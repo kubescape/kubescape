@@ -7,7 +7,7 @@ kubescape is a tool for testing Kubernetes clusters against industry accepted se
 # TL;DR
 To get a fast check of the security posture of your Kubernetes cluster run this:
 
-`curl -s https://raw.githubusercontent.com/armosec/kubescape/main/install.sh | /bin/bash`
+`curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash`
 
 # Status
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
