@@ -9,5 +9,8 @@ To get a fast check of the security posture of your Kubernetes cluster run this:
 
 `curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash`
 
+<img src="docs/install.jpeg">
+
+
 # Status
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
