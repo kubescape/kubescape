@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"kube-escape/cautils"
 
+	pkgcautils "kube-escape/cautils/cautils"
 	"kube-escape/cautils/k8sinterface"
 	"kube-escape/cautils/opapolicy"
 	resources "kube-escape/cautils/opapolicy/resources"
@@ -47,4 +48,14 @@ func getRuleDependencies() (map[string]string, error) {
 		glog.Warningf("failed to load rule dependencies")
 	}
 	return modules, nil
+}
+
+func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
+	if annotations == nil {
+		return false
+	}
+	if s, ok := annotations["armoOpa"]; ok { // TODO - make global
+		return pkgcautils.StringToBool(s.(string))
+	}
+	return false
 }

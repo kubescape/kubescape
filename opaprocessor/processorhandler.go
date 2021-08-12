@@ -67,13 +67,15 @@ func (opap *OPAProcessor) ProcessRulesHandler(opaSessionObj *cautils.OPASessionO
 		controlReports := []opapolicy.ControlReport{}
 		for _, control := range framework.Controls {
 			// cautils.SimpleDisplay(os.Stdout, fmt.Sprintf("\033[2K\r%s", control.Name))
-			// fmt.Printf("\033[2K\r%s", control.Name)
 			controlReport := opapolicy.ControlReport{}
 			controlReport.Name = control.Name
 			controlReport.Description = control.Description
 			controlReport.Remediation = control.Remediation
 			ruleReports := []opapolicy.RuleReport{}
 			for _, rule := range control.Rules {
+				if ruleWithArmoOpaDependency(rule.Attributes) {
+					continue
+				}
 				k8sObjects := getKubernetesObjects(opaSessionObj.K8SResources, rule.Match)
 				ruleReport, err := opap.runOPAOnSingleRule(&rule, k8sObjects)
 				if err != nil {
@@ -86,9 +88,7 @@ func (opap *OPAProcessor) ProcessRulesHandler(opaSessionObj *cautils.OPASessionO
 					ruleReport.RuleStatus.Status = "success"
 				}
 				ruleReport.NumOfResources = len(k8sObjects)
-				// if len(ruleReport.RuleResponses) > 0 {
 				ruleReports = append(ruleReports, ruleReport)
-				// }
 			}
 			controlReport.RuleReports = ruleReports
 			controlReports = append(controlReports, controlReport)

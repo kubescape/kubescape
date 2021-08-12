@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"kube-escape/cautils"
 	"kube-escape/cautils/opapolicy"
 )
 
@@ -67,7 +68,10 @@ func (flagHandler *FlagHandler) Scan() {
 }
 func (flagHandler *FlagHandler) ScanFramework() {
 	frameworkName := strings.ToUpper(flag.Arg(2))
-
+	if cautils.StringInSlice(SupportedFrameworks(), frameworkName) == cautils.ValueNotFound {
+		fmt.Printf("framework %s not supported, supported frameworks: %v", frameworkName, SupportedFrameworks())
+		return
+	}
 	flagHandler.policyIdentifier = &opapolicy.PolicyIdentifier{
 		Kind: opapolicy.KindFramework,
 		Name: frameworkName,
@@ -80,11 +84,15 @@ func (flagHandler *FlagHandler) ScanControl() {
 	}
 }
 func (flagHandler *FlagHandler) ScanHelp() {
-	fmt.Println("Entre scope: framework or control")
+	fmt.Println("")
 }
 func (flagHandler *FlagHandler) ScanFrameworkHelp() {
-	fmt.Println("Run a framework. Run 'cacli opa framework list' for the list of available frameworks")
+	fmt.Println("Run framework nsa or mitre")
 }
 func (flagHandler *FlagHandler) ScanControlHelp() {
 	fmt.Println("not supported")
+}
+
+func SupportedFrameworks() []string {
+	return []string{"nsa", "mitre"} // TODO - get from BE
 }

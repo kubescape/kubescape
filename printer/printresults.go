@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"kube-escape/cautils"
 	"os"
+	"strings"
 
 	"kube-escape/cautils/k8sinterface"
 	"kube-escape/cautils/opapolicy"
@@ -51,14 +52,17 @@ func (printer *Printer) ActionPrint() {
 func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 	for _, fr := range postureReport.FrameworkReports {
 		for _, cr := range fr.ControlReports {
+			if len(cr.RuleReports) == 0 {
+				continue
+			}
 			workloadsSummery := listResultSummery(cr.RuleReports)
 			mapResources := groupByNamespace(workloadsSummery)
 
 			printer.summery[cr.Name] = ControlSummery{
 				TotalResources:  cr.GetNumberOfResources(),
 				TotalFailed:     len(workloadsSummery),
-				Description:     cr.Description,
 				WorkloadSummery: mapResources,
+				Description:     strings.ReplaceAll(cr.Description, ". ", fmt.Sprintf(".\n%s%s", INDENT, INDENT)),
 			}
 		}
 	}
@@ -73,7 +77,9 @@ func (printer *Printer) PrintResults() {
 
 func (printer *Printer) printTitle(controlName string, controlSummery *ControlSummery) {
 	cautils.InfoDisplay(os.Stdout, "[control: %s] ", controlName)
-	if controlSummery.TotalFailed == 0 {
+	if controlSummery.TotalResources == 0 {
+		cautils.InfoDisplay(os.Stdout, "resources not found %v\n", emoji.ConfusedFace)
+	} else if controlSummery.TotalFailed == 0 {
 		cautils.SuccessDisplay(os.Stdout, "passed %v\n", emoji.ThumbsUp)
 	} else {
 		cautils.FailureDisplay(os.Stdout, "failed %v\n", emoji.SadButRelievedFace)
@@ -113,6 +119,9 @@ func generateHeader() []string {
 
 func percentage(big, small int) int {
 	if big == 0 {
+		if small == 0 {
+			return 100
+		}
 		return 0
 	}
 	return int(float64(float64(big-small)/float64(big)) * 100)

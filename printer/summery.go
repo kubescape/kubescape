@@ -1,6 +1,8 @@
 package printer
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type Summery map[string]ControlSummery
 
@@ -20,26 +22,6 @@ type WorkloadSummery struct {
 	Name      string
 	Namespace string
 	Group     string
-}
-
-func (summery *Summery) SetWorkloadSummery(c string, ws map[string][]WorkloadSummery) {
-	s := (*summery)[c]
-	s.WorkloadSummery = ws
-}
-
-func (summery *Summery) SetTotalResources(c string, t int) {
-	s := (*summery)[c]
-	s.TotalResources = t
-}
-
-func (summery *Summery) SetTotalFailed(c string, t int) {
-	s := (*summery)[c]
-	s.TotalFailed = t
-}
-
-func (summery *Summery) SetDescription(c string, d string) {
-	s := (*summery)[c]
-	s.Description = d
 }
 
 func (controlSummery *ControlSummery) ToSlice() []string {
