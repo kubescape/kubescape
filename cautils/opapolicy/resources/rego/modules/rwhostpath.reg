@@ -1,0 +1,64 @@
+package armo_builtins
+#import data.kubernetes.api.client as client
+import data.cautils as cautils
+
+# input: pod
+# apiversion: v1
+# does: 
+#	returns rw hostpath volumes of that pod
+#
+#
+deny[msga] {
+    pod := input[_]
+    pod.kind == "Pod"
+    volumes := pod.spec.volumes
+    volume := volumes[_]
+    # crsrcs.body.spec.containers[_].volumeMounts[_].name = volume.name
+    mount := pod.spec.containers[_].volumeMounts[_]
+    mount.name == volume.name
+    volume.hostPath
+    isRWMount(mount)
+    podname := cautils.getPodName(pod.metadata)
+    obj := {"volume":volume,"mount":mount,"podname": podname}
+
+	msga := {
+		"packagename": "armo_builtins",
+		"alertMessage": sprintf("pod: %v has {%v,%v} as rw hostPath volume and volumemount pair\n\n\n", [podname, volume,mount]),
+		"alertScore": 7,
+		"alertObject": [obj],
+	
+	}
+}
+
+isRWMount(mount) {
+ not mount.readOnly
+}
+isRWMount(mount) {
+  mount.readOnly == false
+}
+
+
+#handles majority of workload resources
+deny[msga] {
+
+	wl := input[_]
+	spec_template_spec_patterns := {"Deployment","ReplicaSet","DaemonSet","StatefulSet","Job"}
+	spec_template_spec_patterns[wl.kind]
+    volumes := wl.spec.template.spec.volumes
+    volume := volumes[_]
+    mount := wl.spec.template.spec.containers[_].volumeMounts[_]
+    mount.name == volume.name
+    volume.hostPath
+    isRWMount(mount)
+    wlname := cautils.getPodName(wl.metadata)
+    obj := {"volume":volume,"mount":mount,"podname": wlname}
+
+	msga := {
+		"packagename": "armo_builtins",
+		"alertMessage": sprintf("%v: %v has {%v,%v} as rw hostPath volume and volumemount pair\n\n\n", [wl.kind,wlname, volume,mount]),
+		"alertScore": 7,
+		"alertObject": [obj],
+	}
+}
+
+

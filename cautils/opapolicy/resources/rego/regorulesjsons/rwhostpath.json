@@ -1,0 +1,31 @@
+{
+    "guid": "3b0467c9-488d-c244-99d0-90fbf600aaff",
+    "name": "[Builtin] alert-rw-hostpath",
+    "creationTime": "2019-09-04T12:04:58.461455",
+    "description": "determines if any workload contains a hostPath volume with rw permissions",
+    "attributes": {
+        "m$K8sThreatMatrix": "Persistance::Writable hostPath mount"
+    },
+    "ruleDependencies": [
+        {
+            "packageName":"cautils"
+        }
+    ],
+    "remediation": "consider if hostPath is really necessary- sensitive data like hostPath credentials might endanger cluster, if so consider encrypting the data",
+
+    "match": [
+        {
+            "resources": [
+                "Deployment","ReplicaSet","DaemonSet","StatefulSet","Job","Pod"
+            ],
+            "apiVersions": [
+                "v1"
+            ],
+            "apiGroups": [
+                "*"
+            ]
+        }
+    ],
+    "ruleLanguage": "Rego",
+    "rule": "\"\\npackage armo_builtins\\nimport data.kubernetes.api.client as client\\nimport data.cautils as cautils\\n\\n# input: pod\\n# apiversion: v1\\n# does: \\n#\\treturns hostPath volumes\\n#\\n#\\ndeny[msga] {\\n    pod := input[_]\\n    pod.kind == \\\"Pod\\\"\\n    volumes := pod.spec.volumes\\n    volume := volumes[_]\\n    # crsrcs.body.spec.containers[_].volumeMounts[_].name = volume.name\\n    volume.hostPath\\n    podname := cautils.getPodName(pod.metadata)\\n    obj := {\\\"volume\\\":volume,\\\"podname\\\": podname}\\n\\n\\tmsga := {\\n\\t\\t\\\"alertMessage\\\": sprintf(\\\"pod: %v has {%v,%v} ashostPath volume \\n\\n\\n\\\", [podname, volume]),\\n\\t\\t\\\"alert\\\": true,\\n\\t\\t\\\"prevent\\\": false,\\n\\t\\t\\\"alertScore\\\": 7,\\n\\t\\t\\\"alertObject\\\": [obj],\\n\\t\\n\\t}\\n}\\n\\nisRWMount(mount) {\\n not mount.readOnly\\n}\\nisRWMount(mount) {\\n  mount.readOnly == false\\n}\\n\\n\\n#handles majority of workload resources\\ndeny[msga] {\\n\\n\\twl := input[_]\\n\\tspec_template_spec_patterns := {\\\"Deployment\\\",\\\"ReplicaSet\\\",\\\"DaemonSet\\\",\\\"StatefulSet\\\",\\\"Job\\\"}\\n\\tspec_template_spec_patterns[wl.kind]\\n    volumes := wl.spec.template.spec.volumes\\n    volume := volumes[_]\\n    volume.hostPath\\n    wlname := cautils.getPodName(wl.metadata)\\n    obj := {\\\"volume\\\":volume,\\\"podname\\\": wlname}\\n\\n\\tmsga := {\\n\\t\\t\\\"alertMessage\\\": sprintf(\\\"%v: %v has {%v,%v} as hostPath volume\\n\\n\\n\\\", [wl.kind,wlname, volume]),\\n\\t\\t\\\"alert\\\": true,\\n\\t\\t\\\"prevent\\\": false,\\n\\t\\t\\\"alertScore\\\": 7,\\n\\t\\t\\\"alertObject\\\": [obj],\\n\\t\\n\\t}\\n}\\n\\n\\n\""
+}

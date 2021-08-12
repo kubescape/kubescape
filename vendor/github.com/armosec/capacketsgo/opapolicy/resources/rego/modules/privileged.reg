@@ -1,0 +1,56 @@
+package armo_builtins
+
+#import data.kubernetes.api.client as client
+
+
+# Deny mutating action unless user is in group owning the resource
+
+
+#privileged pods
+deny[msga] {
+
+   
+	pod := input[_]
+	containers := pod.spec.containers[_]
+	containers.securityContext.privileged == true
+    msga := {
+		"packagename": "armo_builtins",
+		"alertMessage": sprintf("the following pods are defined as privileged: %v", [pod]),
+		"alertScore": 3,
+		"alertObject": pod,
+	}
+}
+
+
+#handles majority of workload resources
+deny[msga] {
+
+	wl := input[_]
+	spec_template_spec_patterns := {"Deployment","ReplicaSet","DaemonSet","StatefulSet","Job"}
+	spec_template_spec_patterns[wl.kind]
+	containers := wl.spec.template.spec.containers[_]
+	containers.securityContext.privileged == true
+    msga := {
+		"packagename": "armo_builtins",
+		"alertMessage": sprintf("the following workloads are defined as privileged: %v", [wl]),
+		"alertScore": 3,
+		"alertObject": wl,
+	}
+}
+
+
+
+#handles cronjob
+deny[msga] {
+
+	wl := input[_]
+	wl.kind == "CronJob"
+	containers := wl.spec.jobTemplate.spec.template.spec.containers[_]
+	containers.securityContext.privileged == true
+    msga := {
+		"packagename": "armo_builtins",
+		"alertMessage": sprintf("the following cronjobs are defined as privileged: %v", [wl]),
+		"alertScore": 3,
+		"alertObject": wl,
+	}
+}

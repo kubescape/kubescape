@@ -1,0 +1,31 @@
+{
+    "guid": "3b0467c9-488d-c244-99d0-90fbf600aaff",
+    "name": "[Builtin] rule-pod-external-facing",
+    "creationTime": "2019-09-04T12:04:58.461455",
+    "description": "denies pods with external facing services, grabs related services",
+    "attributes": {
+        "microsoftK8sThreatMatrix": "val1"
+    },
+    "ruleDependencies": [
+        {
+            "packageName":"kubernetes.api.client"
+        }
+    ],
+    "remediation": "create a network policy that controls which protect your cluster from unwanted connections and the outside world",
+    "match": [
+        {
+            "resources": [
+                "Pods"
+            ],
+            "apiVersions": [
+                "v1"
+            ],
+            "apiGroups": [
+                "*"
+            ]
+        }
+    ],
+    "ruleLanguage": "Rego",
+    "rule": "\npackage armo_builtins\n\nimport data.kubernetes.api.client as client\n\n\n# input: pod\n# apiversion: v1\n# does: \n#\treturns the external facing services of that pod\n#\n#\ndeny[msga] {\n\tpod := input[_]\n\tpodns :=  pod.metadata.namespace\n\tpodname := getName(pod.metadata)\n\t# pod := client.query_name_ns(\"pods\",\"frontend-86c5ffb485-kfp9d\", \"default\")\n\tlabels := pod.body.metadata.labels\n\tfiltered_labels := json.remove(labels, [\"pod-template-hash\"])\n    \n\t cluster_resource := client.query_all(\n\t \t\"services\"\n\t )\n\n\n\tservices := [svc | cluster_resource.body.items[i].metadata.namespace == podns; svc := cluster_resource.body.items[i]]\n\tservice := \tservices[_]\n\tnp_or_lb := {\"NodePort\", \"LoadBalancer\"}\n\tnp_or_lb[service.spec.type]\n\tservice.spec.selector == filtered_labels\n    \n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"pod %v/%v exposed services: %v\n\", [podns,podname,service]),\n\t\t\"alert\": true,\n\t\t\"prevent\": false,\n\t\t\"alertScore\": 7,\n\t\t\"alertObject\": {\"service\":service,\"labels\":filtered_labels, \"podname\":podname,\"namespace\":podns}\n\t\n\t}\n}\n\ngetName(metadata) = name {\n\tname := metadata.generateName\n}\ngetName(metadata) = name {\n\tname := metadata.name\n}\n"
+
+}

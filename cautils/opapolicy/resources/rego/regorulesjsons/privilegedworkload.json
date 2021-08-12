@@ -1,0 +1,29 @@
+{
+    "guid": "",
+    "name": "[Builtin] rule-privilege-escalation",
+    "creationTime": "2019-09-04T12:04:58.461455",
+    "description": "determines if pods/deployments defined as privileged true",
+    "attributes": {
+        "mitre": "Privilege Escalation",
+        "mitreCode": "TA0004",
+        "m$K8sThreatMatrix": "Privilege Escalation::privileged container"
+    },
+    "ruleDependencies": [
+    ],
+    "remediation": "avoid defining pods as privilleged",
+    "match": [
+        {
+            "resources": [
+                "Deployment","ReplicaSet","DaemonSet","StatefulSet","Job","Pod","CronJob"
+            ],
+            "apiVersions": [
+                "v1"
+            ],
+            "apiGroups": [
+                "*"
+            ]
+        }
+    ],
+    "ruleLanguage": "Rego",
+    "rule": "\npackage armo_builtins\n\nimport data.kubernetes.api.client as client\nimport data.designators as scope\nimport data.cautils as cautils\n\n\n# Deny mutating action unless user is in group owning the resource\n\n\n#privileged pods\ndeny[msga] {\n\n   \n\tpod := input[_]\n\tcontainers := pod.spec.containers[_]\n\tcontainers.securityContext.privileged == true\n    msga := {\n\t\t\"alertMessage\": sprintf(\"the following pods are defined as privileged: %v\", [pod]),\n\t\t\"alert\": true,\n\t\t\"prevent\": false,\n\t\t\"alertScore\": 3,\n\t\t\"alertObject\": pod,\n\t\n\t}\n}\n\n\n#handles majority of workload resources\ndeny[msga] {\n\n\twl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n\tcontainers := wl.spec.template.spec.containers[_]\n\tcontainers.securityContext.privileged == true\n    msga := {\n\t\t\"alertMessage\": sprintf(\"the following workloads are defined as privileged: %v\", [wl]),\n\t\t\"alert\": true,\n\t\t\"prevent\": false,\n\t\t\"alertScore\": 3,\n\t\t\"alertObject\": wl,\n\t\n\t}\n}\n\n\n\n#handles cronjob\ndeny[msga] {\n\n\twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainers := wl.spec.jobTemplate.spec.template.spec.containers[_]\n\tcontainers.securityContext.privileged == true\n    msga := {\n\t\t\"alertMessage\": sprintf(\"the following cronjobs are defined as privileged: %v\", [wl]),\n\t\t\"alert\": true,\n\t\t\"prevent\": false,\n\t\t\"alertScore\": 3,\n\t\t\"alertObject\": wl,\n\t\n\t}\n}\n\n"
+}

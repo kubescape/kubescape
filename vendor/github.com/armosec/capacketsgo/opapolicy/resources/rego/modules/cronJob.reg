@@ -1,0 +1,20 @@
+package armo_builtins
+
+# import data.kubernetes.api.client as client
+import data.cautils as cautils
+
+
+# alert cronjobs
+
+#handles cronjob
+deny[msga] {
+
+	wl := input[_]
+	wl.kind == "CronJob"
+    msga := {
+		"alertMessage": sprintf("the following cronjobs are defined: %v", [wl]),
+		"alertScore": 2,
+		"packagename": "armo_builtins",
+		"alertObject": wl
+	}
+}

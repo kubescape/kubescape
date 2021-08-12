@@ -1,0 +1,57 @@
+package armo_builtins
+import data.kubernetes.api.client as client
+import data.cautils as cautils
+
+# input: pod
+# apiversion: v1
+# does: 
+#	returns the external facing services of that pod
+#
+#
+deny[msga] {
+	pod := input[_]
+	podns := pod.metadata.namespace
+	podname := cautils.getPodName(pod.metadata)
+	# pod := client.query_name_ns("pods", "catalog-mongo-6f468d99b4-pn242", "default")
+	labels := pod.body.metadata.labels
+	filtered_labels := json.remove(labels, ["pod-template-hash"])
+    
+	 cluster_resource := client.query_all(
+	 	"services"
+	 )
+
+	services := [svc | cluster_resource.body.items[i].metadata.namespace == podns; svc := cluster_resource.body.items[i]]
+	service := 	services[_]
+	service.spec.selector == filtered_labels
+    
+	hasSSHPorts(service)
+
+	msga := {
+		"alertMessage": sprintf("pod %v/%v exposed by SSH services: %v\n", [podns,podname,service]),
+		"packagename": "armo_builtins",
+		"alertScore": 7,
+		"alertObject": [{"pod":pod,"service":{service}}]
+	}
+}
+
+hasSSHPorts(service) {
+	port := service.spec.ports[_]
+	port.port == 22
+}
+
+
+hasSSHPorts(service) {
+	port := service.spec.ports[_]
+	port.port == 2222
+}
+
+hasSSHPorts(service) {
+	port := service.spec.ports[_]
+	port.targetPort == 22
+}
+
+
+hasSSHPorts(service) {
+	port := service.spec.ports[_]
+	port.targetPort == 2222
+}

@@ -1,0 +1,57 @@
+package armo_builtins
+#import data.kubernetes.api.client as client
+import data.cautils as cautils
+
+# input: pod
+# apiversion: v1
+# does: 
+#	returns hostPath volumes
+#
+#
+deny[msga] {
+    pod := input[_]
+    pod.kind == "Pod"
+    volumes := pod.spec.volumes
+    volume := volumes[_]
+    # crsrcs.body.spec.containers[_].volumeMounts[_].name = volume.name
+    volume.hostPath
+    podname := cautils.getPodName(pod.metadata)
+    obj := {"volume":volume,"podname": podname}
+
+	msga := {
+		"packagename": "armo_builtins",
+		"alertMessage": sprintf("pod: %v has {%v,%v} ashostPath volume \n\n\n", [podname, volume]),
+		"alertScore": 7,
+		"alertObject": [obj]
+	}
+}
+
+isRWMount(mount) {
+ not mount.readOnly
+}
+isRWMount(mount) {
+  mount.readOnly == false
+}
+
+
+#handles majority of workload resources
+deny[msga] {
+
+	wl := input[_]
+	spec_template_spec_patterns := {"Deployment","ReplicaSet","DaemonSet","StatefulSet","Job"}
+	spec_template_spec_patterns[wl.kind]
+    volumes := wl.spec.template.spec.volumes
+    volume := volumes[_]
+    volume.hostPath
+    wlname := cautils.getPodName(wl.metadata)
+    obj := {"volume":volume,"podname": wlname}
+
+	msga := {
+		"packagename": "armo_builtins",
+		"alertMessage": sprintf("%v: %v has {%v,%v} as hostPath volume\n\n\n", [wl.kind,wlname, volume]),
+		"alertScore": 7,
+		"alertObject": [obj]
+	}
+}
+
+
