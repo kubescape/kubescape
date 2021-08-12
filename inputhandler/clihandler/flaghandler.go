@@ -41,7 +41,7 @@ func (flagHandler *FlagHandler) ParseFlag() {
 }
 
 func (flagHandler *FlagHandler) Help() {
-	fmt.Println("Run: ./kube-escape scan framework nsa")
+	fmt.Println("Run: kube-escape scan framework nsa")
 }
 
 func (flagHandler *FlagHandler) Version() {
