@@ -5,12 +5,15 @@ kubescape is a tool for testing Kubernetes clusters against industry accepted se
 * MITRE threat matrix for Kubernetes [see here](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/)
 
 # TL;DR
+## Installation
 To install the tool locally, run this:
 
 `curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash`
 
-To get a fast check of the security posture of your Kubernetes cluster, run this:
 <img src="docs/install.jpeg">
+
+## Run
+To get a fast check of the security posture of your Kubernetes cluster, run this:
 
 `kubescape scan framework nsa`
 
@@ -19,3 +22,18 @@ To get a fast check of the security posture of your Kubernetes cluster, run this
 
 # Status
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
+
+# How to build 
+`go mod tidy && go build -o kubescape` :zany_face:
+
+# Under the hood
+
+## Tests
+Defining the tests here...
+
+## Technology
+Kubescape based on OPA engine: https://github.com/open-policy-agent/opa and ARMO's posture controls. 
+
+The tools retrieves Kubernetes objects from the API server and runs a set of [regos snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by (ARMO)[https://www.armosec.io/]. 
+
+The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
