@@ -5,11 +5,16 @@ kubescape is a tool for testing Kubernetes clusters against industry accepted se
 * MITRE threat matrix for Kubernetes [see here](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/)
 
 # TL;DR
-To get a fast check of the security posture of your Kubernetes cluster run this:
+To install the tool locally, run this:
 
 `curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash`
 
+To get a fast check of the security posture of your Kubernetes cluster, run this:
 <img src="docs/install.jpeg">
+
+`kubescape scan framework nsa`
+
+<img src="docs/run.jpeg">
 
 
 # Status
