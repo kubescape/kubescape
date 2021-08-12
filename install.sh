@@ -6,7 +6,7 @@ echo
  
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
-RELEASE=v0.0.11
+RELEASE=v0.0.12
 DOWNLOAD_URL="https://github.com/armosec/kubescape/releases/download/$RELEASE/kubescape"
 
 mkdir -p $BASE_DIR 

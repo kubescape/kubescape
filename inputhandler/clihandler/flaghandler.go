@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"kube-escape/cautils"
 	"kube-escape/cautils/opapolicy"
 )
 
@@ -68,10 +67,10 @@ func (flagHandler *FlagHandler) Scan() {
 }
 func (flagHandler *FlagHandler) ScanFramework() {
 	frameworkName := strings.ToUpper(flag.Arg(2))
-	if cautils.StringInSlice(SupportedFrameworks(), frameworkName) == cautils.ValueNotFound {
-		fmt.Printf("framework %s not supported, supported frameworks: %v", frameworkName, SupportedFrameworks())
-		return
-	}
+	// if cautils.StringInSlice(SupportedFrameworks(), frameworkName) == cautils.ValueNotFound {
+	// 	fmt.Printf("framework %s not supported, supported frameworks: %v", frameworkName, SupportedFrameworks())
+	// 	return
+	// }
 	flagHandler.policyIdentifier = &opapolicy.PolicyIdentifier{
 		Kind: opapolicy.KindFramework,
 		Name: frameworkName,
