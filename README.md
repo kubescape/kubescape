@@ -23,6 +23,7 @@ To get a fast check of the security posture of your Kubernetes cluster, run this
 
 # Status
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
+[![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)]()
 
 # How to build 
 `go mod tidy && go build -o kubescape` :zany_face:
