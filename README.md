@@ -1,8 +1,7 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 
-kubescape is a tool for testing Kubernetes clusters against industry accepted security standards and recomendations like:
-* NSA hardening for Kubernetes operators [see here](https://media.defense.gov/2021/Aug/03/2002820425/-1/-1/1/CTR_KUBERNETES%20HARDENING%20GUIDANCE.PDF)
-* MITRE threat matrix for Kubernetes [see here](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/)
+Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by to NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
+Tests are configured with YAML files, making this tool easy to update as test specifications evolve.
 
 <img src="docs/using-mov.gif">
 
@@ -31,11 +30,25 @@ To get a fast check of the security posture of your Kubernetes cluster, run this
 # Under the hood
 
 ## Tests
-Defining the tests here...
+Kubescape is running the following tests according to what is defined by [Kubernetes Hardening Guidance by to NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
+* Non-root containers
+* Immutable container filesystem 
+* Building secure container images
+* Privileged containers 
+* hostPID, hostIPC privileges
+* hostNetwork access
+* allowedHostPaths field
+* Protecting pod service account tokens
+* Pods in kube-system and kube-public
+* Resource policies
+* Control plane hardening 
+* Encrypted secrets 
+* Anonymous Requests
+
 
 ## Technology
 Kubescape based on OPA engine: https://github.com/open-policy-agent/opa and ARMO's posture controls. 
 
-The tools retrieves Kubernetes objects from the API server and runs a set of [regos snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by (ARMO)[https://www.armosec.io/]. 
+The tools retrieves Kubernetes objects from the API server and runs a set of [regos snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io/). 
 
 The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
