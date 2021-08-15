@@ -13,7 +13,7 @@ mkdir -p $BASE_DIR
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
 
-curl -sL $DOWNLOAD_URL -o $OUTPUT
+curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 echo -e "\033[32m[V] Downloaded Kubescape"
 
 sudo chmod +x $OUTPUT
