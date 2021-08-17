@@ -34,17 +34,13 @@ To get a fast check of the security posture of your Kubernetes cluster, run this
 Kubescape is running the following tests according to what is defined by [Kubernetes Hardening Guidance by to NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
 * Non-root containers
 * Immutable container filesystem 
-* Building secure container images
 * Privileged containers 
 * hostPID, hostIPC privileges
 * hostNetwork access
 * allowedHostPaths field
 * Protecting pod service account tokens
-* Pods in kube-system and kube-public
 * Resource policies
 * Control plane hardening 
-* Encrypted secrets 
-* Anonymous Requests
 
 
 ## Technology
