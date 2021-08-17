@@ -14,7 +14,7 @@ type ControlSummery struct {
 	TotalResources  int
 	TotalFailed     int
 	Description     string
-	WorkloadSummery map[string][]WorkloadSummery
+	WorkloadSummery map[string][]WorkloadSummery // <namespace>:[<WorkloadSummery>]
 }
 
 type WorkloadSummery struct {

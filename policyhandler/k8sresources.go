@@ -62,6 +62,9 @@ func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVer
 	if labels != nil && len(labels) > 0 {
 		set := k8slabels.Set(labels)
 		listOptions.LabelSelector = set.AsSelector().String()
+		// if excludeSystem{
+		// 	listOptions.FieldSelector = "metadata.namespace!=kube-system,metadata.namespace!=cyberarmor-system"
+		// }
 	}
 
 	// set dynamic object
