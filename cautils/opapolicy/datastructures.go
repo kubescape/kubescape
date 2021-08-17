@@ -42,11 +42,11 @@ type ControlReport struct {
 	Description string       `json:"description"`
 }
 type RuleReport struct {
-	Name           string         `json:"name"`
-	Remediation    string         `json:"remediation"`
-	RuleStatus     RuleStatus     `json:"ruleStatus"`
-	RuleResponses  []RuleResponse `json:"ruleResponses"`
-	NumOfResources int
+	Name               string                   `json:"name"`
+	Remediation        string                   `json:"remediation"`
+	RuleStatus         RuleStatus               `json:"ruleStatus"`
+	RuleResponses      []RuleResponse           `json:"ruleResponses"`
+	ListInputResources []map[string]interface{} `json:"-"`
 }
 type RuleStatus struct {
 	Status  string `json:"status"`

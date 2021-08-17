@@ -70,7 +70,10 @@ func ParseRegoResult(regoResult *rego.ResultSet) ([]RuleResponse, error) {
 func (controlReport *ControlReport) GetNumberOfResources() int {
 	sum := 0
 	for i := range controlReport.RuleReports {
-		sum += controlReport.RuleReports[i].NumOfResources
+		if controlReport.RuleReports[i].ListInputResources == nil {
+			continue
+		}
+		sum += len(controlReport.RuleReports[i].ListInputResources)
 	}
 	return sum
 }

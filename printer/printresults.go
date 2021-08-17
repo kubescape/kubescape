@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"kube-escape/cautils"
 	"os"
-	"strings"
 
 	"kube-escape/cautils/k8sinterface"
 	"kube-escape/cautils/opapolicy"
@@ -62,7 +61,7 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 				TotalResources:  cr.GetNumberOfResources(),
 				TotalFailed:     len(workloadsSummery),
 				WorkloadSummery: mapResources,
-				Description:     strings.ReplaceAll(cr.Description, ". ", fmt.Sprintf(".\n%s%s", INDENT, INDENT)),
+				Description:     cr.Description,
 			}
 		}
 	}
@@ -72,6 +71,7 @@ func (printer *Printer) PrintResults() {
 	for control, controlSummery := range printer.summery {
 		printer.printTitle(control, &controlSummery)
 		printer.printResult(control, &controlSummery)
+		// printer.printSummery(control, &controlSummery)
 	}
 }
 
@@ -85,7 +85,7 @@ func (printer *Printer) printTitle(controlName string, controlSummery *ControlSu
 		cautils.FailureDisplay(os.Stdout, "failed %v\n", emoji.SadButRelievedFace)
 	}
 
-	cautils.SimpleDisplay(os.Stdout, "%sDescription: %s\n", INDENT, controlSummery.Description)
+	cautils.SimpleDisplay(os.Stdout, "Description: %s\n", controlSummery.Description)
 
 }
 func (printer *Printer) printResult(controlName string, controlSummery *ControlSummery) {
