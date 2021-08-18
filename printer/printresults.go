@@ -71,8 +71,19 @@ func (printer *Printer) PrintResults() {
 	for control, controlSummery := range printer.summery {
 		printer.printTitle(control, &controlSummery)
 		printer.printResult(control, &controlSummery)
-		// printer.printSummery(control, &controlSummery)
+
+		if controlSummery.TotalResources > 0 {
+			printer.printSummery(control, &controlSummery)
+		}
+
 	}
+}
+
+func (print *Printer) printSummery(controlName string, controlSummery *ControlSummery) {
+	cautils.SimpleDisplay(os.Stdout, "Summary - ")
+	cautils.SuccessDisplay(os.Stdout, "Passed:%v   ", controlSummery.TotalResources-controlSummery.TotalFailed)
+	cautils.FailureDisplay(os.Stdout, "Failed:%v   ", controlSummery.TotalFailed)
+	cautils.InfoDisplay(os.Stdout, "Total:%v\n", controlSummery.TotalResources)
 }
 
 func (printer *Printer) printTitle(controlName string, controlSummery *ControlSummery) {
