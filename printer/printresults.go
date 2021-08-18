@@ -13,7 +13,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-var INDENT = "    "
+var INDENT = "   "
 
 type Printer struct {
 	opaSessionObj *chan *cautils.OPASessionObj
@@ -96,7 +96,7 @@ func (printer *Printer) printTitle(controlName string, controlSummery *ControlSu
 		cautils.FailureDisplay(os.Stdout, "failed %v\n", emoji.SadButRelievedFace)
 	}
 
-	cautils.SimpleDisplay(os.Stdout, "Description: %s\n", controlSummery.Description)
+	cautils.SimpleDisplay(os.Stdout, "Description: %s\n\n", controlSummery.Description)
 
 }
 func (printer *Printer) printResult(controlName string, controlSummery *ControlSummery) {
@@ -104,7 +104,6 @@ func (printer *Printer) printResult(controlName string, controlSummery *ControlS
 	indent := INDENT
 	for ns, rsc := range controlSummery.WorkloadSummery {
 		preIndent := indent
-		indent += indent
 		cautils.SimpleDisplay(os.Stdout, "%sNamespace %s\n", indent, ns)
 		preIndent2 := indent
 		for r := range rsc {
