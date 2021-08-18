@@ -6,7 +6,9 @@ echo
  
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
+
 RELEASE=v0.0.29
+
 DOWNLOAD_URL="https://github.com/armosec/kubescape/releases/download/$RELEASE/kubescape"
 
 mkdir -p $BASE_DIR 
@@ -24,5 +26,5 @@ rm -rf $BASE_DIR
 echo -e "[V] Finished Installation"
 echo
 
-echo -e "\033[35m Usage: $ $KUBESCAPE_EXEC scan framework nsa"
+echo -e "\033[35m Usage: $ $KUBESCAPE_EXEC scan framework nsa --exclude-namespaces kube-system,kube-public"
 echo

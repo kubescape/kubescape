@@ -47,6 +47,7 @@ Kubescape is running the following tests according to what is defined by [Kubern
 * Protecting pod service account tokens
 * Resource policies
 * Control plane hardening 
+* Exposed dashboard
 
 
 ## Technology
