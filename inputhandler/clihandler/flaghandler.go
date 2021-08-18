@@ -71,8 +71,6 @@ func (flagHandler *FlagHandler) ScanFramework() {
 	// 	fmt.Printf("framework %s not supported, supported frameworks: %v", frameworkName, SupportedFrameworks())
 	// 	return
 	// }
-	// excludeSystem := false
-	// flag.BoolVar(&excludeSystem, "exclude-system", false, "")
 	flagHandler.policyIdentifier = &opapolicy.PolicyIdentifier{
 		Kind: opapolicy.KindFramework,
 		Name: frameworkName,

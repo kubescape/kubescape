@@ -3,6 +3,7 @@ package policyhandler
 import (
 	"fmt"
 	"kube-escape/cautils"
+	"strings"
 
 	"kube-escape/cautils/k8sinterface"
 
@@ -18,7 +19,7 @@ import (
 
 const SelectAllResources = "*"
 
-func (policyHandler *PolicyHandler) getK8sResources(frameworks []opapolicy.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) getK8sResources(frameworks []opapolicy.Framework, designator *armotypes.PortalDesignator, excludedNamespaces string) (*cautils.K8SResources, error) {
 	// build resources map
 	k8sResourcesMap := setResourceMap(frameworks)
 
@@ -26,20 +27,20 @@ func (policyHandler *PolicyHandler) getK8sResources(frameworks []opapolicy.Frame
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
 
 	// pull k8s recourses
-	if err := policyHandler.pullResources(k8sResourcesMap, namespace, labels); err != nil {
+	if err := policyHandler.pullResources(k8sResourcesMap, namespace, labels, excludedNamespaces); err != nil {
 		return k8sResourcesMap, err
 	}
 
 	return k8sResourcesMap, nil
 }
 
-func (policyHandler *PolicyHandler) pullResources(k8sResources *cautils.K8SResources, namespace string, labels map[string]string) error {
+func (policyHandler *PolicyHandler) pullResources(k8sResources *cautils.K8SResources, namespace string, labels map[string]string, excludedNamespaces string) error {
 
 	var errs error
 	for groupResource := range *k8sResources {
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(groupResource)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := policyHandler.pullSingleResource(&gvr, namespace, labels)
+		result, err := policyHandler.pullSingleResource(&gvr, namespace, labels, excludedNamespaces)
 		if err != nil {
 			// handle error
 			if errs == nil {
@@ -55,16 +56,19 @@ func (policyHandler *PolicyHandler) pullResources(k8sResources *cautils.K8SResou
 	return errs
 }
 
-func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string) ([]unstructured.Unstructured, error) {
+func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string, excludedNamespaces string) ([]unstructured.Unstructured, error) {
 
 	// set labels
 	listOptions := metav1.ListOptions{}
+	if excludedNamespaces != "" {
+		excludedNamespacesSlice := strings.Split(excludedNamespaces, ",")
+		for _, excludedNamespace := range excludedNamespacesSlice {
+			listOptions.FieldSelector += "metadata.namespace!=" + excludedNamespace + ","
+		}
+	}
 	if labels != nil && len(labels) > 0 {
 		set := k8slabels.Set(labels)
 		listOptions.LabelSelector = set.AsSelector().String()
-		// if excludeSystem{
-		// 	listOptions.FieldSelector = "metadata.namespace!=kube-system,metadata.namespace!=cyberarmor-system"
-		// }
 	}
 
 	// set dynamic object
