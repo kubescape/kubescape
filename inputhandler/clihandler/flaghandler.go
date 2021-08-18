@@ -41,11 +41,11 @@ func (flagHandler *FlagHandler) ParseFlag() {
 }
 
 func (flagHandler *FlagHandler) Help() {
-	fmt.Println("Run: kube-escape scan framework nsa")
+	fmt.Println("Run: kubescape scan framework nsa --exclude-namespaces kube-system,kube-public")
 }
 
 func (flagHandler *FlagHandler) Version() {
-	fmt.Println("")
+	fmt.Println("betav1")
 }
 
 func (flagHandler *FlagHandler) Scan() {
