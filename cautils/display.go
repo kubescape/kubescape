@@ -16,6 +16,7 @@ var InfoDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
 var InfoTextDisplay = color.New(color.Faint, color.FgHiYellow).FprintfFunc()
 var SimpleDisplay = color.New(color.Bold, color.FgHiWhite).FprintfFunc()
 var SuccessDisplay = color.New(color.Bold, color.FgHiGreen).FprintfFunc()
+var DescriptionDisplay = color.New(color.Faint, color.FgWhite).FprintfFunc()
 
 var Spinner *spinner.Spinner
 
