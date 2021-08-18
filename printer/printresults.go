@@ -13,7 +13,7 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-var INDENT = "    "
+var INDENT = "   "
 
 type Printer struct {
 	opaSessionObj *chan *cautils.OPASessionObj
@@ -83,7 +83,7 @@ func (print *Printer) printSummery(controlName string, controlSummery *ControlSu
 	cautils.SimpleDisplay(os.Stdout, "Summary - ")
 	cautils.SuccessDisplay(os.Stdout, "Passed:%v   ", controlSummery.TotalResources-controlSummery.TotalFailed)
 	cautils.FailureDisplay(os.Stdout, "Failed:%v   ", controlSummery.TotalFailed)
-	cautils.InfoDisplay(os.Stdout, "Total:%v\n", controlSummery.TotalResources)
+	cautils.InfoDisplay(os.Stdout, "Total:%v\n\n", controlSummery.TotalResources)
 }
 
 func (printer *Printer) printTitle(controlName string, controlSummery *ControlSummery) {
@@ -96,7 +96,7 @@ func (printer *Printer) printTitle(controlName string, controlSummery *ControlSu
 		cautils.FailureDisplay(os.Stdout, "failed %v\n", emoji.SadButRelievedFace)
 	}
 
-	cautils.SimpleDisplay(os.Stdout, "Description: %s\n", controlSummery.Description)
+	cautils.DescriptionDisplay(os.Stdout, "Description: %s\n", controlSummery.Description)
 
 }
 func (printer *Printer) printResult(controlName string, controlSummery *ControlSummery) {
@@ -104,8 +104,9 @@ func (printer *Printer) printResult(controlName string, controlSummery *ControlS
 	indent := INDENT
 	for ns, rsc := range controlSummery.WorkloadSummery {
 		preIndent := indent
-		indent += indent
-		cautils.SimpleDisplay(os.Stdout, "%sNamespace %s\n", indent, ns)
+		if ns != "" {
+			cautils.SimpleDisplay(os.Stdout, "%sNamespace %s\n", indent, ns)
+		}
 		preIndent2 := indent
 		for r := range rsc {
 			indent += indent

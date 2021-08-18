@@ -60,7 +60,7 @@ func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVer
 
 	// set labels
 	listOptions := metav1.ListOptions{}
-	if excludedNamespaces != "" {
+	if excludedNamespaces != "" && k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
 		excludedNamespacesSlice := strings.Split(excludedNamespaces, ",")
 		for _, excludedNamespace := range excludedNamespacesSlice {
 			listOptions.FieldSelector += "metadata.namespace!=" + excludedNamespace + ","
@@ -73,7 +73,6 @@ func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVer
 
 	// set dynamic object
 	var clientResource dynamic.ResourceInterface
-
 	if namespace != "" && k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
 		clientResource = policyHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
 	} else {

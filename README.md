@@ -9,14 +9,20 @@ Tests are configured with YAML files, making this tool easy to update as test sp
 ## Installation
 To install the tool locally, run this:
 
-`curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash`
+```
+curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
+```
 
 <img src="docs/install.jpeg">
 
 ## Run
 To get a fast check of the security posture of your Kubernetes cluster, run this:
 
-`kubescape scan framework nsa`
+```
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+```
+
+If you wish to scan all namespaces in your cluster, remove the `--exclude-namespaces` flag.
 
 <img src="docs/run.jpeg">
 
