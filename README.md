@@ -48,6 +48,7 @@ Kubescape is running the following tests according to what is defined by [Kubern
 * Resource policies
 * Control plane hardening 
 * Exposed dashboard
+* Allow privilege escalation
 
 
 ## Technology
