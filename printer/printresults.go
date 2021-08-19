@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"kube-escape/cautils"
 	"os"
+	"sort"
 
 	"kube-escape/cautils/k8sinterface"
 	"kube-escape/cautils/opapolicy"
@@ -68,12 +69,14 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 }
 
 func (printer *Printer) PrintResults() {
-	for control, controlSummery := range printer.summery {
-		printer.printTitle(control, &controlSummery)
-		printer.printResult(control, &controlSummery)
+	controlNames := printer.getSortedControlsNames()
+	for i := 0; i < len(controlNames); i++ {
+		controlSummery := printer.summery[controlNames[i]]
+		printer.printTitle(controlNames[i], &controlSummery)
+		printer.printResult(controlNames[i], &controlSummery)
 
-		if controlSummery.TotalResources > 0 {
-			printer.printSummery(control, &controlSummery)
+		if printer.summery[controlNames[i]].TotalResources > 0 {
+			printer.printSummery(controlNames[i], &controlSummery)
 		}
 
 	}
@@ -164,4 +167,13 @@ func (printer *Printer) PrintSummaryTable() {
 	}
 	summaryTable.SetFooter(generateFooter(len(printer.summery), sumFailed, sumTotal))
 	summaryTable.Render()
+}
+
+func (printer *Printer) getSortedControlsNames() []string {
+	controlNames := make([]string, 0, len(printer.summery))
+	for k := range printer.summery {
+		controlNames = append(controlNames, k)
+	}
+	sort.Strings(controlNames)
+	return controlNames
 }
