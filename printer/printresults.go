@@ -10,15 +10,15 @@ import (
 	"kube-escape/cautils/opapolicy"
 
 	"github.com/enescakir/emoji"
-	"github.com/golang/glog"
 	"github.com/olekukonko/tablewriter"
 )
 
 var INDENT = "   "
 
 type Printer struct {
-	opaSessionObj *chan *cautils.OPASessionObj
-	summery       Summery
+	opaSessionObj      *chan *cautils.OPASessionObj
+	summery            Summery
+	sortedControlNames []string
 }
 
 func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj) *Printer {
@@ -30,12 +30,6 @@ func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj) *Printer {
 
 func (printer *Printer) ActionPrint() {
 
-	// recover
-	defer func() {
-		if err := recover(); err != nil {
-			glog.Errorf("RECOVER in ActionSendReportListenner, reason: %v", err)
-		}
-	}()
 	for {
 		opaSessionObj := <-*printer.opaSessionObj
 
@@ -66,17 +60,18 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 			}
 		}
 	}
+	printer.sortedControlNames = printer.getSortedControlsNames()
+
 }
 
 func (printer *Printer) PrintResults() {
-	controlNames := printer.getSortedControlsNames()
-	for i := 0; i < len(controlNames); i++ {
-		controlSummery := printer.summery[controlNames[i]]
-		printer.printTitle(controlNames[i], &controlSummery)
-		printer.printResult(controlNames[i], &controlSummery)
+	for i := 0; i < len(printer.sortedControlNames); i++ {
+		controlSummery := printer.summery[printer.sortedControlNames[i]]
+		printer.printTitle(printer.sortedControlNames[i], &controlSummery)
+		printer.printResult(printer.sortedControlNames[i], &controlSummery)
 
-		if printer.summery[controlNames[i]].TotalResources > 0 {
-			printer.printSummery(controlNames[i], &controlSummery)
+		if printer.summery[printer.sortedControlNames[i]].TotalResources > 0 {
+			printer.printSummery(printer.sortedControlNames[i], &controlSummery)
 		}
 
 	}
@@ -150,7 +145,6 @@ func generateFooter(numControlers, sumFailed, sumTotal int) []string {
 	row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
 	return row
 }
-
 func (printer *Printer) PrintSummaryTable() {
 	summaryTable := tablewriter.NewWriter(os.Stdout)
 	summaryTable.SetAutoWrapText(false)
@@ -160,10 +154,11 @@ func (printer *Printer) PrintSummaryTable() {
 	sumTotal := 0
 	sumFailed := 0
 
-	for k, v := range printer.summery {
-		summaryTable.Append(generateRow(k, v))
-		sumFailed += v.TotalFailed
-		sumTotal += v.TotalResources
+	for i := 0; i < len(printer.sortedControlNames); i++ {
+		controlSummery := printer.summery[printer.sortedControlNames[i]]
+		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummery))
+		sumFailed += controlSummery.TotalFailed
+		sumTotal += controlSummery.TotalResources
 	}
 	summaryTable.SetFooter(generateFooter(len(printer.summery), sumFailed, sumTotal))
 	summaryTable.Render()
