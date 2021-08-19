@@ -49,6 +49,11 @@ Kubescape is running the following tests according to what is defined by [Kubern
 * Control plane hardening 
 * Exposed dashboard
 * Allow privilege escalation
+* Applications credentials in configuration files
+* Cluster-admin binding
+* Exec into container
+* Dangerous capabilities
+* Insecure capabilities
 
 
 ## Technology
