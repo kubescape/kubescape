@@ -138,23 +138,13 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 			// backend
 			receivedFrameworks, err := d.OPAFRAMEWORKGet(rule.Name)
 			if err != nil {
-				errs = fmt.Errorf("%v\nKind: %v, Name: %s, error: %s", errs, rule.Kind, rule.Name, err.Error())
+				errs = fmt.Errorf("Could not download framework, please check if this framework exists")
 			}
 			frameworks = append(frameworks, receivedFrameworks...)
-		case opapolicy.KindControl:
-			receivedControls := []opapolicy.Control{} //, err := policyHandler.cacli.OPAFRAMEWORKGet(rule.Name, !k8sinterface.RunningIncluster)
 
-			// receivedControls, err := policyHandler.cacli.OPACONTROLGet(rule.Name)
-			// if err != nil {
-			// 	errs = fmt.Errorf("%v\nKind: %v, Name: %s, error: %s", errs, rule.Kind, rule.Name, err.Error())
-			// }
-			framework := opapolicy.Framework{ // TODO - wrap control by framework properly
-				Controls: receivedControls,
-			}
-			frameworks = append(frameworks, framework)
 		default:
-			err := fmt.Errorf("missing rule kind, expected: %s", opapolicy.KindFramework)
-			errs = fmt.Errorf("%v\nerror: %s", errs, err.Error())
+			err := fmt.Errorf("Missing rule kind, expected: %s", opapolicy.KindFramework)
+			errs = fmt.Errorf("%s", err.Error())
 
 		}
 	}

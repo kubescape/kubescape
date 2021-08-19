@@ -27,13 +27,16 @@ type KubernetesApi struct {
 
 // NewKubernetesApi -
 func NewKubernetesApi() *KubernetesApi {
+
 	kubernetesClient, err := kubernetes.NewForConfig(GetK8sConfig())
 	if err != nil {
-		panic(fmt.Sprintf("kubernetes.NewForConfig - Failed to load config file, reason: %s", err.Error()))
+		fmt.Printf("Failed to load config file, reason: %s", err.Error())
+		os.Exit(1)
 	}
-	dynamicClient, err := dynamic.NewForConfig(GetK8sConfig())
+	dynamicClient, err := dynamic.NewForConfig(K8SConfig)
 	if err != nil {
-		panic(fmt.Sprintf("dynamic.NewForConfig - Failed to load config file, reason: %s", err.Error()))
+		fmt.Printf("Failed to load config file, reason: %s", err.Error())
+		os.Exit(1)
 	}
 
 	return &KubernetesApi{
@@ -50,11 +53,11 @@ var RunningIncluster bool
 func LoadK8sConfig() error {
 	kubeconfig, err := clientcmd.BuildConfigFromFlags("", ConfigPath)
 	if err != nil {
-		kubeconfig, err = restclient.InClusterConfig()
-		if err != nil {
-			return fmt.Errorf("Failed to load kubernetes config from file: '%s', err: %v", ConfigPath, err)
-		}
-		RunningIncluster = true
+		// kubeconfig, err = restclient.InClusterConfig()
+		// if err != nil {
+		return fmt.Errorf("Failed to load kubernetes config from file: '%s'.\n", ConfigPath)
+		// }
+		// RunningIncluster = true
 	} else {
 		RunningIncluster = false
 	}
@@ -66,7 +69,9 @@ func LoadK8sConfig() error {
 func GetK8sConfig() *restclient.Config {
 	if K8SConfig == nil {
 		if err := LoadK8sConfig(); err != nil {
-			return nil
+			// print error
+			fmt.Printf("%s", err.Error())
+			os.Exit(1)
 		}
 	}
 	return K8SConfig

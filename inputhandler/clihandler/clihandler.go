@@ -8,8 +8,6 @@ import (
 
 	"kube-escape/cautils/armotypes"
 	"kube-escape/cautils/opapolicy"
-
-	"github.com/golang/glog"
 )
 
 type CLIHandler struct {
@@ -43,7 +41,8 @@ func (clihandler *CLIHandler) Scan() error {
 	case opapolicy.TypeExecPostureScan:
 		go func() {
 			if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification); err != nil {
-				glog.Error(err)
+				fmt.Printf("%v\n", err)
+				os.Exit(0)
 			}
 		}()
 	default:

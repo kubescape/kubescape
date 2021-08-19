@@ -24,6 +24,7 @@ func main() {
 
 func CliSetup() error {
 	k8s := k8sinterface.NewKubernetesApi()
+
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
 
@@ -42,7 +43,6 @@ func CliSetup() error {
 		reporterObj := opaprocessor.NewOPAProcessor(&processNotification, &reportResults)
 		reporterObj.ProcessRulesListenner()
 	}()
-
 	p := printer.NewPrinter(&reportResults)
 	p.ActionPrint()
 
