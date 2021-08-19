@@ -7,9 +7,9 @@ echo
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
 
-RELEASE=v0.0.35
-
-DOWNLOAD_URL="https://github.com/armosec/kubescape/releases/download/$RELEASE/kubescape"
+DOWNLOAD_URL=$(curl --silent "https://api.github.com/repos/armosec/kubescape/releases/latest" | grep -o "browser_download_url.*")
+DOWNLOAD_URL=${DOWNLOAD_URL//\"}
+DOWNLOAD_URL=${DOWNLOAD_URL/browser_download_url: /}
 
 mkdir -p $BASE_DIR 
 
