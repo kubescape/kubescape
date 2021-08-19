@@ -28,7 +28,7 @@ type RuleResponse struct {
 
 type AlertObject struct {
 	K8SApiObjects   []map[string]interface{} `json:"k8sApiObjects,omitempty"`
-	ExternalObjects []map[string]interface{} `json:"externalObjects,omitempty"`
+	ExternalObjects map[string]interface{}   `json:"externalObjects,omitempty"`
 }
 
 type FrameworkReport struct {
