@@ -8,7 +8,10 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v2
 
@@ -20,29 +23,19 @@ jobs:
     - name: Build
       run: mkdir build  && go mod tidy && go build -ldflags "-w -s" -o build/kubescape
     
-    - name: Chmod
-      run: chmod +x build/kubescape
-
-    - name: List
-      run: ls -la
-      
-    - name: Create Release
+    - name: Release ${{ matrix.os }}
       id: create_release
       uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: v0.0.${{ github.run_number }}
-        release_name: Release v0.0.${{ github.run_number }}
-        body: |
-          Changes in this Release
-          - First Change
-          - Second Change
+        tag_name: betav1.0.${{ github.run_number }}
+        release_name: Release betav1.0.${{ github.run_number }}
         draft: false
         prerelease: false
  
-    - name: Upload Release Asset
-      id: upload-release-asset 
+    - name: Upload Release Asset ${{ matrix.os }}
+      id: upload-release-asset-${{ matrix.os }} 
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
