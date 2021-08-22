@@ -23,7 +23,7 @@ jobs:
     - name: Build
       run: mkdir build  && go mod tidy && go build -ldflags "-w -s" -o build/kubescape
     
-    - name: Create Release
+    - name: Create Release ${{ matrix.os }} 
       id: create_release
       uses: actions/create-release@v1
       env:
@@ -34,8 +34,8 @@ jobs:
         draft: false
         prerelease: false
  
-    - name: Upload Release Asset
-      id: upload-release-asset 
+    - name: Upload Release Asset ${{ matrix.os }}
+      id: upload-release-asset
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
