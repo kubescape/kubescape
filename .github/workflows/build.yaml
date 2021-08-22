@@ -25,7 +25,7 @@ jobs:
     
     - name: Create Release ${{ matrix.os }} 
       id: create_release
-      uses: actions/${{ matrix.os }}/create-release@v1
+      uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -36,7 +36,7 @@ jobs:
  
     - name: Upload Release Asset ${{ matrix.os }}
       id: upload-release-asset
-      uses: actions/${{ matrix.os }}/upload-release-asset@v1
+      uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
