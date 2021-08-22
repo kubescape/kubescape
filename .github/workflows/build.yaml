@@ -29,8 +29,8 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        tag_name: betav1.0.${{ github.run_number }}
-        release_name: Release betav1.0.${{ github.run_number }}
+        tag_name: ${{ matrix.os }}.0.${{ github.run_number }}
+        release_name: Release ${{ matrix.os }}.0.${{ github.run_number }}
         draft: false
         prerelease: false
  
