@@ -13,19 +13,19 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/${{ matrix.os }}/checkout@v2
 
     - name: Set up Go
-      uses: actions/setup-go@v2
+      uses: actions/${{ matrix.os }}/setup-go@v2
       with:
         go-version: 1.16
 
     - name: Build
-      run: mkdir build  && go mod tidy && go build -ldflags "-w -s" -o build/kubescape
+      run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s" -o build/${{ matrix.os }}/kubescape
     
     - name: Create Release ${{ matrix.os }} 
       id: create_release
-      uses: actions/create-release@v1
+      uses: actions/${{ matrix.os }}/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -36,11 +36,11 @@ jobs:
  
     - name: Upload Release Asset ${{ matrix.os }}
       id: upload-release-asset
-      uses: actions/upload-release-asset@v1
+      uses: actions/${{ matrix.os }}/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
-        asset_path: build/kubescape
-        asset_name: kubescape
+        asset_path: build/${{ matrix.os }}/kubescape
+        asset_name: kubescape-${{ matrix.os }}
         asset_content_type: application/octet-stream
