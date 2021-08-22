@@ -7,7 +7,18 @@ echo
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
 
-DOWNLOAD_URL=$(curl --silent "https://api.github.com/repos/armosec/kubescape/releases/latest" | grep -o "browser_download_url.*")
+osName=$(uname -s)
+if [[ $osName == *"MINGW"* ]]; then
+    osName=windows-latest
+elif [[ $osName == *"Darwin"* ]]; then
+    osName=macos-latest
+else
+    osName=ubuntu-latest
+fi
+
+GITHUB_OWNER=armosec
+
+DOWNLOAD_URL=$(curl --silent "https://api.github.com/repos/$GITHUB_OWNER/kubescape/releases/latest" | grep -o "browser_download_url.*${osName}.*")
 DOWNLOAD_URL=${DOWNLOAD_URL//\"}
 DOWNLOAD_URL=${DOWNLOAD_URL/browser_download_url: /}
 

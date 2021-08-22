@@ -5,49 +5,50 @@ on:
     branches: [ master ]
   pull_request:
     branches: [ master ]
+    types: [ closed ]
 
 jobs:
-  build:
+  once:
+    name: Create release
     runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
-    - uses: actions/checkout@v2
+      - name: Create a release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: betav1.0.${{ github.run_number }}
+          release_name: Release betav1.0.${{ github.run_number }}
+          draft: false
+          prerelease: false
+  build:
+    name: Create cross-platform release build, tag and upload binaries
+    needs: once
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v1
 
-    - name: Set up Go
-      uses: actions/setup-go@v2
-      with:
-        go-version: 1.16
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
 
-    - name: Build
-      run: mkdir build  && go mod tidy && go build -ldflags "-w -s" -o build/kubescape
-    
-    - name: Chmod
-      run: chmod +x build/kubescape
-
-    - name: List
-      run: ls -la
+      - name: Build
+        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s" -o build/${{ matrix.os }}/kubescape
       
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: v0.0.${{ github.run_number }}
-        release_name: Release v0.0.${{ github.run_number }}
-        body: |
-          Changes in this Release
-          - First Change
-          - Second Change
-        draft: false
-        prerelease: false
- 
-    - name: Upload Release Asset
-      id: upload-release-asset 
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }} # This pulls from the CREATE RELEASE step above, referencing it's ID to get its outputs object, which include a `upload_url`. See this blog post for more info: https://jasonet.co/posts/new-features-of-github-actions/#passing-data-to-future-steps 
-        asset_path: build/kubescape
-        asset_name: kubescape
-        asset_content_type: application/octet-stream
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.once.outputs.upload_url }}
+          asset_path: build/${{ matrix.os }}/kubescape
+          asset_name: kubescape-${{ matrix.os }}
+          asset_content_type: application/octet-stream
