@@ -70,6 +70,7 @@ Kubescape is running the following tests according to what is defined by [Kubern
 * Exec into container
 * Dangerous capabilities
 * Insecure capabilities
+* Linux hardening
 
 
 ## Technology
