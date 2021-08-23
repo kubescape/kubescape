@@ -80,3 +80,5 @@ The tools retrieves Kubernetes objects from the API server and runs a set of [re
 The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
+
+
