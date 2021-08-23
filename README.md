@@ -30,6 +30,7 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 # Status
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
 [![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)]()
+[![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
 # How to build 
 
