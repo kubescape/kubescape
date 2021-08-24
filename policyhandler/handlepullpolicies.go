@@ -49,7 +49,7 @@ type ArmoAPI struct {
 func NewArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
 		httpClient: &http.Client{},
-		hostURL:    "https://dashbe.eudev3.cyberarmorsoft.com",
+		hostURL:    "https://dashbe.eustage2.cyberarmorsoft.com",
 	}
 }
 func (db *ArmoAPI) GetServerAddress() string {

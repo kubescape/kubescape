@@ -29,7 +29,6 @@ func CliSetup() error {
 	reportResults := make(chan *cautils.OPASessionObj)
 
 	// policy handler setup
-	cautils.SetupDefaultEnvs()
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
 	// cli handler setup
