@@ -148,3 +148,9 @@ type PolicyIdentifier struct {
 	Kind NotificationPolicyKind `json:"kind"`
 	Name string                 `json:"name"`
 }
+
+type ScanInfo struct {
+	PolicyIdentifier   PolicyIdentifier `json:"policyIdentifier"`
+	Output             string           `json:"output"`
+	ExcludedNamespaces string           `json:"excludedNamespaces"`
+}
