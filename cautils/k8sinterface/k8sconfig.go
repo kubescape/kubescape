@@ -4,15 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	// DO NOT REMOVE - load cloud providers auth
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
 
 // K8SConfig pointer to k8s config
@@ -46,20 +45,17 @@ func NewKubernetesApi() *KubernetesApi {
 	}
 }
 
-var ConfigPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+// RunningIncluster whether running in cluster
 var RunningIncluster bool
 
 // LoadK8sConfig load config from local file or from cluster
 func LoadK8sConfig() error {
-	kubeconfig, err := clientcmd.BuildConfigFromFlags("", ConfigPath)
+	kubeconfig, err := config.GetConfig()
 	if err != nil {
-		// kubeconfig, err = restclient.InClusterConfig()
-		// if err != nil {
-		return fmt.Errorf("Failed to load kubernetes config from file: '%s'.\n", ConfigPath)
-		// }
-		// RunningIncluster = true
-	} else {
-		RunningIncluster = false
+		return fmt.Errorf("Failed to load kubernetes config: %s\n", err)
+	}
+	if _, err := restclient.InClusterConfig(); err == nil {
+		RunningIncluster = true
 	}
 	K8SConfig = kubeconfig
 	return nil

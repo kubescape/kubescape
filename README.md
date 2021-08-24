@@ -1,5 +1,9 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 
+[![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
+[![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)]()
+[![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
+
 Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by to NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
 Tests are configured with YAML files, making this tool easy to update as test specifications evolve.
 
@@ -25,11 +29,6 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 If you wish to scan all namespaces in your cluster, remove the `--exclude-namespaces` flag.
 
 <img src="docs/summery.PNG">
-
-
-# Status
-[![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
-[![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)]()
 
 # How to build 
 
@@ -81,3 +80,5 @@ The tools retrieves Kubernetes objects from the API server and runs a set of [re
 The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
+
+
