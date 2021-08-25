@@ -17,14 +17,14 @@ var INDENT = "   "
 
 type Printer struct {
 	opaSessionObj      *chan *cautils.OPASessionObj
-	summery            Summery
+	summary            Summary
 	sortedControlNames []string
 }
 
 func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj) *Printer {
 	return &Printer{
 		opaSessionObj: opaSessionObj,
-		summery:       NewSummery(),
+		summary:       NewSummery(),
 	}
 }
 
@@ -52,7 +52,7 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 			workloadsSummery := listResultSummery(cr.RuleReports)
 			mapResources := groupByNamespace(workloadsSummery)
 
-			printer.summery[cr.Name] = ControlSummery{
+			printer.summary[cr.Name] = ControlSummery{
 				TotalResources:  cr.GetNumberOfResources(),
 				TotalFailed:     len(workloadsSummery),
 				WorkloadSummery: mapResources,
@@ -66,11 +66,11 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 
 func (printer *Printer) PrintResults() {
 	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummery := printer.summery[printer.sortedControlNames[i]]
+		controlSummery := printer.summary[printer.sortedControlNames[i]]
 		printer.printTitle(printer.sortedControlNames[i], &controlSummery)
 		printer.printResult(printer.sortedControlNames[i], &controlSummery)
 
-		if printer.summery[printer.sortedControlNames[i]].TotalResources > 0 {
+		if printer.summary[printer.sortedControlNames[i]].TotalResources > 0 {
 			printer.printSummery(printer.sortedControlNames[i], &controlSummery)
 		}
 
@@ -155,18 +155,18 @@ func (printer *Printer) PrintSummaryTable() {
 	sumFailed := 0
 
 	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummery := printer.summery[printer.sortedControlNames[i]]
+		controlSummery := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummery))
 		sumFailed += controlSummery.TotalFailed
 		sumTotal += controlSummery.TotalResources
 	}
-	summaryTable.SetFooter(generateFooter(len(printer.summery), sumFailed, sumTotal))
+	summaryTable.SetFooter(generateFooter(len(printer.summary), sumFailed, sumTotal))
 	summaryTable.Render()
 }
 
 func (printer *Printer) getSortedControlsNames() []string {
-	controlNames := make([]string, 0, len(printer.summery))
-	for k := range printer.summery {
+	controlNames := make([]string, 0, len(printer.summary))
+	for k := range printer.summary {
 		controlNames = append(controlNames, k)
 	}
 	sort.Strings(controlNames)
