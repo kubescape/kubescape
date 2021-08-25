@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"encoding/json"
 	"fmt"
 	"kube-escape/cautils"
 	"os"
@@ -15,16 +16,24 @@ import (
 
 var INDENT = "   "
 
+const (
+	PrettyPrinter      string = "pretty-printer"
+	JsonPrinter        string = "json-printer"
+	JunitResultPrinter string = "junit-result-printer"
+)
+
 type Printer struct {
 	opaSessionObj      *chan *cautils.OPASessionObj
 	summary            Summary
 	sortedControlNames []string
+	printerType        string
 }
 
-func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj) *Printer {
+func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj, printerType string) *Printer {
 	return &Printer{
 		opaSessionObj: opaSessionObj,
 		summary:       NewSummery(),
+		printerType:   printerType,
 	}
 }
 
@@ -33,9 +42,21 @@ func (printer *Printer) ActionPrint() {
 	for {
 		opaSessionObj := <-*printer.opaSessionObj
 
-		printer.SummerySetup(opaSessionObj.PostureReport)
-		printer.PrintResults()
-		printer.PrintSummaryTable()
+		if printer.printerType == PrettyPrinter {
+			printer.SummerySetup(opaSessionObj.PostureReport)
+			printer.PrintResults()
+			printer.PrintSummaryTable()
+		} else if printer.printerType == JsonPrinter {
+			postureReportStr, err := json.Marshal(opaSessionObj.PostureReport)
+			if err != nil {
+				fmt.Println("Failed to convert posture report object!")
+				os.Exit(1)
+			}
+			os.Stdout.Write(postureReportStr)
+		} else {
+			fmt.Println("unknown output printer")
+			os.Exit(1)
+		}
 
 		if !k8sinterface.RunningIncluster {
 			break
