@@ -28,9 +28,11 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 
 If you wish to scan all namespaces in your cluster, remove the `--exclude-namespaces` flag.
 
-<img src="docs/summery.PNG">
+<img src="docs/summary.png">
 
 # How to build 
+
+Note: development (and the release process) is done with Go 1.16 
 
 1. Clone Project
 ```

@@ -42,7 +42,7 @@ func CliSetup() error {
 		reporterObj := opaprocessor.NewOPAProcessor(&processNotification, &reportResults)
 		reporterObj.ProcessRulesListenner()
 	}()
-	p := printer.NewPrinter(&reportResults)
+	p := printer.NewPrinter(&reportResults, printer.PrettyPrinter)
 	p.ActionPrint()
 
 	return nil

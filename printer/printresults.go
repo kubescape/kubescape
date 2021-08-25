@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"encoding/json"
 	"fmt"
 	"kube-escape/cautils"
 	"os"
@@ -15,16 +16,24 @@ import (
 
 var INDENT = "   "
 
+const (
+	PrettyPrinter      string = "pretty-printer"
+	JsonPrinter        string = "json-printer"
+	JunitResultPrinter string = "junit-result-printer"
+)
+
 type Printer struct {
 	opaSessionObj      *chan *cautils.OPASessionObj
-	summery            Summery
+	summary            Summary
 	sortedControlNames []string
+	printerType        string
 }
 
-func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj) *Printer {
+func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj, printerType string) *Printer {
 	return &Printer{
 		opaSessionObj: opaSessionObj,
-		summery:       NewSummery(),
+		summary:       NewSummery(),
+		printerType:   printerType,
 	}
 }
 
@@ -33,9 +42,21 @@ func (printer *Printer) ActionPrint() {
 	for {
 		opaSessionObj := <-*printer.opaSessionObj
 
-		printer.SummerySetup(opaSessionObj.PostureReport)
-		printer.PrintResults()
-		printer.PrintSummaryTable()
+		if printer.printerType == PrettyPrinter {
+			printer.SummerySetup(opaSessionObj.PostureReport)
+			printer.PrintResults()
+			printer.PrintSummaryTable()
+		} else if printer.printerType == JsonPrinter {
+			postureReportStr, err := json.Marshal(opaSessionObj.PostureReport)
+			if err != nil {
+				fmt.Println("Failed to convert posture report object!")
+				os.Exit(1)
+			}
+			os.Stdout.Write(postureReportStr)
+		} else {
+			fmt.Println("unknown output printer")
+			os.Exit(1)
+		}
 
 		if !k8sinterface.RunningIncluster {
 			break
@@ -52,7 +73,7 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 			workloadsSummery := listResultSummery(cr.RuleReports)
 			mapResources := groupByNamespace(workloadsSummery)
 
-			printer.summery[cr.Name] = ControlSummery{
+			printer.summary[cr.Name] = ControlSummery{
 				TotalResources:  cr.GetNumberOfResources(),
 				TotalFailed:     len(workloadsSummery),
 				WorkloadSummery: mapResources,
@@ -66,11 +87,11 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 
 func (printer *Printer) PrintResults() {
 	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummery := printer.summery[printer.sortedControlNames[i]]
+		controlSummery := printer.summary[printer.sortedControlNames[i]]
 		printer.printTitle(printer.sortedControlNames[i], &controlSummery)
 		printer.printResult(printer.sortedControlNames[i], &controlSummery)
 
-		if printer.summery[printer.sortedControlNames[i]].TotalResources > 0 {
+		if printer.summary[printer.sortedControlNames[i]].TotalResources > 0 {
 			printer.printSummery(printer.sortedControlNames[i], &controlSummery)
 		}
 
@@ -155,18 +176,18 @@ func (printer *Printer) PrintSummaryTable() {
 	sumFailed := 0
 
 	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummery := printer.summery[printer.sortedControlNames[i]]
+		controlSummery := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummery))
 		sumFailed += controlSummery.TotalFailed
 		sumTotal += controlSummery.TotalResources
 	}
-	summaryTable.SetFooter(generateFooter(len(printer.summery), sumFailed, sumTotal))
+	summaryTable.SetFooter(generateFooter(len(printer.summary), sumFailed, sumTotal))
 	summaryTable.Render()
 }
 
 func (printer *Printer) getSortedControlsNames() []string {
-	controlNames := make([]string, 0, len(printer.summery))
-	for k := range printer.summery {
+	controlNames := make([]string, 0, len(printer.summary))
+	for k := range printer.summary {
 		controlNames = append(controlNames, k)
 	}
 	sort.Strings(controlNames)
