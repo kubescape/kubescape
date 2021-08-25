@@ -2,6 +2,7 @@ package printer
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"kube-escape/cautils"
 	"os"
@@ -47,7 +48,19 @@ func (printer *Printer) ActionPrint() {
 			printer.PrintResults()
 			printer.PrintSummaryTable()
 		} else if printer.printerType == JsonPrinter {
-			postureReportStr, err := json.Marshal(opaSessionObj.PostureReport)
+			postureReportStr, err := json.Marshal(opaSessionObj.PostureReport.FrameworkReports[0])
+			if err != nil {
+				fmt.Println("Failed to convert posture report object!")
+				os.Exit(1)
+			}
+			os.Stdout.Write(postureReportStr)
+		} else if printer.printerType == JunitResultPrinter {
+			junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
+			if err != nil {
+				fmt.Println("Failed to convert posture report object!")
+				os.Exit(1)
+			}
+			postureReportStr, err := xml.Marshal(junitResult)
 			if err != nil {
 				fmt.Println("Failed to convert posture report object!")
 				os.Exit(1)
