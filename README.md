@@ -32,6 +32,8 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 
 # How to build 
 
+Note: development (and the release process) is done with Go 1.16 
+
 1. Clone Project
 ```
 git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
