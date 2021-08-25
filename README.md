@@ -4,7 +4,7 @@
 [![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)]()
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
-Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by to NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
+Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
 Tests are configured with YAML files, making this tool easy to update as test specifications evolve.
 
 <img src="docs/demo.gif">
@@ -52,7 +52,7 @@ go mod tidy && go build -o kubescape .
 # Under the hood
 
 ## Tests
-Kubescape is running the following tests according to what is defined by [Kubernetes Hardening Guidance by to NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
+Kubescape is running the following tests according to what is defined by [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
 * Non-root containers
 * Immutable container filesystem 
 * Privileged containers 
