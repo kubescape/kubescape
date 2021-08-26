@@ -29,7 +29,6 @@ func CliSetup() error {
 	reportResults := make(chan *cautils.OPASessionObj)
 
 	// policy handler setup
-	cautils.SetupDefaultEnvs()
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
 	// cli handler setup
@@ -43,7 +42,7 @@ func CliSetup() error {
 		reporterObj := opaprocessor.NewOPAProcessor(&processNotification, &reportResults)
 		reporterObj.ProcessRulesListenner()
 	}()
-	p := printer.NewPrinter(&reportResults)
+	p := printer.NewPrinter(&reportResults, printer.PrettyPrinter)
 	p.ActionPrint()
 
 	return nil

@@ -4,9 +4,9 @@ import (
 	"fmt"
 )
 
-type Summery map[string]ControlSummery
+type Summary map[string]ControlSummery
 
-func NewSummery() Summery {
+func NewSummery() Summary {
 	return make(map[string]ControlSummery)
 }
 
