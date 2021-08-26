@@ -22,7 +22,7 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, match []opapolicy.
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
 							if k8sObj == nil {
-								glog.Errorf("Resource '%s' is nil, probably failed to pull the resource", groupResource)
+								// glog.Errorf("Resource '%s' is nil, probably failed to pull the resource", groupResource)
 							} else if v, k := k8sObj.([]map[string]interface{}); k {
 								k8sObjects = append(k8sObjects, v...)
 							} else if v, k := k8sObj.(map[string]interface{}); k {

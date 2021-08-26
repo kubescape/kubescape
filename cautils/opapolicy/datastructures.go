@@ -150,9 +150,9 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
-	PolicyIdentifier   PolicyIdentifier `json:"policyIdentifier"`
-	Output             string           `json:"output"`
-	ExcludedNamespaces string           `json:"excludedNamespaces"`
-	Input              []string         `json:"input"`
-	Silent             bool             `json:"silent"`
+	PolicyIdentifier   PolicyIdentifier
+	Output             string
+	ExcludedNamespaces string
+	InputPatterns      []string
+	Silent             bool
 }

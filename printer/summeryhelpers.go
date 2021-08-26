@@ -7,26 +7,26 @@ import (
 	"kube-escape/cautils/opapolicy"
 )
 
-// Group workloads by namespace - return {"namespace": <[]WorkloadSummery>}
-func groupByNamespace(resources []WorkloadSummery) map[string][]WorkloadSummery {
-	mapResources := make(map[string][]WorkloadSummery)
+// Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
+func groupByNamespace(resources []WorkloadSummary) map[string][]WorkloadSummary {
+	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
 		if r, ok := mapResources[resources[i].Namespace]; ok {
 			r = append(r, resources[i])
 			mapResources[resources[i].Namespace] = r
 		} else {
-			mapResources[resources[i].Namespace] = []WorkloadSummery{resources[i]}
+			mapResources[resources[i].Namespace] = []WorkloadSummary{resources[i]}
 		}
 	}
 	return mapResources
 }
-func listResultSummery(ruleReports []opapolicy.RuleReport) []WorkloadSummery {
-	workloadsSummery := []WorkloadSummery{}
+func listResultSummary(ruleReports []opapolicy.RuleReport) []WorkloadSummary {
+	workloadsSummary := []WorkloadSummary{}
 	track := map[string]bool{}
 
 	for c := range ruleReports {
 		for _, ruleReport := range ruleReports[c].RuleResponses {
-			resource, err := ruleResultSummery(ruleReport.AlertObject)
+			resource, err := ruleResultSummary(ruleReport.AlertObject)
 			if err != nil {
 				fmt.Println(err.Error())
 				continue
@@ -36,18 +36,18 @@ func listResultSummery(ruleReports []opapolicy.RuleReport) []WorkloadSummery {
 			for i := range resource {
 				if ok := track[resource[i].ToString()]; !ok {
 					track[resource[i].ToString()] = true
-					workloadsSummery = append(workloadsSummery, resource[i])
+					workloadsSummary = append(workloadsSummary, resource[i])
 				}
 			}
 		}
 	}
-	return workloadsSummery
+	return workloadsSummary
 }
-func ruleResultSummery(obj opapolicy.AlertObject) ([]WorkloadSummery, error) {
-	resource := []WorkloadSummery{}
+func ruleResultSummary(obj opapolicy.AlertObject) ([]WorkloadSummary, error) {
+	resource := []WorkloadSummary{}
 
 	for i := range obj.K8SApiObjects {
-		r, err := newWorkloadSummery(obj.K8SApiObjects[i])
+		r, err := newWorkloadSummary(obj.K8SApiObjects[i])
 		if err != nil {
 			return resource, err
 		}
@@ -57,8 +57,8 @@ func ruleResultSummery(obj opapolicy.AlertObject) ([]WorkloadSummery, error) {
 	return resource, nil
 }
 
-func newWorkloadSummery(obj map[string]interface{}) (*WorkloadSummery, error) {
-	r := &WorkloadSummery{}
+func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
+	r := &WorkloadSummary{}
 
 	workload := k8sinterface.NewWorkloadObj(obj)
 	if workload == nil {
