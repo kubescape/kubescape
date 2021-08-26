@@ -14,6 +14,7 @@ type ControlSummery struct {
 	TotalResources  int
 	TotalFailed     int
 	Description     string
+	Remediation     string
 	WorkloadSummery map[string][]WorkloadSummery // <namespace>:[<WorkloadSummery>]
 }
 

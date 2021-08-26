@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"kube-escape/cautils"
 	"kube-escape/cautils/armotypes"
 	"kube-escape/cautils/k8sinterface"
@@ -27,13 +29,26 @@ var frameworkCmd = &cobra.Command{
 	Short:     "The framework you wish to use. Supported frameworks: nsa, mitre",
 	Long:      ``,
 	ValidArgs: []string{"nsa", "mitre"},
-	Args:      cobra.ExactValidArgs(1),
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 1 {
+			return errors.New("requires at least one argument")
+		}
+		if !isValidFramework(args[0]) {
+			return errors.New("supported frameworks: nsa and mitre")
+		}
+		return nil
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
-		scanInfo.PolicyIdentifier.Kind = "Framework"
-		scanInfo.PolicyIdentifier.Name = strings.Join(args, ",")
+		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
+		scanInfo.PolicyIdentifier.Name = args[0]
+		scanInfo.Input = args[1:]
 		CliSetup()
 	},
+}
+
+func isValidFramework(framework string) bool {
+	return framework == "nsa" || framework != "mitre"
 }
 
 func init() {
@@ -41,6 +56,20 @@ func init() {
 	scanInfo = opapolicy.ScanInfo{}
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "excluded-namespaces", "e", "", "namespaces to exclude from check")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "output format")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent output")
+
+}
+
+func processYamlInput(yamls string) {
+	listOfYamls := strings.Split(yamls, ",")
+	for _, yaml := range listOfYamls {
+		dat, err := ioutil.ReadFile(yaml)
+		if err != nil {
+			fmt.Printf("Could not open file: %s.", yaml)
+		}
+		fmt.Print(string(dat))
+	}
+
 }
 
 func CliSetup() error {

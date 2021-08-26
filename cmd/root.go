@@ -9,8 +9,8 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:   "kubescape",
 	Short: "A tool for running NSA recommended tests in your cluster ",
-	Long: `This tool pulls checks based on the NSA recommendations from the ARMO backend
-	and run these checks on your cluster resources `,
+	Long: `Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in Kubernetes Hardening Guidance
+by to NSA and CISA Tests are configured with YAML files, making this tool easy to update as test specifications evolve.`,
 }
 
 func Execute() {
