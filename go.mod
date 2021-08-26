@@ -23,6 +23,7 @@ require (
 	github.com/satori/go.uuid v1.2.0
 	golang.org/x/oauth2 v0.0.0-20210810183815-faf39c7919d5
 	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
+	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.22.0
 	k8s.io/apimachinery v0.22.0
 	k8s.io/client-go v0.22.0

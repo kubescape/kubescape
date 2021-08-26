@@ -20,6 +20,9 @@ import (
 const SelectAllResources = "*"
 
 func (policyHandler *PolicyHandler) getK8sResources(frameworks []opapolicy.Framework, designator *armotypes.PortalDesignator, excludedNamespaces string) (*cautils.K8SResources, error) {
+	// get k8s resources
+	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
+
 	// build resources map
 	k8sResourcesMap := setResourceMap(frameworks)
 
@@ -31,6 +34,7 @@ func (policyHandler *PolicyHandler) getK8sResources(frameworks []opapolicy.Frame
 		return k8sResourcesMap, err
 	}
 
+	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects, let’s start!!!")
 	return k8sResourcesMap, nil
 }
 
@@ -66,7 +70,7 @@ func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVer
 			listOptions.FieldSelector += "metadata.namespace!=" + excludedNamespace + ","
 		}
 	}
-	if labels != nil && len(labels) > 0 {
+	if len(labels) > 0 {
 		set := k8slabels.Set(labels)
 		listOptions.LabelSelector = set.AsSelector().String()
 	}
