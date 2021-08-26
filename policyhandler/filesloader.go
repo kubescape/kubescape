@@ -20,25 +20,18 @@ var (
 
 func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framework, scanInfo *opapolicy.ScanInfo) (*cautils.K8SResources, error) {
 
-	files, errs := listFiles(scanInfo.InputPatterns)
-	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
-	}
-	if len(files) == 0 {
-		return nil, fmt.Errorf("empty list of files - no files found")
+	workloads, err := loadResourcesFromFiles(scanInfo.InputPatterns)
+	if err != nil {
+		return nil, err
 	}
 
-	workloads, errs := loadFiles(files)
-	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
-	}
-	if len(workloads) == 0 {
-		return nil, fmt.Errorf("empty list of workloads - no workloads valid workloads found")
-	}
+	// TODO - load resource from url
 
+	// map all resources: map["/group/version/kind"][]<k8s workloads>
 	allResources := mapResources(workloads)
 
 	// build resources map
+	// map resources based on framework requrid resources: map["/group/version/kind"][]<k8s workloads>
 	k8sResources := setResourceMap(frameworks)
 
 	// save only relevant resources
@@ -52,6 +45,26 @@ func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framewo
 
 }
 
+func loadResourcesFromFiles(inputPatterns []string) ([]k8sinterface.IWorkload, error) {
+	files, errs := listFiles(inputPatterns)
+	if len(errs) > 0 {
+		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+	}
+	if len(files) == 0 {
+		return nil, fmt.Errorf("empty list of files - no files found")
+	}
+
+	workloads, errs := loadFiles(files)
+	if len(errs) > 0 {
+		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+	}
+	if len(workloads) == 0 {
+		return workloads, fmt.Errorf("empty list of workloads - no workloads valid workloads found")
+	}
+	return workloads, nil
+}
+
+// build resources map
 func mapResources(workloads []k8sinterface.IWorkload) map[string][]map[string]interface{} {
 	allResources := map[string][]map[string]interface{}{}
 	for i := range workloads {
@@ -76,7 +89,6 @@ func mapResources(workloads []k8sinterface.IWorkload) map[string][]map[string]in
 
 }
 
-// // build resources map
 func loadFiles(filePaths []string) ([]k8sinterface.IWorkload, []error) {
 	workloads := []k8sinterface.IWorkload{}
 	errs := []error{}
