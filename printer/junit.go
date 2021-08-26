@@ -59,6 +59,8 @@ func convertPostureReportToJunitResult(postureResult *opapolicy.PostureReport) (
 			suite.Tests = suite.Tests + 1
 			testCase := JUnitTestCase{}
 			testCase.Name = controlReports.Name
+			testCase.Classname = "Kubescape"
+			testCase.Time = "0"
 			if 0 < len(controlReports.RuleReports[0].RuleResponses) {
 				suite.Failures = suite.Failures + 1
 				failure := JUnitFailure{}
