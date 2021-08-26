@@ -10,6 +10,16 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
+var silent = false
+
+func SetSilentMode(s bool) {
+	silent = s
+}
+
+func IsSilent() bool {
+	return silent
+}
+
 var FailureDisplay = color.New(color.Bold, color.FgHiRed).FprintfFunc()
 var FailureTextDisplay = color.New(color.Faint, color.FgHiRed).FprintfFunc()
 var InfoDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
@@ -20,19 +30,41 @@ var DescriptionDisplay = color.New(color.Faint, color.FgWhite).FprintfFunc()
 
 var Spinner *spinner.Spinner
 
+func ScanStartDisplay() {
+	if IsSilent() {
+		return
+	}
+	InfoDisplay(os.Stdout, "ARMO security scanner starting\n")
+}
+
 func SuccessTextDisplay(str string) {
+	if IsSilent() {
+		return
+	}
 	SuccessDisplay(os.Stdout, "[success] ")
 	SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n", str))
 
 }
 
+func ErrorDisplay(str string) {
+	if IsSilent() {
+		return
+	}
+	SuccessDisplay(os.Stdout, "[Error] ")
+	SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n", str))
+
+}
+
 func ProgressTextDisplay(str string) {
+	if IsSilent() {
+		return
+	}
 	InfoDisplay(os.Stdout, "[progress] ")
 	SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n", str))
 
 }
 func StartSpinner() {
-	if isatty.IsTerminal(os.Stdout.Fd()) {
+	if !IsSilent() && isatty.IsTerminal(os.Stdout.Fd()) {
 		Spinner = spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		Spinner.Start()
 	}

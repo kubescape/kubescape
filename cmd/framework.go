@@ -19,6 +19,8 @@ import (
 )
 
 var scanInfo opapolicy.ScanInfo
+var supportedFrameworks = []string{"nsa", "mitre"}
+var isSilent bool
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
@@ -43,22 +45,22 @@ var frameworkCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
 		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
 		scanInfo.PolicyIdentifier.Name = args[0]
-		scanInfo.Input = args[1:]
+		scanInfo.InputPatterns = args[1:]
+		cautils.SetSilentMode(scanInfo.Silent)
 		CliSetup()
 	},
 }
 
 func isValidFramework(framework string) bool {
-	return framework == "nsa" || framework != "mitre"
+	return cautils.StringInSlice(supportedFrameworks, framework) != cautils.ValueNotFound
 }
 
 func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = opapolicy.ScanInfo{}
-	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "excluded-namespaces", "e", "", "namespaces to exclude from check")
+	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "namespaces to exclude from check")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "pretty-printer", "output format")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent output")
-
 }
 
 func processYamlInput(yamls string) {
@@ -107,8 +109,7 @@ func NewCLIHandler(policyHandler *policyhandler.PolicyHandler) *CLIHandler {
 }
 
 func (clihandler *CLIHandler) Scan() error {
-	cautils.InfoDisplay(os.Stdout, "ARMO security scanner starting\n")
-
+	cautils.ScanStartDisplay()
 	policyNotification := &opapolicy.PolicyNotification{
 		NotificationType: opapolicy.TypeExecPostureScan,
 		Rules: []opapolicy.PolicyIdentifier{

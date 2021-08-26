@@ -75,7 +75,7 @@ func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNo
 func (policyHandler *PolicyHandler) getResources(notification *opapolicy.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *opapolicy.ScanInfo) (*cautils.K8SResources, error) {
 	var k8sResources *cautils.K8SResources
 	var err error
-	if len(scanInfo.Input) > 0 {
+	if len(scanInfo.InputPatterns) > 0 {
 		k8sResources, err = policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
 	} else {
 		k8sResources, err = policyHandler.getK8sResources(opaSessionObj.Frameworks, &notification.Designators, scanInfo.ExcludedNamespaces)

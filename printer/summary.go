@@ -4,34 +4,34 @@ import (
 	"fmt"
 )
 
-type Summary map[string]ControlSummery
+type Summary map[string]ControlSummary
 
-func NewSummery() Summary {
-	return make(map[string]ControlSummery)
+func NewSummary() Summary {
+	return make(map[string]ControlSummary)
 }
 
-type ControlSummery struct {
+type ControlSummary struct {
 	TotalResources  int
 	TotalFailed     int
 	Description     string
 	Remediation     string
-	WorkloadSummery map[string][]WorkloadSummery // <namespace>:[<WorkloadSummery>]
+	WorkloadSummary map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
 }
 
-type WorkloadSummery struct {
+type WorkloadSummary struct {
 	Kind      string
 	Name      string
 	Namespace string
 	Group     string
 }
 
-func (controlSummery *ControlSummery) ToSlice() []string {
+func (controlSummary *ControlSummary) ToSlice() []string {
 	s := []string{}
-	s = append(s, fmt.Sprintf("%d", controlSummery.TotalFailed))
-	s = append(s, fmt.Sprintf("%d", controlSummery.TotalResources))
+	s = append(s, fmt.Sprintf("%d", controlSummary.TotalFailed))
+	s = append(s, fmt.Sprintf("%d", controlSummary.TotalResources))
 	return s
 }
 
-func (workloadSummery *WorkloadSummery) ToString() string {
-	return fmt.Sprintf("/%s/%s/%s/%s", workloadSummery.Group, workloadSummery.Namespace, workloadSummery.Kind, workloadSummery.Name)
+func (workloadSummary *WorkloadSummary) ToString() string {
+	return fmt.Sprintf("/%s/%s/%s/%s", workloadSummary.Group, workloadSummary.Namespace, workloadSummary.Kind, workloadSummary.Name)
 }

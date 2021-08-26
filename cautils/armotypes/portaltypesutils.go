@@ -1,7 +1,5 @@
 package armotypes
 
-import "github.com/golang/glog"
-
 var IgnoreLabels = []string{AttributeCluster, AttributeNamespace}
 
 // DigestPortalDesignator - get cluster namespace and labels from designator
@@ -12,7 +10,6 @@ func DigestPortalDesignator(designator *PortalDesignator) (string, string, map[s
 	// case DesignatorWlid: TODO
 	// case DesignatorWildWlid: TODO
 	default:
-		glog.Warningf("in 'digestPortalDesignator' designator type: '%v' not yet supported. please contact Armo team", designator.DesignatorType)
 	}
 	return "", "", nil
 }

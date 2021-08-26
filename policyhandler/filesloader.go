@@ -20,9 +20,9 @@ var (
 
 func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framework, scanInfo *opapolicy.ScanInfo) (*cautils.K8SResources, error) {
 
-	files, errs := listFiles(scanInfo.Input)
+	files, errs := listFiles(scanInfo.InputPatterns)
 	if len(errs) > 0 {
-		fmt.Printf("%v", errs) // TODO - print error
+		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("empty list of files - no files found")
@@ -30,7 +30,7 @@ func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framewo
 
 	workloads, errs := loadFiles(files)
 	if len(errs) > 0 {
-		fmt.Printf("%v", errs) // TODO - print error
+		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
 	}
 	if len(workloads) == 0 {
 		return nil, fmt.Errorf("empty list of workloads - no workloads valid workloads found")

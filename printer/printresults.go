@@ -33,7 +33,7 @@ type Printer struct {
 func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj, printerType string) *Printer {
 	return &Printer{
 		opaSessionObj: opaSessionObj,
-		summary:       NewSummery(),
+		summary:       NewSummary(),
 		printerType:   printerType,
 	}
 }
@@ -42,9 +42,8 @@ func (printer *Printer) ActionPrint() {
 
 	for {
 		opaSessionObj := <-*printer.opaSessionObj
-
 		if printer.printerType == PrettyPrinter {
-			printer.SummerySetup(opaSessionObj.PostureReport)
+			printer.SummarySetup(opaSessionObj.PostureReport)
 			printer.PrintResults()
 			printer.PrintSummaryTable()
 		} else if printer.printerType == JsonPrinter {
@@ -66,7 +65,7 @@ func (printer *Printer) ActionPrint() {
 				os.Exit(1)
 			}
 			os.Stdout.Write(postureReportStr)
-		} else {
+		} else if !cautils.IsSilent() {
 			fmt.Println("unknown output printer")
 			os.Exit(1)
 		}
@@ -77,19 +76,19 @@ func (printer *Printer) ActionPrint() {
 	}
 }
 
-func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
+func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {
 	for _, fr := range postureReport.FrameworkReports {
 		for _, cr := range fr.ControlReports {
 			if len(cr.RuleReports) == 0 {
 				continue
 			}
-			workloadsSummery := listResultSummery(cr.RuleReports)
-			mapResources := groupByNamespace(workloadsSummery)
+			workloadsSummary := listResultSummary(cr.RuleReports)
+			mapResources := groupByNamespace(workloadsSummary)
 
-			printer.summary[cr.Name] = ControlSummery{
+			printer.summary[cr.Name] = ControlSummary{
 				TotalResources:  cr.GetNumberOfResources(),
-				TotalFailed:     len(workloadsSummery),
-				WorkloadSummery: mapResources,
+				TotalFailed:     len(workloadsSummary),
+				WorkloadSummary: mapResources,
 				Description:     cr.Description,
 				Remediation:     cr.Remediation,
 			}
@@ -101,46 +100,46 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 
 func (printer *Printer) PrintResults() {
 	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummery := printer.summary[printer.sortedControlNames[i]]
-		printer.printTitle(printer.sortedControlNames[i], &controlSummery)
-		printer.printResult(printer.sortedControlNames[i], &controlSummery)
+		controlSummary := printer.summary[printer.sortedControlNames[i]]
+		printer.printTitle(printer.sortedControlNames[i], &controlSummary)
+		printer.printResult(printer.sortedControlNames[i], &controlSummary)
 
 		if printer.summary[printer.sortedControlNames[i]].TotalResources > 0 {
-			printer.printSummery(printer.sortedControlNames[i], &controlSummery)
+			printer.printSummary(printer.sortedControlNames[i], &controlSummary)
 		}
 
 	}
 }
 
-func (print *Printer) printSummery(controlName string, controlSummery *ControlSummery) {
+func (print *Printer) printSummary(controlName string, controlSummary *ControlSummary) {
 	cautils.SimpleDisplay(os.Stdout, "Summary - ")
-	cautils.SuccessDisplay(os.Stdout, "Passed:%v   ", controlSummery.TotalResources-controlSummery.TotalFailed)
-	cautils.FailureDisplay(os.Stdout, "Failed:%v   ", controlSummery.TotalFailed)
-	cautils.InfoDisplay(os.Stdout, "Total:%v\n", controlSummery.TotalResources)
-	if controlSummery.TotalFailed > 0 {
-		cautils.DescriptionDisplay(os.Stdout, "Remediation: %v\n", controlSummery.Remediation)
+	cautils.SuccessDisplay(os.Stdout, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed)
+	cautils.FailureDisplay(os.Stdout, "Failed:%v   ", controlSummary.TotalFailed)
+	cautils.InfoDisplay(os.Stdout, "Total:%v\n", controlSummary.TotalResources)
+	if controlSummary.TotalFailed > 0 {
+		cautils.DescriptionDisplay(os.Stdout, "Remediation: %v\n", controlSummary.Remediation)
 	}
 	cautils.DescriptionDisplay(os.Stdout, "\n")
 
 }
 
-func (printer *Printer) printTitle(controlName string, controlSummery *ControlSummery) {
+func (printer *Printer) printTitle(controlName string, controlSummary *ControlSummary) {
 	cautils.InfoDisplay(os.Stdout, "[control: %s] ", controlName)
-	if controlSummery.TotalResources == 0 {
+	if controlSummary.TotalResources == 0 {
 		cautils.InfoDisplay(os.Stdout, "resources not found %v\n", emoji.ConfusedFace)
-	} else if controlSummery.TotalFailed == 0 {
+	} else if controlSummary.TotalFailed == 0 {
 		cautils.SuccessDisplay(os.Stdout, "passed %v\n", emoji.ThumbsUp)
 	} else {
 		cautils.FailureDisplay(os.Stdout, "failed %v\n", emoji.SadButRelievedFace)
 	}
 
-	cautils.DescriptionDisplay(os.Stdout, "Description: %s\n", controlSummery.Description)
+	cautils.DescriptionDisplay(os.Stdout, "Description: %s\n", controlSummary.Description)
 
 }
-func (printer *Printer) printResult(controlName string, controlSummery *ControlSummery) {
+func (printer *Printer) printResult(controlName string, controlSummary *ControlSummary) {
 
 	indent := INDENT
-	for ns, rsc := range controlSummery.WorkloadSummery {
+	for ns, rsc := range controlSummary.WorkloadSummary {
 		preIndent := indent
 		if ns != "" {
 			cautils.SimpleDisplay(os.Stdout, "%sNamespace %s\n", indent, ns)
@@ -156,7 +155,7 @@ func (printer *Printer) printResult(controlName string, controlSummery *ControlS
 
 }
 
-func generateRow(control string, cs ControlSummery) []string {
+func generateRow(control string, cs ControlSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)
 	row = append(row, fmt.Sprintf("%d%s", percentage(cs.TotalResources, cs.TotalFailed), "%"))
@@ -195,10 +194,10 @@ func (printer *Printer) PrintSummaryTable() {
 	sumFailed := 0
 
 	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummery := printer.summary[printer.sortedControlNames[i]]
-		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummery))
-		sumFailed += controlSummery.TotalFailed
-		sumTotal += controlSummery.TotalResources
+		controlSummary := printer.summary[printer.sortedControlNames[i]]
+		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
+		sumFailed += controlSummary.TotalFailed
+		sumTotal += controlSummary.TotalResources
 	}
 	summaryTable.SetFooter(generateFooter(len(printer.summary), sumFailed, sumTotal))
 	summaryTable.Render()
