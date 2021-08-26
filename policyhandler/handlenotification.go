@@ -1,7 +1,6 @@
 package policyhandler
 
 import (
-	"flag"
 	"fmt"
 	"kube-escape/cautils"
 
@@ -27,7 +26,7 @@ func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, k8s *k8sinterf
 	}
 }
 
-func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opapolicy.PolicyNotification) error {
+func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opapolicy.PolicyNotification, excludedNamespaces string) error {
 	glog.Infof("Processing notification. reportID: %s", notification.ReportID)
 	opaSessionObj := cautils.NewOPASessionObj(nil, nil)
 	// validate notification
@@ -53,10 +52,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 	// get k8s resources
 	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
 	glog.Infof(fmt.Sprintf("Getting kubernetes objects. reportID: %s", notification.ReportID))
-	excludedNamespaces := ""
-	if flag.Arg(3) == "--exclude-namespaces" {
-		excludedNamespaces = flag.Arg(4)
-	}
+
 	k8sResources, err := policyHandler.getK8sResources(frameworks, &notification.Designators, excludedNamespaces)
 	if err != nil || len(*k8sResources) == 0 {
 		glog.Error(err)
