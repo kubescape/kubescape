@@ -55,7 +55,7 @@ func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = opapolicy.ScanInfo{}
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "excluded-namespaces", "e", "", "namespaces to exclude from check")
-	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "output format")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "pretty-printer", "output format")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent output")
 
 }
@@ -92,7 +92,7 @@ func CliSetup() error {
 		reporterObj := opaprocessor.NewOPAProcessor(&processNotification, &reportResults)
 		reporterObj.ProcessRulesListenner()
 	}()
-	p := printer.NewPrinter(&reportResults)
+	p := printer.NewPrinter(&reportResults, scanInfo.Output)
 	p.ActionPrint()
 
 	return nil

@@ -19,8 +19,8 @@ var INDENT = "   "
 
 const (
 	PrettyPrinter      string = "pretty-printer"
-	JsonPrinter        string = "json-printer"
-	JunitResultPrinter string = "junit-result-printer"
+	JsonPrinter        string = "json"
+	JunitResultPrinter string = "junit"
 )
 
 type Printer struct {
