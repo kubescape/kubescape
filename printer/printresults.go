@@ -19,8 +19,8 @@ var INDENT = "   "
 
 const (
 	PrettyPrinter      string = "pretty-printer"
-	JsonPrinter        string = "json-printer"
-	JunitResultPrinter string = "junit-result-printer"
+	JsonPrinter        string = "json"
+	JunitResultPrinter string = "junit"
 )
 
 type Printer struct {
@@ -91,6 +91,7 @@ func (printer *Printer) SummerySetup(postureReport *opapolicy.PostureReport) {
 				TotalFailed:     len(workloadsSummery),
 				WorkloadSummery: mapResources,
 				Description:     cr.Description,
+				Remediation:     cr.Remediation,
 			}
 		}
 	}
@@ -115,7 +116,12 @@ func (print *Printer) printSummery(controlName string, controlSummery *ControlSu
 	cautils.SimpleDisplay(os.Stdout, "Summary - ")
 	cautils.SuccessDisplay(os.Stdout, "Passed:%v   ", controlSummery.TotalResources-controlSummery.TotalFailed)
 	cautils.FailureDisplay(os.Stdout, "Failed:%v   ", controlSummery.TotalFailed)
-	cautils.InfoDisplay(os.Stdout, "Total:%v\n\n", controlSummery.TotalResources)
+	cautils.InfoDisplay(os.Stdout, "Total:%v\n", controlSummery.TotalResources)
+	if controlSummery.TotalFailed > 0 {
+		cautils.DescriptionDisplay(os.Stdout, "Remediation: %v\n", controlSummery.Remediation)
+	}
+	cautils.DescriptionDisplay(os.Stdout, "\n")
+
 }
 
 func (printer *Printer) printTitle(controlName string, controlSummery *ControlSummery) {

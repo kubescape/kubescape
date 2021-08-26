@@ -61,7 +61,7 @@ func (db *ArmoAPI) GetHttpClient() *http.Client {
 func (db *ArmoAPI) OPAFRAMEWORKGet(name string) ([]opapolicy.Framework, error) {
 	requestURI := "v1/armoFrameworks"
 	requestURI += fmt.Sprintf("?customerGUID=%s", "11111111-1111-1111-1111-111111111111")
-	requestURI += fmt.Sprintf("&frameworkName=%s", name)
+	requestURI += fmt.Sprintf("&frameworkName=%s", strings.ToUpper(name))
 	requestURI += "&getRules=true"
 
 	fullURL := URLEncoder(fmt.Sprintf("%s/%s", db.GetServerAddress(), requestURI))
