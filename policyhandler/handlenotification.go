@@ -24,7 +24,7 @@ func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, k8s *k8sinterf
 	}
 }
 
-func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opapolicy.PolicyNotification) error {
+func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opapolicy.PolicyNotification, scanInfo *opapolicy.ScanInfo) error {
 	opaSessionObj := cautils.NewOPASessionObj(nil, nil)
 	// validate notification
 	// TODO
@@ -39,7 +39,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 	}
 	opaSessionObj.Frameworks = frameworks
 
-	k8sResources, err := policyHandler.getResources(notification, opaSessionObj)
+	k8sResources, err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
 	if err != nil {
 		return err
 	}
@@ -72,15 +72,13 @@ func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNo
 	return frameworks, nil
 }
 
-func (policyHandler *PolicyHandler) getResources(notification *opapolicy.PolicyNotification, opaSessionObj *cautils.OPASessionObj) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) getResources(notification *opapolicy.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *opapolicy.ScanInfo) (*cautils.K8SResources, error) {
 	var k8sResources *cautils.K8SResources
 	var err error
-	paths := []string{}
-	if len(paths) > 0 {
-		//
+	if len(scanInfo.Input) > 0 {
+		k8sResources, err = policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
 	} else {
-		excludedNamespaces := ""
-		k8sResources, err = policyHandler.getK8sResources(opaSessionObj.Frameworks, &notification.Designators, excludedNamespaces)
+		k8sResources, err = policyHandler.getK8sResources(opaSessionObj.Frameworks, &notification.Designators, scanInfo.ExcludedNamespaces)
 
 	}
 

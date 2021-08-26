@@ -117,6 +117,10 @@ func (w *Workload) RemoveUpdateTime() {
 	w.RemoveAnnotation(cautils.CAUpdate) // DEPRECATED
 	w.RemoveAnnotation(cautils.ArmoUpdate)
 }
+func (w *Workload) RemoveSecretData() {
+	w.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
+	delete(w.workload, "data")
+}
 
 func (w *Workload) RemovePodStatus() {
 	delete(w.workload, "status")
@@ -268,11 +272,41 @@ func (w *Workload) GetApiVersion() string {
 	return ""
 }
 
+func (w *Workload) GetVersion() string {
+	apiVersion := w.GetApiVersion()
+	splitted := strings.Split(apiVersion, "/")
+	if len(splitted) == 1 {
+		return splitted[0]
+	} else if len(splitted) == 2 {
+		return splitted[1]
+	}
+	return ""
+}
+
+func (w *Workload) GetGroup() string {
+	apiVersion := w.GetApiVersion()
+	splitted := strings.Split(apiVersion, "/")
+	if len(splitted) == 2 {
+		return splitted[0]
+	}
+	return ""
+}
+
 func (w *Workload) GetGenerateName() string {
 	if v, ok := InspectWorkload(w.workload, "metadata", "generateName"); ok {
 		return v.(string)
 	}
 	return ""
+}
+
+func (w *Workload) GetReplicas() int {
+	if v, ok := InspectWorkload(w.workload, "spec", "replicas"); ok {
+		replicas, isok := v.(float64)
+		if isok {
+			return int(replicas)
+		}
+	}
+	return 1
 }
 
 func (w *Workload) GetKind() string {
@@ -453,7 +487,7 @@ func (w *Workload) GetContainers() ([]corev1.Container, error) {
 	return containers, err
 }
 
-// GetContainers -
+// GetInitContainers -
 func (w *Workload) GetInitContainers() ([]corev1.Container, error) {
 	containers := []corev1.Container{}
 
@@ -606,52 +640,3 @@ func InspectWorkload(workload interface{}, scopes ...string) (val interface{}, k
 	return val, k
 
 }
-
-// // InspectWorkload -
-// func InjectWorkload(workload interface{}, scopes []string, val string) {
-
-// 	if len(scopes) == 0 {
-
-// 	}
-// 	if data, ok := workload.(map[string]interface{}); ok {
-// 		InjectWorkload(data[scopes[0]], scopes[1:], val)
-// 	} else {
-
-// 	}
-
-// }
-
-// InjectWorkload -
-// func InjectWorkload(workload interface{}, scopes []string, val string) {
-
-// 	if len(scopes) == 0 {
-// 		workload = ""
-// 	}
-// 	if data, ok := workload.(map[string]interface{}); ok {
-// 		d := InjectWorkload(data[scopes[0]], scopes[1:], val)
-// 		data[scopes[0]] = d
-// 		return data
-// 	} else {
-
-// 	}
-
-// }
-// func (w *Workload) SetNamespace(ns string) {
-
-// 	if v, k := w.workload["metadata"]; k {
-// 		if vv, kk := v.(map[string]interface{}); kk {
-// 			vv["namespace"] = ""
-// 			// if v3, k3 := w.workload["namespace"]; k3 {
-// 			// 	if v4, k4 := v.(map[string]interface{}); kk {
-
-// 			// 	}
-// 			// }
-// 			v = vv
-// 		}
-// 		w.workload = v
-// 	}
-// 	// if data, ok := w.workload.(map[string]interface{}); ok {
-// 	// 	val, k = InspectWorkload(data[scopes[0]], scopes[1:]...)
-// 	// }
-
-// }

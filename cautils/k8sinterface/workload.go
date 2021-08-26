@@ -2,7 +2,6 @@ package k8sinterface
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"kube-escape/cautils/apis"
 
@@ -15,9 +14,16 @@ import (
 type IWorkload interface {
 	IBasicWorkload
 
+	// Convert
+	ToUnstructured() (*unstructured.Unstructured, error)
+	ToString() string
+	Json() string // DEPRECATED
+
 	// GET
 	GetWlid() string
 	GetJobID() *apis.JobTracking
+	GetVersion() string
+	GetGroup() string
 
 	// SET
 	SetWlid(string)
@@ -27,6 +33,7 @@ type IWorkload interface {
 	SetJobID(apis.JobTracking)
 	SetCompatible()
 	SetIncompatible()
+	SetReplaceheaders()
 
 	// EXIST
 	IsIgnore() bool
@@ -37,6 +44,7 @@ type IWorkload interface {
 
 	// REMOVE
 	RemoveWlid()
+	RemoveSecretData()
 	RemoveInject()
 	RemoveIgnore()
 	RemoveUpdateTime()
@@ -62,8 +70,8 @@ type IBasicWorkload interface {
 	GetGenerateName() string
 	GetApiVersion() string
 	GetKind() string
-	GetInnerAnnotation() (string, bool)
-	GetPodAnnotation() (string, bool)
+	GetInnerAnnotation(string) (string, bool)
+	GetPodAnnotation(string) (string, bool)
 	GetAnnotation(string) (string, bool)
 	GetLabel(string) (string, bool)
 	GetAnnotations() map[string]string
@@ -72,16 +80,17 @@ type IBasicWorkload interface {
 	GetLabels() map[string]string
 	GetInnerLabels() map[string]string
 	GetPodLabels() map[string]string
-	GetJobLabels() map[string]string
-	GetVolumes() []corev1.Volume
-	GetContainers() []corev1.Container
-	GetInitContainers() []corev1.Container
+	GetVolumes() ([]corev1.Volume, error)
+	GetReplicas() int
+	GetContainers() ([]corev1.Container, error)
+	GetInitContainers() ([]corev1.Container, error)
 	GetOwnerReferences() ([]metav1.OwnerReference, error)
 	GetImagePullSecret() ([]corev1.LocalObjectReference, error)
 	GetServiceAccountName() string
 	GetSelector() (*metav1.LabelSelector, error)
 	GetResourceVersion() string
 	GetUID() string
+	GetPodSpec() (*corev1.PodSpec, error)
 
 	GetWorkload() map[string]interface{}
 
@@ -115,14 +124,17 @@ func NewWorkloadObj(workload map[string]interface{}) *Workload {
 }
 
 func (w *Workload) Json() string {
-	if w.workload == nil {
+	return w.ToString()
+}
+func (w *Workload) ToString() string {
+	if w.GetWorkload() == nil {
 		return ""
 	}
-	bWorkload, err := json.Marshal(w.workload)
+	bWorkload, err := json.Marshal(w.GetWorkload())
 	if err != nil {
 		return err.Error()
 	}
-	return fmt.Sprintf("%s", bWorkload)
+	return string(bWorkload)
 }
 
 func (workload *Workload) DeepCopy(w map[string]interface{}) {

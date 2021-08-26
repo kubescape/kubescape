@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"kube-escape/cautils"
@@ -111,15 +112,15 @@ func (clihandler *CLIHandler) Scan() error {
 	policyNotification := &opapolicy.PolicyNotification{
 		NotificationType: opapolicy.TypeExecPostureScan,
 		Rules: []opapolicy.PolicyIdentifier{
-			*&clihandler.scanInfo.PolicyIdentifier,
+			clihandler.scanInfo.PolicyIdentifier,
 		},
 		Designators: armotypes.PortalDesignator{},
 	}
-
+	flag.Parse()
 	switch policyNotification.NotificationType {
 	case opapolicy.TypeExecPostureScan:
 		go func() {
-			if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification); err != nil {
+			if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
 				fmt.Printf("%v\n", err)
 				os.Exit(0)
 			}
