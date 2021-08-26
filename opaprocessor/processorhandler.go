@@ -56,7 +56,6 @@ func (opap *OPAProcessor) ProcessRulesListenner() {
 }
 
 func (opap *OPAProcessor) ProcessRulesHandler(opaSessionObj *cautils.OPASessionObj) error {
-	glog.Infof(fmt.Sprintf("Starting 'ProcessRulesHandler'. reportID: %s", opaSessionObj.PostureReport.ReportID))
 	cautils.ProgressTextDisplay(fmt.Sprintf("Scanning cluster %s", cautils.ClusterName))
 	cautils.StartSpinner()
 	frameworkReports := []opapolicy.FrameworkReport{}
@@ -99,7 +98,6 @@ func (opap *OPAProcessor) ProcessRulesHandler(opaSessionObj *cautils.OPASessionO
 
 	opaSessionObj.PostureReport.FrameworkReports = frameworkReports
 	opaSessionObj.PostureReport.ReportGenerationTime = time.Now().UTC()
-	glog.Infof(fmt.Sprintf("Done 'ProcessRulesHandler'. reportID: %s", opaSessionObj.PostureReport.ReportID))
 	cautils.StopSpinner()
 	cautils.SuccessTextDisplay(fmt.Sprintf("Done scanning cluster %s", cautils.ClusterName))
 	return errs

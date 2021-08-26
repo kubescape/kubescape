@@ -27,13 +27,11 @@ func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, k8s *k8sinterf
 }
 
 func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opapolicy.PolicyNotification, excludedNamespaces string) error {
-	glog.Infof("Processing notification. reportID: %s", notification.ReportID)
 	opaSessionObj := cautils.NewOPASessionObj(nil, nil)
 	// validate notification
 	// TODO
 
 	// get policies
-	glog.Infof(fmt.Sprintf("Getting %d policies from backend. reportID: %s", len(notification.Rules), notification.ReportID))
 	cautils.ProgressTextDisplay("Downloading framework definitions")
 	frameworks, err := policyHandler.GetPoliciesFromBackend(notification)
 	if err != nil {
@@ -51,8 +49,6 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 
 	// get k8s resources
 	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
-	glog.Infof(fmt.Sprintf("Getting kubernetes objects. reportID: %s", notification.ReportID))
-
 	k8sResources, err := policyHandler.getK8sResources(frameworks, &notification.Designators, excludedNamespaces)
 	if err != nil || len(*k8sResources) == 0 {
 		glog.Error(err)
