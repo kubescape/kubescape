@@ -5,7 +5,8 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
 Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
-Tests are configured with YAML files, making this tool easy to update as test specifications evolve.
+
+Use Kubescape to test clusters or scan single YAML files and integrate it to your processes. 
 
 <img src="docs/demo.gif">
 
@@ -20,6 +21,8 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 <img src="docs/install.jpeg">
 
 ## Run
+
+### Cluster testing
 To get a fast check of the security posture of your Kubernetes cluster, run this:
 
 ```
@@ -27,6 +30,24 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
 
 If you wish to scan all namespaces in your cluster, remove the `--exclude-namespaces` flag.
+
+### Pre-deployment testing
+Check your YAML files before you're deploying, simply add them at the end of command line:
+
+```
+kubescape scan framework nsa *.yaml
+```
+
+### Integration with other tools
+
+Kubescape can produce output fitting for later processing:
+* JSON (`-o json`)
+* JUnit XML (`-o junit`)
+
+Example:
+```
+kubescape scan framework nsa --silent -o -junit > results.xml
+```
 
 <img src="docs/summary.png">
 
