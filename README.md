@@ -77,6 +77,18 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --sile
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o junit > results.xml
 ```
 
+### Helm Support
+
+1. Render the helm template to an output yaml
+```
+helm template [CHART] [flags] --generate-name  --dry-run --output-dir helm-output
+```
+
+2. Run `kubescape` with rended yaml files
+```
+kubescape scan framework nsa helm-output/*
+```
+
 # How to build 
 
 Note: development (and the release process) is done with Go `1.16`
