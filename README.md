@@ -43,6 +43,7 @@ Kubescape can produce output fitting for later processing:
 * JSON (`-o json`)
 * JUnit XML (`-o junit`)
 
+### Examples
 
 * Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
 ```
