@@ -7,7 +7,7 @@ import (
 // scanCmd represents the scan command
 var scanCmd = &cobra.Command{
 	Use:   "scan",
-	Short: "Scan command",
+	Short: "Scan the current running cluster or specified yaml files",
 	Long:  `The action you want to perform`,
 	Run: func(cmd *cobra.Command, args []string) {
 	},

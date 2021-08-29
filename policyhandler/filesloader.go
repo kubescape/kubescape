@@ -9,6 +9,7 @@ import (
 	"kubescape/cautils/k8sinterface"
 	"kubescape/cautils/opapolicy"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v2"
 )
@@ -18,14 +19,33 @@ var (
 	JSON_PREFIX = []string{".json"}
 )
 
-func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framework, scanInfo *opapolicy.ScanInfo) (*cautils.K8SResources, error) {
+type FileFormat string
 
-	workloads, err := loadResourcesFromFiles(scanInfo.InputPatterns)
+const (
+	YAML_FILE_FORMAT FileFormat = "yaml"
+	JSON_FILE_FORMAT FileFormat = "json"
+)
+
+func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framework, scanInfo *opapolicy.ScanInfo) (*cautils.K8SResources, error) {
+	workloads := []k8sinterface.IWorkload{}
+
+	// load resource from local file system
+	w, err := loadResourcesFromFiles(scanInfo.InputPatterns)
 	if err != nil {
 		return nil, err
 	}
+	if w != nil {
+		workloads = append(workloads, w...)
+	}
 
-	// TODO - load resource from url
+	// load resource from url
+	w, err = loadResourcesFromUrl(scanInfo.InputPatterns)
+	if err != nil {
+		return nil, err
+	}
+	if w != nil {
+		workloads = append(workloads, w...)
+	}
 
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
 	allResources := mapResources(workloads)
@@ -51,7 +71,7 @@ func loadResourcesFromFiles(inputPatterns []string) ([]k8sinterface.IWorkload, e
 		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("empty list of files - no files found")
+		return nil, nil
 	}
 
 	workloads, errs := loadFiles(files)
@@ -59,7 +79,7 @@ func loadResourcesFromFiles(inputPatterns []string) ([]k8sinterface.IWorkload, e
 		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
 	}
 	if len(workloads) == 0 {
-		return workloads, fmt.Errorf("empty list of workloads - no workloads valid workloads found")
+		return workloads, fmt.Errorf("empty list of workloads - no workloads found")
 	}
 	return workloads, nil
 }
@@ -93,25 +113,42 @@ func loadFiles(filePaths []string) ([]k8sinterface.IWorkload, []error) {
 	workloads := []k8sinterface.IWorkload{}
 	errs := []error{}
 	for i := range filePaths {
-		w, e := loadFile(filePaths[i])
+		f, err := loadFile(filePaths[i])
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		w, e := readFile(f, getFileFormat(filePaths[i]))
 		errs = append(errs, e...)
-		workloads = append(workloads, w...)
+		if w != nil {
+			workloads = append(workloads, w...)
+		}
 	}
 	return workloads, errs
 }
 
-func loadFile(filePath string) ([]k8sinterface.IWorkload, []error) {
-	if isYaml(filePath) {
-		return loadYamlFile(filePath)
-	} else if isJson(filePath) {
-		return loadJsonFile(filePath)
+func loadFile(filePath string) ([]byte, error) {
+	return ioutil.ReadFile(filePath)
+}
+func readFile(fileContent []byte, fileFromat FileFormat) ([]k8sinterface.IWorkload, []error) {
+
+	switch fileFromat {
+	case YAML_FILE_FORMAT:
+		return readYamlFile(fileContent)
+	case JSON_FILE_FORMAT:
+		return readJsonFile(fileContent)
+	default:
+		return nil, []error{fmt.Errorf("file extension %s not supported", fileFromat)}
 	}
-	return nil, []error{fmt.Errorf("file extension %s not supported, file name: %s", filepath.Ext(filePath), filePath)}
+
 }
 func listFiles(patterns []string) ([]string, []error) {
 	files := []string{}
 	errs := []error{}
 	for i := range patterns {
+		if strings.HasPrefix(patterns[i], "http") {
+			continue
+		}
 		f, err := filepath.Glob(patterns[i])
 		if err != nil {
 			errs = append(errs, err)
@@ -122,12 +159,8 @@ func listFiles(patterns []string) ([]string, []error) {
 	return files, errs
 }
 
-func loadYamlFile(filePath string) ([]k8sinterface.IWorkload, []error) {
+func readYamlFile(yamlFile []byte) ([]k8sinterface.IWorkload, []error) {
 	errs := []error{}
-	yamlFile, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return nil, []error{err}
-	}
 
 	r := bytes.NewReader(yamlFile)
 	dec := yaml.NewDecoder(r)
@@ -136,24 +169,23 @@ func loadYamlFile(filePath string) ([]k8sinterface.IWorkload, []error) {
 	var t interface{}
 	for dec.Decode(&t) == nil {
 		j := convertYamlToJson(t)
+		if j == nil {
+			continue
+		}
 		if obj, ok := j.(map[string]interface{}); ok {
 			yamlObjs = append(yamlObjs, k8sinterface.NewWorkloadObj(obj))
 		} else {
-			errs = append(errs, fmt.Errorf("failed to convert yaml file %s file to map[string]interface", filePath))
+			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
 		}
 	}
 
 	return yamlObjs, errs
 }
 
-func loadJsonFile(filePath string) ([]k8sinterface.IWorkload, []error) {
+func readJsonFile(jsonFile []byte) ([]k8sinterface.IWorkload, []error) {
 	workloads := []k8sinterface.IWorkload{}
-	jsonFile, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return workloads, []error{err}
-	}
 	var jsonObj interface{}
-	if err = json.Unmarshal(jsonFile, &jsonObj); err != nil {
+	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
 		return workloads, []error{err}
 	}
 
@@ -194,4 +226,14 @@ func isYaml(filePath string) bool {
 
 func isJson(filePath string) bool {
 	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+}
+
+func getFileFormat(filePath string) FileFormat {
+	if isYaml(filePath) {
+		return YAML_FILE_FORMAT
+	} else if isJson(filePath) {
+		return JSON_FILE_FORMAT
+	} else {
+		return FileFormat(filePath)
+	}
 }

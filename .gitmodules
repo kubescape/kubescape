@@ -1,4 +1,0 @@
-[submodule "vendor/github.com/armosec/capacketsgo"]
-	path = vendor/github.com/armosec/capacketsgo
-	url = git@github.com:armosec/capacketsgo.git
-	branch = master
