@@ -20,9 +20,6 @@ func loadResourcesFromUrl(inputPatterns []string) ([]k8sinterface.IWorkload, err
 	if len(errs) > 0 {
 		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
 	}
-	if len(workloads) == 0 {
-		return workloads, fmt.Errorf("empty list of workloads - no workloads valid workloads found")
-	}
 	return workloads, nil
 }
 
