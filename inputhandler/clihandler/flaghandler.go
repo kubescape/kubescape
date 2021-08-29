@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils/opapolicy"
 )
 
 type FlagHandler struct {

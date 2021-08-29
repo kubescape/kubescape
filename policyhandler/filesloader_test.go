@@ -2,7 +2,7 @@ package policyhandler
 
 import (
 	"fmt"
-	"kube-escape/cautils"
+	"kubescape/cautils"
 	"os"
 	"path/filepath"
 	"strings"

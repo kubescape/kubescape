@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"kube-escape/cautils/cautils"
+	"kubescape/cautils/cautils"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"

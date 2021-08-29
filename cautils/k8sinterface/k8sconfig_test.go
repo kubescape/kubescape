@@ -3,7 +3,7 @@ package k8sinterface
 import (
 	"testing"
 
-	"kube-escape/cautils/cautils"
+	"kubescape/cautils/cautils"
 )
 
 func TestGetGroupVersionResource(t *testing.T) {

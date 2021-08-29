@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"kube-escape/cautils"
-	"kube-escape/cautils/k8sinterface"
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils"
+	"kubescape/cautils/k8sinterface"
+	"kubescape/cautils/opapolicy"
 	"path/filepath"
 
 	"gopkg.in/yaml.v2"

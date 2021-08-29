@@ -1,12 +1,12 @@
 package opaprocessor
 
 import (
-	"kube-escape/cautils"
+	"kubescape/cautils"
 
-	pkgcautils "kube-escape/cautils/cautils"
-	"kube-escape/cautils/k8sinterface"
-	"kube-escape/cautils/opapolicy"
-	resources "kube-escape/cautils/opapolicy/resources"
+	pkgcautils "kubescape/cautils/cautils"
+	"kubescape/cautils/k8sinterface"
+	"kubescape/cautils/opapolicy"
+	resources "kubescape/cautils/opapolicy/resources"
 
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

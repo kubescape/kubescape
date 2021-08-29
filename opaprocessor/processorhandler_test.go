@@ -3,18 +3,18 @@ package opaprocessor
 import (
 	"context"
 	"encoding/json"
-	"kube-escape/cautils"
+	"kubescape/cautils"
 	"os"
 	"path"
 	"strings"
 	"testing"
 
-	"kube-escape/cautils/k8sinterface"
+	"kubescape/cautils/k8sinterface"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 	restclient "k8s.io/client-go/rest"
 
-	"kube-escape/cautils/opapolicy"
-	"kube-escape/cautils/opapolicy/resources"
+	"kubescape/cautils/opapolicy"
+	"kubescape/cautils/opapolicy/resources"
 
 	"github.com/open-policy-agent/opa/ast"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -82,10 +82,10 @@ func TestCompromisedRegistries(t *testing.T) {
 	// k8sResources["/v1/pods"] = k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.V1KubeSystemNamespaceMock().Items)
 	k8sResources["/v1/pods"] = k8sinterface.V1AllClusterWithCompromisedRegistriesMock().Items
 	wd, _ := os.Getwd()
-	baseDirName := "kube-escape"
+	baseDirName := "kubescape"
 	idx := strings.Index(wd, baseDirName)
 	wd = wd[0:idx]
-	resources.RegoDependenciesPath = path.Join(wd, "/kube-escape/vendor/asterix.cyberarmor.io/cyberarmor/capacketsgo/opapolicy/resources/rego/dependencies")
+	resources.RegoDependenciesPath = path.Join(wd, "/kubescape/vendor/asterix.cyberarmor.io/cyberarmor/capacketsgo/opapolicy/resources/rego/dependencies")
 	k8sinterface.K8SConfig = &restclient.Config{}
 
 	opaProcessor := NewOPAProcessorMock()
@@ -108,7 +108,7 @@ func TestCompromisedRegistries(t *testing.T) {
 // 	k8sResources := make(cautils.K8SResources)
 // 	// k8sResources["/v1/pods"] = k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.V1KubeSystemNamespaceMock().Items)
 // 	k8sResources["/v1/pods"] = k8sinterface.V1KubeSystemNamespaceMock().Items
-// 	resources.RegoDependenciesPath = "/home/david/go/src/kube-escape/vendor/asterix.cyberarmor.io/cyberarmor/capacketsgo/opapolicy/resources/rego/dependencies"
+// 	resources.RegoDependenciesPath = "/home/david/go/src/kubescape/vendor/asterix.cyberarmor.io/cyberarmor/capacketsgo/opapolicy/resources/rego/dependencies"
 // 	opaProcessor := NewOPAProcessorMock()
 
 // 	// set opaSessionObj

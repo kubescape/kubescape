@@ -3,7 +3,7 @@ package opapolicy
 import (
 	"time"
 
-	armotypes "kube-escape/cautils/armotypes"
+	armotypes "kubescape/cautils/armotypes"
 )
 
 type AlertScore float32

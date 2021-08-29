@@ -1,6 +1,6 @@
 package main
 
-import "kube-escape/cmd"
+import "kubescape/cmd"
 
 func main() {
 	cmd.Execute()

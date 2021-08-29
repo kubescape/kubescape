@@ -3,13 +3,13 @@ package opaprocessor
 import (
 	"context"
 	"fmt"
-	"kube-escape/cautils"
+	"kubescape/cautils"
 	"time"
 
-	"kube-escape/cautils/k8sinterface"
+	"kubescape/cautils/k8sinterface"
 
-	"kube-escape/cautils/opapolicy"
-	"kube-escape/cautils/opapolicy/resources"
+	"kubescape/cautils/opapolicy"
+	"kubescape/cautils/opapolicy/resources"
 
 	"github.com/golang/glog"
 	"github.com/open-policy-agent/opa/ast"

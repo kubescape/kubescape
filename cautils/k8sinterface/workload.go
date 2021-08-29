@@ -3,7 +3,7 @@ package k8sinterface
 import (
 	"encoding/json"
 
-	"kube-escape/cautils/apis"
+	"kubescape/cautils/apis"
 
 	corev1 "k8s.io/api/core/v1"
 

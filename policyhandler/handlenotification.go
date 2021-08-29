@@ -2,11 +2,11 @@ package policyhandler
 
 import (
 	"fmt"
-	"kube-escape/cautils"
+	"kubescape/cautils"
 
-	"kube-escape/cautils/k8sinterface"
+	"kubescape/cautils/k8sinterface"
 
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils/opapolicy"
 )
 
 // PolicyHandler -
