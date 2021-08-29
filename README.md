@@ -5,19 +5,20 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
 Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
-Tests are configured with YAML files, making this tool easy to update as test specifications evolve.
+
+Use Kubescape to test clusters or scan single YAML files and integrate it to your processes. 
 
 <img src="docs/demo.gif">
 
 # TL;DR
 ## Install & Run
 
-1. Install:
+### Install:
 ```
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
 
-2. Run:
+### Run:
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
@@ -26,7 +27,22 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 
 <img src="docs/summary.png">
 
+
+
 ## Usage & Examples
+
+### Pre-Deployment Testing
+Check your YAML files before you're deploying, simply add them at the end of command line:
+```
+kubescape scan framework nsa *.yaml
+```
+
+### Integration with other tools
+
+Kubescape can produce output fitting for later processing:
+* JSON (`-o json`)
+* JUnit XML (`-o junit`)
+
 
 * Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
 ```
@@ -52,12 +68,12 @@ kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatfo
 
 * Output in `json` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o json
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o json > results.json
 ```
 
-* Output in `junit` (`xml`) format
+* Output in `junit xml` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o junit
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o junit > results.xml
 ```
 
 # How to build 
