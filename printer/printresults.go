@@ -4,12 +4,12 @@ import (
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
-	"kube-escape/cautils"
+	"kubescape/cautils"
 	"os"
 	"sort"
 
-	"kube-escape/cautils/k8sinterface"
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils/k8sinterface"
+	"kubescape/cautils/opapolicy"
 
 	"github.com/enescakir/emoji"
 	"github.com/olekukonko/tablewriter"

@@ -1,8 +1,8 @@
 package policyhandler
 
 import (
-	"kube-escape/cautils/k8sinterface"
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils/k8sinterface"
+	"kubescape/cautils/opapolicy"
 
 	"testing"
 )

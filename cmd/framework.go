@@ -4,23 +4,20 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
-	"kube-escape/cautils"
-	"kube-escape/cautils/armotypes"
-	"kube-escape/cautils/k8sinterface"
-	"kube-escape/cautils/opapolicy"
-	"kube-escape/opaprocessor"
-	"kube-escape/policyhandler"
-	"kube-escape/printer"
+	"kubescape/cautils"
+	"kubescape/cautils/armotypes"
+	"kubescape/cautils/k8sinterface"
+	"kubescape/cautils/opapolicy"
+	"kubescape/opaprocessor"
+	"kubescape/policyhandler"
+	"kubescape/printer"
 	"os"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
 
 var scanInfo opapolicy.ScanInfo
 var supportedFrameworks = []string{"nsa", "mitre"}
-var isSilent bool
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
@@ -31,7 +28,7 @@ var frameworkCmd = &cobra.Command{
 	Use:       "framework <framework name>",
 	Short:     "The framework you wish to use. Supported frameworks: nsa, mitre",
 	Long:      ``,
-	ValidArgs: []string{"nsa", "mitre"},
+	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
 			return errors.New("requires at least one argument")
@@ -59,23 +56,13 @@ func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = opapolicy.ScanInfo{}
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "namespaces to exclude from check")
-	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "pretty-printer", "output format")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent output")
-}
-
-func processYamlInput(yamls string) {
-	listOfYamls := strings.Split(yamls, ",")
-	for _, yaml := range listOfYamls {
-		dat, err := ioutil.ReadFile(yaml)
-		if err != nil {
-			fmt.Printf("Could not open file: %s.", yaml)
-		}
-		fmt.Print(string(dat))
-	}
-
+	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "pretty-printer", "output format. supported formats: 'pretty-printer'/'json'/'junit'")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent progress output")
 }
 
 func CliSetup() error {
+	flag.Parse()
+
 	k8s := k8sinterface.NewKubernetesApi()
 
 	processNotification := make(chan *cautils.OPASessionObj)
@@ -117,7 +104,6 @@ func (clihandler *CLIHandler) Scan() error {
 		},
 		Designators: armotypes.PortalDesignator{},
 	}
-	flag.Parse()
 	switch policyNotification.NotificationType {
 	case opapolicy.TypeExecPostureScan:
 		go func() {

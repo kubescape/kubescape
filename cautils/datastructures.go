@@ -1,7 +1,7 @@
 package cautils
 
 import (
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils/opapolicy"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>]<resource object>

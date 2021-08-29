@@ -11,29 +11,28 @@ Use Kubescape to test clusters or scan single YAML files and integrate it to you
 <img src="docs/demo.gif">
 
 # TL;DR
-## Installation
-To install the tool locally, run this:
+## Install & Run
 
+### Install:
 ```
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
 
-<img src="docs/install.jpeg">
-
-## Run
-
-### Cluster testing
-To get a fast check of the security posture of your Kubernetes cluster, run this:
-
+### Run:
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
 
 If you wish to scan all namespaces in your cluster, remove the `--exclude-namespaces` flag.
 
-### Pre-deployment testing
-Check your YAML files before you're deploying, simply add them at the end of command line:
+<img src="docs/summary.png">
 
+
+
+## Usage & Examples
+
+### Pre-Deployment Testing
+Check your YAML files before you're deploying, simply add them at the end of command line:
 ```
 kubescape scan framework nsa *.yaml
 ```
@@ -44,16 +43,42 @@ Kubescape can produce output fitting for later processing:
 * JSON (`-o json`)
 * JUnit XML (`-o junit`)
 
-Example:
+
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
 ```
-kubescape scan framework nsa --silent -o -junit > results.xml
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
 
-<img src="docs/summary.png">
+* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework
+```
+kubescape scan framework mitre --exclude-namespaces kube-system,kube-public
+```
+
+
+* Scan local `yaml`/`json` files
+```
+kubescape scan framework nsa examples/online-boutique/*
+```
+
+
+* Scan `yaml`/`json` files from url
+```
+kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatform/microservices-demo/master/release/kubernetes-manifests.yaml
+```
+
+* Output in `json` format
+```
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o json > results.json
+```
+
+* Output in `junit xml` format
+```
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o junit > results.xml
+```
 
 # How to build 
 
-Note: development (and the release process) is done with Go 1.16 
+Note: development (and the release process) is done with Go `1.16`
 
 1. Clone Project
 ```

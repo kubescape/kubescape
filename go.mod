@@ -1,4 +1,4 @@
-module kube-escape
+module kubescape
 
 go 1.16
 

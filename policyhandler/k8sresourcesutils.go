@@ -1,10 +1,10 @@
 package policyhandler
 
 import (
-	"kube-escape/cautils"
+	"kubescape/cautils"
 
-	"kube-escape/cautils/k8sinterface"
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils/k8sinterface"
+	"kubescape/cautils/opapolicy"
 )
 
 func setResourceMap(frameworks []opapolicy.Framework) *cautils.K8SResources {

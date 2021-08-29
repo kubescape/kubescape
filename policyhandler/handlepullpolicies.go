@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"kube-escape/cautils/opapolicy"
+	"kubescape/cautils/opapolicy"
 )
 
 // URLEncoder encode url

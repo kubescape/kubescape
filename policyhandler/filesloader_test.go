@@ -2,7 +2,7 @@ package policyhandler
 
 import (
 	"fmt"
-	"kube-escape/cautils"
+	"kubescape/cautils"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,12 +44,9 @@ func TestLoadFiles(t *testing.T) {
 
 func TestLoadFile(t *testing.T) {
 	files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "bi-monitor.yaml", 1)})
-	bb, err := loadFile(files[0])
-	if len(err) > 0 {
+	_, err := loadFile(files[0])
+	if err != nil {
 		t.Errorf("%v", err)
-	}
-	for i := range bb {
-		t.Errorf("%s", bb[i].ToString())
 	}
 }
 func TestLoadResources(t *testing.T) {
