@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"kubescape/cautils"
 	"kubescape/cautils/armotypes"
 	"kubescape/cautils/k8sinterface"
@@ -26,9 +28,9 @@ type CLIHandler struct {
 }
 
 var frameworkCmd = &cobra.Command{
-	Use:       "framework <framework name>",
+	Use:       "framework <framework name> [`<glob patter>`/`-`] [flags]",
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(supportedFrameworks, ", ")),
-	Long:      ``,
+	Long:      "Execute a scan on a running Kubernetes cluster or yaml/json files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
@@ -39,13 +41,30 @@ var frameworkCmd = &cobra.Command{
 		}
 		return nil
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
 		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
 		scanInfo.PolicyIdentifier.Name = args[0]
-		scanInfo.InputPatterns = args[1:]
+
+		if len(args[1:]) == 0 || args[1] != "-" {
+			scanInfo.InputPatterns = args[1:]
+		} else { // store stout to file
+			tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
+			if err != nil {
+				return err
+			}
+			defer os.Remove(tempFile.Name())
+
+			if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+				return err
+			}
+			scanInfo.InputPatterns = []string{tempFile.Name()}
+		}
+		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
 		CliSetup()
+
+		return nil
 	},
 }
 
@@ -57,7 +76,8 @@ func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = opapolicy.ScanInfo{}
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "namespaces to exclude from check")
-	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "pretty-printer", "output format. supported formats: 'pretty-printer'/'json'/'junit'")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "output format. supported formats: 'pretty-printer'/'json'/'junit'")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "output file. print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent progress output")
 }
 
@@ -83,7 +103,7 @@ func CliSetup() error {
 		reporterObj := opaprocessor.NewOPAProcessor(&processNotification, &reportResults)
 		reporterObj.ProcessRulesListenner()
 	}()
-	p := printer.NewPrinter(&reportResults, scanInfo.Output)
+	p := printer.NewPrinter(&reportResults, scanInfo.Format, scanInfo.Output)
 	p.ActionPrint()
 
 	return nil

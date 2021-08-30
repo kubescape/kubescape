@@ -17,6 +17,8 @@ import (
 
 var INDENT = "   "
 
+const EmptyPercentage = "NaN"
+
 const (
 	PrettyPrinter      string = "pretty-printer"
 	JsonPrinter        string = "json"
@@ -25,16 +27,18 @@ const (
 
 type Printer struct {
 	opaSessionObj      *chan *cautils.OPASessionObj
+	writer             *os.File
 	summary            Summary
 	sortedControlNames []string
 	printerType        string
 }
 
-func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj, printerType string) *Printer {
+func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj, printerType, outputFile string) *Printer {
 	return &Printer{
 		opaSessionObj: opaSessionObj,
 		summary:       NewSummary(),
 		printerType:   printerType,
+		writer:        getWriter(outputFile),
 	}
 }
 
@@ -52,7 +56,7 @@ func (printer *Printer) ActionPrint() {
 				fmt.Println("Failed to convert posture report object!")
 				os.Exit(1)
 			}
-			os.Stdout.Write(postureReportStr)
+			printer.writer.Write(postureReportStr)
 		} else if printer.printerType == JunitResultPrinter {
 			junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
 			if err != nil {
@@ -64,7 +68,7 @@ func (printer *Printer) ActionPrint() {
 				fmt.Println("Failed to convert posture report object!")
 				os.Exit(1)
 			}
-			os.Stdout.Write(postureReportStr)
+			printer.writer.Write(postureReportStr)
 		} else if !cautils.IsSilent() {
 			fmt.Println("unknown output printer")
 			os.Exit(1)
@@ -111,29 +115,29 @@ func (printer *Printer) PrintResults() {
 	}
 }
 
-func (print *Printer) printSummary(controlName string, controlSummary *ControlSummary) {
-	cautils.SimpleDisplay(os.Stdout, "Summary - ")
-	cautils.SuccessDisplay(os.Stdout, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed)
-	cautils.FailureDisplay(os.Stdout, "Failed:%v   ", controlSummary.TotalFailed)
-	cautils.InfoDisplay(os.Stdout, "Total:%v\n", controlSummary.TotalResources)
+func (printer *Printer) printSummary(controlName string, controlSummary *ControlSummary) {
+	cautils.SimpleDisplay(printer.writer, "Summary - ")
+	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed)
+	cautils.FailureDisplay(printer.writer, "Failed:%v   ", controlSummary.TotalFailed)
+	cautils.InfoDisplay(printer.writer, "Total:%v\n", controlSummary.TotalResources)
 	if controlSummary.TotalFailed > 0 {
-		cautils.DescriptionDisplay(os.Stdout, "Remediation: %v\n", controlSummary.Remediation)
+		cautils.DescriptionDisplay(printer.writer, "Remediation: %v\n", controlSummary.Remediation)
 	}
-	cautils.DescriptionDisplay(os.Stdout, "\n")
+	cautils.DescriptionDisplay(printer.writer, "\n")
 
 }
 
 func (printer *Printer) printTitle(controlName string, controlSummary *ControlSummary) {
-	cautils.InfoDisplay(os.Stdout, "[control: %s] ", controlName)
+	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
 	if controlSummary.TotalResources == 0 {
-		cautils.InfoDisplay(os.Stdout, "resources not found %v\n", emoji.ConfusedFace)
+		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed == 0 {
-		cautils.SuccessDisplay(os.Stdout, "passed %v\n", emoji.ThumbsUp)
+		cautils.SuccessDisplay(printer.writer, "passed %v\n", emoji.ThumbsUp)
 	} else {
-		cautils.FailureDisplay(os.Stdout, "failed %v\n", emoji.SadButRelievedFace)
+		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
 	}
 
-	cautils.DescriptionDisplay(os.Stdout, "Description: %s\n", controlSummary.Description)
+	cautils.DescriptionDisplay(printer.writer, "Description: %s\n", controlSummary.Description)
 
 }
 func (printer *Printer) printResult(controlName string, controlSummary *ControlSummary) {
@@ -142,12 +146,12 @@ func (printer *Printer) printResult(controlName string, controlSummary *ControlS
 	for ns, rsc := range controlSummary.WorkloadSummary {
 		preIndent := indent
 		if ns != "" {
-			cautils.SimpleDisplay(os.Stdout, "%sNamespace %s\n", indent, ns)
+			cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
 		}
 		preIndent2 := indent
 		for r := range rsc {
 			indent += indent
-			cautils.SimpleDisplay(os.Stdout, fmt.Sprintf("%s%s - %s\n", indent, rsc[r].Kind, rsc[r].Name))
+			cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s\n", indent, rsc[r].Kind, rsc[r].Name))
 			indent = preIndent2
 		}
 		indent = preIndent
@@ -158,7 +162,11 @@ func (printer *Printer) printResult(controlName string, controlSummary *ControlS
 func generateRow(control string, cs ControlSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)
-	row = append(row, fmt.Sprintf("%d%s", percentage(cs.TotalResources, cs.TotalFailed), "%"))
+	if cs.TotalResources != 0 {
+		row = append(row, fmt.Sprintf("%d%s", percentage(cs.TotalResources, cs.TotalFailed), "%"))
+	} else {
+		row = append(row, EmptyPercentage)
+	}
 	return row
 }
 
@@ -181,11 +189,15 @@ func generateFooter(numControlers, sumFailed, sumTotal int) []string {
 	row = append(row, fmt.Sprintf("%d", numControlers))
 	row = append(row, fmt.Sprintf("%d", sumFailed))
 	row = append(row, fmt.Sprintf("%d", sumTotal))
-	row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
+	if sumTotal != 0 {
+		row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
+	} else {
+		row = append(row, EmptyPercentage)
+	}
 	return row
 }
 func (printer *Printer) PrintSummaryTable() {
-	summaryTable := tablewriter.NewWriter(os.Stdout)
+	summaryTable := tablewriter.NewWriter(printer.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
 	summaryTable.SetHeaderLine(true)
@@ -210,4 +222,18 @@ func (printer *Printer) getSortedControlsNames() []string {
 	}
 	sort.Strings(controlNames)
 	return controlNames
+}
+
+func getWriter(outputFile string) *os.File {
+
+	if outputFile != "" {
+		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			fmt.Println("Error opening file")
+			return os.Stdout
+		}
+		return f
+	}
+	return os.Stdout
+
 }

@@ -28,7 +28,6 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 <img src="docs/summary.png">
 
 
-
 ## Usage & Examples
 
 ### Pre-Deployment Testing
@@ -40,8 +39,8 @@ kubescape scan framework nsa *.yaml
 ### Integration with other tools
 
 Kubescape can produce output fitting for later processing:
-* JSON (`-o json`)
-* JUnit XML (`-o junit`)
+* JSON (`-f json`)
+* JUnit XML (`-f junit`)
 
 ### Examples
 
@@ -49,12 +48,6 @@ Kubescape can produce output fitting for later processing:
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
-
-* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework
-```
-kubescape scan framework mitre --exclude-namespaces kube-system,kube-public
-```
-
 
 * Scan local `yaml`/`json` files
 ```
@@ -69,24 +62,24 @@ kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatfo
 
 * Output in `json` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o json > results.json
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format json --output results.json
 ```
 
 * Output in `junit xml` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o junit > results.xml
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
 ```
 
 ### Helm Support
 
-1. Render the helm template to an output yaml
+Render the helm template and pass as stdout
 ```
-helm template [CHART] [flags] --generate-name  --dry-run --output-dir helm-output
+helm template [CHART] [flags] --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
-2. Run `kubescape` with rended yaml files
+for example:
 ```
-kubescape scan framework nsa helm-output/*
+helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
 # How to build 
