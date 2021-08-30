@@ -152,6 +152,10 @@ func listFiles(patterns []string) ([]string, []error) {
 		if strings.HasPrefix(patterns[i], "http") {
 			continue
 		}
+		if !filepath.IsAbs(patterns[i]) {
+			o, _ := os.Getwd()
+			patterns[i] = filepath.Join(o, patterns[i])
+		}
 		f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
 		if err != nil {
 			errs = append(errs, err)
@@ -212,7 +216,9 @@ func convertYamlToJson(i interface{}) interface{} {
 	case map[interface{}]interface{}:
 		m2 := map[string]interface{}{}
 		for k, v := range x {
-			m2[k.(string)] = convertYamlToJson(v)
+			if s, ok := k.(string); ok {
+				m2[s] = convertYamlToJson(v)
+			}
 		}
 		return m2
 	case []interface{}:

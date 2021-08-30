@@ -31,7 +31,7 @@ func TestListFiles(t *testing.T) {
 	if len(errs) > 0 {
 		t.Error(errs)
 	}
-	expected := 14
+	expected := 12
 	if len(files) != expected {
 		t.Errorf("wrong number of files, expected: %d, found: %d", expected, len(files))
 	}
