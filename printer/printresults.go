@@ -17,6 +17,8 @@ import (
 
 var INDENT = "   "
 
+const EmptyPercentage = "NaN"
+
 const (
 	PrettyPrinter      string = "pretty-printer"
 	JsonPrinter        string = "json"
@@ -158,7 +160,11 @@ func (printer *Printer) printResult(controlName string, controlSummary *ControlS
 func generateRow(control string, cs ControlSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)
-	row = append(row, fmt.Sprintf("%d%s", percentage(cs.TotalResources, cs.TotalFailed), "%"))
+	if cs.TotalResources != 0 {
+		row = append(row, fmt.Sprintf("%d%s", percentage(cs.TotalResources, cs.TotalFailed), "%"))
+	} else {
+		row = append(row, EmptyPercentage)
+	}
 	return row
 }
 
@@ -181,7 +187,11 @@ func generateFooter(numControlers, sumFailed, sumTotal int) []string {
 	row = append(row, fmt.Sprintf("%d", numControlers))
 	row = append(row, fmt.Sprintf("%d", sumFailed))
 	row = append(row, fmt.Sprintf("%d", sumTotal))
-	row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
+	if sumTotal != 0 {
+		row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
+	} else {
+		row = append(row, EmptyPercentage)
+	}
 	return row
 }
 func (printer *Printer) PrintSummaryTable() {

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"io/ioutil"
 	"kubescape/cautils"
 	"kubescape/cautils/armotypes"
 	"kubescape/cautils/k8sinterface"
@@ -25,26 +27,42 @@ type CLIHandler struct {
 }
 
 var frameworkCmd = &cobra.Command{
-	Use:       "framework <framework name>",
-	Short:     "The framework you wish to use. Supported frameworks: nsa, mitre",
-	Long:      ``,
+	Use:       "framework <framework name> [`<glob patter>`/`-`] [flags]",
+	Short:     "The framework you wish to use. Supported frameworks: nsa",
+	Long:      "Execute a scan on a running Kubernetes cluster or yaml/json files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
 			return errors.New("requires at least one argument")
 		}
 		if !isValidFramework(args[0]) {
-			return errors.New("supported frameworks: nsa and mitre")
+			return errors.New("supported frameworks: nsa")
 		}
 		return nil
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
 		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
 		scanInfo.PolicyIdentifier.Name = args[0]
-		scanInfo.InputPatterns = args[1:]
+
+		if len(args[1:]) == 0 || args[1] != "-" {
+			scanInfo.InputPatterns = args[1:]
+		} else { // store stout to file
+			tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
+			if err != nil {
+				return err
+			}
+			defer os.Remove(tempFile.Name())
+
+			if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+				return err
+			}
+			scanInfo.InputPatterns = []string{tempFile.Name()}
+		}
 		cautils.SetSilentMode(scanInfo.Silent)
 		CliSetup()
+
+		return nil
 	},
 }
 
