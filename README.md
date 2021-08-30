@@ -28,7 +28,6 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 <img src="docs/summary.png">
 
 
-
 ## Usage & Examples
 
 ### Pre-Deployment Testing
@@ -40,8 +39,8 @@ kubescape scan framework nsa *.yaml
 ### Integration with other tools
 
 Kubescape can produce output fitting for later processing:
-* JSON (`-o json`)
-* JUnit XML (`-o junit`)
+* JSON (`-f json`)
+* JUnit XML (`-f junit`)
 
 ### Examples
 
@@ -63,12 +62,12 @@ kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatfo
 
 * Output in `json` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o json > results.json
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format json --output results.json
 ```
 
 * Output in `junit xml` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o junit > results.xml
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
 ```
 
 ### Helm Support
