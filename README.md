@@ -50,12 +50,6 @@ Kubescape can produce output fitting for later processing:
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
 
-* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework
-```
-kubescape scan framework mitre --exclude-namespaces kube-system,kube-public
-```
-
-
 * Scan local `yaml`/`json` files
 ```
 kubescape scan framework nsa examples/online-boutique/*
@@ -79,14 +73,14 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --sile
 
 ### Helm Support
 
-1. Render the helm template to an output yaml
+Render the helm template and pass as stdout
 ```
-helm template [CHART] [flags] --generate-name  --dry-run --output-dir helm-output
+helm template [CHART] [flags] --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
-2. Run `kubescape` with rended yaml files
+for example:
 ```
-kubescape scan framework nsa helm-output/*
+helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
 # How to build 
