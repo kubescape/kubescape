@@ -1,7 +1,7 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
-[![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)]()
+[![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)](https://github.com/armosec/kubescape)
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
 Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
@@ -75,6 +75,18 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --sile
 * Output in `junit xml` format
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --silence -o junit > results.xml
+```
+
+### Helm Support
+
+1. Render the helm template to an output yaml
+```
+helm template [CHART] [flags] --generate-name  --dry-run --output-dir helm-output
+```
+
+2. Run `kubescape` with rended yaml files
+```
+kubescape scan framework nsa helm-output/*
 ```
 
 # How to build 

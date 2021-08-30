@@ -8,6 +8,7 @@ import (
 	"kubescape/cautils"
 	"kubescape/cautils/k8sinterface"
 	"kubescape/cautils/opapolicy"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -38,7 +39,7 @@ func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framewo
 		workloads = append(workloads, w...)
 	}
 
-	// load resource from url
+	// load resources from url
 	w, err = loadResourcesFromUrl(scanInfo.InputPatterns)
 	if err != nil {
 		return nil, err
@@ -47,11 +48,15 @@ func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framewo
 		workloads = append(workloads, w...)
 	}
 
+	if len(workloads) == 0 {
+		return nil, fmt.Errorf("empty list of workloads - no workloads found")
+	}
+
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
 	allResources := mapResources(workloads)
 
 	// build resources map
-	// map resources based on framework requrid resources: map["/group/version/kind"][]<k8s workloads>
+	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads>
 	k8sResources := setResourceMap(frameworks)
 
 	// save only relevant resources
@@ -77,9 +82,6 @@ func loadResourcesFromFiles(inputPatterns []string) ([]k8sinterface.IWorkload, e
 	workloads, errs := loadFiles(files)
 	if len(errs) > 0 {
 		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
-	}
-	if len(workloads) == 0 {
-		return workloads, fmt.Errorf("empty list of workloads - no workloads found")
 	}
 	return workloads, nil
 }
@@ -138,10 +140,11 @@ func readFile(fileContent []byte, fileFromat FileFormat) ([]k8sinterface.IWorklo
 	case JSON_FILE_FORMAT:
 		return readJsonFile(fileContent)
 	default:
-		return nil, []error{fmt.Errorf("file extension %s not supported", fileFromat)}
+		return nil, nil // []error{fmt.Errorf("file extension %s not supported", fileFromat)}
 	}
 
 }
+
 func listFiles(patterns []string) ([]string, []error) {
 	files := []string{}
 	errs := []error{}
@@ -149,7 +152,11 @@ func listFiles(patterns []string) ([]string, []error) {
 		if strings.HasPrefix(patterns[i], "http") {
 			continue
 		}
-		f, err := filepath.Glob(patterns[i])
+		if !filepath.IsAbs(patterns[i]) {
+			o, _ := os.Getwd()
+			patterns[i] = filepath.Join(o, patterns[i])
+		}
+		f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
 		if err != nil {
 			errs = append(errs, err)
 		} else {
@@ -209,7 +216,9 @@ func convertYamlToJson(i interface{}) interface{} {
 	case map[interface{}]interface{}:
 		m2 := map[string]interface{}{}
 		for k, v := range x {
-			m2[k.(string)] = convertYamlToJson(v)
+			if s, ok := k.(string); ok {
+				m2[s] = convertYamlToJson(v)
+			}
 		}
 		return m2
 	case []interface{}:
@@ -220,6 +229,27 @@ func convertYamlToJson(i interface{}) interface{} {
 	return i
 }
 
+func glob(root, pattern string) ([]string, error) {
+	var matches []string
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
+			return err
+		} else if matched {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
+}
 func isYaml(filePath string) bool {
 	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
 }
