@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,7 +19,7 @@ import (
 )
 
 var scanInfo opapolicy.ScanInfo
-var supportedFrameworks = []string{"nsa", "mitre"}
+var supportedFrameworks = []string{"nsa"}
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
@@ -34,10 +33,10 @@ var frameworkCmd = &cobra.Command{
 	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
-			return errors.New("requires at least one argument")
+			return fmt.Errorf("requires at least one argument")
 		}
 		if !isValidFramework(args[0]) {
-			return errors.New(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
+			return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
 		}
 		return nil
 	},
@@ -76,7 +75,7 @@ func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = opapolicy.ScanInfo{}
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "namespaces to exclude from check")
-	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "output format. supported formats: 'pretty-printer'/'json'/'junit'")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "output format. supported formats: `pretty-printer`/`json`/`junit`")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "output file. print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent progress output")
 }

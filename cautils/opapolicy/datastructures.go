@@ -160,7 +160,7 @@ type ScanInfo struct {
 }
 
 func (scanInfo *ScanInfo) Init() {
-	scanInfo.setSilentMode()
+	// scanInfo.setSilentMode()
 	scanInfo.setOutputFile()
 
 }
