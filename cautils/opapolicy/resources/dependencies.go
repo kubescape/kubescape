@@ -196,6 +196,21 @@ query_all(resource) = http.send({
 	"raise_error": true,
 }) 
 
+
+
+# Query for all resources of type resource in all namespaces - without authentication
+# Example: query_all("deployments")
+query_all_no_auth(resource) = http.send({
+	"url": sprintf("%v/%v/namespaces/default/%v", [
+		host,
+		resource_group_mapping[resource],
+		resource,
+	]),
+	"method": "get",
+	"raise_error": true,
+	"tls_insecure_skip_verify" : true,
+}) 
+
 field_transform_to_qry_param(field,map) = finala {
 	mid := {concat(".",[field,key]): val | val := map[key]}
     finala := label_map_to_query_string(mid)
