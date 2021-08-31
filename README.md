@@ -126,7 +126,7 @@ Kubescape is running the following tests according to what is defined by [Kubern
 * Linux hardening
 * Ingress and Egress blocked
 * Container hostPort
-* Anonymous requests
+
 
 
 ## Technology
