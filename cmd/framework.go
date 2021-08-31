@@ -14,6 +14,7 @@ import (
 	"kubescape/policyhandler"
 	"kubescape/printer"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,7 @@ type CLIHandler struct {
 
 var frameworkCmd = &cobra.Command{
 	Use:       "framework <framework name> [`<glob patter>`/`-`] [flags]",
-	Short:     "The framework you wish to use. Supported frameworks: nsa",
+	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(supportedFrameworks, ", ")),
 	Long:      "Execute a scan on a running Kubernetes cluster or yaml/json files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -36,7 +37,7 @@ var frameworkCmd = &cobra.Command{
 			return errors.New("requires at least one argument")
 		}
 		if !isValidFramework(args[0]) {
-			return errors.New("supported frameworks: nsa")
+			return errors.New(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
 		}
 		return nil
 	},

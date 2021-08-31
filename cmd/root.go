@@ -8,9 +8,8 @@ var cfgFile string
 
 var rootCmd = &cobra.Command{
 	Use:   "kubescape",
-	Short: "A tool for running NSA recommended tests in your cluster ",
-	Long: `Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in Kubernetes Hardening Guidance
-by to NSA and CISA Tests are configured with YAML files, making this tool easy to update as test specifications evolve.`,
+	Short: "Kubescape is a tool for testing Kubernetes security posture",
+	Long:  `Kubescape is a tool for testing Kubernetes security posture based on NSA and MITRE specifications.`,
 }
 
 func Execute() {
