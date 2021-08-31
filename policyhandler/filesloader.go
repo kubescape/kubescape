@@ -5,12 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"kubescape/cautils"
-	"kubescape/cautils/k8sinterface"
-	"kubescape/cautils/opapolicy"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/kubescape/cautils/opapolicy"
 
 	"gopkg.in/yaml.v2"
 )

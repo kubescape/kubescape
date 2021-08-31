@@ -3,7 +3,7 @@ package k8sinterface
 import (
 	"testing"
 
-	"kubescape/cautils/cautils"
+	"github.com/armosec/kubescape/cautils/cautils"
 )
 
 func TestGetGroupVersionResource(t *testing.T) {

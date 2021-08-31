@@ -2,11 +2,12 @@ package policyhandler
 
 import (
 	"fmt"
-	"kubescape/cautils"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/armosec/kubescape/cautils"
 )
 
 func combine(base, rel string) string {
@@ -24,7 +25,7 @@ func combine(base, rel string) string {
 }
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
-	return combine(o, "kubescape/examples/online-boutique/*")
+	return combine(o, "github.com/armosec/kubescape/examples/online-boutique/*")
 }
 func TestListFiles(t *testing.T) {
 	files, errs := listFiles([]string{onlineBoutiquePath()})

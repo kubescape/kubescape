@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"kubescape/cautils/k8sinterface"
+	"github.com/armosec/kubescape/cautils/k8sinterface"
 
 	"github.com/golang/glog"
 	"github.com/open-policy-agent/opa/storage"

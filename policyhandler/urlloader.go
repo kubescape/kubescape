@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"kubescape/cautils"
-	"kubescape/cautils/k8sinterface"
 	"net/http"
 	"strings"
+
+	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/k8sinterface"
 )
 
 func loadResourcesFromUrl(inputPatterns []string) ([]k8sinterface.IWorkload, error) {

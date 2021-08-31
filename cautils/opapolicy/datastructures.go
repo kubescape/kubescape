@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"time"
 
-	armotypes "kubescape/cautils/armotypes"
+	armotypes "github.com/armosec/kubescape/cautils/armotypes"
 )
 
 type AlertScore float32

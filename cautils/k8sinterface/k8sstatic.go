@@ -3,7 +3,7 @@ package k8sinterface
 import (
 	"context"
 
-	"kubescape/cautils/cautils"
+	"github.com/armosec/kubescape/cautils/cautils"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

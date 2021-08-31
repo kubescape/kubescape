@@ -3,7 +3,7 @@ package opapolicy
 import (
 	"time"
 
-	armotypes "kubescape/cautils/armotypes"
+	armotypes "github.com/armosec/kubescape/cautils/armotypes"
 )
 
 // Mock A
