@@ -48,6 +48,7 @@ type RuleReport struct {
 	RuleStatus         RuleStatus               `json:"ruleStatus"`
 	RuleResponses      []RuleResponse           `json:"ruleResponses"`
 	ListInputResources []map[string]interface{} `json:"-"`
+	ListInputKinds     []string                 `json:"-"`
 }
 type RuleStatus struct {
 	Status  string `json:"status"`

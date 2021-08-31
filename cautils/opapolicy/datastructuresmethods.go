@@ -78,6 +78,13 @@ func (controlReport *ControlReport) GetNumberOfResources() int {
 	return sum
 }
 
+func (controlReport *ControlReport) ListControlsInputKinds() []string {
+	listControlsInputKinds := []string{}
+	for i := range controlReport.RuleReports {
+		listControlsInputKinds = append(listControlsInputKinds, controlReport.RuleReports[i].ListInputKinds...)
+	}
+	return listControlsInputKinds
+}
 func (controlReport *ControlReport) Passed() bool {
 	for i := range controlReport.RuleReports {
 		if len(controlReport.RuleReports[i].RuleResponses) > 0 {

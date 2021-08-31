@@ -59,3 +59,11 @@ func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
 	}
 	return false
 }
+
+func listMatchKinds(match []opapolicy.RuleMatchObjects) []string {
+	matchKinds := []string{}
+	for i := range match {
+		matchKinds = append(matchKinds, match[i].Resources...)
+	}
+	return matchKinds
+}

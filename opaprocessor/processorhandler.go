@@ -87,6 +87,7 @@ func (opap *OPAProcessor) ProcessRulesHandler(opaSessionObj *cautils.OPASessionO
 					ruleReport.RuleStatus.Status = "success"
 				}
 				ruleReport.ListInputResources = k8sObjects
+				ruleReport.ListInputKinds = listMatchKinds(rule.Match)
 				ruleReports = append(ruleReports, ruleReport)
 			}
 			controlReport.RuleReports = ruleReports

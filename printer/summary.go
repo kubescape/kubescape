@@ -15,6 +15,7 @@ type ControlSummary struct {
 	TotalFailed     int
 	Description     string
 	Remediation     string
+	ListInputKinds  []string
 	WorkloadSummary map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
 }
 

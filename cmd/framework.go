@@ -29,7 +29,7 @@ type CLIHandler struct {
 var frameworkCmd = &cobra.Command{
 	Use:       "framework <framework name> [`<glob patter>`/`-`] [flags]",
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(supportedFrameworks, ", ")),
-	Long:      "Execute a scan on a running Kubernetes cluster or yaml/json files (use glob) or `-` for stdin",
+	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
@@ -75,7 +75,7 @@ func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = opapolicy.ScanInfo{}
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "namespaces to exclude from check")
-	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", "output format. supported formats: `pretty-printer`/`json`/`junit`")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `output format. supported formats: "pretty-printer"/"json"/"junit"`)
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "output file. print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "silent progress output")
 }
