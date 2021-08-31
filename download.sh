@@ -3,9 +3,6 @@ set -e
 
 echo "Downloading Kubescape..."
 echo
- 
-BASE_DIR=~/.kubescape
-KUBESCAPE_EXEC=kubescape
 
 osName=$(uname -s)
 if [[ $osName == *"MINGW"* ]]; then
@@ -22,11 +19,9 @@ DOWNLOAD_URL=$(curl --silent "https://api.github.com/repos/$GITHUB_OWNER/kubesca
 DOWNLOAD_URL=${DOWNLOAD_URL//\"}
 DOWNLOAD_URL=${DOWNLOAD_URL/browser_download_url: /}
 
-mkdir -p $BASE_DIR 
+KUBESCAPE_EXEC=kubescape
 
-OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
-
-curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
+curl --progress-bar -L $DOWNLOAD_URL -o $KUBESCAPE_EXEC
 echo -e "\033[32m[V] Downloaded Kubescape"
 
-chmod +x $OUTPUT || sudo chmod +x $OUTPUT
+chmod +x $KUBESCAPE_EXEC || sudo chmod +x $KUBESCAPE_EXEC
