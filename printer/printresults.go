@@ -95,6 +95,7 @@ func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {
 				WorkloadSummary: mapResources,
 				Description:     cr.Description,
 				Remediation:     cr.Remediation,
+				ListInputKinds:  cr.ListControlsInputKinds(),
 			}
 		}
 	}
@@ -129,7 +130,7 @@ func (printer *Printer) printSummary(controlName string, controlSummary *Control
 
 func (printer *Printer) printTitle(controlName string, controlSummary *ControlSummary) {
 	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
-	if controlSummary.TotalResources == 0 {
+	if controlSummary.TotalResources == 0 && len(controlSummary.ListInputKinds) > 0 {
 		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed == 0 {
 		cautils.SuccessDisplay(printer.writer, "passed %v\n", emoji.ThumbsUp)

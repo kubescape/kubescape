@@ -23,4 +23,12 @@ func TestGetGroupVersionResource(t *testing.T) {
 		t.Errorf("wrong Resource")
 	}
 
+	r2, err := GetGroupVersionResource("NetworkPolicy")
+	if err != nil {
+		t.Error(err)
+		return
+	}
+	if r2.Resource != "networkpolicies" {
+		t.Errorf("wrong Resource")
+	}
 }
