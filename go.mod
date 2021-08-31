@@ -1,4 +1,4 @@
-module kubescape
+module github.com/armosec/kubescape
 
 go 1.16
 
