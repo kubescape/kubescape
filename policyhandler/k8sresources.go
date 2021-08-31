@@ -2,13 +2,14 @@ package policyhandler
 
 import (
 	"fmt"
-	"kubescape/cautils"
 	"strings"
 
-	"kubescape/cautils/k8sinterface"
+	"github.com/armosec/kubescape/cautils"
 
-	"kubescape/cautils/armotypes"
-	"kubescape/cautils/opapolicy"
+	"github.com/armosec/kubescape/cautils/k8sinterface"
+
+	"github.com/armosec/kubescape/cautils/armotypes"
+	"github.com/armosec/kubescape/cautils/opapolicy"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

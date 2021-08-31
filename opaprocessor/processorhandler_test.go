@@ -3,18 +3,19 @@ package opaprocessor
 import (
 	"context"
 	"encoding/json"
-	"kubescape/cautils"
 	"os"
 	"path"
 	"strings"
 	"testing"
 
-	"kubescape/cautils/k8sinterface"
+	"github.com/armosec/kubescape/cautils"
+
+	"github.com/armosec/kubescape/cautils/k8sinterface"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 	restclient "k8s.io/client-go/rest"
 
-	"kubescape/cautils/opapolicy"
-	"kubescape/cautils/opapolicy/resources"
+	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/kubescape/cautils/opapolicy/resources"
 
 	"github.com/open-policy-agent/opa/ast"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

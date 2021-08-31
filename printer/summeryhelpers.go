@@ -3,8 +3,8 @@ package printer
 import (
 	"fmt"
 
-	"kubescape/cautils/k8sinterface"
-	"kubescape/cautils/opapolicy"
+	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}

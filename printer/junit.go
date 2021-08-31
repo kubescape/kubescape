@@ -3,7 +3,8 @@ package printer
 import (
 	"encoding/xml"
 	"fmt"
-	"kubescape/cautils/opapolicy"
+
+	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
 type JUnitTestSuites struct {

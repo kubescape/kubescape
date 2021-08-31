@@ -1,6 +1,6 @@
 package main
 
-import "kubescape/cmd"
+import "github.com/armosec/kubescape/cmd"
 
 func main() {
 	cmd.Execute()

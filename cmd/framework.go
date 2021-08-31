@@ -5,15 +5,16 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"kubescape/cautils"
-	"kubescape/cautils/armotypes"
-	"kubescape/cautils/k8sinterface"
-	"kubescape/cautils/opapolicy"
-	"kubescape/opaprocessor"
-	"kubescape/policyhandler"
-	"kubescape/printer"
 	"os"
 	"strings"
+
+	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/armotypes"
+	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/kubescape/opaprocessor"
+	"github.com/armosec/kubescape/policyhandler"
+	"github.com/armosec/kubescape/printer"
 
 	"github.com/spf13/cobra"
 )
