@@ -28,20 +28,17 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 <img src="docs/summary.png">
 
 
+### Flags
+
+| flag |  default | description | options |
+| --- | --- | --- | --- |
+| `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning, Recommended to exclude `kube-system` and `kube-public` namespaces |
+| `-s`/`--silent` | Display progress messages | Silent progress messages |
+| `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` | 
+| `-o`/`--output` | print to stdout | Save scan result in file |
+
 ## Usage & Examples
-
-### Pre-Deployment Testing
-Check your YAML files before you're deploying, simply add them at the end of command line:
-```
-kubescape scan framework nsa *.yaml
-```
-
-### Integration with other tools
-
-Kubescape can produce output fitting for later processing:
-* JSON (`-f json`)
-* JUnit XML (`-f junit`)
-
+ 
 ### Examples
 
 * Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
@@ -49,32 +46,32 @@ Kubescape can produce output fitting for later processing:
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
 
-* Scan local `yaml`/`json` files
+* Scan local `yaml`/`json` files before deploying <img src="docs/new-feature.svg">
 ```
-kubescape scan framework nsa examples/online-boutique/*
+kubescape scan framework nsa *.yaml
 ```
 
 
-* Scan `yaml`/`json` files from url
+* Scan `yaml`/`json` files from url  <img src="docs/new-feature.svg">
 ```
 kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatform/microservices-demo/master/release/kubernetes-manifests.yaml
 ```
 
-* Output in `json` format
+* Output in `json` format  <img src="docs/new-feature.svg">
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format json --output results.json
 ```
 
-* Output in `junit xml` format
+* Output in `junit xml` format  <img src="docs/new-feature.svg">
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
 ```
 
 ### Helm Support
 
-Render the helm template and pass as stdout
+* Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout   <img src="docs/new-feature.svg">
 ```
-helm template [CHART] [flags] --generate-name --dry-run | kubescape scan framework nsa -
+helm template [NAME] [CHART] [flags] --dry-run | kubescape scan framework nsa -
 ```
 
 for example:

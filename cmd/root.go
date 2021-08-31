@@ -9,7 +9,7 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:   "kubescape",
 	Short: "Kubescape is a tool for testing Kubernetes security posture",
-	Long:  `Kubescape is a tool for testing Kubernetes security posture based on NSA and MITRE specifications.`,
+	Long:  `Kubescape is a tool for testing Kubernetes security posture based on NSA specifications.`,
 }
 
 func Execute() {
