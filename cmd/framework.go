@@ -35,9 +35,10 @@ var frameworkCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
 			return fmt.Errorf("requires at least one argument")
-		}
-		if !isValidFramework(args[0]) {
-			return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
+		} else if len(args) > 0 {
+			if !isValidFramework(args[0]) {
+				return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
+			}
 		}
 		return nil
 	},
@@ -48,19 +49,21 @@ var frameworkCmd = &cobra.Command{
 		if !(cmd.Flags().Lookup("use-from").Changed) {
 			scanInfo.PolicyIdentifier.Name = args[0]
 		}
-		if len(args[1:]) == 0 || args[1] != "-" {
-			scanInfo.InputPatterns = args[1:]
-		} else { // store stout to file
-			tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
-			if err != nil {
-				return err
-			}
-			defer os.Remove(tempFile.Name())
+		if len(args) > 0 {
+			if len(args[1:]) == 0 || args[1] != "-" {
+				scanInfo.InputPatterns = args[1:]
+			} else { // store stout to file
+				tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
+				if err != nil {
+					return err
+				}
+				defer os.Remove(tempFile.Name())
 
-			if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-				return err
+				if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+					return err
+				}
+				scanInfo.InputPatterns = []string{tempFile.Name()}
 			}
-			scanInfo.InputPatterns = []string{tempFile.Name()}
 		}
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
