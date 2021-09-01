@@ -41,14 +41,51 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framewo
 	}
 
 	framework := &opapolicy.Framework{}
-	err = JSONDecoder(respStr).Decode(framework)
+	if err = JSONDecoder(respStr).Decode(framework); err != nil {
+		return framework, err
+	}
+
+	SaveFrameworkInFile(framework, GetDefaultPath(name))
 	return framework, err
 }
 
-func (drp *DownloadReleasedPolicy) setURL(frameworkName string) {
-	// requestURI := "v1/armoFrameworks"
+func (drp *DownloadReleasedPolicy) setURL(frameworkName string) error {
 
-	// drp.hostURL = URLEncoder(fmt.Sprintf("%s/%s", drp.hostURL, requestURI))
+	latestReleases := "https://api.github.com/repos/armosec/regolibrary/releases/latest"
+	resp, err := http.Get(latestReleases)
+	if err != nil {
+		return fmt.Errorf("failed to get latest releases from '%s', reason: %s", latestReleases, err.Error())
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || 301 < resp.StatusCode {
+		return fmt.Errorf("failed to download file, status code: %s", resp.Status)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body from '%s', reason: %s", latestReleases, err.Error())
+	}
+	var data map[string]interface{}
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal response body from '%s', reason: %s", latestReleases, err.Error())
+	}
+
+	if assets, ok := data["assets"].([]interface{}); ok {
+		for i := range assets {
+			if asset, ok := assets[i].(map[string]interface{}); ok {
+				if name, ok := asset["name"].(string); ok {
+					if name == frameworkName {
+						if url, ok := asset["browser_download_url"].(string); ok {
+							drp.hostURL = url
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+
 }
 
 // =======================================================================================================================
@@ -66,14 +103,18 @@ func NewLoadPolicy(filePath string) *LoadPolicy {
 	}
 }
 
-func (lp *LoadPolicy) GetFramework(filename string) (*opapolicy.Framework, error) {
+func (lp *LoadPolicy) GetFramework(frameworkName string) (*opapolicy.Framework, error) {
 
 	framework := &opapolicy.Framework{}
-	f, err := ioutil.ReadFile(filename)
+	f, err := ioutil.ReadFile(lp.filePath)
 	if err != nil {
 		return nil, err
 	}
+
 	err = json.Unmarshal(f, framework)
+	if frameworkName != "" && !strings.EqualFold(frameworkName, framework.Name) {
+		return nil, fmt.Errorf("framework from file not matching")
+	}
 	return framework, err
 }
 
@@ -100,9 +141,13 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*opapolicy.Framework, error) 
 		return nil, err
 	}
 
-	framework := opapolicy.Framework{}
-	err = JSONDecoder(respStr).Decode(&framework)
-	return &framework, err
+	framework := &opapolicy.Framework{}
+	if err = JSONDecoder(respStr).Decode(framework); err != nil {
+		return nil, err
+	}
+	SaveFrameworkInFile(framework, GetDefaultPath(name))
+
+	return framework, err
 }
 
 func (armoAPI *ArmoAPI) setURL(frameworkName string) {

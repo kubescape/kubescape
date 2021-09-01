@@ -10,6 +10,8 @@ import (
 type ScanInfo struct {
 	PolicyGetter       getter.IPolicyGetter
 	PolicyIdentifier   opapolicy.PolicyIdentifier
+	UseFrom            string
+	UseDefault         bool
 	Format             string
 	Output             string
 	ExcludedNamespaces string
@@ -19,13 +21,29 @@ type ScanInfo struct {
 
 func (scanInfo *ScanInfo) Init() {
 	// scanInfo.setSilentMode()
+	scanInfo.setUseFrom()
 	scanInfo.setOutputFile()
 	scanInfo.setGetter()
 
 }
-func (scanInfo *ScanInfo) setGetter() {
-	scanInfo.PolicyGetter = getter.NewArmoAPI()
+func (scanInfo *ScanInfo) setUseFrom() {
+	if scanInfo.UseFrom != "" {
+		return
+	}
+	if scanInfo.UseDefault {
+		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier.Name)
+	}
+
 }
+func (scanInfo *ScanInfo) setGetter() {
+	if scanInfo.UseFrom != "" {
+		// load from file
+		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
+	} else {
+		scanInfo.PolicyGetter = getter.NewArmoAPI()
+	}
+}
+
 func (scanInfo *ScanInfo) setSilentMode() {
 	if scanInfo.Format == "json" || scanInfo.Format == "junit" {
 		scanInfo.Silent = true

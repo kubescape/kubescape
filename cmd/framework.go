@@ -33,7 +33,7 @@ var frameworkCmd = &cobra.Command{
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
+		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
 			return fmt.Errorf("requires at least one argument")
 		}
 		if !isValidFramework(args[0]) {
@@ -44,8 +44,10 @@ var frameworkCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
 		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
-		scanInfo.PolicyIdentifier.Name = args[0]
 
+		if !(cmd.Flags().Lookup("use-from").Changed) {
+			scanInfo.PolicyIdentifier.Name = args[0]
+		}
 		if len(args[1:]) == 0 || args[1] != "-" {
 			scanInfo.InputPatterns = args[1:]
 		} else { // store stout to file
@@ -75,6 +77,8 @@ func isValidFramework(framework string) bool {
 func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = cautils.ScanInfo{}
+	frameworkCmd.Flags().StringVarP(&scanInfo.UseFrom, "use-from", "", "", "Path to load framework from")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.UseDefault, "use-default", "", false, "Load framework from default path")
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from check")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. supported formats: "pretty-printer"/"json"/"junit"`)
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
