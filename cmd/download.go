@@ -22,7 +22,7 @@ var downloadCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		downloadInfo.FrameworkName = args[1]
-		g := getter.NewDownloadReleasedPolicy()
+		g := getter.NewArmoAPI()
 		if downloadInfo.Path == "" {
 			downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName)
 		}
