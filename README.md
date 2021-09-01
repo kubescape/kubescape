@@ -79,13 +79,13 @@ for example:
 helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
-### Offline Support
+### Offline Support <img src="docs/new-feature.svg">
 
 It is possible to run Kubescape offline!
 
 First download the framework and then scan with `--use-from` flag
 
-* Download and save in file, if file name not specified, will store save to `~/.kubescape/<framework name>.json` <img src="new-feature.svg">
+* Download and save in file, if file name not specified, will store save to `~/.kubescape/<framework name>.json`
 ```
 kubescape download framework nsa --output nsa.json
 ```
