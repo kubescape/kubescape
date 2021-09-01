@@ -41,5 +41,5 @@ var downloadCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(downloadCmd)
 	downloadInfo = cautils.DownloadInfo{}
-	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file.")
+	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If specified, will store save to `~/.kubescape/<framework name>.json`")
 }

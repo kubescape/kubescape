@@ -79,6 +79,23 @@ for example:
 helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
+### Offline Support
+
+It is possible to run Kubescape offline!
+
+First download the framework and then scan with `--use-from` flag
+
+* Download and save in file, if file name not specified, will store save to `~/.kubescape/<framework name>.json` <img src="new-feature.svg">
+```
+kubescape download framework nsa --output nsa.json
+```
+
+* Scan using the downloaded framework 
+```
+kubescape scan framework nsa --use-from nsa.json
+```
+
+
 # How to build 
 
 Note: development (and the release process) is done with Go `1.16`
