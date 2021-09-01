@@ -67,8 +67,11 @@ var frameworkCmd = &cobra.Command{
 		}
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
-		CliSetup()
-
+		err := CliSetup()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		return nil
 	},
 }
@@ -86,10 +89,17 @@ func init() {
 	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. supported formats: "pretty-printer"/"json"/"junit"`)
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
+	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code -1")
+
 }
 
 func CliSetup() error {
 	flag.Parse()
+
+	if 100 < scanInfo.FailThreshold {
+		fmt.Println("bad argument: out of range threshold")
+		os.Exit(1)
+	}
 
 	var k8s *k8sinterface.KubernetesApi
 	if scanInfo.ScanRunningCluster() {
@@ -114,7 +124,12 @@ func CliSetup() error {
 		reporterObj.ProcessRulesListenner()
 	}()
 	p := printer.NewPrinter(&reportResults, scanInfo.Format, scanInfo.Output)
-	p.ActionPrint()
+	score := p.ActionPrint()
+
+	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
+	if score < adjustedFailThreshold {
+		return fmt.Errorf("Scan score is bellow threshold")
+	}
 
 	return nil
 }
