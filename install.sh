@@ -32,7 +32,7 @@ echo -e "\033[32m[V] Downloaded Kubescape"
 sudo chmod +x $OUTPUT
 sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
 sudo cp $OUTPUT /usr/local/bin
-rm -rf $BASE_DIR
+rm -rf $OUTPUT
 
 echo -e "[V] Finished Installation"
 echo

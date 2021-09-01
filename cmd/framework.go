@@ -88,7 +88,10 @@ func init() {
 func CliSetup() error {
 	flag.Parse()
 
-	k8s := k8sinterface.NewKubernetesApi()
+	var k8s *k8sinterface.KubernetesApi
+	if scanInfo.ScanRunningCluster() {
+		k8s = k8sinterface.NewKubernetesApi()
+	}
 
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)

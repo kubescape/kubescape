@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -52,7 +53,7 @@ var RunningIncluster bool
 func LoadK8sConfig() error {
 	kubeconfig, err := config.GetConfig()
 	if err != nil {
-		return fmt.Errorf("Failed to load kubernetes config: %s\n", err)
+		return fmt.Errorf("failed to load kubernetes config: %s\n", strings.ReplaceAll(err.Error(), "KUBERNETES_MASTER", "KUBECONFIG"))
 	}
 	if _, err := restclient.InClusterConfig(); err == nil {
 		RunningIncluster = true
@@ -61,7 +62,7 @@ func LoadK8sConfig() error {
 	return nil
 }
 
-// GetK8sConfig get config. load if not loaded yer
+// GetK8sConfig get config. load if not loaded yet
 func GetK8sConfig() *restclient.Config {
 	if K8SConfig == nil {
 		if err := LoadK8sConfig(); err != nil {

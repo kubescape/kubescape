@@ -26,7 +26,7 @@ type OPAProcessor struct {
 
 func NewOPAProcessor(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessor {
 
-	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig())
+	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.K8SConfig)
 	store, err := regoDependenciesData.TOStorage()
 	if err != nil {
 		panic(err)
