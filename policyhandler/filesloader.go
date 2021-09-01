@@ -28,7 +28,7 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framework, scanInfo *opapolicy.ScanInfo) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framework, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
 	workloads := []k8sinterface.IWorkload{}
 
 	// load resource from local file system

@@ -19,12 +19,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scanInfo opapolicy.ScanInfo
+var scanInfo cautils.ScanInfo
 var supportedFrameworks = []string{"nsa"}
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
-	scanInfo      *opapolicy.ScanInfo
+	scanInfo      *cautils.ScanInfo
 }
 
 var frameworkCmd = &cobra.Command{
@@ -74,7 +74,7 @@ func isValidFramework(framework string) bool {
 
 func init() {
 	scanCmd.AddCommand(frameworkCmd)
-	scanInfo = opapolicy.ScanInfo{}
+	scanInfo = cautils.ScanInfo{}
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from check")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. supported formats: "pretty-printer"/"json"/"junit"`)
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
