@@ -43,8 +43,28 @@ func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj, printerType, outputF
 	}
 }
 
-func (printer *Printer) ActionPrint() {
+func calculatePostureScore(postureReport *opapolicy.PostureReport) float32 {
+	totalResources := 0
+	totalFailed := 0
+	for _, frameworkReport := range postureReport.FrameworkReports {
+		for _, controlReport := range frameworkReport.ControlReports {
+			for _, ruleReport := range controlReport.RuleReports {
+				for _, ruleResponses := range ruleReport.RuleResponses {
+					totalFailed += len(ruleResponses.AlertObject.K8SApiObjects)
+					totalFailed += len(ruleResponses.AlertObject.ExternalObjects)
+				}
+			}
+			totalResources += controlReport.GetNumberOfResources()
+		}
+	}
+	if totalResources == 0 {
+		return float32(0)
+	}
+	return (float32(totalResources) - float32(totalFailed)) / float32(totalResources)
+}
 
+func (printer *Printer) ActionPrint() float32 {
+	var score float32
 	for {
 		opaSessionObj := <-*printer.opaSessionObj
 		if printer.printerType == PrettyPrinter {
@@ -75,10 +95,14 @@ func (printer *Printer) ActionPrint() {
 			os.Exit(1)
 		}
 
+		score = calculatePostureScore(opaSessionObj.PostureReport)
+
 		if !k8sinterface.RunningIncluster {
 			break
 		}
+
 	}
+	return score
 }
 
 func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {

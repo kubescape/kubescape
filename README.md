@@ -34,6 +34,7 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 | --- | --- | --- | --- |
 | `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces |
 | `-s`/`--silent` | Display progress messages | Silent progress messages |
+| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result bellow threshold| `0` -> `100` |
 | `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` | 
 | `-o`/`--output` | print to stdout | Save scan result in file |
 

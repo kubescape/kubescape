@@ -17,6 +17,7 @@ type ScanInfo struct {
 	ExcludedNamespaces string
 	InputPatterns      []string
 	Silent             bool
+	FailThreshold      uint16
 }
 
 func (scanInfo *ScanInfo) Init() {
