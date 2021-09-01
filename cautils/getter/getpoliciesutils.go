@@ -6,8 +6,32 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
+
+	"github.com/armosec/kubescape/cautils/opapolicy"
 )
+
+func GetDefaultPath(frameworkName string) string {
+	defaultfilePath := filepath.Join(DefaultLocalStore, frameworkName+".json")
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		defaultfilePath = filepath.Join(homeDir, defaultfilePath)
+	}
+	return defaultfilePath
+}
+
+func SaveFrameworkInFile(framework *opapolicy.Framework, path string) error {
+	encodedData, err := json.Marshal(framework)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(path, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 
 // JSONDecoder returns JSON decoder for given string
 func JSONDecoder(origin string) *json.Decoder {

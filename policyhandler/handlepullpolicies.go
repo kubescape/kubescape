@@ -18,7 +18,7 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 			// backend
 			receivedFramework, err := getPolicies.GetFramework(rule.Name)
 			if err != nil {
-				errs = fmt.Errorf("could not download framework, please check if this framework exists")
+				errs = err
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
@@ -27,7 +27,6 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 		default:
 			err := fmt.Errorf("missing rule kind, expected: %s", opapolicy.KindFramework)
 			errs = fmt.Errorf("%s", err.Error())
-
 		}
 	}
 	return frameworks, errs

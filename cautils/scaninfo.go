@@ -31,21 +31,16 @@ func (scanInfo *ScanInfo) setUseFrom() {
 		return
 	}
 	if scanInfo.UseDefault {
-		scanInfo.UseFrom = GetDefaultPath(scanInfo.PolicyIdentifier.Name)
+		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier.Name)
 	}
 
 }
 func (scanInfo *ScanInfo) setGetter() {
-
-	// // get from armo backend
-	// scanInfo.PolicyGetter = getter.NewArmoAPI()
-
 	if scanInfo.UseFrom != "" {
 		// load from file
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
 	} else {
-		scanInfo.PolicyGetter = getter.NewDownloadReleasedPolicy()
-
+		scanInfo.PolicyGetter = getter.NewArmoAPI()
 	}
 }
 

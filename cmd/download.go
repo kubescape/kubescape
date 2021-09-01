@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -25,16 +23,8 @@ var downloadCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		downloadInfo.FrameworkName = args[1]
 		g := getter.NewDownloadReleasedPolicy()
-		if !(cmd.Flags().Lookup("output").Changed) {
-			downloadInfo.Path = cautils.GetDefaultPath(downloadInfo.FrameworkName)
-		} else {
-			currPath, err := os.Getwd()
-			if err != nil {
-				downloadInfo.Path = filepath.Join(downloadInfo.Path)
-			} else {
-				downloadInfo.Path = filepath.Join(currPath, downloadInfo.Path)
-			}
-
+		if downloadInfo.Path == "" {
+			downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName)
 		}
 		frameworks, err := g.GetFramework(downloadInfo.FrameworkName)
 		if err != nil {

@@ -59,7 +59,6 @@ func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNo
 
 	cautils.ProgressTextDisplay("Downloading/Loading framework definitions")
 
-	// TODO - support load policies from local file
 	frameworks, err := policyHandler.GetPoliciesFromBackend(notification, policyGetter)
 	if err != nil {
 		return frameworks, err
