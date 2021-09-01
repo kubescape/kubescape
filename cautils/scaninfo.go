@@ -50,3 +50,7 @@ func (scanInfo *ScanInfo) setOutputFile() {
 		}
 	}
 }
+
+func (scanInfo *ScanInfo) ScanRunningCluster() bool {
+	return len(scanInfo.InputPatterns) == 0
+}
