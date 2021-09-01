@@ -25,7 +25,7 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 			}
 
 		default:
-			err := fmt.Errorf("Missing rule kind, expected: %s", opapolicy.KindFramework)
+			err := fmt.Errorf("missing rule kind, expected: %s", opapolicy.KindFramework)
 			errs = fmt.Errorf("%s", err.Error())
 
 		}

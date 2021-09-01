@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
 const DefaultLocalStore = ".kubescape"
+
+var path string
 
 type IPolicyGetter interface {
 	GetFramework(name string) (*opapolicy.Framework, error)
@@ -33,6 +36,15 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	}
 }
 
+func SaveFrameworkInFile(framework *opapolicy.Framework, path string) error {
+	encodedData, _ := json.Marshal(framework)
+	err := os.WriteFile(path, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framework, error) {
 	drp.setURL(name)
 	respStr, err := HttpGetter(drp.httpClient, drp.hostURL)
@@ -42,13 +54,56 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framewo
 
 	framework := &opapolicy.Framework{}
 	err = JSONDecoder(respStr).Decode(framework)
+	//	SaveFrameworkInFile(framework)
+	// store in file
+	//
+
+	/*
+
+		1. Public save framework function (framework, path) error
+		2. Call the function from Download And GetFramework
+		3. export to function: os.Join($HOME, getter.DefaultLocalStore, <name>.json)
+
+	*/
 	return framework, err
 }
 
-func (drp *DownloadReleasedPolicy) setURL(frameworkName string) {
-	// requestURI := "v1/armoFrameworks"
+func (drp *DownloadReleasedPolicy) setURL(frameworkName string) error {
 
-	// drp.hostURL = URLEncoder(fmt.Sprintf("%s/%s", drp.hostURL, requestURI))
+	resp, err := http.Get("https://api.github.com/repos/armosec/regolibrary/releases/latest")
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || 301 < resp.StatusCode {
+		return fmt.Errorf("failed to download file, status code: %s", resp.Status)
+	}
+
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var data map[string]interface{}
+	err = json.Unmarshal(body, &data)
+	if err != nil {
+		return err
+	}
+
+	if assets, ok := data["assets"].([]interface{}); ok {
+		for i := range assets {
+			if asset, ok := assets[i].(map[string]interface{}); ok {
+				if name, ok := asset["name"].(string); ok {
+					if name == frameworkName {
+						if url, ok := asset["browser_download_url"].(string); ok {
+							drp.hostURL = url
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
+
 }
 
 // =======================================================================================================================

@@ -50,6 +50,18 @@ kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatfo
 helm template [CHART] [flags] --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
+### Scan on-prem (offline)
+
+* Scan using a framework from the local file system 
+```
+kubescape scan framework --use-from <path> 
+```
+
+* Scan using the framework from the default location in file system  
+```
+kubescape scan framework  --use-default 
+```
+
 ## Output formats
 
 By default, the output is user friendly.
@@ -64,4 +76,16 @@ kubescape scan framework nsa --format json --output results.json
 * Output in `junit xml` format <img src="new-feature.svg">
 ```
 kubescape scan framework nsa --format junit --output results.xml
+```
+
+## Download
+
+* Download and save in file <img src="new-feature.svg">
+```
+kubescape download framework nsa --output nsa.json
+```
+
+* Download and save in default file (`~/.kubescape/<framework name>.json`)
+```
+kubescape download framework nsa 
 ```
