@@ -19,12 +19,12 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scanInfo opapolicy.ScanInfo
+var scanInfo cautils.ScanInfo
 var supportedFrameworks = []string{"nsa"}
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
-	scanInfo      *opapolicy.ScanInfo
+	scanInfo      *cautils.ScanInfo
 }
 
 var frameworkCmd = &cobra.Command{
@@ -33,37 +33,45 @@ var frameworkCmd = &cobra.Command{
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
+		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
 			return fmt.Errorf("requires at least one argument")
-		}
-		if !isValidFramework(args[0]) {
-			return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
+		} else if len(args) > 0 {
+			if !isValidFramework(args[0]) {
+				return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
+			}
 		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
 		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
-		scanInfo.PolicyIdentifier.Name = args[0]
 
-		if len(args[1:]) == 0 || args[1] != "-" {
-			scanInfo.InputPatterns = args[1:]
-		} else { // store stout to file
-			tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
-			if err != nil {
-				return err
-			}
-			defer os.Remove(tempFile.Name())
+		if !(cmd.Flags().Lookup("use-from").Changed) {
+			scanInfo.PolicyIdentifier.Name = args[0]
+		}
+		if len(args) > 0 {
+			if len(args[1:]) == 0 || args[1] != "-" {
+				scanInfo.InputPatterns = args[1:]
+			} else { // store stout to file
+				tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
+				if err != nil {
+					return err
+				}
+				defer os.Remove(tempFile.Name())
 
-			if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-				return err
+				if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+					return err
+				}
+				scanInfo.InputPatterns = []string{tempFile.Name()}
 			}
-			scanInfo.InputPatterns = []string{tempFile.Name()}
 		}
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
-		CliSetup()
-
+		err := CliSetup()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
+		}
 		return nil
 	},
 }
@@ -74,17 +82,29 @@ func isValidFramework(framework string) bool {
 
 func init() {
 	scanCmd.AddCommand(frameworkCmd)
-	scanInfo = opapolicy.ScanInfo{}
+	scanInfo = cautils.ScanInfo{}
+	frameworkCmd.Flags().StringVarP(&scanInfo.UseFrom, "use-from", "", "", "Path to load framework from")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.UseDefault, "use-default", "", false, "Load framework from default path")
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from check")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. supported formats: "pretty-printer"/"json"/"junit"`)
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
+	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code -1")
+
 }
 
 func CliSetup() error {
 	flag.Parse()
 
-	k8s := k8sinterface.NewKubernetesApi()
+	if 100 < scanInfo.FailThreshold {
+		fmt.Println("bad argument: out of range threshold")
+		os.Exit(1)
+	}
+
+	var k8s *k8sinterface.KubernetesApi
+	if scanInfo.ScanRunningCluster() {
+		k8s = k8sinterface.NewKubernetesApi()
+	}
 
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
@@ -104,7 +124,12 @@ func CliSetup() error {
 		reporterObj.ProcessRulesListenner()
 	}()
 	p := printer.NewPrinter(&reportResults, scanInfo.Format, scanInfo.Output)
-	p.ActionPrint()
+	score := p.ActionPrint()
+
+	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
+	if score < adjustedFailThreshold {
+		return fmt.Errorf("Scan score is bellow threshold")
+	}
 
 	return nil
 }

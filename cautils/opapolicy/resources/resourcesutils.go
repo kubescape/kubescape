@@ -42,9 +42,12 @@ func NewRegoDependenciesDataMock() *RegoDependenciesData {
 
 func NewRegoDependenciesData(k8sConfig *rest.Config) *RegoDependenciesData {
 
-	regoDependenciesData := RegoDependenciesData{
-		K8sConfig: *NewRegoK8sConfig(k8sConfig),
+	regoDependenciesData := RegoDependenciesData{}
+
+	if k8sConfig != nil {
+		regoDependenciesData.K8sConfig = *NewRegoK8sConfig(k8sConfig)
 	}
+
 	return &regoDependenciesData
 }
 func NewRegoK8sConfig(k8sConfig *rest.Config) *RegoK8sConfig {
@@ -61,19 +64,9 @@ func NewRegoK8sConfig(k8sConfig *rest.Config) *RegoK8sConfig {
 		token = fmt.Sprintf("Bearer %s", k8sConfig.BearerToken)
 	}
 
-	// crtFile := os.Getenv("KUBERNETES_CRT_PATH")
-	// if crtFile == "" {
-	// 	crtFile = k8sConfig.CAFile
-	// 	// crtFile = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
-	// }
-
-	// glog.Infof("===========================================================================")
-	// glog.Infof(fmt.Sprintf("%v", k8sConfig.String()))
-	// glog.Infof("===========================================================================")
-
 	regoK8sConfig := RegoK8sConfig{
 		Token:         token,
-		Host:          k8sConfig.Host,
+		Host:          host,
 		CrtFile:       k8sConfig.CAFile,
 		ClientCrtFile: k8sConfig.CertFile,
 		ClientKeyFile: k8sConfig.KeyFile,

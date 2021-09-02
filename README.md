@@ -32,8 +32,9 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 
 | flag |  default | description | options |
 | --- | --- | --- | --- |
-| `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning, Recommended to exclude `kube-system` and `kube-public` namespaces |
+| `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces |
 | `-s`/`--silent` | Display progress messages | Silent progress messages |
+| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result bellow threshold| `0` -> `100` |
 | `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` | 
 | `-o`/`--output` | print to stdout | Save scan result in file |
 
@@ -79,6 +80,23 @@ for example:
 helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
 
+### Offline Support <img src="docs/new-feature.svg">
+
+It is possible to run Kubescape offline!
+
+First download the framework and then scan with `--use-from` flag
+
+* Download and save in file, if file name not specified, will store save to `~/.kubescape/<framework name>.json`
+```
+kubescape download framework nsa --output nsa.json
+```
+
+* Scan using the downloaded framework 
+```
+kubescape scan framework nsa --use-from nsa.json
+```
+
+
 # How to build 
 
 Note: development (and the release process) is done with Go `1.16`
@@ -123,6 +141,7 @@ Kubescape is running the following tests according to what is defined by [Kubern
 * Linux hardening
 * Ingress and Egress blocked
 * Container hostPort
+* Network policies
 
 
 
