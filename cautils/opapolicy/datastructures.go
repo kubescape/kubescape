@@ -16,14 +16,15 @@ const (
 
 // RegoResponse the expected response of single run of rego policy
 type RuleResponse struct {
-	AlertMessage string     `json:"alertMessage"`
-	PackageName  string     `json:"packagename"`
-	AlertScore   AlertScore `json:"alertScore"`
-	// AlertObject   AlertObject `json:"alertObject"`
-	AlertObject   AlertObject `json:"alertObject"` // TODO - replace interface to AlertObject
-	Context       []string    `json:"context"`     // TODO - Remove
-	Rulename      string      `json:"rulename"`    // TODO - Remove
-	ExceptionName string      `json:"exceptionName"`
+	AlertMessage  string                            `json:"alertMessage"`
+	RuleStatus    string                            `json:"ruleStatus"`
+	PackageName   string                            `json:"packagename"`
+	AlertScore    AlertScore                        `json:"alertScore"`
+	AlertObject   AlertObject                       `json:"alertObject"`
+	Context       []string                          `json:"context,omitempty"`       // TODO - Remove
+	Rulename      string                            `json:"rulename,omitempty"`      // TODO - Remove
+	ExceptionName string                            `json:"exceptionName,omitempty"` // Not in use
+	Exception     *armotypes.PostureExceptionPolicy `json:"exception,omitempty"`
 }
 
 type AlertObject struct {
@@ -32,19 +33,26 @@ type AlertObject struct {
 }
 
 type FrameworkReport struct {
-	Name           string          `json:"name"`
-	ControlReports []ControlReport `json:"controlReports"`
+	Name            string          `json:"name"`
+	ControlReports  []ControlReport `json:"controlReports"`
+	Score           float32         `json:"score,omitempty"`
+	ARMOImprovement float32         `json:"ARMOImprovement,omitempty"`
+	WCSScore        float32         `json:"wcsScore,omitempty"`
 }
 type ControlReport struct {
-	Name        string       `json:"name"`
-	RuleReports []RuleReport `json:"ruleReports"`
-	Remediation string       `json:"remediation"`
-	Description string       `json:"description"`
+	armotypes.PortalBase `json:",inline"`
+	Name                 string       `json:"name"`
+	RuleReports          []RuleReport `json:"ruleReports"`
+	Remediation          string       `json:"remediation"`
+	Description          string       `json:"description"`
+	Score                float32      `json:"score,omitempty"`
+	BaseScore            float32      `json:"baseScore,omitempty"`
+	ARMOImprovement      float32      `json:"ARMOImprovement,omitempty"`
 }
 type RuleReport struct {
 	Name               string                   `json:"name"`
 	Remediation        string                   `json:"remediation"`
-	RuleStatus         RuleStatus               `json:"ruleStatus"`
+	RuleStatus         RuleStatus               `json:"ruleStatus"` // did we run the rule or not (if there where compile errors, the value will be failed)
 	RuleResponses      []RuleResponse           `json:"ruleResponses"`
 	ListInputResources []map[string]interface{} `json:"-"`
 	ListInputKinds     []string                 `json:"-"`

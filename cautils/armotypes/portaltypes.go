@@ -22,6 +22,7 @@ type DesignatorType string
 // Supported designators
 const (
 	DesignatorAttributes DesignatorType = "Attributes"
+	DesignatorAttribute  DesignatorType = "Attribute" // Deprecated
 	/*
 		WorkloadID format.
 		k8s format: wlid://cluster-<cluster>/namespace-<namespace>/<kind>-<name>
@@ -45,6 +46,8 @@ const (
 const (
 	AttributeCluster   = "cluster"
 	AttributeNamespace = "namespace"
+	AttributeKind      = "kind"
+	AttributeName      = "name"
 )
 
 // PortalDesignator represented single designation options
