@@ -3,25 +3,28 @@ package policyhandler
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
-func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapolicy.PolicyNotification, getPolicies getter.IPolicyGetter) ([]opapolicy.Framework, error) {
+func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapolicy.PolicyNotification) ([]opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {
 	var errs error
-	// d := getter.NewArmoAPI()
 	frameworks := []opapolicy.Framework{}
+	exceptionPolicies := []armotypes.PostureExceptionPolicy{}
+
 	// Get - cacli opa get
 	for _, rule := range notification.Rules {
 		switch rule.Kind {
 		case opapolicy.KindFramework:
-			// backend
-			receivedFramework, err := getPolicies.GetFramework(rule.Name)
+			receivedFramework, recExceptionPolicies, err := policyHandler.getFrameworkPolicies(rule.Name)
 			if err != nil {
-				errs = err
+				errs = fmt.Errorf("%v\nKind: %v, Name: %s, error: %s", errs, rule.Kind, rule.Name, err.Error())
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
+				if recExceptionPolicies != nil {
+					exceptionPolicies = append(exceptionPolicies, recExceptionPolicies...)
+				}
 			}
 
 		default:
@@ -29,5 +32,19 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 			errs = fmt.Errorf("%s", err.Error())
 		}
 	}
-	return frameworks, errs
+	return frameworks, exceptionPolicies, errs
+}
+
+func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {
+	receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(policyName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions("", "", "")
+	if err != nil {
+		return receivedFramework, nil, err
+	}
+
+	return receivedFramework, receivedException, nil
 }

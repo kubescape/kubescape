@@ -83,8 +83,9 @@ func isValidFramework(framework string) bool {
 func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = cautils.ScanInfo{}
-	frameworkCmd.Flags().StringVarP(&scanInfo.UseFrom, "use-from", "", "", "Path to load framework from")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.UseDefault, "use-default", "", false, "Load framework from default path")
+	frameworkCmd.Flags().StringVar(&scanInfo.UseFrom, "use-from", "", "Path to load framework from")
+	frameworkCmd.Flags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load framework from default path")
+	frameworkCmd.Flags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to file containing list of exceptions")
 	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from check")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. supported formats: "pretty-printer"/"json"/"junit"`)
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
@@ -120,7 +121,7 @@ func CliSetup() error {
 
 	// processor setup - rego run
 	go func() {
-		reporterObj := opaprocessor.NewOPAProcessor(&processNotification, &reportResults)
+		reporterObj := opaprocessor.NewOPAProcessorHandler(&processNotification, &reportResults)
 		reporterObj.ProcessRulesListenner()
 	}()
 	p := printer.NewPrinter(&reportResults, scanInfo.Format, scanInfo.Output)

@@ -3,10 +3,6 @@ package opapolicy
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
-
-	"github.com/golang/glog"
-	"github.com/open-policy-agent/opa/rego"
 )
 
 func (pn *PolicyNotification) ToJSONBytesBuffer() (*bytes.Buffer, error) {
@@ -52,34 +48,6 @@ func (ruleReport *RuleReport) GetRuleStatus() (string, []RuleResponse, []RuleRes
 		status = "warning"
 	}
 	return status, failed, exceptions
-}
-func ParseRegoResult(regoResult *rego.ResultSet) ([]RuleResponse, error) {
-	var errs error
-	ruleResponses := []RuleResponse{}
-	for _, result := range *regoResult {
-		for desicionIdx := range result.Expressions {
-			if resMap, ok := result.Expressions[desicionIdx].Value.(map[string]interface{}); ok {
-				for objName := range resMap {
-					jsonBytes, err := json.Marshal(resMap[objName])
-					if err != nil {
-						err = fmt.Errorf("in parseRegoResult, json.Marshal failed. name: %s, obj: %v, reason: %s", objName, resMap[objName], err)
-						glog.Error(err)
-						errs = fmt.Errorf("%s\n%s", errs, err)
-						continue
-					}
-					desObj := make([]RuleResponse, 0)
-					if err := json.Unmarshal(jsonBytes, &desObj); err != nil {
-						err = fmt.Errorf("in parseRegoResult, json.Unmarshal failed. name: %s, obj: %v, reason: %s", objName, resMap[objName], err)
-						glog.Error(err)
-						errs = fmt.Errorf("%s\n%s", errs, err)
-						continue
-					}
-					ruleResponses = append(ruleResponses, desObj...)
-				}
-			}
-		}
-	}
-	return ruleResponses, errs
 }
 
 func (controlReport *ControlReport) GetNumberOfResources() int {
