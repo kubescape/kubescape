@@ -48,6 +48,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          upload_url: ${{ needs.once.outputs.upload_url }}
           asset_paths: '["build/${{ matrix.os }}/kubescape*"]'
-          asset_content_type: application/octet-stream
