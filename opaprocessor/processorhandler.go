@@ -56,12 +56,6 @@ func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASes
 }
 
 func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
-	// recover
-	defer func() {
-		if err := recover(); err != nil {
-			glog.Errorf("RECOVER in ProcessRulesListenner, reason: %v", err)
-		}
-	}()
 
 	for {
 		opaSessionObj := <-*opaHandler.processedPolicy
