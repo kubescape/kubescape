@@ -27,7 +27,6 @@ type Getters struct {
 }
 
 func (scanInfo *ScanInfo) Init() {
-	// scanInfo.setSilentMode()
 	scanInfo.setUseFrom()
 	scanInfo.setUseExceptions()
 	scanInfo.setOutputFile()
@@ -58,16 +57,7 @@ func (scanInfo *ScanInfo) setGetter() {
 		// load from file
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
 	} else {
-		scanInfo.PolicyGetter = getter.NewArmoAPI()
-	}
-}
-
-func (scanInfo *ScanInfo) setSilentMode() {
-	if scanInfo.Format == "json" || scanInfo.Format == "junit" {
-		scanInfo.Silent = true
-	}
-	if scanInfo.Output != "" {
-		scanInfo.Silent = true
+		scanInfo.PolicyGetter = getter.NewDownloadReleasedPolicy()
 	}
 }
 

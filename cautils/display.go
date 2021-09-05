@@ -21,6 +21,7 @@ func IsSilent() bool {
 }
 
 var FailureDisplay = color.New(color.Bold, color.FgHiRed).FprintfFunc()
+var WarningDisplay = color.New(color.Bold, color.FgCyan).FprintfFunc()
 var FailureTextDisplay = color.New(color.Faint, color.FgHiRed).FprintfFunc()
 var InfoDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
 var InfoTextDisplay = color.New(color.Faint, color.FgHiYellow).FprintfFunc()

@@ -16,18 +16,17 @@ import (
 // Armo API for downloading policies
 type ArmoAPI struct {
 	httpClient *http.Client
-	hostURL    string
+	baseURL    string
 }
 
 func NewArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
 		httpClient: &http.Client{},
-		hostURL:    "https://dashbe.eustage2.cyberarmorsoft.com",
+		baseURL:    "https://dashbe.auprod1.cyberarmorsoft.com",
 	}
 }
 func (armoAPI *ArmoAPI) GetFramework(name string) (*opapolicy.Framework, error) {
-	armoAPI.setURL(name)
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.hostURL)
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name))
 	if err != nil {
 		return nil, err
 	}
@@ -41,15 +40,37 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*opapolicy.Framework, error) 
 	return framework, err
 }
 
-func (armoAPI *ArmoAPI) setURL(frameworkName string) {
+func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	requestURI := "v1/armoFrameworks"
 	requestURI += fmt.Sprintf("?customerGUID=%s", "11111111-1111-1111-1111-111111111111")
 	requestURI += fmt.Sprintf("&frameworkName=%s", strings.ToUpper(frameworkName))
 	requestURI += "&getRules=true"
 
-	armoAPI.hostURL = urlEncoder(fmt.Sprintf("%s/%s", armoAPI.hostURL, requestURI))
+	return urlEncoder(fmt.Sprintf("%s/%s", armoAPI.baseURL, requestURI))
 }
 
-func (armoAPI *ArmoAPI) GetExceptions(scope, customerName, namespace string) ([]armotypes.PostureExceptionPolicy, error) {
-	return []armotypes.PostureExceptionPolicy{}, nil
+func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	exceptions := []armotypes.PostureExceptionPolicy{}
+	if customerGUID == "" {
+		return exceptions, nil
+	}
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(customerGUID, clusterName))
+	if err != nil {
+		return nil, err
+	}
+
+	if err = JSONDecoder(respStr).Decode(&exceptions); err != nil {
+		return nil, err
+	}
+
+	return exceptions, nil
+}
+
+func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) string {
+	requestURI := "api/v1/armoPostureExceptions"
+	requestURI += fmt.Sprintf("?customerGUID=%s", customerGUID)
+	if clusterName != "" {
+		requestURI += fmt.Sprintf("&clusterName=%s", clusterName)
+	}
+	return urlEncoder(fmt.Sprintf("%s/%s", armoAPI.baseURL, requestURI))
 }

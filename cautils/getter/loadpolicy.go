@@ -41,6 +41,14 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*opapolicy.Framework, 
 	return framework, err
 }
 
-func (lp *LoadPolicy) GetExceptions(policyType, customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	return []armotypes.PostureExceptionPolicy{}, nil
+func (lp *LoadPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+
+	exception := []armotypes.PostureExceptionPolicy{}
+	f, err := ioutil.ReadFile(lp.filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(f, &exception)
+	return exception, err
 }

@@ -27,7 +27,7 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	}
 }
 
-func (drp *DownloadReleasedPolicy) GetExceptions(policyType, customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (drp *DownloadReleasedPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	return []armotypes.PostureExceptionPolicy{}, nil
 }
 

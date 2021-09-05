@@ -7,6 +7,6 @@ import (
 
 type IPolicyGetter interface {
 	GetFramework(name string) (*opapolicy.Framework, error)
-	GetExceptions(policyType, customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error)
+	GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error)
 	// GetScores(scope, customerName, namespace string) ([]armotypes.PostureExceptionPolicy, error)
 }

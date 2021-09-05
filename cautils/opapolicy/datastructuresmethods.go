@@ -53,13 +53,26 @@ func (ruleReport *RuleReport) GetRuleStatus() (string, []RuleResponse, []RuleRes
 func (controlReport *ControlReport) GetNumberOfResources() int {
 	sum := 0
 	for i := range controlReport.RuleReports {
-		if controlReport.RuleReports[i].ListInputResources != nil {
-			sum += len(controlReport.RuleReports[i].ListInputResources)
-		}
+		sum += controlReport.RuleReports[i].GetNumberOfResources()
 	}
 	return sum
 }
 
+func (controlReport *ControlReport) GetNumberOfFailedResources() int {
+	sum := 0
+	for i := range controlReport.RuleReports {
+		sum += controlReport.RuleReports[i].GetNumberOfFailedResources()
+	}
+	return sum
+}
+
+func (controlReport *ControlReport) GetNumberOfWarningResources() int {
+	sum := 0
+	for i := range controlReport.RuleReports {
+		sum += controlReport.RuleReports[i].GetNumberOfWarningResources()
+	}
+	return sum
+}
 func (controlReport *ControlReport) ListControlsInputKinds() []string {
 	listControlsInputKinds := []string{}
 	for i := range controlReport.RuleReports {
@@ -99,4 +112,28 @@ func (controlReport *ControlReport) Failed() bool {
 		}
 	}
 	return false
+}
+
+func (ruleReport *RuleReport) GetNumberOfResources() int {
+	return len(ruleReport.ListInputResources)
+}
+
+func (ruleReport *RuleReport) GetNumberOfFailedResources() int {
+	sum := 0
+	for i := range ruleReport.RuleResponses {
+		if ruleReport.RuleResponses[i].GetSingleResultStatus() == "failed" {
+			sum += 1
+		}
+	}
+	return sum
+}
+
+func (ruleReport *RuleReport) GetNumberOfWarningResources() int {
+	sum := 0
+	for i := range ruleReport.RuleResponses {
+		if ruleReport.RuleResponses[i].GetSingleResultStatus() == "warning" {
+			sum += 1
+		}
+	}
+	return sum
 }

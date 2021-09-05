@@ -14,7 +14,9 @@ import (
 	"github.com/armosec/kubescape/cautils/opapolicy"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
-	"github.com/armosec/kubescape/printer"
+	"github.com/armosec/kubescape/resultshandling"
+	"github.com/armosec/kubescape/resultshandling/printer"
+	"github.com/armosec/kubescape/resultshandling/reporter"
 
 	"github.com/spf13/cobra"
 )
@@ -121,11 +123,12 @@ func CliSetup() error {
 
 	// processor setup - rego run
 	go func() {
-		reporterObj := opaprocessor.NewOPAProcessorHandler(&processNotification, &reportResults)
-		reporterObj.ProcessRulesListenner()
+		opaprocessorObj := opaprocessor.NewOPAProcessorHandler(&processNotification, &reportResults)
+		opaprocessorObj.ProcessRulesListenner()
 	}()
-	p := printer.NewPrinter(&reportResults, scanInfo.Format, scanInfo.Output)
-	score := p.ActionPrint()
+
+	resultsHandling := resultshandling.NewResultsHandler(&reportResults, reporter.NewReportEventReceiver(), printer.NewPrinter(scanInfo.Format, scanInfo.Output))
+	score := resultsHandling.HandleResults()
 
 	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
 	if score < adjustedFailThreshold {

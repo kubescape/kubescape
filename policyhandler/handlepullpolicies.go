@@ -41,7 +41,7 @@ func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*op
 		return nil, nil, err
 	}
 
-	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions("", "", "")
+	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions("", "")
 	if err != nil {
 		return receivedFramework, nil, err
 	}
