@@ -40,7 +40,7 @@ jobs:
           go-version: 1.16
 
       - name: Build
-        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s" -o build/${{ matrix.os }}/kubescape
+        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s" -o build/${{ matrix.os }}/kubescape && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
       
       - name: Upload Release Asset
         id: upload-release-asset
@@ -49,6 +49,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.once.outputs.upload_url }}
-          asset_path: build/${{ matrix.os }}/kubescape
+          asset_path: build/${{ matrix.os }}/kubescape*
           asset_name: kubescape-${{ matrix.os }}
           asset_content_type: application/octet-stream
