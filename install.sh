@@ -29,6 +29,9 @@ OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 echo -e "\033[32m[V] Downloaded Kubescape"
 
+# Ping download counter
+curl --silent https://us-central1-elated-pottery-310110.cloudfunctions.net/kubescape-download-counter -o /dev/null
+
 sudo chmod +x $OUTPUT
 sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
 sudo cp $OUTPUT /usr/local/bin
