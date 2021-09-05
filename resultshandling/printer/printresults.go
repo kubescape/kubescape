@@ -9,7 +9,6 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 
 	"github.com/enescakir/emoji"
@@ -27,19 +26,17 @@ const (
 )
 
 type Printer struct {
-	opaSessionObj      *chan *cautils.OPASessionObj
 	writer             *os.File
 	summary            Summary
 	sortedControlNames []string
 	printerType        string
 }
 
-func NewPrinter(opaSessionObj *chan *cautils.OPASessionObj, printerType, outputFile string) *Printer {
+func NewPrinter(printerType, outputFile string) *Printer {
 	return &Printer{
-		opaSessionObj: opaSessionObj,
-		summary:       NewSummary(),
-		printerType:   printerType,
-		writer:        getWriter(outputFile),
+		summary:     NewSummary(),
+		writer:      getWriter(outputFile),
+		printerType: printerType,
 	}
 }
 
@@ -63,45 +60,39 @@ func calculatePostureScore(postureReport *opapolicy.PostureReport) float32 {
 	return (float32(totalResources) - float32(totalFailed)) / float32(totalResources)
 }
 
-func (printer *Printer) ActionPrint() float32 {
+func (printer *Printer) ActionPrint(opaSessionObj *cautils.OPASessionObj) float32 {
 	var score float32
-	for {
-		opaSessionObj := <-*printer.opaSessionObj
-		if printer.printerType == PrettyPrinter {
-			printer.SummarySetup(opaSessionObj.PostureReport)
-			printer.PrintResults()
-			printer.PrintSummaryTable()
-		} else if printer.printerType == JsonPrinter {
-			postureReportStr, err := json.Marshal(opaSessionObj.PostureReport.FrameworkReports[0])
-			if err != nil {
-				fmt.Println("Failed to convert posture report object!")
-				os.Exit(1)
-			}
-			printer.writer.Write(postureReportStr)
-		} else if printer.printerType == JunitResultPrinter {
-			junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
-			if err != nil {
-				fmt.Println("Failed to convert posture report object!")
-				os.Exit(1)
-			}
-			postureReportStr, err := xml.Marshal(junitResult)
-			if err != nil {
-				fmt.Println("Failed to convert posture report object!")
-				os.Exit(1)
-			}
-			printer.writer.Write(postureReportStr)
-		} else if !cautils.IsSilent() {
-			fmt.Println("unknown output printer")
+
+	if printer.printerType == PrettyPrinter {
+		printer.SummarySetup(opaSessionObj.PostureReport)
+		printer.PrintResults()
+		printer.PrintSummaryTable()
+	} else if printer.printerType == JsonPrinter {
+		postureReportStr, err := json.Marshal(opaSessionObj.PostureReport.FrameworkReports[0])
+		if err != nil {
+			fmt.Println("Failed to convert posture report object!")
 			os.Exit(1)
 		}
-
-		score = calculatePostureScore(opaSessionObj.PostureReport)
-
-		if !k8sinterface.RunningIncluster {
-			break
+		printer.writer.Write(postureReportStr)
+	} else if printer.printerType == JunitResultPrinter {
+		junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
+		if err != nil {
+			fmt.Println("Failed to convert posture report object!")
+			os.Exit(1)
 		}
-
+		postureReportStr, err := xml.Marshal(junitResult)
+		if err != nil {
+			fmt.Println("Failed to convert posture report object!")
+			os.Exit(1)
+		}
+		printer.writer.Write(postureReportStr)
+	} else if !cautils.IsSilent() {
+		fmt.Println("unknown output printer")
+		os.Exit(1)
 	}
+
+	score = calculatePostureScore(opaSessionObj.PostureReport)
+
 	return score
 }
 
@@ -116,7 +107,8 @@ func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {
 
 			printer.summary[cr.Name] = ControlSummary{
 				TotalResources:  cr.GetNumberOfResources(),
-				TotalFailed:     len(workloadsSummary),
+				TotalFailed:     cr.GetNumberOfFailedResources(),
+				TotalWarnign:    cr.GetNumberOfWarningResources(),
 				WorkloadSummary: mapResources,
 				Description:     cr.Description,
 				Remediation:     cr.Remediation,
@@ -125,9 +117,7 @@ func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {
 		}
 	}
 	printer.sortedControlNames = printer.getSortedControlsNames()
-
 }
-
 func (printer *Printer) PrintResults() {
 	for i := 0; i < len(printer.sortedControlNames); i++ {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
@@ -144,6 +134,7 @@ func (printer *Printer) PrintResults() {
 func (printer *Printer) printSummary(controlName string, controlSummary *ControlSummary) {
 	cautils.SimpleDisplay(printer.writer, "Summary - ")
 	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed)
+	cautils.WarningDisplay(printer.writer, "Warning:%v   ", controlSummary.TotalWarnign)
 	cautils.FailureDisplay(printer.writer, "Failed:%v   ", controlSummary.TotalFailed)
 	cautils.InfoDisplay(printer.writer, "Total:%v\n", controlSummary.TotalResources)
 	if controlSummary.TotalFailed > 0 {
@@ -157,10 +148,12 @@ func (printer *Printer) printTitle(controlName string, controlSummary *ControlSu
 	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
 	if controlSummary.TotalResources == 0 && len(controlSummary.ListInputKinds) > 0 {
 		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
-	} else if controlSummary.TotalFailed == 0 {
-		cautils.SuccessDisplay(printer.writer, "passed %v\n", emoji.ThumbsUp)
-	} else {
+	} else if controlSummary.TotalFailed != 0 {
 		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
+	} else if controlSummary.TotalWarnign != 0 {
+		cautils.WarningDisplay(printer.writer, "warning %v\n", emoji.NeutralFace)
+	} else {
+		cautils.SuccessDisplay(printer.writer, "passed %v\n", emoji.ThumbsUp)
 	}
 
 	cautils.DescriptionDisplay(printer.writer, "Description: %s\n", controlSummary.Description)
@@ -197,7 +190,7 @@ func generateRow(control string, cs ControlSummary) []string {
 }
 
 func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "All Resources", "% success"}
+	return []string{"Control Name", "Failed Resources", "Warning Resources", "All Resources", "% success"}
 }
 
 func percentage(big, small int) int {
@@ -209,11 +202,12 @@ func percentage(big, small int) int {
 	}
 	return int(float64(float64(big-small)/float64(big)) * 100)
 }
-func generateFooter(numControlers, sumFailed, sumTotal int) []string {
+func generateFooter(numControlers, sumFailed, sumWarning, sumTotal int) []string {
 	// Control name | # failed resources | all resources | % success
 	row := []string{}
 	row = append(row, fmt.Sprintf("%d", numControlers))
 	row = append(row, fmt.Sprintf("%d", sumFailed))
+	row = append(row, fmt.Sprintf("%d", sumWarning))
 	row = append(row, fmt.Sprintf("%d", sumTotal))
 	if sumTotal != 0 {
 		row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
@@ -230,14 +224,16 @@ func (printer *Printer) PrintSummaryTable() {
 	summaryTable.SetAlignment(tablewriter.ALIGN_LEFT)
 	sumTotal := 0
 	sumFailed := 0
+	sumWarning := 0
 
 	for i := 0; i < len(printer.sortedControlNames); i++ {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
 		sumFailed += controlSummary.TotalFailed
+		sumWarning += controlSummary.TotalWarnign
 		sumTotal += controlSummary.TotalResources
 	}
-	summaryTable.SetFooter(generateFooter(len(printer.summary), sumFailed, sumTotal))
+	summaryTable.SetFooter(generateFooter(len(printer.summary), sumFailed, sumWarning, sumTotal))
 	summaryTable.Render()
 }
 

@@ -34,6 +34,7 @@ func listResultSummary(ruleReports []opapolicy.RuleReport) []WorkloadSummary {
 
 			// add resource only once
 			for i := range resource {
+				resource[i].Exception = ruleReport.Exception
 				if ok := track[resource[i].ToString()]; !ok {
 					track[resource[i].ToString()] = true
 					workloadsSummary = append(workloadsSummary, resource[i])
@@ -51,6 +52,7 @@ func ruleResultSummary(obj opapolicy.AlertObject) ([]WorkloadSummary, error) {
 		if err != nil {
 			return resource, err
 		}
+
 		resource = append(resource, *r)
 	}
 

@@ -2,6 +2,8 @@ package printer
 
 import (
 	"fmt"
+
+	"github.com/armosec/kubescape/cautils/armotypes"
 )
 
 type Summary map[string]ControlSummary
@@ -13,6 +15,7 @@ func NewSummary() Summary {
 type ControlSummary struct {
 	TotalResources  int
 	TotalFailed     int
+	TotalWarnign    int
 	Description     string
 	Remediation     string
 	ListInputKinds  []string
@@ -24,11 +27,13 @@ type WorkloadSummary struct {
 	Name      string
 	Namespace string
 	Group     string
+	Exception *armotypes.PostureExceptionPolicy
 }
 
 func (controlSummary *ControlSummary) ToSlice() []string {
 	s := []string{}
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalFailed))
+	s = append(s, fmt.Sprintf("%d", controlSummary.TotalWarnign))
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalResources))
 	return s
 }
