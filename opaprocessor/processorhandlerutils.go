@@ -1,12 +1,17 @@
 package opaprocessor
 
 import (
-	"github.com/armosec/kubescape/cautils"
+	"encoding/json"
+	"fmt"
 
 	pkgcautils "github.com/armosec/kubescape/cautils/cautils"
+
+	"github.com/armosec/kubescape/cautils"
+
 	"github.com/armosec/kubescape/cautils/k8sinterface"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 	resources "github.com/armosec/kubescape/cautils/opapolicy/resources"
+	"github.com/open-policy-agent/opa/rego"
 
 	"github.com/golang/glog"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -48,6 +53,73 @@ func getRuleDependencies() (map[string]string, error) {
 		glog.Warningf("failed to load rule dependencies")
 	}
 	return modules, nil
+}
+func parseRegoResult(regoResult *rego.ResultSet) ([]opapolicy.RuleResponse, error) {
+	var errs error
+	ruleResponses := []opapolicy.RuleResponse{}
+	for _, result := range *regoResult {
+		for desicionIdx := range result.Expressions {
+			if resMap, ok := result.Expressions[desicionIdx].Value.(map[string]interface{}); ok {
+				for objName := range resMap {
+					jsonBytes, err := json.Marshal(resMap[objName])
+					if err != nil {
+						err = fmt.Errorf("in parseRegoResult, json.Marshal failed. name: %s, obj: %v, reason: %s", objName, resMap[objName], err)
+						glog.Error(err)
+						errs = fmt.Errorf("%s\n%s", errs, err)
+						continue
+					}
+					desObj := make([]opapolicy.RuleResponse, 0)
+					if err := json.Unmarshal(jsonBytes, &desObj); err != nil {
+						err = fmt.Errorf("in parseRegoResult, json.Unmarshal failed. name: %s, obj: %v, reason: %s", objName, resMap[objName], err)
+						glog.Error(err)
+						errs = fmt.Errorf("%s\n%s", errs, err)
+						continue
+					}
+					ruleResponses = append(ruleResponses, desObj...)
+				}
+			}
+		}
+	}
+	return ruleResponses, errs
+}
+
+//editRuleResponses editing the responses -> removing duplications, clearing secret data, etc.
+func editRuleResponses(ruleResponses []opapolicy.RuleResponse) []opapolicy.RuleResponse {
+	uniqueRuleResponses := map[string]bool{}
+	lenRuleResponses := len(ruleResponses)
+	for i := 0; i < lenRuleResponses; i++ {
+		for j := range ruleResponses[i].AlertObject.K8SApiObjects {
+			w := k8sinterface.NewWorkloadObj(ruleResponses[i].AlertObject.K8SApiObjects[j])
+			if w == nil {
+				continue
+			}
+			resourceID := fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), w.GetKind(), w.GetName())
+			if found := uniqueRuleResponses[resourceID]; found {
+				// resource found -> remove from slice
+				ruleResponses = removeFromSlice(ruleResponses, i)
+				lenRuleResponses -= 1
+				break
+			} else {
+				cleanRuleResponses(w)
+				ruleResponses[i].AlertObject.K8SApiObjects[j] = w.GetWorkload()
+				uniqueRuleResponses[resourceID] = true
+			}
+		}
+	}
+	return ruleResponses
+}
+func cleanRuleResponses(workload k8sinterface.IWorkload) {
+	if workload.GetKind() == "Secret" {
+		workload.RemoveSecretData()
+	}
+}
+
+func removeFromSlice(ruleResponses []opapolicy.RuleResponse, i int) []opapolicy.RuleResponse {
+	if i != len(ruleResponses)-1 {
+		ruleResponses[i] = ruleResponses[len(ruleResponses)-1]
+	}
+
+	return ruleResponses[:len(ruleResponses)-1]
 }
 
 func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {

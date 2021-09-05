@@ -8,8 +8,9 @@ import (
 )
 
 type ScanInfo struct {
-	PolicyGetter       getter.IPolicyGetter
+	Getters
 	PolicyIdentifier   opapolicy.PolicyIdentifier
+	UseExceptions      string
 	UseFrom            string
 	UseDefault         bool
 	Format             string
@@ -20,11 +21,26 @@ type ScanInfo struct {
 	FailThreshold      uint16
 }
 
+type Getters struct {
+	ExceptionsGetter getter.IPolicyGetter
+	PolicyGetter     getter.IPolicyGetter
+}
+
 func (scanInfo *ScanInfo) Init() {
-	// scanInfo.setSilentMode()
 	scanInfo.setUseFrom()
+	scanInfo.setUseExceptions()
 	scanInfo.setOutputFile()
 	scanInfo.setGetter()
+
+}
+
+func (scanInfo *ScanInfo) setUseExceptions() {
+	if scanInfo.UseExceptions != "" {
+		// load exceptions from file
+		scanInfo.ExceptionsGetter = getter.NewLoadPolicy(scanInfo.UseExceptions)
+	} else {
+		scanInfo.ExceptionsGetter = getter.NewArmoAPI()
+	}
 
 }
 func (scanInfo *ScanInfo) setUseFrom() {
@@ -41,16 +57,7 @@ func (scanInfo *ScanInfo) setGetter() {
 		// load from file
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
 	} else {
-		scanInfo.PolicyGetter = getter.NewArmoAPI()
-	}
-}
-
-func (scanInfo *ScanInfo) setSilentMode() {
-	if scanInfo.Format == "json" || scanInfo.Format == "junit" {
-		scanInfo.Silent = true
-	}
-	if scanInfo.Output != "" {
-		scanInfo.Silent = true
+		scanInfo.PolicyGetter = getter.NewDownloadReleasedPolicy()
 	}
 }
 

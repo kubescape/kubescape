@@ -1,6 +1,6 @@
 package armotypes
 
-type EnforcmentsRule struct {
+type EnforcementsRule struct {
 	MonitoredObject          []string `json:"monitoredObject"`
 	MonitoredObjectExistence []string `json:"objectExistence"`
 	MonitoredObjectEvent     []string `json:"event"`
@@ -12,5 +12,5 @@ type ExecutionPolicy struct {
 	Designators               []PortalDesignator `json:"designators"`
 	PolicyType                string             `json:"policyType"`
 	CreationTime              string             `json:"creation_time"`
-	ExecutionEnforcmentsRules []EnforcmentsRule  `json:"enforcementRules"`
+	ExecutionEnforcementsRule []EnforcementsRule `json:"enforcementRules"`
 }

@@ -31,10 +31,10 @@ echo -e "\033[32m[V] Downloaded Kubescape"
 
 # Ping download counter
 curl --silent https://us-central1-elated-pottery-310110.cloudfunctions.net/kubescape-download-counter -o /dev/null
-
-sudo chmod +x $OUTPUT
-sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
-sudo cp $OUTPUT /usr/local/bin
+ 
+chmod +x $OUTPUT || sudo chmod +x $OUTPUT
+rm -f /usr/local/bin/$KUBESCAPE_EXEC || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
+cp $OUTPUT /usr/local/bin || sudo cp $OUTPUT /usr/local/bin
 rm -rf $OUTPUT
 
 echo -e "[V] Finished Installation"
