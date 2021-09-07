@@ -126,6 +126,18 @@ go mod tidy && go build -o kubescape .
 
 4. Enjoy :zany_face:
 
+# How to build in Docker
+
+1. Clone Project
+```
+git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
+```
+
+2. Build
+```
+docker build -t kubescape -f build/Dockerfile .
+```
+
 # Under the hood
 
 ## Tests
