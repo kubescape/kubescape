@@ -22,7 +22,7 @@ type ArmoAPI struct {
 func NewArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
 		httpClient: &http.Client{},
-		baseURL:    "https://dashbe.auprod1.cyberarmorsoft.com",
+		baseURL:    "https://dashbe.euprod1.cyberarmorsoft.com",
 	}
 }
 func (armoAPI *ArmoAPI) GetFramework(name string) (*opapolicy.Framework, error) {
