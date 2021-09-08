@@ -4,8 +4,8 @@ import (
 	"fmt"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
 
+	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/k8sinterface"
 
 	"github.com/armosec/kubescape/cautils/opapolicy"
@@ -16,6 +16,7 @@ type PolicyHandler struct {
 	k8s *k8sinterface.KubernetesApi
 	// we are listening on this chan in opaprocessor/processorhandler.go/ProcessRulesListenner func
 	processPolicy *chan *cautils.OPASessionObj
+	getters       *cautils.Getters
 }
 
 // CreatePolicyHandler Create ws-handler obj
@@ -30,9 +31,10 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 	opaSessionObj := cautils.NewOPASessionObj(nil, nil)
 	// validate notification
 	// TODO
+	policyHandler.getters = &scanInfo.Getters
 
 	// get policies
-	frameworks, err := policyHandler.getPolicies(notification, scanInfo.PolicyGetter)
+	frameworks, exceptions, err := policyHandler.getPolicies(notification)
 	if err != nil {
 		return err
 	}
@@ -40,6 +42,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 		return fmt.Errorf("empty list of frameworks")
 	}
 	opaSessionObj.Frameworks = frameworks
+	opaSessionObj.Exceptions = exceptions
 
 	k8sResources, err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
 	if err != nil {
@@ -55,22 +58,22 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 	return nil
 }
 
-func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNotification, policyGetter getter.IPolicyGetter) ([]opapolicy.Framework, error) {
+func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNotification) ([]opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {
 
 	cautils.ProgressTextDisplay("Downloading/Loading framework definitions")
 
-	frameworks, err := policyHandler.GetPoliciesFromBackend(notification, policyGetter)
+	frameworks, exceptions, err := policyHandler.GetPoliciesFromBackend(notification)
 	if err != nil {
-		return frameworks, err
+		return frameworks, exceptions, err
 	}
 
 	if len(frameworks) == 0 {
 		err := fmt.Errorf("could not download any policies, please check previous logs")
-		return frameworks, err
+		return frameworks, exceptions, err
 	}
 	cautils.SuccessTextDisplay("Downloaded/Loaded framework")
 
-	return frameworks, nil
+	return frameworks, exceptions, nil
 }
 
 func (policyHandler *PolicyHandler) getResources(notification *opapolicy.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {

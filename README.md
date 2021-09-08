@@ -1,7 +1,6 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
-[![Github All Releases](https://img.shields.io/github/downloads/armosec/kubescape/total.svg)](https://github.com/armosec/kubescape)
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
 Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
@@ -37,7 +36,10 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 | `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result bellow threshold| `0` -> `100` |
 | `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` | 
 | `-o`/`--output` | print to stdout | Save scan result in file |
- 
+| `--use-from` | | Load local framework object from specified path. If not used will download latest |
+| `--use-default` | `false` | Load local framework object from default path. If not used will download latest | `true`/`false` |
+| `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json) |
+
 ## Usage & Examples
  
 ### Examples
@@ -47,30 +49,35 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
 
-* Scan local `yaml`/`json` files before deploying <img src="docs/new-feature.svg">
+* Scan local `yaml`/`json` files before deploying
 ```
 kubescape scan framework nsa *.yaml
 ```
 
 
-* Scan `yaml`/`json` files from url  <img src="docs/new-feature.svg">
+* Scan `yaml`/`json` files from url 
 ```
 kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatform/microservices-demo/master/release/kubernetes-manifests.yaml
 ```
 
-* Output in `json` format  <img src="docs/new-feature.svg">
+* Output in `json` format 
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format json --output results.json
 ```
 
-* Output in `junit xml` format  <img src="docs/new-feature.svg">
+* Output in `junit xml` format 
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
 ```
 
+* Scan with exceptions, objects with exceptions will be presented as `warning` and not `fail`  <img src="docs/new-feature.svg">
+```
+kubescape scan framework nsa --exceptions examples/exceptions.json
+```
+
 ### Helm Support
 
-* Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout   <img src="docs/new-feature.svg">
+* Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout 
 ```
 helm template [NAME] [CHART] [flags] --dry-run | kubescape scan framework nsa -
 ```

@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
@@ -10,6 +11,7 @@ type K8SResources map[string]interface{}
 type OPASessionObj struct {
 	Frameworks    []opapolicy.Framework
 	K8SResources  *K8SResources
+	Exceptions    []armotypes.PostureExceptionPolicy
 	PostureReport *opapolicy.PostureReport
 }
 
