@@ -1,6 +1,8 @@
 name: build
 
 on:
+  push:
+    branches: [ master ]
   pull_request:
     branches: [ master ]
     types: [ closed ]
@@ -61,4 +63,3 @@ jobs:
       #     asset_path: build/${{ matrix.os }}/kubescape.md5
       #     asset_name: kubescape-${{ matrix.os }}
       #     asset_content_type: application/octet-stream
-
