@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/armosec/kubescape/cmd"
 )
@@ -12,8 +13,10 @@ func main() {
 }
 
 func CheckLatestVersion() {
-	latest, _ := cmd.GetLatestVersion()
-	if latest != cmd.BuildNumber {
+	latest, err := cmd.GetLatestVersion()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+	} else if latest != cmd.BuildNumber {
 		fmt.Println("Warning: You are not updated to the latest release: " + latest)
 	}
 
