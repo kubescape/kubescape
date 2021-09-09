@@ -10,6 +10,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/armotypes"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/k8sinterface"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 	"github.com/armosec/kubescape/opaprocessor"
@@ -115,11 +116,22 @@ func CliSetup() error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	// cli handler setup
-	cli := NewCLIHandler(policyHandler)
-	if err := cli.Scan(); err != nil {
-		panic(err)
+	// load cluster config
+	clusterConfig := cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
+	if err := clusterConfig.SetCustomerGUID(); err != nil {
+		fmt.Println(err)
 	}
+	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
+	cautils.ClusterName = "minikube" // clusterConfig.GetClusterName()
+
+	// cli handler setup
+	go func() {
+		cli := NewCLIHandler(policyHandler)
+		if err := cli.Scan(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}()
 
 	// processor setup - rego run
 	go func() {
@@ -129,6 +141,9 @@ func CliSetup() error {
 
 	resultsHandling := resultshandling.NewResultsHandler(&reportResults, reporter.NewReportEventReceiver(), printer.NewPrinter(scanInfo.Format, scanInfo.Output))
 	score := resultsHandling.HandleResults()
+
+	// print report url
+	fmt.Println(clusterConfig.GenerateURL())
 
 	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
 	if score < adjustedFailThreshold {
@@ -156,12 +171,10 @@ func (clihandler *CLIHandler) Scan() error {
 	}
 	switch policyNotification.NotificationType {
 	case opapolicy.TypeExecPostureScan:
-		go func() {
-			if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
-				fmt.Printf("%v\n", err)
-				os.Exit(0)
-			}
-		}()
+		//
+		if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
 	}
