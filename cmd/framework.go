@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"strings"
 
@@ -122,7 +123,7 @@ func CliSetup() error {
 		fmt.Println(err)
 	}
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
-	cautils.ClusterName = "minikube" // clusterConfig.GetClusterName()
+	cautils.ClusterName = generateClusterName()
 
 	// cli handler setup
 	go func() {
@@ -179,4 +180,22 @@ func (clihandler *CLIHandler) Scan() error {
 		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
 	}
 	return nil
+}
+
+func generateClusterName() string {
+	name := fmt.Sprintf("%d", rand.Int())
+	if k8sinterface.K8SConfig == nil {
+		return name
+	}
+	if k8sinterface.K8SConfig.Host != "" {
+		name = k8sinterface.K8SConfig.Host
+	} else if k8sinterface.K8SConfig.ServerName != "" {
+		name = k8sinterface.K8SConfig.ServerName
+	}
+
+	name = strings.ReplaceAll(name, ".", "-")
+	name = strings.ReplaceAll(name, " ", "-")
+	name = strings.ReplaceAll(name, "https://", "")
+	name = strings.ReplaceAll(name, ":", "-")
+	return name
 }

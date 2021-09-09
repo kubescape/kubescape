@@ -38,7 +38,7 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*opapolicy.Framework, error) 
 	if err = JSONDecoder(respStr).Decode(framework); err != nil {
 		return nil, err
 	}
-	SaveFrameworkInFile(framework, GetDefaultPath(name))
+	SaveFrameworkInFile(framework, GetDefaultPath(name+".json"))
 
 	return framework, err
 }

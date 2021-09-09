@@ -20,16 +20,19 @@ const (
 
 type ConfigObj struct {
 	CustomerGUID string `json:"customerGUID"`
-	ClusterName  string `json:"clusterName"`
 	Token        string `json:"token"`
 }
+
+func (co *ConfigObj) Json() []byte {
+	if b, err := json.Marshal(co); err == nil {
+		return b
+	}
+	return []byte{}
+}
+
 type IClusterConfig interface {
 	SetCustomerGUID()
-	SetClusterName()
-
 	GetCustomerGUID()
-	GetClusterName()
-
 	GenerateURL() string
 }
 
@@ -49,9 +52,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, armoAPI *getter.ArmoAPI) 
 }
 func (c *ClusterConfig) update(configObj *ConfigObj) {
 	c.configObj = configObj
-}
-func (c *ClusterConfig) SetClusterName() {
-	// k8sinterface.K8SConfig.
+	ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), c.configObj.Json(), 0664)
 }
 func (c *ClusterConfig) GenerateURL() string {
 	u := url.URL{}
@@ -66,9 +67,7 @@ func (c *ClusterConfig) GenerateURL() string {
 
 	return u.String()
 }
-func (c *ClusterConfig) GetClusterName() string {
-	return c.configObj.ClusterName
-}
+
 func (c *ClusterConfig) GetCustomerGUID() string {
 	return c.configObj.CustomerGUID
 }
@@ -112,6 +111,9 @@ func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
 }
 
 func (c *ClusterConfig) updateConfigMap() error {
+	if c.k8s == nil {
+		return nil
+	}
 	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
 	if err != nil {
 		configMap = &corev1.ConfigMap{
@@ -121,7 +123,7 @@ func (c *ClusterConfig) updateConfigMap() error {
 		}
 	}
 
-	c.updateConfigMapData(configMap)
+	c.updateConfigData(configMap)
 
 	if err != nil {
 		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Create(context.Background(), configMap, metav1.CreateOptions{})
@@ -130,7 +132,7 @@ func (c *ClusterConfig) updateConfigMap() error {
 	}
 	return err
 }
-func (c *ClusterConfig) updateConfigMapData(configMap *corev1.ConfigMap) {
+func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {
 	if len(configMap.Data) == 0 {
 		configMap.Data = make(map[string]string)
 	}
@@ -142,7 +144,7 @@ func (c *ClusterConfig) updateConfigMapData(configMap *corev1.ConfigMap) {
 	}
 }
 func (c *ClusterConfig) loadConfigFromFile() (*ConfigObj, error) {
-	dat, err := ioutil.ReadFile(configFileName)
+	dat, err := ioutil.ReadFile(getter.GetDefaultPath(configFileName + ".json"))
 	if err != nil {
 		return nil, err
 	}

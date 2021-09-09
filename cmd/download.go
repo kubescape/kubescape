@@ -24,7 +24,7 @@ var downloadCmd = &cobra.Command{
 		downloadInfo.FrameworkName = args[1]
 		g := getter.NewDownloadReleasedPolicy()
 		if downloadInfo.Path == "" {
-			downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName)
+			downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName + ".json")
 		}
 		frameworks, err := g.GetFramework(downloadInfo.FrameworkName)
 		if err != nil {
