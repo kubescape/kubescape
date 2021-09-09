@@ -40,9 +40,9 @@ jobs:
           go-version: 1.16
 
       - name: Build
-        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s" -o build/${{ matrix.os }}/kubescape
+        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
       
-      - name: Upload Release Asset
+      - name: Upload Release binaries
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
         env:
