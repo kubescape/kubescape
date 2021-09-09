@@ -9,13 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var (
-	sha1ver    string
-	buildTime  string
-	Run_number string
-)
+var Run_number string
 
-// versionCmd represents the version command
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Get current version",
