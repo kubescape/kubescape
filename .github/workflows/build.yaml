@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: [ master ]
     types: [ closed ]
-
 jobs:
   once:
     name: Create release
@@ -38,9 +37,10 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.16
-
       - name: Build
-        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
+        env:
+          RELEASE: v1.0.${{ github.run_number }} 
+        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
       
       - name: Upload Release binaries
         id: upload-release-asset
