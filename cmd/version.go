@@ -12,7 +12,7 @@ import (
 var (
 	sha1ver    string
 	buildTime  string
-	run_number string
+	Run_number string
 )
 
 // versionCmd represents the version command
@@ -21,18 +21,7 @@ var versionCmd = &cobra.Command{
 	Short: "Get current version",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println(sha1ver)
-		fmt.Println(buildTime)
-		latest, err := GetLatestVersion()
-		if err != nil {
-			return err
-		}
-		fmt.Println(latest)
-		if latest == run_number {
-			fmt.Println("Updated")
-		} else {
-			fmt.Println("Not updated")
-		}
+		fmt.Println("Your current version is: " + Run_number)
 		return nil
 	},
 }
