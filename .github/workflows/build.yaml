@@ -40,7 +40,7 @@ jobs:
       - name: Build
         env:
           RELEASE: v1.0.${{ github.run_number }} 
-        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.Run_number=$RELEASE" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
+        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
       
       - name: Upload Release binaries
         id: upload-release-asset

@@ -9,14 +9,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var Run_number string
+var BuildNumber string
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Get current version",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Println("Your current version is: " + Run_number)
+		fmt.Println("Your current version is: " + BuildNumber)
 		return nil
 	},
 }

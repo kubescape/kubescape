@@ -13,7 +13,7 @@ func main() {
 
 func CheckLatestVersion() {
 	latest, _ := cmd.GetLatestVersion()
-	if latest != cmd.Run_number {
+	if latest != cmd.BuildNumber {
 		fmt.Println("Warning: You are not updated to the latest release: " + latest)
 	}
 
