@@ -43,7 +43,7 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framewo
 		return framework, err
 	}
 
-	SaveFrameworkInFile(framework, GetDefaultPath(name))
+	SaveFrameworkInFile(framework, GetDefaultPath(name+".json"))
 	return framework, err
 }
 
