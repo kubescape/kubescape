@@ -1,6 +1,8 @@
 name: build
 
 on:
+  push:
+    branches: [ master ]
   pull_request:
     branches: [ master ]
     types: [ closed ]
@@ -50,15 +52,3 @@ jobs:
           asset_path: build/${{ matrix.os }}/kubescape
           asset_name: kubescape-${{ matrix.os }}
           asset_content_type: application/octet-stream
-
-      # - name: Upload Release md5 digest
-      #   id: upload-release-asset
-      #   uses: actions/upload-release-asset@v1
-      #   env:
-      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #   with:
-      #     upload_url: ${{ needs.once.outputs.upload_url }}
-      #     asset_path: build/${{ matrix.os }}/kubescape.md5
-      #     asset_name: kubescape-${{ matrix.os }}
-      #     asset_content_type: application/octet-stream
-
