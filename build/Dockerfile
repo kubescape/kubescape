@@ -4,7 +4,7 @@ ENV GO111MODULE=on
 
 WORKDIR /work
 ADD . .
-RUN go mod download
+RUN go mod tidy
 RUN GOOS=linux CGO_ENABLED=0 go build -ldflags="-s -w " -installsuffix cgo  -o kubescape .
 
 FROM alpine
