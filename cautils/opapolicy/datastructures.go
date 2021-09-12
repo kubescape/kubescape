@@ -41,6 +41,7 @@ type FrameworkReport struct {
 }
 type ControlReport struct {
 	armotypes.PortalBase `json:",inline"`
+	ControlID            string       `json:"id"`
 	Name                 string       `json:"name"`
 	RuleReports          []RuleReport `json:"ruleReports"`
 	Remediation          string       `json:"remediation"`
@@ -100,10 +101,12 @@ type PolicyRule struct {
 // Control represents a collection of rules which are combined together to single purpose
 type Control struct {
 	armotypes.PortalBase `json:",inline"`
-	CreationTime         string       `json:"creationTime"`
-	Description          string       `json:"description"`
-	Remediation          string       `json:"remediation"`
-	Rules                []PolicyRule `json:"rules"`
+	ControlID            string `json:"id"`
+
+	CreationTime string       `json:"creationTime"`
+	Description  string       `json:"description"`
+	Remediation  string       `json:"remediation"`
+	Rules        []PolicyRule `json:"rules"`
 	// for new list of  rules in POST/UPADTE requests
 	RulesIDs *[]string `json:"rulesIDs,omitempty"`
 }
