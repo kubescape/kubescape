@@ -46,7 +46,7 @@ type ControlReport struct {
 	RuleReports          []RuleReport `json:"ruleReports"`
 	Remediation          string       `json:"remediation"`
 	Description          string       `json:"description"`
-	Score                float32      `json:"score,omitempty"`
+	Score                float32      `json:"score"`
 	BaseScore            float32      `json:"baseScore,omitempty"`
 	ARMOImprovement      float32      `json:"ARMOImprovement,omitempty"`
 }
