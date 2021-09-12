@@ -178,6 +178,10 @@ func (printer *Printer) printResult(controlName string, controlSummary *ControlS
 
 }
 
+func (printer *Printer) PrintUrl(url string) {
+	cautils.InfoTextDisplay(printer.writer, url)
+}
+
 func generateRow(control string, cs ControlSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)

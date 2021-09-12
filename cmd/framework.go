@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"strings"
 
@@ -95,7 +94,7 @@ func init() {
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code -1")
-
+	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Kubescape sends scan results to its backend to allow users to control exceptions and maintain chronological scan results. Use –results-locally if you do not wish to use these features")
 }
 
 func CliSetup() error {
@@ -107,7 +106,9 @@ func CliSetup() error {
 	}
 
 	var k8s *k8sinterface.KubernetesApi
-	if scanInfo.ScanRunningCluster() {
+	if !scanInfo.ScanRunningCluster() {
+		k8sinterface.ConnectedToCluster = false
+	} else {
 		k8s = k8sinterface.NewKubernetesApi()
 	}
 
@@ -118,12 +119,18 @@ func CliSetup() error {
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
 	// load cluster config
-	clusterConfig := cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
+	var clusterConfig cautils.IClusterConfig
+	if !scanInfo.DoNotSendResults && k8sinterface.ConnectedToCluster {
+		clusterConfig = cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
+	} else {
+		clusterConfig = cautils.NewEmptyConfig()
+	}
+
 	if err := clusterConfig.SetCustomerGUID(); err != nil {
 		fmt.Println(err)
 	}
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
-	cautils.ClusterName = generateClusterName()
+	cautils.ClusterName = k8sinterface.GetClusterName()
 
 	// cli handler setup
 	go func() {
@@ -144,7 +151,7 @@ func CliSetup() error {
 	score := resultsHandling.HandleResults()
 
 	// print report url
-	fmt.Println(clusterConfig.GenerateURL())
+	clusterConfig.GenerateURL()
 
 	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
 	if score < adjustedFailThreshold {
@@ -180,22 +187,4 @@ func (clihandler *CLIHandler) Scan() error {
 		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
 	}
 	return nil
-}
-
-func generateClusterName() string {
-	name := fmt.Sprintf("%d", rand.Int())
-	if k8sinterface.K8SConfig == nil {
-		return name
-	}
-	if k8sinterface.K8SConfig.Host != "" {
-		name = k8sinterface.K8SConfig.Host
-	} else if k8sinterface.K8SConfig.ServerName != "" {
-		name = k8sinterface.K8SConfig.ServerName
-	}
-
-	name = strings.ReplaceAll(name, ".", "-")
-	name = strings.ReplaceAll(name, " ", "-")
-	name = strings.ReplaceAll(name, "https://", "")
-	name = strings.ReplaceAll(name, ":", "-")
-	return name
 }

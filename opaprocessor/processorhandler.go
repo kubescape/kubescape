@@ -221,6 +221,10 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 
 func (opap *OPAProcessor) updateScore() {
 
+	if !k8sinterface.ConnectedToCluster {
+		return
+	}
+
 	// calculate score
 	s := score.NewScore(k8sinterface.NewKubernetesApi(), ScoreConfigPath)
 	s.Calculate(opap.PostureReport.FrameworkReports)
