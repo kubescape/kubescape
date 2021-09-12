@@ -121,6 +121,7 @@ func (opap *OPAProcessor) processControl(control *opapolicy.Control) (*opapolicy
 
 	controlReport := opapolicy.ControlReport{}
 	controlReport.PortalBase = control.PortalBase
+	controlReport.ControlID = control.ControlID
 
 	controlReport.Name = control.Name
 	controlReport.Description = control.Description
