@@ -70,7 +70,7 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opap.updateResults()
 
 		// update score
-		opap.updateScore()
+		// opap.updateScore()
 
 		// report
 		*opaHandler.reportResults <- opaSessionObj
@@ -125,6 +125,7 @@ func (opap *OPAProcessor) processControl(control *opapolicy.Control) (*opapolicy
 	controlReport.PortalBase = control.PortalBase
 
 	controlReport.Name = control.Name
+	controlReport.ID = control.ID
 	controlReport.Description = control.Description
 	controlReport.Remediation = control.Remediation
 
