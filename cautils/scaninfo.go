@@ -19,10 +19,11 @@ type ScanInfo struct {
 	InputPatterns      []string
 	Silent             bool
 	FailThreshold      uint16
+	DoNotSendResults   bool
 }
 
 type Getters struct {
-	ExceptionsGetter getter.IPolicyGetter
+	ExceptionsGetter getter.IExceptionsGetter
 	PolicyGetter     getter.IPolicyGetter
 }
 
@@ -80,3 +81,8 @@ func (scanInfo *ScanInfo) setOutputFile() {
 func (scanInfo *ScanInfo) ScanRunningCluster() bool {
 	return len(scanInfo.InputPatterns) == 0
 }
+
+// func (scanInfo *ScanInfo) ConnectedToCluster(k8s k8sinterface.) bool {
+// 	_, err := k8s.KubernetesClient.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
+// 	return err == nil
+// }

@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
@@ -25,10 +24,6 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 		hostURL:    "",
 		httpClient: &http.Client{},
 	}
-}
-
-func (drp *DownloadReleasedPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	return []armotypes.PostureExceptionPolicy{}, nil
 }
 
 func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framework, error) {

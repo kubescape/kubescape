@@ -42,7 +42,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj) *OPAProcessor {
 
 func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessorHandler {
 
-	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.K8SConfig)
+	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig())
 	store, err := regoDependenciesData.TOStorage()
 	if err != nil {
 		panic(err)
@@ -222,6 +222,10 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 
 func (opap *OPAProcessor) updateScore() {
 
+	if !k8sinterface.ConnectedToCluster {
+		return
+	}
+
 	// calculate score
 	s := score.NewScore(k8sinterface.NewKubernetesApi(), ScoreConfigPath)
 	s.Calculate(opap.PostureReport.FrameworkReports)
@@ -229,6 +233,8 @@ func (opap *OPAProcessor) updateScore() {
 
 func (opap *OPAProcessor) updateResults() {
 	for f, frameworkReport := range opap.PostureReport.FrameworkReports {
+		sumFailed := 0
+		sumTotal := 0
 		for c, controlReport := range opap.PostureReport.FrameworkReports[f].ControlReports {
 			for r, ruleReport := range opap.PostureReport.FrameworkReports[f].ControlReports[c].RuleReports {
 				// editing the responses -> removing duplications, clearing secret data, etc.
@@ -238,6 +244,10 @@ func (opap *OPAProcessor) updateResults() {
 				ruleExceptions := exceptions.ListRuleExceptions(opap.Exceptions, frameworkReport.Name, controlReport.Name, ruleReport.Name)
 				exceptions.AddExceptionsToRuleResponses(opap.PostureReport.FrameworkReports[f].ControlReports[c].RuleReports[r].RuleResponses, ruleExceptions)
 			}
+			sumFailed += controlReport.GetNumberOfFailedResources()
+			sumTotal += controlReport.GetNumberOfResources()
+			opap.PostureReport.FrameworkReports[f].ControlReports[c].Score = float32(percentage(controlReport.GetNumberOfResources(), controlReport.GetNumberOfFailedResources()))
 		}
+		opap.PostureReport.FrameworkReports[f].Score = float32(percentage(sumTotal, sumFailed))
 	}
 }

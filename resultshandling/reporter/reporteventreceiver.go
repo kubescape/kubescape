@@ -28,6 +28,7 @@ func (report *ReportEventReceiver) ActionSendReportListenner(opaSessionObj *caut
 	if cautils.CustomerGUID == "" {
 		return
 	}
+	//Add score
 	opaSessionObj.PostureReport.RemoveData()
 	if err := report.Send(opaSessionObj.PostureReport); err != nil {
 		fmt.Println(err)

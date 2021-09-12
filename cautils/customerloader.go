@@ -3,8 +3,10 @@ package cautils
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"net/url"
+	"os"
 
 	"github.com/armosec/kubescape/cautils/getter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,9 +33,9 @@ func (co *ConfigObj) Json() []byte {
 }
 
 type IClusterConfig interface {
-	SetCustomerGUID()
-	GetCustomerGUID()
-	GenerateURL() string
+	SetCustomerGUID() error
+	GetCustomerGUID() string
+	GenerateURL()
 }
 
 type ClusterConfig struct {
@@ -43,18 +45,37 @@ type ClusterConfig struct {
 	configObj *ConfigObj
 }
 
+type EmptyConfig struct {
+}
+
+func (c *EmptyConfig) GenerateURL() {
+}
+
+func (c *EmptyConfig) SetCustomerGUID() error {
+	return nil
+}
+
+func (c *EmptyConfig) GetCustomerGUID() string {
+	return ""
+}
+
+func NewEmptyConfig() *EmptyConfig {
+	return &EmptyConfig{}
+}
+
 func NewClusterConfig(k8s *k8sinterface.KubernetesApi, armoAPI *getter.ArmoAPI) *ClusterConfig {
 	return &ClusterConfig{
 		k8s:       k8s,
 		armoAPI:   armoAPI,
-		defaultNS: "default", // TODO - load default namespace from k8s api
+		defaultNS: k8sinterface.GetDefaultNamespace(),
 	}
 }
+
 func (c *ClusterConfig) update(configObj *ConfigObj) {
 	c.configObj = configObj
 	ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), c.configObj.Json(), 0664)
 }
-func (c *ClusterConfig) GenerateURL() string {
+func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.ArmoFEURL
@@ -64,8 +85,9 @@ func (c *ClusterConfig) GenerateURL() string {
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
+	fmt.Println("To view all controls and get remediations visit:")
+	InfoTextDisplay(os.Stdout, u.String()+"\n")
 
-	return u.String()
 }
 
 func (c *ClusterConfig) GetCustomerGUID() string {
