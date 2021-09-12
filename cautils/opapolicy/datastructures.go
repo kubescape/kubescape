@@ -42,6 +42,7 @@ type FrameworkReport struct {
 type ControlReport struct {
 	armotypes.PortalBase `json:",inline"`
 	Name                 string       `json:"name"`
+	ID                   string       `json:"id"`
 	RuleReports          []RuleReport `json:"ruleReports"`
 	Remediation          string       `json:"remediation"`
 	Description          string       `json:"description"`
@@ -100,6 +101,7 @@ type PolicyRule struct {
 // Control represents a collection of rules which are combined together to single purpose
 type Control struct {
 	armotypes.PortalBase `json:",inline"`
+	ID                   string       `json:"id"`
 	CreationTime         string       `json:"creationTime"`
 	Description          string       `json:"description"`
 	Remediation          string       `json:"remediation"`
