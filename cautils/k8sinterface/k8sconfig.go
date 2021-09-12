@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	"k8s.io/client-go/tools/clientcmd"
+
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
@@ -17,6 +19,7 @@ import (
 
 // K8SConfig pointer to k8s config
 var K8SConfig *restclient.Config
+var K8SCmdConfig clientcmd.ClientConfig
 
 // KubernetesApi -
 type KubernetesApi struct {
@@ -51,13 +54,15 @@ var RunningIncluster bool
 
 // LoadK8sConfig load config from local file or from cluster
 func LoadK8sConfig() error {
+
 	kubeconfig, err := config.GetConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load kubernetes config: %s\n", strings.ReplaceAll(err.Error(), "KUBERNETES_MASTER", "KUBECONFIG"))
+		return fmt.Errorf("failed to load kubernetes config: %s", strings.ReplaceAll(err.Error(), "KUBERNETES_MASTER", "KUBECONFIG"))
 	}
 	if _, err := restclient.InClusterConfig(); err == nil {
 		RunningIncluster = true
 	}
+
 	K8SConfig = kubeconfig
 	return nil
 }
@@ -66,8 +71,7 @@ func LoadK8sConfig() error {
 func GetK8sConfig() *restclient.Config {
 	if K8SConfig == nil {
 		if err := LoadK8sConfig(); err != nil {
-			// print error
-			fmt.Printf("%s", err.Error())
+			fmt.Println(err.Error())
 			os.Exit(1)
 		}
 	}

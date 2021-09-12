@@ -13,8 +13,8 @@ import (
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
-func GetDefaultPath(frameworkName string) string {
-	defaultfilePath := filepath.Join(DefaultLocalStore, frameworkName+".json")
+func GetDefaultPath(name string) string {
+	defaultfilePath := filepath.Join(DefaultLocalStore, name)
 	if homeDir, err := os.UserHomeDir(); err == nil {
 		defaultfilePath = filepath.Join(homeDir, defaultfilePath)
 	}
