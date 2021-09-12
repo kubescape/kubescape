@@ -42,7 +42,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj) *OPAProcessor {
 
 func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessorHandler {
 
-	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.K8SConfig)
+	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig())
 	store, err := regoDependenciesData.TOStorage()
 	if err != nil {
 		panic(err)

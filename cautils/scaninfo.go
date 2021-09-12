@@ -22,7 +22,7 @@ type ScanInfo struct {
 }
 
 type Getters struct {
-	ExceptionsGetter getter.IPolicyGetter
+	ExceptionsGetter getter.IExceptionsGetter
 	PolicyGetter     getter.IPolicyGetter
 }
 
