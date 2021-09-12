@@ -70,7 +70,7 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opap.updateResults()
 
 		// update score
-		opap.updateScore()
+		// opap.updateScore()
 
 		// report
 		*opaHandler.reportResults <- opaSessionObj
