@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/gofrs/uuid"
 )
 
@@ -36,12 +37,12 @@ func initEventReceiverURL() *url.URL {
 	urlObj := url.URL{}
 
 	urlObj.Scheme = "https"
-	urlObj.Host = "report.euprod1.cyberarmorsoft.com"
+	urlObj.Host = getter.ArmoERURL
 	urlObj.Path = "/k8s/postureReport"
-
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.FromStringOrNil(cautils.CustomerGUID).String())
 	q.Add("clusterName", cautils.ClusterName)
+
 	urlObj.RawQuery = q.Encode()
 
 	return &urlObj
@@ -49,9 +50,7 @@ func initEventReceiverURL() *url.URL {
 
 func hostToString(host *url.URL, reportID string) string {
 	q := host.Query()
-	if reportID != "" {
-		q.Add("reportID", reportID) // TODO - do we add the reportID?
-	}
+	q.Add("reportID", reportID) // TODO - do we add the reportID?
 	host.RawQuery = q.Encode()
 	return host.String()
 }
