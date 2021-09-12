@@ -137,3 +137,62 @@ func (ruleReport *RuleReport) GetNumberOfWarningResources() int {
 	}
 	return sum
 }
+
+func (postureReport *PostureReport) RemoveData() {
+	for i := range postureReport.FrameworkReports {
+		postureReport.FrameworkReports[i].RemoveData()
+	}
+}
+func (frameworkReport *FrameworkReport) RemoveData() {
+	for i := range frameworkReport.ControlReports {
+		frameworkReport.ControlReports[i].RemoveData()
+	}
+}
+func (controlReport *ControlReport) RemoveData() {
+	for i := range controlReport.RuleReports {
+		controlReport.RuleReports[i].RemoveData()
+	}
+}
+
+func (ruleReport *RuleReport) RemoveData() {
+	for i := range ruleReport.RuleResponses {
+		ruleReport.RuleResponses[i].RemoveData()
+	}
+}
+
+func (r *RuleResponse) RemoveData() {
+	r.AlertObject.ExternalObjects = nil
+
+	keepFields := []string{"kind", "apiVersion", "metadata"}
+	keepMetadataFields := []string{"name", "namespace", "labels"}
+
+	for i := range r.AlertObject.K8SApiObjects {
+		deleteFromMap(r.AlertObject.K8SApiObjects[i], keepFields)
+		for k := range r.AlertObject.K8SApiObjects[i] {
+			if k == "metadata" {
+				if b, ok := r.AlertObject.K8SApiObjects[i][k].(map[string]interface{}); ok {
+					deleteFromMap(b, keepMetadataFields)
+					r.AlertObject.K8SApiObjects[i][k] = b
+				}
+			}
+		}
+	}
+}
+
+func deleteFromMap(m map[string]interface{}, keepFields []string) {
+	for k := range m {
+		if StringInSlice(keepFields, k) {
+			continue
+		}
+		delete(m, k)
+	}
+}
+
+func StringInSlice(strSlice []string, str string) bool {
+	for i := range strSlice {
+		if strSlice[i] == str {
+			return true
+		}
+	}
+	return false
+}

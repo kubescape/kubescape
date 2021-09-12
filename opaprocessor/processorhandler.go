@@ -13,11 +13,11 @@ import (
 
 	"github.com/armosec/kubescape/cautils/opapolicy"
 	"github.com/armosec/kubescape/cautils/opapolicy/resources"
-
 	"github.com/golang/glog"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
+	uuid "github.com/satori/go.uuid"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -70,7 +70,7 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opap.updateResults()
 
 		// update score
-		opap.updateScore()
+		// opap.updateScore()
 
 		// report
 		*opaHandler.reportResults <- opaSessionObj
@@ -92,6 +92,7 @@ func (opap *OPAProcessor) Process() error {
 	}
 
 	opap.PostureReport.FrameworkReports = frameworkReports
+	opap.PostureReport.ReportID = uuid.NewV4().String()
 	opap.PostureReport.ReportGenerationTime = time.Now().UTC()
 	// glog.Infof(fmt.Sprintf("Done 'Process'. reportID: %s", opap.PostureReport.ReportID))
 	cautils.StopSpinner()
@@ -104,6 +105,7 @@ func (opap *OPAProcessor) processFramework(framework *opapolicy.Framework) (*opa
 
 	frameworkReport := opapolicy.FrameworkReport{}
 	frameworkReport.Name = framework.Name
+
 	controlReports := []opapolicy.ControlReport{}
 	for i := range framework.Controls {
 		controlReport, err := opap.processControl(&framework.Controls[i])
@@ -123,6 +125,7 @@ func (opap *OPAProcessor) processControl(control *opapolicy.Control) (*opapolicy
 	controlReport.PortalBase = control.PortalBase
 
 	controlReport.Name = control.Name
+	controlReport.ID = control.ID
 	controlReport.Description = control.Description
 	controlReport.Remediation = control.Remediation
 

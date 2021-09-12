@@ -24,9 +24,9 @@ func (resultsHandler *ResultsHandler) HandleResults() float32 {
 
 	opaSessionObj := <-*resultsHandler.opaSessionObj
 
-	resultsHandler.reporterObj.ActionSendReportListenner(opaSessionObj)
-
 	score := resultsHandler.printerObj.ActionPrint(opaSessionObj)
+
+	resultsHandler.reporterObj.ActionSendReportListenner(opaSessionObj)
 
 	return score
 }
