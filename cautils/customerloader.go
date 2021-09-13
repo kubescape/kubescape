@@ -79,7 +79,7 @@ func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.ArmoFEURL
-	u.Path = "account/signup"
+	u.Path = "account/sign-up"
 	q := u.Query()
 	q.Add("invitationToken", c.configObj.Token)
 	q.Add("customerGUID", c.configObj.CustomerGUID)
