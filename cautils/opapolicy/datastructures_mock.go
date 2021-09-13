@@ -33,7 +33,8 @@ func MockFrameworkReportA() *FrameworkReport {
 		Name: AMockFrameworkName,
 		ControlReports: []ControlReport{
 			{
-				Name: AMockControlName,
+				ControlID: "C-0010",
+				Name:      AMockControlName,
 				RuleReports: []RuleReport{
 					{
 						Name:        AMockRuleName,
