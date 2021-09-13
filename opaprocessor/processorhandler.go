@@ -248,6 +248,6 @@ func (opap *OPAProcessor) updateResults() {
 			sumTotal += controlReport.GetNumberOfResources()
 			opap.PostureReport.FrameworkReports[f].ControlReports[c].Score = float32(percentage(controlReport.GetNumberOfResources(), controlReport.GetNumberOfFailedResources()))
 		}
-		opap.PostureReport.FrameworkReports[f].Score = float32(percentage(sumTotal, sumFailed))
+		opap.PostureReport.FrameworkReports[f].Score = float32(percentage(sumTotal, sumTotal-sumFailed))
 	}
 }
