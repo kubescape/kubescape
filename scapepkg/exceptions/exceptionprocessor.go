@@ -1,6 +1,7 @@
 package exceptions
 
 import (
+	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/k8sinterface"
 
 	"github.com/armosec/kubescape/cautils/armotypes"
@@ -91,9 +92,9 @@ func hasException(designator *armotypes.PortalDesignator, workload k8sinterface.
 		return false // if designators are empty
 	}
 
-	// if cluster != "" && cluster != ClusterName { // TODO - where do we receive cluster name from?
-	// 	return false // cluster name does not match
-	// }
+	if cluster != "" && cautils.ClusterName != "" && cluster != cautils.ClusterName { // TODO - where do we receive cluster name from?
+		return false // cluster name does not match
+	}
 
 	if namespace != "" && !compareNamespace(workload, namespace) {
 		return false // namespaces do not match
