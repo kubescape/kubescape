@@ -39,6 +39,7 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 | `--use-from` | | Load local framework object from specified path. If not used will download latest |
 | `--use-default` | `false` | Load local framework object from default path. If not used will download latest | `true`/`false` |
 | `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json) |
+| `--results-locally` | `false` | Kubescape sends scan results to its backend to allow users to control exceptions and maintain chronological scan results. Use –results-locally if you do not wish to use these features | |
 
 ## Usage & Examples
  
