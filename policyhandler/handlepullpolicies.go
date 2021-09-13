@@ -19,7 +19,7 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 		case opapolicy.KindFramework:
 			receivedFramework, recExceptionPolicies, err := policyHandler.getFrameworkPolicies(rule.Name)
 			if err != nil {
-				errs = fmt.Errorf("%v\nKind: %v, Name: %s, error: %s", errs, rule.Kind, rule.Name, err.Error())
+				return nil, nil, fmt.Errorf("kind: %v, name: %s, error: %s", rule.Kind, rule.Name, err.Error())
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
