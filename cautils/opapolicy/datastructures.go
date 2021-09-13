@@ -43,7 +43,6 @@ type ControlReport struct {
 	armotypes.PortalBase `json:",inline"`
 	ControlID            string       `json:"id"`
 	Name                 string       `json:"name"`
-	ID                   string       `json:"id"`
 	RuleReports          []RuleReport `json:"ruleReports"`
 	Remediation          string       `json:"remediation"`
 	Description          string       `json:"description"`
