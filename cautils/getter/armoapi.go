@@ -12,7 +12,7 @@ import (
 // =============================================== ArmoAPI ===============================================================
 // =======================================================================================================================
 
-const (
+var (
 	ArmoBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
 	ArmoERURL = "report.eudev3.cyberarmorsoft.com"
 	ArmoFEURL = "armoui.eudev3.cyberarmorsoft.com"
