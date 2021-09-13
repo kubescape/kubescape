@@ -27,9 +27,9 @@ func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) strin
 
 	q := u.Query()
 	q.Add("customerGUID", customerGUID)
-	if clusterName != "" {
-		q.Add("clusterName", clusterName)
-	}
+	// if clusterName != "" { // TODO - fix customer name support in Armo BE
+	// 	q.Add("clusterName", clusterName)
+	// }
 	u.RawQuery = q.Encode()
 
 	return u.String()

@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/armosec/kubescape/cautils/armotypes"
@@ -11,7 +12,7 @@ import (
 // =============================================== ArmoAPI ===============================================================
 // =======================================================================================================================
 
-const (
+var (
 	ArmoBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
 	ArmoERURL = "report.eudev3.cyberarmorsoft.com"
 	ArmoFEURL = "armoui.eudev3.cyberarmorsoft.com"
@@ -60,8 +61,12 @@ func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armot
 	return exceptions, nil
 }
 
-func (armoAPI *ArmoAPI) GetCustomerGUID() (*TenantResponse, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getCustomerURL())
+func (armoAPI *ArmoAPI) GetCustomerGUID(customerGUID string) (*TenantResponse, error) {
+	url := armoAPI.getCustomerURL()
+	if customerGUID != "" {
+		url = fmt.Sprintf("%s?customerGUID=%s", url, customerGUID)
+	}
+	respStr, err := HttpGetter(armoAPI.httpClient, url)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +79,8 @@ func (armoAPI *ArmoAPI) GetCustomerGUID() (*TenantResponse, error) {
 }
 
 type TenantResponse struct {
-	TenantID string `json:"tenantId"`
-	Token    string `json:"token"`
-	Expires  string `json:"expires"`
+	TenantID  string `json:"tenantId"`
+	Token     string `json:"token"`
+	Expires   string `json:"expires"`
+	AdminMail string `json:"adminMail,omitempty"`
 }

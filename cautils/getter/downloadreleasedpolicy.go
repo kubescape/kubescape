@@ -27,7 +27,9 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 }
 
 func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framework, error) {
-	drp.setURL(name)
+	if err := drp.setURL(name); err != nil {
+		return nil, err
+	}
 	respStr, err := HttpGetter(drp.httpClient, drp.hostURL)
 	if err != nil {
 		return nil, err
@@ -71,12 +73,13 @@ func (drp *DownloadReleasedPolicy) setURL(frameworkName string) error {
 					if name == frameworkName {
 						if url, ok := asset["browser_download_url"].(string); ok {
 							drp.hostURL = url
+							return nil
 						}
 					}
 				}
 			}
 		}
 	}
-	return nil
+	return fmt.Errorf("failed to download '%s' - not found", frameworkName)
 
 }

@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils/getter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,8 +22,9 @@ const (
 )
 
 type ConfigObj struct {
-	CustomerGUID string `json:"customerGUID"`
-	Token        string `json:"token"`
+	CustomerGUID       string `json:"customerGUID"`
+	Token              string `json:"token"`
+	CustomerAdminEMail string `json:"adminMail"`
 }
 
 func (co *ConfigObj) Json() []byte {
@@ -79,6 +81,11 @@ func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.ArmoFEURL
+	if c.configObj.CustomerAdminEMail != "" {
+		msgStr := fmt.Sprintf("To view all controls and get remediations ask access permissions to %s from %s", u.String(), c.configObj.CustomerAdminEMail)
+		InfoTextDisplay(os.Stdout, msgStr+"\n")
+		return
+	}
 	u.Path = "account/sign-up"
 	q := u.Query()
 	q.Add("invitationToken", c.configObj.Token)
@@ -91,30 +98,40 @@ func (c *ClusterConfig) GenerateURL() {
 }
 
 func (c *ClusterConfig) GetCustomerGUID() string {
-	return c.configObj.CustomerGUID
+	if c.configObj != nil {
+		return c.configObj.CustomerGUID
+	}
+	return ""
 }
 func (c *ClusterConfig) SetCustomerGUID() error {
 
 	// get from configMap
 	if configObj, _ := c.loadConfigFromConfigMap(); configObj != nil {
 		c.update(configObj)
-		return nil
 	}
 
 	// get from file
 	if configObj, _ := c.loadConfigFromFile(); configObj != nil {
 		c.update(configObj)
 		c.updateConfigMap()
-		return nil
 	}
-
+	customerGUID := c.GetCustomerGUID()
 	// get from armoBE
-	if tenantResponse, err := c.armoAPI.GetCustomerGUID(); tenantResponse != nil {
-		c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
-		return c.updateConfigMap()
+	tenantResponse, err := c.armoAPI.GetCustomerGUID(customerGUID)
+	if err == nil && tenantResponse != nil {
+		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
+			c.update(&ConfigObj{CustomerGUID: customerGUID, CustomerAdminEMail: tenantResponse.AdminMail})
+		} else {
+			c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
+			return c.updateConfigMap()
+		}
 	} else {
+		if err != nil && strings.Contains(err.Error(), "Invitation for tenant already exists") {
+			return nil
+		}
 		return err
 	}
+	return nil
 }
 
 func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
