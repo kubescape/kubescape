@@ -32,12 +32,12 @@ echo -e "\033[32m[V] Downloaded Kubescape"
 # Ping download counter
 curl --silent https://us-central1-elated-pottery-310110.cloudfunctions.net/kubescape-download-counter -o /dev/null
  
-chmod +x $OUTPUT || sudo chmod +x $OUTPUT
-rm -f /usr/local/bin/$KUBESCAPE_EXEC || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
-cp $OUTPUT /usr/local/bin || sudo cp $OUTPUT /usr/local/bin
+chmod +x $OUTPUT 2>&1 || sudo chmod +x $OUTPUT
+rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>&1 || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
+cp $OUTPUT /usr/local/bin 2>&1 || sudo cp $OUTPUT /usr/local/bin
 rm -rf $OUTPUT
 
-echo -e "[V] Finished Installation"
+echo -e "[V] Finished Installation." $($KUBESCAPE_EXEC version)
 echo
 
 echo -e "\033[35m Usage: $ $KUBESCAPE_EXEC scan framework nsa --exclude-namespaces kube-system,kube-public"

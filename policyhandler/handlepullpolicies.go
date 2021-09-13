@@ -3,6 +3,7 @@ package policyhandler
 import (
 	"fmt"
 
+	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
@@ -41,7 +42,7 @@ func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*op
 		return nil, nil, err
 	}
 
-	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions("", "")
+	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.CustomerGUID, cautils.ClusterName)
 	if err != nil {
 		return receivedFramework, nil, err
 	}
