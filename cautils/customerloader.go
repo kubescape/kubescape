@@ -72,6 +72,10 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, armoAPI *getter.ArmoAPI) 
 		defaultNS: k8sinterface.GetDefaultNamespace(),
 	}
 }
+func (c *ClusterConfig) createConfigJson() {
+	ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), nil, 0664)
+
+}
 
 func (c *ClusterConfig) update(configObj *ConfigObj) {
 	c.configObj = configObj
@@ -122,6 +126,26 @@ func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
 
 }
 
+func (c *ClusterConfig) SetKeyValueInConfigJson(key string, value string) error {
+	data, err := ioutil.ReadFile(getter.GetDefaultPath(configFileName + ".json"))
+	if err != nil {
+		return err
+	}
+	var obj map[string]interface{}
+	err = json.Unmarshal(data, &obj)
+
+	if err != nil {
+		return err
+	}
+	obj[key] = value
+	newData, err := json.Marshal(obj)
+	if err != nil {
+		return err
+	}
+
+	return ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), newData, 0664)
+}
+
 func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
 
 	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
@@ -150,25 +174,35 @@ func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
 
 func (c *ClusterConfig) SetCustomerGUID() error {
 
-	// get from configMap
-	if configObj, _ := c.loadConfigFromConfigMap(); configObj != nil {
-		c.update(configObj)
+	// get from file
+	if c.existsConfigJson() {
+		c.configObj, _ = c.loadConfigFromFile()
+	} else if c.existsConfigMap() {
+		c.configObj, _ = c.loadConfigFromConfigMap()
+	} else {
+		c.createConfigMap()
+		c.createConfigJson()
 	}
 
-	// get from file
-	if configObj, _ := c.loadConfigFromFile(); configObj != nil {
-		c.update(configObj)
-		c.updateConfigMap()
-	}
 	customerGUID := c.GetCustomerGUID()
 	// get from armoBE
 	tenantResponse, err := c.armoAPI.GetCustomerGUID(customerGUID)
 	if err == nil && tenantResponse != nil {
 		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
-			c.update(&ConfigObj{CustomerGUID: customerGUID, CustomerAdminEMail: tenantResponse.AdminMail})
+			if c.existsConfigJson() {
+				c.update(&ConfigObj{CustomerGUID: customerGUID, CustomerAdminEMail: tenantResponse.AdminMail})
+			}
+			if c.existsConfigMap() {
+				c.updateConfigMap()
+			}
 		} else {
-			c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
-			return c.updateConfigMap()
+			if c.existsConfigJson() {
+				c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
+			}
+			if c.existsConfigMap() {
+				c.configObj = &ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token}
+				c.updateConfigMap()
+			}
 		}
 	} else {
 		if err != nil && strings.Contains(err.Error(), "Invitation for tenant already exists") {
@@ -194,28 +228,49 @@ func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
 	return nil, nil
 }
 
+func (c *ClusterConfig) existsConfigMap() bool {
+	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+	return err == nil
+}
+
+func (c *ClusterConfig) existsConfigJson() bool {
+	_, err := ioutil.ReadFile(getter.GetDefaultPath(configFileName + ".json"))
+
+	return err == nil
+
+}
+
+func (c *ClusterConfig) createConfigMap() error {
+	if c.k8s == nil {
+		return nil
+	}
+	configMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: configMapName,
+		},
+	}
+	c.updateConfigData(configMap)
+
+	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Create(context.Background(), configMap, metav1.CreateOptions{})
+	return err
+}
+
 func (c *ClusterConfig) updateConfigMap() error {
 	if c.k8s == nil {
 		return nil
 	}
 	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+
 	if err != nil {
-		configMap = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: configMapName,
-			},
-		}
+		return err
 	}
 
 	c.updateConfigData(configMap)
 
-	if err != nil {
-		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Create(context.Background(), configMap, metav1.CreateOptions{})
-	} else {
-		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(configMap.Namespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
-	}
+	_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(configMap.Namespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
 }
+
 func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {
 	if len(configMap.Data) == 0 {
 		configMap.Data = make(map[string]string)
