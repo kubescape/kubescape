@@ -81,6 +81,9 @@ func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.ArmoFEURL
+	if c.configObj == nil {
+		return
+	}
 	if c.configObj.CustomerAdminEMail != "" {
 		msgStr := fmt.Sprintf("To view all controls and get remediations ask access permissions to %s from %s", u.String(), c.configObj.CustomerAdminEMail)
 		InfoTextDisplay(os.Stdout, msgStr+"\n")
