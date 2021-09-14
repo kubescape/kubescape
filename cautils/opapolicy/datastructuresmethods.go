@@ -85,11 +85,11 @@ func (controlReport *ControlReport) ListControlsInputKinds() []string {
 
 func (controlReport *ControlReport) Passed() bool {
 	for i := range controlReport.RuleReports {
-		if len(controlReport.RuleReports[i].RuleResponses) == 0 {
-			return true
+		if len(controlReport.RuleReports[i].RuleResponses) != 0 {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 func (controlReport *ControlReport) Warning() bool {
