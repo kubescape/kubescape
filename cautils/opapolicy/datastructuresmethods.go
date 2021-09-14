@@ -3,6 +3,8 @@ package opapolicy
 import (
 	"bytes"
 	"encoding/json"
+
+	"github.com/armosec/kubescape/cautils/k8sinterface"
 )
 
 func (pn *PolicyNotification) ToJSONBytesBuffer() (*bytes.Buffer, error) {
@@ -120,12 +122,63 @@ func (ruleReport *RuleReport) GetNumberOfResources() int {
 
 func (ruleReport *RuleReport) GetNumberOfFailedResources() int {
 	sum := 0
-	for i := range ruleReport.RuleResponses {
+	for i := 0; i < len(ruleReport.RuleResponses); i++ {
 		if ruleReport.RuleResponses[i].GetSingleResultStatus() == "failed" {
-			sum += 1
+			if !ruleReport.DeleteIfRedundantResponse(&ruleReport.RuleResponses[i], i) {
+				sum += 1
+			} else {
+				i--
+			}
 		}
 	}
 	return sum
+}
+
+func (ruleReport *RuleReport) DeleteIfRedundantResponse(RuleResponse *RuleResponse, index int) bool {
+	if b, rr := ruleReport.IsDuplicateResponseOfResource(RuleResponse, index); b {
+		rr.AddMessageToResponse(RuleResponse.AlertMessage)
+		ruleReport.RuleResponses = removeResponse(ruleReport.RuleResponses, index)
+		return true
+	}
+	return false
+}
+
+func (ruleResponse *RuleResponse) AddMessageToResponse(message string) {
+	// fmt.Printf("adding message\n")
+	var messages []string
+	if m, exist := ruleResponse.AlertObject.ExternalObjects["additionalMessages"]; exist {
+		switch t := m.(type) {
+		case []string:
+			messages = append(t, message)
+		}
+	} else {
+		messages = append(messages, message)
+	}
+	if ruleResponse.AlertObject.ExternalObjects == nil {
+		ruleResponse.AlertObject.ExternalObjects = make(map[string]interface{})
+	}
+	ruleResponse.AlertObject.ExternalObjects["additionalMessages"] = messages
+}
+
+func (ruleReport *RuleReport) IsDuplicateResponseOfResource(RuleResponse *RuleResponse, index int) (bool, *RuleResponse) {
+	for i := range ruleReport.RuleResponses {
+		if i != index {
+			for j := range ruleReport.RuleResponses[i].AlertObject.K8SApiObjects {
+				for k := range RuleResponse.AlertObject.K8SApiObjects {
+					w1 := k8sinterface.NewWorkloadObj(ruleReport.RuleResponses[i].AlertObject.K8SApiObjects[j])
+					w2 := k8sinterface.NewWorkloadObj(RuleResponse.AlertObject.K8SApiObjects[k])
+					if w1.GetName() == w2.GetName() && w1.GetNamespace() == w2.GetNamespace() {
+						return true, &ruleReport.RuleResponses[i]
+					}
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
+func removeResponse(slice []RuleResponse, index int) []RuleResponse {
+	return append(slice[:index], slice[index+1:]...)
 }
 
 func (ruleReport *RuleReport) GetNumberOfWarningResources() int {
