@@ -46,7 +46,8 @@ jobs:
           BEServerConst: github.com/armosec/kubescape/cautils/getter.ArmoBEURL
           ERServerConst: github.com/armosec/kubescape/cautils/getter.ArmoERURL
           WebsiteConst: github.com/armosec/kubescape/cautils/getter.ArmoFEURL
-        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X $BEServerConst=$ArmoBEServer -X $ERServerConst=$ArmoERServer -X $WebsiteConst=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
+       # run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X $BEServerConst=$ArmoBEServer -X $ERServerConst=$ArmoERServer -X $WebsiteConst=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
+        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
       
       - name: Upload Release binaries
         id: upload-release-asset
