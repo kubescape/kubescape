@@ -121,7 +121,7 @@ func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
 	if val, ok := configMap.Data[key]; ok {
 		return val, nil
 	} else {
-		return "", fmt.Errorf("value does not exist.")
+		return "", fmt.Errorf("value does not exist")
 	}
 
 }
@@ -144,6 +144,7 @@ func (c *ClusterConfig) SetKeyValueInConfigJson(key string, value string) error 
 	}
 
 	return ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), newData, 0664)
+
 }
 
 func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
