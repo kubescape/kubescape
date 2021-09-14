@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"path/filepath"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/opapolicy"
@@ -67,7 +68,7 @@ func (scanInfo *ScanInfo) setOutputFile() {
 		return
 	}
 	if scanInfo.Format == "json" {
-		if filepath.Ext(scanInfo.Output) != "json" {
+		if filepath.Ext(scanInfo.Output) != "json" && !strings.HasSuffix(scanInfo.Output, ".json") {
 			scanInfo.Output += ".json"
 		}
 	}

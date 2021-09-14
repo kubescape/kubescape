@@ -23,7 +23,7 @@ const (
 
 type ConfigObj struct {
 	CustomerGUID       string `json:"customerGUID"`
-	Token              string `json:"token"`
+	Token              string `json:"invitationParam"`
 	CustomerAdminEMail string `json:"adminMail"`
 }
 
@@ -81,6 +81,9 @@ func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.ArmoFEURL
+	if c.configObj == nil {
+		return
+	}
 	if c.configObj.CustomerAdminEMail != "" {
 		msgStr := fmt.Sprintf("To view all controls and get remediations ask access permissions to %s from %s", u.String(), c.configObj.CustomerAdminEMail)
 		InfoTextDisplay(os.Stdout, msgStr+"\n")
@@ -103,6 +106,48 @@ func (c *ClusterConfig) GetCustomerGUID() string {
 	}
 	return ""
 }
+
+func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
+
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+
+	if err != nil {
+		return "", err
+	}
+	if val, ok := configMap.Data[key]; ok {
+		return val, nil
+	} else {
+		return "", fmt.Errorf("value does not exist.")
+	}
+
+}
+
+func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
+
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+	if err != nil {
+		configMap = &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: configMapName,
+			},
+		}
+	}
+
+	if len(configMap.Data) == 0 {
+		configMap.Data = make(map[string]string)
+	}
+
+	configMap.Data[key] = value
+
+	if err != nil {
+		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Create(context.Background(), configMap, metav1.CreateOptions{})
+	} else {
+		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(configMap.Namespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
+	}
+
+	return err
+}
+
 func (c *ClusterConfig) SetCustomerGUID() error {
 
 	// get from configMap

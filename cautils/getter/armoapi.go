@@ -13,6 +13,8 @@ import (
 // =======================================================================================================================
 
 var (
+	// ATTENTION!!!
+	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFULL
 	ArmoBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
 	ArmoERURL = "report.eudev3.cyberarmorsoft.com"
 	ArmoFEURL = "armoui.eudev3.cyberarmorsoft.com"
