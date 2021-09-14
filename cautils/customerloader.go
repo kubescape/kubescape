@@ -23,7 +23,7 @@ const (
 
 type ConfigObj struct {
 	CustomerGUID       string `json:"customerGUID"`
-	Token              string `json:"token"`
+	Token              string `json:"invitationParam"`
 	CustomerAdminEMail string `json:"adminMail"`
 }
 
