@@ -122,13 +122,14 @@ func (ruleReport *RuleReport) GetNumberOfResources() int {
 
 func (ruleReport *RuleReport) GetNumberOfFailedResources() int {
 	sum := 0
-	for i := 0; i < len(ruleReport.RuleResponses); i++ {
+	for i := len(ruleReport.RuleResponses) - 1; i >= 0; i-- {
 		if ruleReport.RuleResponses[i].GetSingleResultStatus() == "failed" {
 			if !ruleReport.DeleteIfRedundantResponse(&ruleReport.RuleResponses[i], i) {
-				sum += 1
-			} else {
-				i--
+				sum++
 			}
+			// else {
+			// i--
+			// }
 		}
 	}
 	return sum
@@ -144,20 +145,7 @@ func (ruleReport *RuleReport) DeleteIfRedundantResponse(RuleResponse *RuleRespon
 }
 
 func (ruleResponse *RuleResponse) AddMessageToResponse(message string) {
-	// fmt.Printf("adding message\n")
-	var messages []string
-	if m, exist := ruleResponse.AlertObject.ExternalObjects["additionalMessages"]; exist {
-		switch t := m.(type) {
-		case []string:
-			messages = append(t, message)
-		}
-	} else {
-		messages = append(messages, message)
-	}
-	if ruleResponse.AlertObject.ExternalObjects == nil {
-		ruleResponse.AlertObject.ExternalObjects = make(map[string]interface{})
-	}
-	ruleResponse.AlertObject.ExternalObjects["additionalMessages"] = messages
+	ruleResponse.AlertMessage += message
 }
 
 func (ruleReport *RuleReport) IsDuplicateResponseOfResource(RuleResponse *RuleResponse, index int) (bool, *RuleResponse) {
@@ -167,7 +155,7 @@ func (ruleReport *RuleReport) IsDuplicateResponseOfResource(RuleResponse *RuleRe
 				for k := range RuleResponse.AlertObject.K8SApiObjects {
 					w1 := k8sinterface.NewWorkloadObj(ruleReport.RuleResponses[i].AlertObject.K8SApiObjects[j])
 					w2 := k8sinterface.NewWorkloadObj(RuleResponse.AlertObject.K8SApiObjects[k])
-					if w1.GetName() == w2.GetName() && w1.GetNamespace() == w2.GetNamespace() {
+					if w1.GetName() == w2.GetName() && w1.GetNamespace() == w2.GetNamespace() && w1.GetKind() != "Role" && w1.GetKind() != "ClusterRole" {
 						return true, &ruleReport.RuleResponses[i]
 					}
 				}
