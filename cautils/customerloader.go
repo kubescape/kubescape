@@ -23,7 +23,7 @@ const (
 
 type ConfigObj struct {
 	CustomerGUID       string `json:"customerGUID"`
-	Token              string `json:"token"`
+	Invitation         string `json:"invitation"`
 	CustomerAdminEMail string `json:"adminMail"`
 }
 
@@ -88,7 +88,7 @@ func (c *ClusterConfig) GenerateURL() {
 	}
 	u.Path = "account/sign-up"
 	q := u.Query()
-	q.Add("invitationToken", c.configObj.Token)
+	q.Add("invitationToken", c.configObj.Invitation)
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
@@ -164,7 +164,7 @@ func (c *ClusterConfig) SetCustomerGUID() error {
 		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
 			c.update(&ConfigObj{CustomerGUID: customerGUID, CustomerAdminEMail: tenantResponse.AdminMail})
 		} else {
-			c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
+			c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Invitation: tenantResponse.Token})
 			return c.updateConfigMap()
 		}
 	} else {
