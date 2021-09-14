@@ -127,9 +127,6 @@ func (ruleReport *RuleReport) GetNumberOfFailedResources() int {
 			if !ruleReport.DeleteIfRedundantResponse(&ruleReport.RuleResponses[i], i) {
 				sum++
 			}
-			// else {
-			// i--
-			// }
 		}
 	}
 	return sum
