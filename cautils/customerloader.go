@@ -23,7 +23,7 @@ const (
 
 type ConfigObj struct {
 	CustomerGUID       string `json:"customerGUID"`
-	Invitation         string `json:"invitation"`
+	Token              string `json:"invitationParam"`
 	CustomerAdminEMail string `json:"adminMail"`
 }
 
@@ -81,6 +81,9 @@ func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.ArmoFEURL
+	if c.configObj == nil {
+		return
+	}
 	if c.configObj.CustomerAdminEMail != "" {
 		msgStr := fmt.Sprintf("To view all controls and get remediations ask access permissions to %s from %s", u.String(), c.configObj.CustomerAdminEMail)
 		InfoTextDisplay(os.Stdout, msgStr+"\n")
@@ -88,7 +91,7 @@ func (c *ClusterConfig) GenerateURL() {
 	}
 	u.Path = "account/sign-up"
 	q := u.Query()
-	q.Add("invitationToken", c.configObj.Invitation)
+	q.Add("invitationToken", c.configObj.Token)
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
@@ -164,7 +167,7 @@ func (c *ClusterConfig) SetCustomerGUID() error {
 		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
 			c.update(&ConfigObj{CustomerGUID: customerGUID, CustomerAdminEMail: tenantResponse.AdminMail})
 		} else {
-			c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Invitation: tenantResponse.Token})
+			c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
 			return c.updateConfigMap()
 		}
 	} else {
