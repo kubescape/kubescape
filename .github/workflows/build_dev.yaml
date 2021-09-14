@@ -9,7 +9,6 @@ on:
 jobs:
   build:
     name: Create cross-platform dev build
-    needs: once
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
