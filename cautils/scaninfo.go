@@ -66,12 +66,12 @@ func (scanInfo *ScanInfo) setOutputFile() {
 		return
 	}
 	if scanInfo.Format == "json" {
-		if filepath.Ext(scanInfo.Output) != "json" {
+		if filepath.Ext(scanInfo.Output) != ".json" {
 			scanInfo.Output += ".json"
 		}
 	}
 	if scanInfo.Format == "junit" {
-		if filepath.Ext(scanInfo.Output) != "xml" {
+		if filepath.Ext(scanInfo.Output) != ".xml" {
 			scanInfo.Output += ".xml"
 		}
 	}
