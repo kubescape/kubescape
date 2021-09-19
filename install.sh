@@ -32,8 +32,8 @@ curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 curl --silent https://us-central1-elated-pottery-310110.cloudfunctions.net/kubescape-download-counter -o /dev/null
  
 chmod +x $OUTPUT 2>/dev/null || sudo chmod +x $OUTPUT
-rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
-cp $OUTPUT /usr/local/bin 2>/dev/null || sudo cp $OUTPUT /usr/local/bin
+sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
+sudo cp $OUTPUT /usr/local/bin 2>/dev/null || sudo cp $OUTPUT /usr/local/bin
 rm -rf $OUTPUT
 
 echo
