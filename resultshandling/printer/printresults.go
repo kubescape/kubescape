@@ -178,6 +178,10 @@ func (printer *Printer) printResult(controlName string, controlSummary *ControlS
 
 }
 
+func (printer *Printer) PrintUrl(url string) {
+	cautils.InfoTextDisplay(printer.writer, url)
+}
+
 func generateRow(control string, cs ControlSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)
@@ -247,7 +251,7 @@ func (printer *Printer) getSortedControlsNames() []string {
 }
 
 func getWriter(outputFile string) *os.File {
-
+	os.Remove(outputFile)
 	if outputFile != "" {
 		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {

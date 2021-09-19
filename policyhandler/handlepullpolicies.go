@@ -3,6 +3,7 @@ package policyhandler
 import (
 	"fmt"
 
+	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
@@ -18,7 +19,7 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 		case opapolicy.KindFramework:
 			receivedFramework, recExceptionPolicies, err := policyHandler.getFrameworkPolicies(rule.Name)
 			if err != nil {
-				errs = fmt.Errorf("%v\nKind: %v, Name: %s, error: %s", errs, rule.Kind, rule.Name, err.Error())
+				return nil, nil, fmt.Errorf("kind: %v, name: %s, error: %s", rule.Kind, rule.Name, err.Error())
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
@@ -41,7 +42,7 @@ func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*op
 		return nil, nil, err
 	}
 
-	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions("", "")
+	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.CustomerGUID, cautils.ClusterName)
 	if err != nil {
 		return receivedFramework, nil, err
 	}

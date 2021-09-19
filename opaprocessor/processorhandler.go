@@ -13,11 +13,11 @@ import (
 
 	"github.com/armosec/kubescape/cautils/opapolicy"
 	"github.com/armosec/kubescape/cautils/opapolicy/resources"
-
 	"github.com/golang/glog"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
+	uuid "github.com/satori/go.uuid"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -42,7 +42,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj) *OPAProcessor {
 
 func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessorHandler {
 
-	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.K8SConfig)
+	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig())
 	store, err := regoDependenciesData.TOStorage()
 	if err != nil {
 		panic(err)
@@ -92,6 +92,7 @@ func (opap *OPAProcessor) Process() error {
 	}
 
 	opap.PostureReport.FrameworkReports = frameworkReports
+	opap.PostureReport.ReportID = uuid.NewV4().String()
 	opap.PostureReport.ReportGenerationTime = time.Now().UTC()
 	// glog.Infof(fmt.Sprintf("Done 'Process'. reportID: %s", opap.PostureReport.ReportID))
 	cautils.StopSpinner()
@@ -104,6 +105,7 @@ func (opap *OPAProcessor) processFramework(framework *opapolicy.Framework) (*opa
 
 	frameworkReport := opapolicy.FrameworkReport{}
 	frameworkReport.Name = framework.Name
+
 	controlReports := []opapolicy.ControlReport{}
 	for i := range framework.Controls {
 		controlReport, err := opap.processControl(&framework.Controls[i])
@@ -220,6 +222,10 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 
 func (opap *OPAProcessor) updateScore() {
 
+	if !k8sinterface.ConnectedToCluster {
+		return
+	}
+
 	// calculate score
 	s := score.NewScore(k8sinterface.NewKubernetesApi(), ScoreConfigPath)
 	s.Calculate(opap.PostureReport.FrameworkReports)
@@ -227,6 +233,8 @@ func (opap *OPAProcessor) updateScore() {
 
 func (opap *OPAProcessor) updateResults() {
 	for f, frameworkReport := range opap.PostureReport.FrameworkReports {
+		sumFailed := 0
+		sumTotal := 0
 		for c, controlReport := range opap.PostureReport.FrameworkReports[f].ControlReports {
 			for r, ruleReport := range opap.PostureReport.FrameworkReports[f].ControlReports[c].RuleReports {
 				// editing the responses -> removing duplications, clearing secret data, etc.
@@ -236,6 +244,10 @@ func (opap *OPAProcessor) updateResults() {
 				ruleExceptions := exceptions.ListRuleExceptions(opap.Exceptions, frameworkReport.Name, controlReport.Name, ruleReport.Name)
 				exceptions.AddExceptionsToRuleResponses(opap.PostureReport.FrameworkReports[f].ControlReports[c].RuleReports[r].RuleResponses, ruleExceptions)
 			}
+			sumFailed += controlReport.GetNumberOfFailedResources()
+			sumTotal += controlReport.GetNumberOfResources()
+			opap.PostureReport.FrameworkReports[f].ControlReports[c].Score = float32(percentage(controlReport.GetNumberOfResources(), controlReport.GetNumberOfFailedResources()))
 		}
+		opap.PostureReport.FrameworkReports[f].Score = float32(percentage(sumTotal, sumTotal-sumFailed))
 	}
 }

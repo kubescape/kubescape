@@ -2,30 +2,13 @@ name: build
 
 on:
   push:
-    branches: [ master ]
+    branches: [ dev ]
   pull_request:
-    branches: [ master ]
+    branches: [ dev ]
     types: [ closed ]
 jobs:
-  once:
-    name: Create release
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - name: Create a release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          release_name: Release v1.0.${{ github.run_number }}
-          draft: false
-          prerelease: false
   build:
-    name: Create cross-platform release build, tag and upload binaries
-    needs: once
+    name: Create cross-platform dev build
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -45,13 +28,8 @@ jobs:
           ArmoWebsite: portal.armo.cloud
         run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
       
-      - name: Upload Release binaries
-        id: upload-release-asset
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload build artifacts 
+        uses: actions/upload-artifact@v2
         with:
-          upload_url: ${{ needs.once.outputs.upload_url }}
-          asset_path: build/${{ matrix.os }}/kubescape
-          asset_name: kubescape-${{ matrix.os }}
-          asset_content_type: application/octet-stream
+          name: kubescape-${{ matrix.os }}
+          path: build/${{ matrix.os }}/kubescape 

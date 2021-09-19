@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Installing Kubescape..."
+echo -e "\033[0;36mInstalling Kubescape..."
 echo
  
 BASE_DIR=~/.kubescape
@@ -27,18 +27,22 @@ mkdir -p $BASE_DIR
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
 
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
-echo -e "\033[32m[V] Downloaded Kubescape"
 
 # Ping download counter
 curl --silent https://us-central1-elated-pottery-310110.cloudfunctions.net/kubescape-download-counter -o /dev/null
  
-chmod +x $OUTPUT || sudo chmod +x $OUTPUT
-rm -f /usr/local/bin/$KUBESCAPE_EXEC || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
-cp $OUTPUT /usr/local/bin || sudo cp $OUTPUT /usr/local/bin
+chmod +x $OUTPUT 2>/dev/null || sudo chmod +x $OUTPUT
+sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
+sudo cp $OUTPUT /usr/local/bin 2>/dev/null || sudo cp $OUTPUT /usr/local/bin
 rm -rf $OUTPUT
 
-echo -e "[V] Finished Installation"
+echo
+echo -e "\033[32mFinished Installation."
+
+echo -e "\033[0m"
+$KUBESCAPE_EXEC version
 echo
 
-echo -e "\033[35m Usage: $ $KUBESCAPE_EXEC scan framework nsa --exclude-namespaces kube-system,kube-public"
-echo
+echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan framework nsa --exclude-namespaces kube-system,kube-public"
+
+echo -e "\033[0m"

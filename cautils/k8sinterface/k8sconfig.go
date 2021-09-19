@@ -9,11 +9,14 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	// DO NOT REMOVE - load cloud providers auth
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
+
+var ConnectedToCluster = true
 
 // K8SConfig pointer to k8s config
 var K8SConfig *restclient.Config
@@ -27,8 +30,15 @@ type KubernetesApi struct {
 
 // NewKubernetesApi -
 func NewKubernetesApi() *KubernetesApi {
+	var kubernetesClient *kubernetes.Clientset
+	var err error
 
-	kubernetesClient, err := kubernetes.NewForConfig(GetK8sConfig())
+	if !IsConnectedToCluster() {
+		fmt.Println(fmt.Errorf("failed to load kubernetes config: no configuration has been provided, try setting KUBECONFIG environment variable"))
+		os.Exit(1)
+	}
+
+	kubernetesClient, err = kubernetes.NewForConfig(GetK8sConfig())
 	if err != nil {
 		fmt.Printf("Failed to load config file, reason: %s", err.Error())
 		os.Exit(1)
@@ -53,23 +63,54 @@ var RunningIncluster bool
 func LoadK8sConfig() error {
 	kubeconfig, err := config.GetConfig()
 	if err != nil {
-		return fmt.Errorf("failed to load kubernetes config: %s\n", strings.ReplaceAll(err.Error(), "KUBERNETES_MASTER", "KUBECONFIG"))
+		return fmt.Errorf("failed to load kubernetes config: %s", strings.ReplaceAll(err.Error(), "KUBERNETES_MASTER", "KUBECONFIG"))
 	}
 	if _, err := restclient.InClusterConfig(); err == nil {
 		RunningIncluster = true
 	}
+
 	K8SConfig = kubeconfig
 	return nil
 }
 
 // GetK8sConfig get config. load if not loaded yet
 func GetK8sConfig() *restclient.Config {
-	if K8SConfig == nil {
-		if err := LoadK8sConfig(); err != nil {
-			// print error
-			fmt.Printf("%s", err.Error())
-			os.Exit(1)
-		}
+	if !IsConnectedToCluster() {
+		return nil
 	}
 	return K8SConfig
+}
+
+func IsConnectedToCluster() bool {
+	if K8SConfig == nil {
+		if err := LoadK8sConfig(); err != nil {
+			ConnectedToCluster = false
+		}
+	}
+	return ConnectedToCluster
+}
+func GetClusterName() string {
+	if !ConnectedToCluster {
+		return ""
+	}
+
+	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(clientcmd.NewDefaultClientConfigLoadingRules(), &clientcmd.ConfigOverrides{})
+	config, err := kubeConfig.RawConfig()
+	if err != nil {
+		return ""
+	}
+	// TODO - Handle if empty
+	return config.CurrentContext
+}
+
+func GetDefaultNamespace() string {
+	clientCfg, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
+	if err != nil {
+		return "default"
+	}
+	namespace := clientCfg.Contexts[clientCfg.CurrentContext].Namespace
+	if namespace == "" {
+		namespace = "default"
+	}
+	return namespace
 }

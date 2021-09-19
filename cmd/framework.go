@@ -10,6 +10,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/armotypes"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/k8sinterface"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 	"github.com/armosec/kubescape/opaprocessor"
@@ -93,7 +94,7 @@ func init() {
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code -1")
-
+	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Kubescape sends scan results to Armosec backend to allow users to control exceptions and maintain chronological scan results. Use this flag if you do not wish to use these features")
 }
 
 func CliSetup() error {
@@ -105,7 +106,9 @@ func CliSetup() error {
 	}
 
 	var k8s *k8sinterface.KubernetesApi
-	if scanInfo.ScanRunningCluster() {
+	if !scanInfo.ScanRunningCluster() {
+		k8sinterface.ConnectedToCluster = false
+	} else {
 		k8s = k8sinterface.NewKubernetesApi()
 	}
 
@@ -115,11 +118,28 @@ func CliSetup() error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	// cli handler setup
-	cli := NewCLIHandler(policyHandler)
-	if err := cli.Scan(); err != nil {
-		panic(err)
+	// load cluster config
+	var clusterConfig cautils.IClusterConfig
+	if !scanInfo.DoNotSendResults && k8sinterface.ConnectedToCluster {
+		clusterConfig = cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
+	} else {
+		clusterConfig = cautils.NewEmptyConfig()
 	}
+
+	if err := clusterConfig.SetCustomerGUID(); err != nil {
+		fmt.Println(err)
+	}
+	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
+	cautils.ClusterName = k8sinterface.GetClusterName()
+
+	// cli handler setup
+	go func() {
+		cli := NewCLIHandler(policyHandler)
+		if err := cli.Scan(); err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	}()
 
 	// processor setup - rego run
 	go func() {
@@ -129,6 +149,9 @@ func CliSetup() error {
 
 	resultsHandling := resultshandling.NewResultsHandler(&reportResults, reporter.NewReportEventReceiver(), printer.NewPrinter(scanInfo.Format, scanInfo.Output))
 	score := resultsHandling.HandleResults()
+
+	// print report url
+	clusterConfig.GenerateURL()
 
 	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
 	if score < adjustedFailThreshold {
@@ -156,12 +179,10 @@ func (clihandler *CLIHandler) Scan() error {
 	}
 	switch policyNotification.NotificationType {
 	case opapolicy.TypeExecPostureScan:
-		go func() {
-			if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
-				fmt.Printf("%v\n", err)
-				os.Exit(0)
-			}
-		}()
+		//
+		if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
 	}

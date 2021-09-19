@@ -79,7 +79,7 @@ func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNo
 func (policyHandler *PolicyHandler) getResources(notification *opapolicy.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
 	var k8sResources *cautils.K8SResources
 	var err error
-	if scanInfo.ScanRunningCluster() {
+	if k8sinterface.ConnectedToCluster {
 		k8sResources, err = policyHandler.getK8sResources(opaSessionObj.Frameworks, &notification.Designators, scanInfo.ExcludedNamespaces)
 	} else {
 		k8sResources, err = policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)

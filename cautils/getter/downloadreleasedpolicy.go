@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"net/http"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
@@ -27,12 +26,10 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	}
 }
 
-func (drp *DownloadReleasedPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	return []armotypes.PostureExceptionPolicy{}, nil
-}
-
 func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framework, error) {
-	drp.setURL(name)
+	if err := drp.setURL(name); err != nil {
+		return nil, err
+	}
 	respStr, err := HttpGetter(drp.httpClient, drp.hostURL)
 	if err != nil {
 		return nil, err
@@ -43,7 +40,7 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framewo
 		return framework, err
 	}
 
-	SaveFrameworkInFile(framework, GetDefaultPath(name))
+	SaveFrameworkInFile(framework, GetDefaultPath(name+".json"))
 	return framework, err
 }
 
@@ -76,12 +73,13 @@ func (drp *DownloadReleasedPolicy) setURL(frameworkName string) error {
 					if name == frameworkName {
 						if url, ok := asset["browser_download_url"].(string); ok {
 							drp.hostURL = url
+							return nil
 						}
 					}
 				}
 			}
 		}
 	}
-	return nil
+	return fmt.Errorf("failed to download '%s' - not found", frameworkName)
 
 }
