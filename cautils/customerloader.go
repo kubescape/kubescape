@@ -18,7 +18,7 @@ import (
 
 const (
 	configMapName  = "kubescape"
-	configFileName = "config"
+	ConfigFileName = "config"
 )
 
 type ConfigObj struct {
@@ -72,14 +72,13 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, armoAPI *getter.ArmoAPI) 
 		defaultNS: k8sinterface.GetDefaultNamespace(),
 	}
 }
-func (c *ClusterConfig) createConfigJson() {
-	ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), nil, 0664)
+func createConfigJson() {
+	ioutil.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), nil, 0664)
 
 }
 
-func (c *ClusterConfig) update(configObj *ConfigObj) {
-	c.configObj = configObj
-	ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), c.configObj.Json(), 0664)
+func update(configObj *ConfigObj) {
+	ioutil.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), configObj.Json(), 0664)
 }
 func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
@@ -126,8 +125,23 @@ func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
 
 }
 
-func (c *ClusterConfig) SetKeyValueInConfigJson(key string, value string) error {
-	data, err := ioutil.ReadFile(getter.GetDefaultPath(configFileName + ".json"))
+func GetValueFromConfigJson(key string) (string, error) {
+	data, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
+	if err != nil {
+		return "", err
+	}
+	var obj map[string]interface{}
+	err = json.Unmarshal(data, &obj)
+	if val, ok := obj[key]; ok {
+		return fmt.Sprint(val), nil
+	} else {
+		return "", fmt.Errorf("value does not exist")
+	}
+
+}
+
+func SetKeyValueInConfigJson(key string, value string) error {
+	data, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
 	if err != nil {
 		return err
 	}
@@ -143,7 +157,7 @@ func (c *ClusterConfig) SetKeyValueInConfigJson(key string, value string) error 
 		return err
 	}
 
-	return ioutil.WriteFile(getter.GetDefaultPath(configFileName+".json"), newData, 0664)
+	return ioutil.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), newData, 0664)
 
 }
 
@@ -176,29 +190,31 @@ func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
 func (c *ClusterConfig) SetCustomerGUID() error {
 
 	// get from file
-	if c.existsConfigJson() {
-		c.configObj, _ = c.loadConfigFromFile()
+	if existsConfigJson() {
+		c.configObj, _ = loadConfigFromFile()
 	} else if c.existsConfigMap() {
 		c.configObj, _ = c.loadConfigFromConfigMap()
 	} else {
 		c.createConfigMap()
-		c.createConfigJson()
+		createConfigJson()
 	}
 
 	customerGUID := c.GetCustomerGUID()
 	// get from armoBE
 	tenantResponse, err := c.armoAPI.GetCustomerGUID(customerGUID)
+
 	if err == nil && tenantResponse != nil {
 		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
-			if c.existsConfigJson() {
-				c.update(&ConfigObj{CustomerGUID: customerGUID, CustomerAdminEMail: tenantResponse.AdminMail})
+			if existsConfigJson() {
+				update(&ConfigObj{CustomerGUID: customerGUID, CustomerAdminEMail: tenantResponse.AdminMail})
 			}
 			if c.existsConfigMap() {
+				c.configObj.CustomerAdminEMail = tenantResponse.AdminMail
 				c.updateConfigMap()
 			}
 		} else {
-			if c.existsConfigJson() {
-				c.update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
+			if existsConfigJson() {
+				update(&ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token})
 			}
 			if c.existsConfigMap() {
 				c.configObj = &ConfigObj{CustomerGUID: tenantResponse.TenantID, Token: tenantResponse.Token}
@@ -234,8 +250,8 @@ func (c *ClusterConfig) existsConfigMap() bool {
 	return err == nil
 }
 
-func (c *ClusterConfig) existsConfigJson() bool {
-	_, err := ioutil.ReadFile(getter.GetDefaultPath(configFileName + ".json"))
+func existsConfigJson() bool {
+	_, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
 
 	return err == nil
 
@@ -283,8 +299,8 @@ func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {
 		}
 	}
 }
-func (c *ClusterConfig) loadConfigFromFile() (*ConfigObj, error) {
-	dat, err := ioutil.ReadFile(getter.GetDefaultPath(configFileName + ".json"))
+func loadConfigFromFile() (*ConfigObj, error) {
+	dat, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
 	if err != nil {
 		return nil, err
 	}

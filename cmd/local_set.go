@@ -5,12 +5,9 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
 	"github.com/spf13/cobra"
 )
 
-// localSetCmd represents the localSet command
 var localSetCmd = &cobra.Command{
 	Use:   "set <key>=<value>",
 	Short: "Set configuration locally",
@@ -30,9 +27,7 @@ var localSetCmd = &cobra.Command{
 		key := keyValue[0]
 		data := keyValue[1]
 
-		k8s := k8sinterface.NewKubernetesApi()
-		clusterConfig := cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
-		if err := clusterConfig.SetKeyValueInConfigJson(key, data); err != nil {
+		if err := cautils.SetKeyValueInConfigJson(key, data); err != nil {
 			return err
 		}
 		fmt.Println("Value added successfully.")
