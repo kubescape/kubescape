@@ -5,16 +5,13 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
 	"github.com/spf13/cobra"
 )
 
-var setCmd = &cobra.Command{
-	Use:       "set <key>=<value>",
-	Short:     "Set configuration in cluster",
-	Long:      ``,
-	ValidArgs: supportedFrameworks,
+var localSetCmd = &cobra.Command{
+	Use:   "set <key>=<value>",
+	Short: "Set configuration locally",
+	Long:  ``,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 1 {
 			return fmt.Errorf("requires  one argument: <key>=<value>")
@@ -30,9 +27,7 @@ var setCmd = &cobra.Command{
 		key := keyValue[0]
 		data := keyValue[1]
 
-		k8s := k8sinterface.NewKubernetesApi()
-		clusterConfig := cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
-		if err := clusterConfig.SetKeyValueInConfigmap(key, data); err != nil {
+		if err := cautils.SetKeyValueInConfigJson(key, data); err != nil {
 			return err
 		}
 		fmt.Println("Value added successfully.")
@@ -41,5 +36,5 @@ var setCmd = &cobra.Command{
 }
 
 func init() {
-	clusterCmd.AddCommand(setCmd)
+	localCmd.AddCommand(localSetCmd)
 }
