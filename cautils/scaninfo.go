@@ -2,7 +2,6 @@ package cautils
 
 import (
 	"path/filepath"
-	"strings"
 
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/opapolicy"
