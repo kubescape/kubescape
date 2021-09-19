@@ -69,6 +69,10 @@ func alertObjectToWorkloads(obj *opapolicy.AlertObject) []k8sinterface.IWorkload
 			continue
 		}
 		resource = append(resource, r)
+		ns := r.GetNamespace()
+		if ns != "" {
+
+		}
 	}
 
 	return resource

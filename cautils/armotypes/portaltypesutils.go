@@ -33,10 +33,10 @@ func (designator *PortalDesignator) GetLabels() map[string]string {
 
 // DigestPortalDesignator - get cluster namespace and labels from designator
 func (designator *PortalDesignator) DigestPortalDesignator() (string, string, string, string, map[string]string) {
-	switch designator.DesignatorType {
-	case DesignatorAttributes, DesignatorAttribute:
+	switch designator.DesignatorType.ToLower() {
+	case DesignatorAttributes.ToLower(), DesignatorAttribute.ToLower():
 		return designator.DigestAttributesDesignator()
-	case DesignatorWlid, DesignatorWildWlid:
+	case DesignatorWlid.ToLower(), DesignatorWildWlid.ToLower():
 		return cautils.GetClusterFromWlid(designator.WLID), cautils.GetNamespaceFromWlid(designator.WLID), cautils.GetKindFromWlid(designator.WLID), cautils.GetNameFromWlid(designator.WLID), map[string]string{}
 	// case DesignatorSid: // TODO
 	default:

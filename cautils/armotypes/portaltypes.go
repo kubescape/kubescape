@@ -1,5 +1,7 @@
 package armotypes
 
+import "strings"
+
 const (
 	CostumerGuidQuery   = "costumerGUID"
 	ClusterNameQuery    = "cluster"
@@ -41,6 +43,10 @@ const (
 	DesignatorWlidProcess   DesignatorType = "WlidProcess"
 	DesignatorSid           DesignatorType = "Sid" // secret id
 )
+
+func (dt DesignatorType) ToLower() DesignatorType {
+	return DesignatorType(strings.ToLower(string(dt)))
+}
 
 // attributes
 const (
