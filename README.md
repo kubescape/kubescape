@@ -162,6 +162,7 @@ Kubescape is running the following tests according to what is defined by [Kubern
 * Ingress and Egress blocked
 * Container hostPort
 * Network policies
+* Symlink Exchange Can Allow Host Filesystem Access (CVE-2021-25741)
 
 
 
