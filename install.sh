@@ -28,12 +28,14 @@ OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
 
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
-# Ping download counter
-curl --silent https://us-central1-elated-pottery-310110.cloudfunctions.net/kubescape-download-counter -o /dev/null
- 
-chmod +x $OUTPUT 2>/dev/null || sudo chmod +x $OUTPUT
-sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
-sudo cp $OUTPUT /usr/local/bin 2>/dev/null || sudo cp $OUTPUT /usr/local/bin
+SUDO=
+if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ]; then
+    SUDO=sudo
+fi
+
+chmod +x $OUTPUT 2>/dev/null || $SUDO chmod +x $OUTPUT
+$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || $SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC
+$SUDO cp $OUTPUT /usr/local/bin 2>/dev/null || $SUDO cp $OUTPUT /usr/local/bin
 rm -rf $OUTPUT
 
 echo
