@@ -34,8 +34,8 @@ if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ]; then
 fi
 
 chmod +x $OUTPUT 2>/dev/null || $SUDO chmod +x $OUTPUT
-$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || $SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC
-$SUDO cp $OUTPUT /usr/local/bin 2>/dev/null || $SUDO cp $OUTPUT /usr/local/bin
+$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null
+$SUDO cp $OUTPUT /usr/local/bin 2>/dev/null
 rm -rf $OUTPUT
 
 echo
