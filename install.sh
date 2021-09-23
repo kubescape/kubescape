@@ -28,14 +28,28 @@ OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
 
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
+# Checking if SUDO needed/exists 
 SUDO=
 if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ]; then
     SUDO=sudo
 fi
 
-chmod +x $OUTPUT 2>/dev/null || $SUDO chmod +x $OUTPUT
-$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null
-$SUDO cp $OUTPUT /usr/local/bin 2>/dev/null
+
+# Find install dir
+install_dir=/usr/local/bin #default
+for pdir in ${PATH//:/ }; do
+    edir="${pdir/#\~/$HOME}"
+    if [[ $edir == $HOME/* ]]; then
+        install_dir=$edir
+        mkdir -p $install_dir 2>/dev/null || true
+        SUDO=
+        break
+    fi
+done
+
+chmod +x $OUTPUT 2>/dev/null 
+$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true # clearning up old install
+$SUDO cp $OUTPUT $install_dir/$KUBESCAPE_EXEC 
 rm -rf $OUTPUT
 
 echo
