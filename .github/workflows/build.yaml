@@ -62,4 +62,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          id: ${{ steps.create_release.outputs.id }}
+          id: v1.0.${{ github.run_number }}
