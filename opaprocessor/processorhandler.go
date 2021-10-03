@@ -112,7 +112,9 @@ func (opap *OPAProcessor) processFramework(framework *opapolicy.Framework) (*opa
 		if err != nil {
 			errs = fmt.Errorf("%v\n%s", errs, err.Error())
 		}
-		controlReports = append(controlReports, *controlReport)
+		if controlReport != nil {
+			controlReports = append(controlReports, *controlReport)
+		}
 	}
 	frameworkReport.ControlReports = controlReports
 	return &frameworkReport, errs
@@ -138,6 +140,9 @@ func (opap *OPAProcessor) processControl(control *opapolicy.Control) (*opapolicy
 		if ruleReport != nil {
 			ruleReports = append(ruleReports, *ruleReport)
 		}
+	}
+	if len(ruleReports) == 0 {
+		return nil, nil
 	}
 	controlReport.RuleReports = ruleReports
 	return &controlReport, errs
