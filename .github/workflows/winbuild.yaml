@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+    types: [ closed ]
+jobs:
+  once:
+    name: Create release
+    runs-on: windows-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: Create a release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          release_name: Release v1.0.${{ github.run_number }}
+          draft: false
+          prerelease: false
+  build:
+    name: Create cross-platform release build, tag and upload binaries
+    needs: once
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        os: [windows-latest]
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.16
+      - name: Build
+        env:
+          RELEASE: v1.0.${{ github.run_number }} 
+          ArmoBEServer: api.armo.cloud
+          ArmoERServer: report.euprod1.cyberarmorsoft.com
+          ArmoWebsite: portal.armo.cloud
+          BEServerConst: github.com/armosec/kubescape/cautils/getter.ArmoBEURL
+          ERServerConst: github.com/armosec/kubescape/cautils/getter.ArmoERURL
+          WebsiteConst: github.com/armosec/kubescape/cautils/getter.ArmoFEURL
+        run: dir 'env:' && mkdir build/windows-latest  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$ENV:RELEASE -X $ENV:BEServerConst=$ENV:ArmoBEServer -X $ENV:ERServerConst=$ENV:ArmoERServer -X $ENV:WebsiteConst=$ENV:ArmoWebsite" -o build/windows-latest/kubescape
+      
+      - name: Upload Release binaries
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.once.outputs.upload_url }}
+          asset_path: build/windows-latest/kubescape
+          asset_name: kubescape-windows-latest
+          asset_content_type: application/octet-stream
