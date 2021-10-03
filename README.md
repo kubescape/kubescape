@@ -13,8 +13,22 @@ Use Kubescape to test clusters or scan single YAML files and integrate it to you
 ## Install & Run
 
 ### Install:
+
+#### Linux / Mac
 ```
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
+```
+
+#### Windows (Requires powershell v5.0+)
+
+``` powershell
+iwr -useb https://raw.githubusercontent.com/armosec/kubescape/master/install.ps1 | iex
+```
+
+Note: if you get an error you might need to change the execution policy (i.e. enable Powershell) with
+
+``` powershell
+Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
 
 ### Run:
