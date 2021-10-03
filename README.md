@@ -10,11 +10,13 @@ Use Kubescape to test clusters or scan single YAML files and integrate it to you
 <img src="docs/demo.gif">
 
 # TL;DR
+
 ## Install & Run
 
 ### Install:
 
 #### Linux / Mac
+
 ```
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
@@ -32,6 +34,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
 
 ### Run:
+
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
@@ -40,8 +43,20 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 
 <img src="docs/summary.png">
 
+# Being part of the team
 
-### Flags
+We invite you to our team! We are excited about this project and want to return the love we get. 
+
+Want to contribute? Want to discuss something? Have an issue?
+
+* Open a issue, we are trying to respond within 48 hours
+* [Join us](https://discordapp.com/invite/CTcCaBbb) in a discussion on our discord server! 
+
+[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discordapp.com/invite/CTcCaBbb)
+
+# Options and examples
+
+## Flags
 
 | flag |  default | description | options |
 | --- | --- | --- | --- |
@@ -101,7 +116,6 @@ for example:
 ```
 helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
-
 ### Offline Support <img src="docs/new-feature.svg">
 
 It is possible to run Kubescape offline!
@@ -118,8 +132,11 @@ kubescape download framework nsa --output nsa.json
 kubescape scan framework nsa --use-from nsa.json
 ```
 
+Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
 
 # How to build 
+
+## For development
 
 Note: development (and the release process) is done with Go `1.16`
 
@@ -140,7 +157,7 @@ go mod tidy && go build -o kubescape .
 
 4. Enjoy :zany_face:
 
-# How to build in Docker
+## How to build in Docker
 
 1. Clone Project
 ```
