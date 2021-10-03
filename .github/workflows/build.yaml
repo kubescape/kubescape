@@ -56,14 +56,10 @@ jobs:
           asset_path: build/${{ matrix.os }}/kubescape
           asset_name: kubescape-${{ matrix.os }}
           asset_content_type: application/octet-stream
-  post:
-    name: Publish release
-    runs-on: ubuntu-latest
-    steps:
+      
       - name: Publish release
         uses: StuYarrow/publish-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           id: ${{ once.steps.create_release.outputs.id }}
-
