@@ -105,7 +105,21 @@ kubescape scan framework nsa --use-from nsa.json
 ```
 
 
+
+# Being part of the team
+
+We invite you to our team! We are excited about this project and want to return the love we get. 
+
+Want to contribute? Want to discuss something? Have an issue?
+
+* Open a issue, we are trying to respond within 48 hours
+* [Join us](https://discordapp.com/invite/CTcCaBbb) in a discussion on our discord server! 
+
+[<img src="docs/discord.png" width="100" alt="logo" align="center">](https://discordapp.com/invite/CTcCaBbb)
+
 # How to build 
+
+## For development
 
 Note: development (and the release process) is done with Go `1.16`
 
@@ -126,7 +140,7 @@ go mod tidy && go build -o kubescape .
 
 4. Enjoy :zany_face:
 
-# How to build in Docker
+## How to build in Docker
 
 1. Clone Project
 ```
