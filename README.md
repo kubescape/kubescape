@@ -115,7 +115,7 @@ Want to contribute? Want to discuss something? Have an issue?
 * Open a issue, we are trying to respond within 48 hours
 * [Join us](https://discordapp.com/invite/CTcCaBbb) in a discussion on our discord server! 
 
-[<img src="docs/discord.png" width="100" alt="logo" align="center">](https://discordapp.com/invite/CTcCaBbb)
+[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discordapp.com/invite/CTcCaBbb)
 
 # How to build 
 
