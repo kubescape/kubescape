@@ -21,7 +21,7 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           release_name: Release v1.0.${{ github.run_number }}
-          draft: false
+          draft: true
           prerelease: false
   build:
     name: Create cross-platform release build, tag and upload binaries
@@ -56,3 +56,14 @@ jobs:
           asset_path: build/${{ matrix.os }}/kubescape
           asset_name: kubescape-${{ matrix.os }}
           asset_content_type: application/octet-stream
+  post:
+    name: Publish release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        uses: StuYarrow/publish-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          id: ${{ once.steps.create_release.outputs.id }}
+
