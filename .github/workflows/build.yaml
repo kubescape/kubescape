@@ -44,7 +44,13 @@ jobs:
           ArmoERServer: report.euprod1.cyberarmorsoft.com
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
-        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
+        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape
+
+      - name: Digest
+        uses: MCJack123/ghaction-generate-release-hashes@v1
+        with:
+          hash-type: sha1
+          file-name: build/${{ matrix.os }}/kubescape.sha1
 
 #      - name: Upload Release binaries
 #        id: upload-release-asset
@@ -64,5 +70,5 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           files: |
             build/${{ matrix.os }}/kubescape
-            build/${{ matrix.os }}/kubescape.md5
+            build/${{ matrix.os }}/kubescape.sha1
   
