@@ -45,16 +45,6 @@ jobs:
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
         run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
-      
-      - uses: MCJack123/ghaction-generate-release-hashes@v1
-        with:
-          hash-type: sha1
-          file-name: release.sha1
-
-      - uses: actions/upload-artifact@v2
-        with:
-          name: Asset Hashes
-          path: release.sha1
 
 #      - name: Upload Release binaries
 #        id: upload-release-asset
