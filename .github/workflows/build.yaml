@@ -21,7 +21,7 @@ jobs:
         with:
           tag_name: v1.0.${{ github.run_number }}
           release_name: Release v1.0.${{ github.run_number }}
-          draft: true
+          draft: false
           prerelease: false
   build:
     name: Create cross-platform release build, tag and upload binaries
@@ -44,8 +44,13 @@ jobs:
           ArmoERServer: report.euprod1.cyberarmorsoft.com
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
-        run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape
-
+        run: |
+          pip install sha1          
+          mkdir -p build/${{ matrix.os }}  
+          go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape
+          python -m sha1 build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.sha1
+          zip build/${{ matrix.os }}/kubescape.zip build/${{ matrix.os }}/kubescape build/${{ matrix.os }}/kubescape.sha1
+      
       - name: Upload Release binaries
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
@@ -53,13 +58,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ needs.once.outputs.upload_url }}
-          asset_path: build/${{ matrix.os }}/kubescape
-          asset_name: kubescape-${{ matrix.os }}
-          asset_content_type: application/octet-stream
-      
-      - name: Publish release
-        uses: StuYarrow/publish-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          id: v1.0.${{ github.run_number }}
+          asset_path: build/${{ matrix.os }}/kubescape.zip
+          asset_name: kubescape-${{ matrix.os }}.zip
+          asset_content_type: application/zip
