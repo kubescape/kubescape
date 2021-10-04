@@ -6,6 +6,7 @@ echo
  
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
+KUBESCAPE_ZIP=kubescape.zip
 
 osName=$(uname -s)
 if [[ $osName == *"MINGW"* ]]; then
@@ -25,8 +26,10 @@ DOWNLOAD_URL=${DOWNLOAD_URL/browser_download_url: /}
 mkdir -p $BASE_DIR 
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
+OUTPUT_ZIP=$BASE_DIR/$KUBESCAPE_ZIP
 
-curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
+curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT_ZIP
+unzip $OUTPUT_ZIP $KUBESCAPE_EXEC -d $BASE_DIR
 
 # Checking if SUDO needed/exists 
 SUDO=

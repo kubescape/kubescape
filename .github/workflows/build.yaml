@@ -49,7 +49,7 @@ jobs:
           mkdir -p build/${{ matrix.os }}  
           go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape
           python -m sha1 build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.sha1
-          zip build/${{ matrix.os }}/kubescape.zip build/${{ matrix.os }}/kubescape build/${{ matrix.os }}/kubescape.sha1
+          python -m zipfile -c build/${{ matrix.os }}/kubescape.zip build/${{ matrix.os }}/kubescape build/${{ matrix.os }}/kubescape.sha1
       
       - name: Upload Release binaries
         id: upload-release-asset
