@@ -28,12 +28,28 @@ OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
 
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
-# Ping download counter
-curl --silent https://us-central1-elated-pottery-310110.cloudfunctions.net/kubescape-download-counter -o /dev/null
- 
-chmod +x $OUTPUT 2>/dev/null || sudo chmod +x $OUTPUT
-rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || sudo rm -f /usr/local/bin/$KUBESCAPE_EXEC
-cp $OUTPUT /usr/local/bin 2>/dev/null || sudo cp $OUTPUT /usr/local/bin
+# Checking if SUDO needed/exists 
+SUDO=
+if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ]; then
+    SUDO=sudo
+fi
+
+
+# Find install dir
+install_dir=/usr/local/bin #default
+for pdir in ${PATH//:/ }; do
+    edir="${pdir/#\~/$HOME}"
+    if [[ $edir == $HOME/* ]]; then
+        install_dir=$edir
+        mkdir -p $install_dir 2>/dev/null || true
+        SUDO=
+        break
+    fi
+done
+
+chmod +x $OUTPUT 2>/dev/null 
+$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true # clearning up old install
+$SUDO cp $OUTPUT $install_dir/$KUBESCAPE_EXEC 
 rm -rf $OUTPUT
 
 echo

@@ -1,4 +1,4 @@
-name: build
+name: build-dev
 
 on:
   push:
@@ -26,6 +26,7 @@ jobs:
           ArmoBEServer: api.armo.cloud
           ArmoERServer: report.euprod1.cyberarmorsoft.com
           ArmoWebsite: portal.armo.cloud
+          CGO_ENABLED: 0
         run: mkdir -p build/${{ matrix.os }}  && go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape # && md5sum build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.md5
       
       - name: Upload build artifacts 
