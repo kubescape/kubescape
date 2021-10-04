@@ -24,6 +24,8 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 
 <img src="docs/summary.png">
 
+### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀 
+
 # Being part of the team
 
 We invite you to our team! We are excited about this project and want to return the love we get. 
