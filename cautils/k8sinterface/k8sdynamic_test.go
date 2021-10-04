@@ -37,7 +37,7 @@ func NewKubernetesApiMock() *KubernetesApi {
 // 	} else {
 // 		bla, _ := json.Marshal(clientResource)
 // 		// t.Errorf("BearerToken: %v", *K8SConfig)
-// 		// ioutil.WriteFile("bla.json", bla, 777)
+// 		// os.WriteFile("bla.json", bla, 777)
 // 		t.Errorf("clientResource: %s", string(bla))
 // 	}
 // }

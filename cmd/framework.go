@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -56,7 +55,7 @@ var frameworkCmd = &cobra.Command{
 			if len(args[1:]) == 0 || args[1] != "-" {
 				scanInfo.InputPatterns = args[1:]
 			} else { // store stout to file
-				tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
+				tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
 				if err != nil {
 					return err
 				}

@@ -3,7 +3,6 @@ package cautils
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -154,7 +153,7 @@ func LoadConfig(configPath string, loadToEnv bool) (*ClusterConfig, error) {
 		configPath = "/etc/config/clusterData.json"
 	}
 
-	dat, err := ioutil.ReadFile(configPath)
+	dat, err := os.ReadFile(configPath)
 	if err != nil || len(dat) == 0 {
 		return nil, fmt.Errorf("Config empty or not found. path: %s", configPath)
 	}

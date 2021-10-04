@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
@@ -73,12 +72,12 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, armoAPI *getter.ArmoAPI) 
 	}
 }
 func createConfigJson() {
-	ioutil.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), nil, 0664)
+	os.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), nil, 0664)
 
 }
 
 func update(configObj *ConfigObj) {
-	ioutil.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), configObj.Json(), 0664)
+	os.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), configObj.Json(), 0664)
 }
 func (c *ClusterConfig) GenerateURL() {
 	u := url.URL{}
@@ -126,7 +125,7 @@ func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
 }
 
 func GetValueFromConfigJson(key string) (string, error) {
-	data, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
+	data, err := os.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
 	if err != nil {
 		return "", err
 	}
@@ -141,7 +140,7 @@ func GetValueFromConfigJson(key string) (string, error) {
 }
 
 func SetKeyValueInConfigJson(key string, value string) error {
-	data, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
+	data, err := os.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
 	if err != nil {
 		return err
 	}
@@ -157,7 +156,7 @@ func SetKeyValueInConfigJson(key string, value string) error {
 		return err
 	}
 
-	return ioutil.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), newData, 0664)
+	return os.WriteFile(getter.GetDefaultPath(ConfigFileName+".json"), newData, 0664)
 
 }
 
@@ -251,7 +250,7 @@ func (c *ClusterConfig) existsConfigMap() bool {
 }
 
 func existsConfigJson() bool {
-	_, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
+	_, err := os.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
 
 	return err == nil
 
@@ -300,7 +299,7 @@ func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {
 	}
 }
 func loadConfigFromFile() (*ConfigObj, error) {
-	dat, err := ioutil.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
+	dat, err := os.ReadFile(getter.GetDefaultPath(ConfigFileName + ".json"))
 	if err != nil {
 		return nil, err
 	}

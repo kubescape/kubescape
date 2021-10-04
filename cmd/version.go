@@ -3,7 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 
 	"github.com/spf13/cobra"
@@ -32,7 +32,7 @@ func GetLatestVersion() (string, error) {
 		return "", fmt.Errorf("failed to download file, status code: %s", resp.Status)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("failed to read response body from '%s', reason: %s", latestVersion, err.Error())
 	}
