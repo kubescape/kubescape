@@ -24,6 +24,8 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 
 <img src="docs/summary.png">
 
+### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀 
+
 # Being part of the team
 
 We invite you to our team! We are excited about this project and want to return the love we get. 
@@ -123,7 +125,7 @@ Note: development (and the release process) is done with Go `1.16`
 
 1. Clone Project
 ```
-git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
+git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 ```
 
 2. Build
@@ -142,7 +144,7 @@ go mod tidy && go build -o kubescape .
 
 1. Clone Project
 ```
-git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
+git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 ```
 
 2. Build
