@@ -24,6 +24,8 @@ If you wish to scan all namespaces in your cluster, remove the `--exclude-namesp
 
 <img src="docs/summary.png">
 
+### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀 
+
 # Being part of the team
 
 We invite you to our team! We are excited about this project and want to return the love we get. 
@@ -31,9 +33,9 @@ We invite you to our team! We are excited about this project and want to return 
 Want to contribute? Want to discuss something? Have an issue?
 
 * Open a issue, we are trying to respond within 48 hours
-* [Join us](https://discordapp.com/invite/CTcCaBbb) in a discussion on our discord server! 
+* [Join us](https://armosec.github.io/kubescape/) in a discussion on our discord server! 
 
-[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discordapp.com/invite/CTcCaBbb)
+[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
 
 # Options and examples
 

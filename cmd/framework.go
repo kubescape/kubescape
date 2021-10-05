@@ -23,7 +23,7 @@ import (
 )
 
 var scanInfo cautils.ScanInfo
-var supportedFrameworks = []string{"nsa"}
+var supportedFrameworks = []string{"nsa", "mitre"}
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
@@ -39,7 +39,7 @@ var frameworkCmd = &cobra.Command{
 		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
 			return fmt.Errorf("requires at least one argument")
 		} else if len(args) > 0 {
-			if !isValidFramework(args[0]) {
+			if !isValidFramework(strings.ToLower(args[0])) {
 				return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
 			}
 		}
@@ -50,7 +50,7 @@ var frameworkCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
 
 		if !(cmd.Flags().Lookup("use-from").Changed) {
-			scanInfo.PolicyIdentifier.Name = args[0]
+			scanInfo.PolicyIdentifier.Name = strings.ToLower(args[0])
 		}
 		if len(args) > 0 {
 			if len(args[1:]) == 0 || args[1] != "-" {

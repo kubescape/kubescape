@@ -18,14 +18,13 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 		switch rule.Kind {
 		case opapolicy.KindFramework:
 			receivedFramework, recExceptionPolicies, err := policyHandler.getFrameworkPolicies(rule.Name)
-			if err != nil {
-				return nil, nil, fmt.Errorf("kind: %v, name: %s, error: %s", rule.Kind, rule.Name, err.Error())
-			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
 				if recExceptionPolicies != nil {
 					exceptionPolicies = append(exceptionPolicies, recExceptionPolicies...)
 				}
+			} else if err != nil {
+				return nil, nil, fmt.Errorf("kind: %v, name: %s, error: %s", rule.Kind, rule.Name, err.Error())
 			}
 
 		default:
