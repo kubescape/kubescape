@@ -56,10 +56,10 @@ def main():
     # Get dependencies
     try:
         status = subprocess.call(["go", "mod", "tidy"])
-        checkStatus(status, "Faild to get dependancies")
+        checkStatus(status, "Failed to get dependencies")
 
     except OSError:
-        print("An error occure:  (Hint: check if go is installed)")
+        print("An error occured:  (Hint: check if go is installed)")
         raise
 
     # Build kubescape
@@ -67,7 +67,7 @@ def main():
         % (buildUrl, releaseVersion, BE_SERVER_CONST, ArmoBEServer,
            ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite)
     status = subprocess.call(["go", "build", "-o", "%s/%s" % (buildDir, packageName), "-ldflags" ,ldflags])
-    checkStatus(status, "Faild to build kubescape")
+    checkStatus(status, "Failed to build kubescape")
 
 
     sha1 = hashlib.sha1()
@@ -76,7 +76,7 @@ def main():
         with open(buildDir + "/" + packageName + ".sha1", "w") as kube_sha:
             kube_sha.write(sha1.hexdigest())
 
-    print("Build Done.")
+    print("Build Done")
 
 if __name__ == "__main__":
     main()
