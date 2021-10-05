@@ -142,7 +142,7 @@ Note: development (and the release process) is done with Go `1.16`
 
 1. Clone Project
 ```
-git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
+git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 ```
 
 2. Build
@@ -161,7 +161,7 @@ go mod tidy && go build -o kubescape .
 
 1. Clone Project
 ```
-git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
+git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 ```
 
 2. Build
