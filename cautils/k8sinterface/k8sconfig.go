@@ -104,13 +104,18 @@ func GetClusterName() string {
 }
 
 func GetDefaultNamespace() string {
+	defaultNamespace := "default"
 	clientCfg, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
 	if err != nil {
-		return "default"
+		return defaultNamespace
 	}
-	namespace := clientCfg.Contexts[clientCfg.CurrentContext].Namespace
-	if namespace == "" {
-		namespace = "default"
+	apiContext, ok := clientCfg.Contexts[clientCfg.CurrentContext]
+	if !ok || apiContext == nil {
+		return defaultNamespace
+	}
+	namespace := apiContext.Namespace
+	if apiContext.Namespace == "" {
+		namespace = defaultNamespace
 	}
 	return namespace
 }
