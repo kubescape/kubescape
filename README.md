@@ -115,7 +115,7 @@ for example:
 ```
 helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
-### Offline Support <img src="docs/new-feature.svg">
+### Offline Support
 
 It is possible to run Kubescape offline!
 
