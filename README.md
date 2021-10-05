@@ -15,6 +15,8 @@ Use Kubescape to test clusters or scan single YAML files and integrate it to you
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
 
+[Install on windows](#install-on-windows)
+
 ## Run:
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
@@ -33,11 +35,25 @@ We invite you to our team! We are excited about this project and want to return 
 Want to contribute? Want to discuss something? Have an issue?
 
 * Open a issue, we are trying to respond within 48 hours
-* [Join us](https://discordapp.com/invite/CTcCaBbb) in a discussion on our discord server! 
+* [Join us](https://armosec.github.io/kubescape/) in a discussion on our discord server! 
 
-[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discordapp.com/invite/CTcCaBbb)
+[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
 
 # Options and examples
+
+## Install on Windows
+
+**Requires powershell v5.0+**
+
+``` powershell
+iwr -useb https://raw.githubusercontent.com/armosec/kubescape/master/install.ps1 | iex
+```
+
+Note: if you get an error you might need to change the execution policy (i.e. enable Powershell) with
+
+``` powershell
+Set-ExecutionPolicy RemoteSigned -scope CurrentUser
+```
 
 ## Flags
 
@@ -119,13 +135,30 @@ Kubescape is an open source project, we welcome your feedback and ideas for impr
 
 # How to build 
 
-## For development
+## Build using python script
+
+Kubescpae can be built using:
+
+``` sh
+python built.py
+```
+
+Note: In order to built using the above script, one must set the environment
+variables in this script:
+
++ RELEASE
++ ArmoBEServer
++ ArmoERServer
++ ArmoWebsite
+
+
+## Build using go
 
 Note: development (and the release process) is done with Go `1.16`
 
 1. Clone Project
 ```
-git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
+git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 ```
 
 2. Build
@@ -144,7 +177,7 @@ go mod tidy && go build -o kubescape .
 
 1. Clone Project
 ```
-git clone git@github.com:armosec/kubescape.git kubescape && cd "$_"
+git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 ```
 
 2. Build
