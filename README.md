@@ -15,6 +15,8 @@ Use Kubescape to test clusters or scan single YAML files and integrate it to you
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
 
+[Install on windows](#install-on-windows)
+
 ## Run:
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
@@ -38,6 +40,20 @@ Want to contribute? Want to discuss something? Have an issue?
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
 
 # Options and examples
+
+## Install on Windows
+
+**Requires powershell v5.0+**
+
+``` powershell
+iwr -useb https://raw.githubusercontent.com/armosec/kubescape/master/install.ps1 | iex
+```
+
+Note: if you get an error you might need to change the execution policy (i.e. enable Powershell) with
+
+``` powershell
+Set-ExecutionPolicy RemoteSigned -scope CurrentUser
+```
 
 ## Flags
 
@@ -99,7 +115,7 @@ for example:
 ```
 helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
-### Offline Support <img src="docs/new-feature.svg">
+### Offline Support
 
 It is possible to run Kubescape offline!
 
@@ -119,7 +135,24 @@ Kubescape is an open source project, we welcome your feedback and ideas for impr
 
 # How to build 
 
-## For development
+## Build using python script
+
+Kubescpae can be built using:
+
+``` sh
+python build.py
+```
+
+Note: In order to built using the above script, one must set the environment
+variables in this script:
+
++ RELEASE
++ ArmoBEServer
++ ArmoERServer
++ ArmoWebsite
+
+
+## Build using go
 
 Note: development (and the release process) is done with Go `1.16`
 
