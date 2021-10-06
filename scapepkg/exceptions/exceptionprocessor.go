@@ -98,7 +98,7 @@ func hasException(designator *armotypes.PortalDesignator, workload k8sinterface.
 		return false // if designators are empty
 	}
 
-	if cluster != "" && cautils.ClusterName != "" && regexCompare(cluster, cautils.ClusterName) { // TODO - where do we receive cluster name from?
+	if cluster != "" && cautils.ClusterName != "" && !regexCompare(cluster, cautils.ClusterName) { // TODO - where do we receive cluster name from?
 		return false // cluster name does not match
 	}
 
