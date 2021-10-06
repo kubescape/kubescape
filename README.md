@@ -140,7 +140,7 @@ Kubescape is an open source project, we welcome your feedback and ideas for impr
 Kubescpae can be built using:
 
 ``` sh
-python built.py
+python build.py
 ```
 
 Note: In order to built using the above script, one must set the environment
