@@ -189,20 +189,20 @@ func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
 
 func (c *ClusterConfig) SetCustomerGUID() error {
 
-	// get from file
-	if existsConfigJson() {
-		c.configObj, _ = loadConfigFromFile()
-	} else if c.existsConfigMap() {
+	// get from configMap
+	if c.existsConfigMap() {
 		c.configObj, _ = c.loadConfigFromConfigMap()
+	} else if existsConfigJson() { // get from file
+		c.configObj, _ = loadConfigFromFile()
 	} else {
 		c.createConfigMap()
 		createConfigJson()
 	}
 
 	customerGUID := c.GetCustomerGUID()
+
 	// get from armoBE
 	tenantResponse, err := c.armoAPI.GetCustomerGUID(customerGUID)
-
 	if err == nil && tenantResponse != nil {
 		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
 			if existsConfigJson() {
@@ -222,7 +222,7 @@ func (c *ClusterConfig) SetCustomerGUID() error {
 			}
 		}
 	} else {
-		if err != nil && strings.Contains(err.Error(), "Invitation for tenant already exists") {
+		if err != nil && strings.Contains(err.Error(), "already exists") {
 			return nil
 		}
 		return err
