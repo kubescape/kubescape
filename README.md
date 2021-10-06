@@ -78,6 +78,12 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
 
+
+* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework
+```
+kubescape scan framework mitre --exclude-namespaces kube-system,kube-public
+```
+
 * Scan local `yaml`/`json` files before deploying
 ```
 kubescape scan framework nsa *.yaml
