@@ -38,16 +38,13 @@ jobs:
         with:
           go-version: 1.16
       - name: Build
-        uses: actions/setup-python@v2
-        with: 
-          python-version: 3.7
         env:
           RELEASE: v1.0.${{ github.run_number }} 
           ArmoBEServer: api.armo.cloud
           ArmoERServer: report.euprod1.cyberarmorsoft.com
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
-        run: python3 build.py
+        run: python build.py
       
       - name: Upload Release binaries
         id: upload-release-asset
