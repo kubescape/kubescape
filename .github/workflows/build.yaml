@@ -41,7 +41,7 @@ jobs:
         env:
           RELEASE: v1.0.${{ github.run_number }} 
           ArmoBEServer: api.armo.cloud
-          ArmoERServer: report.euprod1.cyberarmorsoft.com
+          ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
         run: python build.py
