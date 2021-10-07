@@ -3,7 +3,7 @@ package getter
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/armotypes"
@@ -29,7 +29,7 @@ func NewLoadPolicy(filePath string) *LoadPolicy {
 func (lp *LoadPolicy) GetFramework(frameworkName string) (*opapolicy.Framework, error) {
 
 	framework := &opapolicy.Framework{}
-	f, err := ioutil.ReadFile(lp.filePath)
+	f, err := os.ReadFile(lp.filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -44,7 +44,7 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*opapolicy.Framework, 
 func (lp *LoadPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 
 	exception := []armotypes.PostureExceptionPolicy{}
-	f, err := ioutil.ReadFile(lp.filePath)
+	f, err := os.ReadFile(lp.filePath)
 	if err != nil {
 		return nil, err
 	}

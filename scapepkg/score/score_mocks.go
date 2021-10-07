@@ -2,7 +2,7 @@ package score
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	k8sinterface "github.com/armosec/kubescape/cautils/k8sinterface"
@@ -12,7 +12,7 @@ import (
 func loadResourcesMock() []map[string]interface{} {
 	resources := make([]map[string]interface{}, 0)
 
-	dat, err := ioutil.ReadFile("resourcemocks.json")
+	dat, err := os.ReadFile("resourcemocks.json")
 
 	if err != nil {
 		return resources
@@ -51,7 +51,7 @@ func getResouceByType(desiredType string) map[string]interface{} {
 func loadFrameworkMock() *opapolicy.FrameworkReport {
 	report := &opapolicy.FrameworkReport{}
 
-	dat, err := ioutil.ReadFile("frameworkmock.json")
+	dat, err := os.ReadFile("frameworkmock.json")
 
 	if err != nil {
 		return report

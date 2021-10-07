@@ -2,10 +2,9 @@ package apis
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"time"
-
-	"io/ioutil"
 
 	oidc "github.com/coreos/go-oidc"
 	uuid "github.com/satori/go.uuid"
@@ -231,7 +230,7 @@ func BELogin(loginDetails *CustomerLoginDetails, login string, cfg string) (*BEL
 		return nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

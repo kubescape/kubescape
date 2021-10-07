@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -57,7 +57,7 @@ func (r *BackendConnector) Login() error {
 		return err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("unable to read login response")
 	}
@@ -120,7 +120,7 @@ func (r *BackendConnector) HTTPSend(httpverb string,
 		return nil, fmt.Errorf("Error #%v Due to: %v", resp.StatusCode, resp.Status)
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

@@ -35,7 +35,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.16
+          go-version: 1.17
 
       - name: Test
         run: go test -v ./...
@@ -44,7 +44,7 @@ jobs:
         env:
           RELEASE: v1.0.${{ github.run_number }} 
           ArmoBEServer: api.armo.cloud
-          ArmoERServer: report.euprod1.cyberarmorsoft.com
+          ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
         run: python build.py

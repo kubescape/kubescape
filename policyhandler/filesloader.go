@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -131,7 +130,7 @@ func loadFiles(filePaths []string) ([]k8sinterface.IWorkload, []error) {
 }
 
 func loadFile(filePath string) ([]byte, error) {
-	return ioutil.ReadFile(filePath)
+	return os.ReadFile(filePath)
 }
 func readFile(fileContent []byte, fileFromat FileFormat) ([]k8sinterface.IWorkload, []error) {
 
