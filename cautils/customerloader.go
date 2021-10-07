@@ -87,7 +87,7 @@ func (c *ClusterConfig) GenerateURL() {
 		return
 	}
 	if c.configObj.CustomerAdminEMail != "" {
-		msgStr := fmt.Sprintf("To view all controls and get remediations ask access permissions to %s from %s", u.String(), c.configObj.CustomerAdminEMail)
+		msgStr := fmt.Sprintf("To view all controls and get remediation's ask access permissions to %s from %s", u.String(), c.configObj.CustomerAdminEMail)
 		InfoTextDisplay(os.Stdout, msgStr+"\n")
 		return
 	}
@@ -97,7 +97,7 @@ func (c *ClusterConfig) GenerateURL() {
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
-	fmt.Println("To view all controls and get remediations visit:")
+	fmt.Println("To view all controls and get remediation's visit:")
 	InfoTextDisplay(os.Stdout, u.String()+"\n")
 
 }
