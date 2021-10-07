@@ -10,7 +10,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 )
 
-func combine(base, rel string) string {
+func combineYamlFile(base, rel string) string {
 	finalPath := []string{}
 	sBase := strings.Split(base, "/")
 	sRel := strings.Split(rel, "/")
@@ -25,7 +25,7 @@ func combine(base, rel string) string {
 }
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
-	return combine(o, "github.com/armosec/kubescape/examples/online-boutique/*")
+	return combineYamlFile(o, "kubescape/examples/online-boutique/*")
 }
 func TestListFiles(t *testing.T) {
 	files, errs := listFiles([]string{onlineBoutiquePath()})
@@ -44,7 +44,7 @@ func TestLoadFiles(t *testing.T) {
 }
 
 func TestLoadFile(t *testing.T) {
-	files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "bi-monitor.yaml", 1)})
+	files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1)})
 	_, err := loadFile(files[0])
 	if err != nil {
 		t.Errorf("%v", err)

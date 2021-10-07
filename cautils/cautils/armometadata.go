@@ -191,7 +191,7 @@ func (clusterConfig *ClusterConfig) LoadConfigToEnv() {
 func SetEnv(key, value string) {
 	if e := os.Getenv(key); e == "" {
 		if err := os.Setenv(key, value); err != nil {
-			glog.Warning("%s: %s", key, err.Error())
+			glog.Warningf("%s: %s", key, err.Error())
 		}
 	}
 }
