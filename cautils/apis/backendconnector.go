@@ -3,7 +3,7 @@ package apis
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 )
 
@@ -66,7 +66,7 @@ func BEHttpRequest(loginobj *LoginObject, beURL,
 		return nil, fmt.Errorf("Error #%v Due to: %v", resp.StatusCode, resp.Status)
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}

@@ -168,7 +168,7 @@ variables in this script:
 
 ## Build using go
 
-Note: development (and the release process) is done with Go `1.16`
+Note: development (and the release process) is done with Go `1.17`
 
 1. Clone Project
 ```
