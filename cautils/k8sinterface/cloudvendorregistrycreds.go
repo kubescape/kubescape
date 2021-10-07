@@ -5,7 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -105,7 +105,7 @@ func getAzureAADAccessToken() (string, error) {
 	}
 
 	// Pull out response body
-	responseBytes, err := ioutil.ReadAll(resp.Body)
+	responseBytes, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	if err != nil {
 		return "", fmt.Errorf("reading response body : %v", err)
@@ -173,7 +173,7 @@ func excahngeAzureAADAccessTokenForACRRefreshToken(registry, tenantID, azureAADA
 	}
 
 	// Pull out response body
-	responseBytes, err := ioutil.ReadAll(resp.Body)
+	responseBytes, err := io.ReadAll(resp.Body)
 	defer resp.Body.Close()
 	if err != nil {
 		return "", fmt.Errorf("reading response body : %v", err)
