@@ -17,6 +17,8 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 [Install on windows](#install-on-windows)
 
+[Install on macOS](#install-on-macos)
+
 ## Run:
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
@@ -53,6 +55,12 @@ Note: if you get an error you might need to change the execution policy (i.e. en
 
 ``` powershell
 Set-ExecutionPolicy RemoteSigned -scope CurrentUser
+```
+
+## Install on macOS
+```
+brew tap armosec/kubescape
+brew install kubescape
 ```
 
 ## Flags
