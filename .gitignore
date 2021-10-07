@@ -1,5 +1,4 @@
 *.vs*
-*go.sum*
 *kubescape*
 *debug*
 .idea
