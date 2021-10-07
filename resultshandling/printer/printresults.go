@@ -134,7 +134,7 @@ func (printer *Printer) PrintResults() {
 func (printer *Printer) printSummary(controlName string, controlSummary *ControlSummary) {
 	cautils.SimpleDisplay(printer.writer, "Summary - ")
 	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed)
-	cautils.WarningDisplay(printer.writer, "Warning:%v   ", controlSummary.TotalWarnign)
+	cautils.WarningDisplay(printer.writer, "Excluded:%v   ", controlSummary.TotalWarnign)
 	cautils.FailureDisplay(printer.writer, "Failed:%v   ", controlSummary.TotalFailed)
 	cautils.InfoDisplay(printer.writer, "Total:%v\n", controlSummary.TotalResources)
 	if controlSummary.TotalFailed > 0 {
@@ -151,7 +151,7 @@ func (printer *Printer) printTitle(controlName string, controlSummary *ControlSu
 	} else if controlSummary.TotalFailed != 0 {
 		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
 	} else if controlSummary.TotalWarnign != 0 {
-		cautils.WarningDisplay(printer.writer, "warning %v\n", emoji.NeutralFace)
+		cautils.WarningDisplay(printer.writer, "excluded %v\n", emoji.NeutralFace)
 	} else {
 		cautils.SuccessDisplay(printer.writer, "passed %v\n", emoji.ThumbsUp)
 	}
@@ -194,7 +194,7 @@ func generateRow(control string, cs ControlSummary) []string {
 }
 
 func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "Warning Resources", "All Resources", "% success"}
+	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% success"}
 }
 
 func percentage(big, small int) int {
