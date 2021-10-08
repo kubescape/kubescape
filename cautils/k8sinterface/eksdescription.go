@@ -36,5 +36,31 @@ func GetEKSClusterDescription() {
 		}
 		return
 	}
-	fmt.Println(*firstCluster.Clusters[0])
+
+	//Return the description of the cluster
+	clusterName := *firstCluster.Clusters[0]
+	input := &eks.DescribeClusterInput{
+		Name: &clusterName,
+	}
+	clusterDescription, err := svc.DescribeCluster(input)
+	if err != nil {
+		if aerr, ok := err.(awserr.Error); ok {
+			switch aerr.Code() {
+			case eks.ErrCodeResourceNotFoundException:
+				fmt.Println(eks.ErrCodeResourceNotFoundException, aerr.Error())
+			case eks.ErrCodeClientException:
+				fmt.Println(eks.ErrCodeClientException, aerr.Error())
+			case eks.ErrCodeServerException:
+				fmt.Println(eks.ErrCodeServerException, aerr.Error())
+			case eks.ErrCodeServiceUnavailableException:
+				fmt.Println(eks.ErrCodeServiceUnavailableException, aerr.Error())
+			default:
+				fmt.Println(aerr.Error())
+			}
+		} else {
+			fmt.Println(err.Error())
+		}
+		return
+	}
+	fmt.Println(clusterDescription)
 }
