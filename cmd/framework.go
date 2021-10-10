@@ -23,6 +23,7 @@ import (
 
 var scanInfo cautils.ScanInfo
 var supportedFrameworks = []string{"nsa", "mitre"}
+var validFrameworks = strings.Join(supportedFrameworks, ", ")
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
@@ -30,7 +31,8 @@ type CLIHandler struct {
 }
 
 var frameworkCmd = &cobra.Command{
-	Use:       "framework <framework name> [`<glob patter>`/`-`] [flags]",
+
+	Use:       fmt.Sprintf("framework <framework name> [`<glob patter>`/`-`] [flags]\nSupported frameworks: %s", validFrameworks),
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(supportedFrameworks, ", ")),
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
