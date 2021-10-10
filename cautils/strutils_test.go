@@ -13,7 +13,13 @@ func TestConvertLabelsToString(t *testing.T) {
 	spilltedA := strings.Split(rsrt, ";")
 	spilltedB := strings.Split(str, ";")
 	for i := range spilltedA {
-		if spilltedA[i] != spilltedB[i] {
+		exists := false
+		for j := range spilltedB {
+			if spilltedB[j] == spilltedA[i] {
+				exists = true
+			}
+		}
+		if !exists {
 			t.Errorf("%s != %s", spilltedA[i], spilltedB[i])
 		}
 	}
