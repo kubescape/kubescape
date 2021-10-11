@@ -80,18 +80,19 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal |
 | `--submit` | `false` | If set, Kubescape will send scan results to Armo management portal to allow users to control exceptions and maintain chronological scan results. By default the results are not sent | `true`/`false`|
 | `--local` | `false` | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results | `true`/`false`|
+| `--account` | | Armo portal account ID. Default will load account ID from configMap or config file | |
 
 ## Usage & Examples
  
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to Armo portal 
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to [Armo portal](https://portal.armo.cloud/) 
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --submit
 ```
 
 
-* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework and submit results to Armo portal 
+* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework and submit results to [Armo portal](https://portal.armo.cloud/)
 ```
 kubescape scan framework mitre --exclude-namespaces kube-system,kube-public --submit
 ```
