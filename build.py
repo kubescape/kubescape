@@ -53,15 +53,6 @@ def main():
     if not os.path.isdir(buildDir):
         os.makedirs(buildDir)
 
-    # Get dependencies
-    try:
-        status = subprocess.call(["go", "mod", "tidy"])
-        checkStatus(status, "Failed to get dependencies")
-
-    except OSError:
-        print("An error occured:  (Hint: check if go is installed)")
-        raise
-
     # Build kubescape
     ldflags = "-w -s -X %s=%s -X %s=%s -X %s=%s -X %s=%s" \
         % (buildUrl, releaseVersion, BE_SERVER_CONST, ArmoBEServer,

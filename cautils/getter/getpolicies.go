@@ -12,3 +12,6 @@ type IPolicyGetter interface {
 type IExceptionsGetter interface {
 	GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error)
 }
+type IBackend interface {
+	GetCustomerGUID(customerGUID string) (*TenantResponse, error)
+}
