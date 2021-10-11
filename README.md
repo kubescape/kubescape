@@ -58,10 +58,13 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
 
 ## Install on macOS
-```
-brew tap armosec/kubescape
-brew install kubescape
-```
+
+1. ```
+    brew tap armosec/kubescape
+    ```
+2. ```
+    brew install kubescape
+    ```
 
 ## Flags
 
@@ -75,21 +78,22 @@ brew install kubescape
 | `--use-from` | | Load local framework object from specified path. If not used will download latest |
 | `--use-default` | `false` | Load local framework object from default path. If not used will download latest | `true`/`false` |
 | `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal |
-| `--results-locally` | `false` | Kubescape sends scan results to Armo management portal to allow users to control exceptions and maintain chronological scan results. Use this flag if you do not wish to use these features | `true`/`false`|
+| `--submit` | `false` | If set, Kubescape will send scan results to Armo management portal to allow users to control exceptions and maintain chronological scan results. By default the results are not sent | `true`/`false`|
+| `--local` | `false` | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results | `true`/`false`|
 
 ## Usage & Examples
  
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to Armo portal 
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --submit
 ```
 
 
-* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework
+* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework and submit results to Armo portal 
 ```
-kubescape scan framework mitre --exclude-namespaces kube-system,kube-public
+kubescape scan framework mitre --exclude-namespaces kube-system,kube-public --submit
 ```
 
 * Scan local `yaml`/`json` files before deploying
@@ -135,12 +139,12 @@ It is possible to run Kubescape offline!
 
 First download the framework and then scan with `--use-from` flag
 
-* Download and save in file, if file name not specified, will store save to `~/.kubescape/<framework name>.json`
+1. Download and save in file, if file name not specified, will store save to `~/.kubescape/<framework name>.json`
 ```
 kubescape download framework nsa --output nsa.json
 ```
 
-* Scan using the downloaded framework 
+2. Scan using the downloaded framework 
 ```
 kubescape scan framework nsa --use-from nsa.json
 ```

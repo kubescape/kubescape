@@ -95,7 +95,11 @@ func init() {
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code 1")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Kubescape sends scan results to Armosec backend to allow users to control exceptions and maintain chronological scan results. Use this flag if you do not wish to use these features")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Kubescape sends scan results to Armo backend to allow users to control exceptions and maintain chronological scan results. Use this flag if you do not wish to use these features")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Use this flag if you wish to send your Kubescape results to Armo backend to control exceptions and maintain chronological scan results. By default the results are not submitted")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Account, "account", "", "", "Account ID. Default will load accout ID from configMap/file")
+
 }
 
 func CliSetup() error {
@@ -119,15 +123,10 @@ func CliSetup() error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	// load cluster config
-	var clusterConfig cautils.IClusterConfig
-	if !scanInfo.DoNotSendResults && k8sinterface.ConnectedToCluster {
-		clusterConfig = cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
-	} else {
-		clusterConfig = cautils.NewEmptyConfig()
-	}
+	// setup cluster config
+	clusterConfig := cautils.ClusterConfigSetup(&scanInfo, k8s, getter.NewArmoAPI())
 
-	if err := clusterConfig.SetCustomerGUID(); err != nil {
+	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
 		fmt.Println(err)
 	}
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()

@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/spf13/cobra"
 )
 
@@ -31,7 +30,7 @@ var localGetCmd = &cobra.Command{
 		val, err := cautils.GetValueFromConfigJson(key)
 		if err != nil {
 			if err.Error() == "value does not exist." {
-				fmt.Printf("Could net get value from: %s, reason: %s\n", getter.GetDefaultPath(cautils.ConfigFileName+".json"), err)
+				fmt.Printf("Could net get value from: %s, reason: %s\n", cautils.ConfigFileFullPath(), err)
 				return nil
 			}
 			return err
