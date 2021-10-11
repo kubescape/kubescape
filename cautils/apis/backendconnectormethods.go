@@ -21,7 +21,7 @@ func MakeBackendConnector(client *http.Client, baseURL string, loginDetails *Cus
 
 func ValidateBEConnectorMakerInput(client *http.Client, baseURL string, loginDetails *CustomerLoginDetails) error {
 	if client == nil {
-		fmt.Errorf("You must provide an initialized httpclient")
+		return fmt.Errorf("You must provide an initialized httpclient")
 	}
 	if len(baseURL) == 0 {
 		return fmt.Errorf("you must provide a valid backend url")
