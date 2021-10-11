@@ -76,6 +76,9 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 
 	*/
 	clusterConfig := NewClusterConfig(k8s, beAPI)
+	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
+		fmt.Println(err)
+	}
 	if !IsSubmitted(clusterConfig) {
 		if scanInfo.Submit {
 			return clusterConfig // submit - Create tenant & Submit report
