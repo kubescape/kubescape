@@ -59,7 +59,7 @@ def main():
         checkStatus(status, "Failed to get dependencies")
 
     except OSError:
-        print("An error occured:  (Hint: check if go is installed)")
+        print("An error occurred:  (Hint: check if go is installed)")
         raise
 
     # Build kubescape
