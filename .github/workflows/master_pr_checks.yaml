@@ -1,0 +1,39 @@
+name: master-pr
+
+on:
+  pull_request:
+    branches: [ master ]
+    types: [ edited, opened, synchronize, reopened ]
+jobs:
+  build:
+    name: Create cross-platform build
+    needs: once
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v1
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.17
+
+      - name: Test
+        run: go test -v ./...
+
+      - name: Build
+        env:
+          RELEASE: v1.0.${{ github.run_number }} 
+          ArmoBEServer: api.armo.cloud
+          ArmoERServer: report.armo.cloud
+          ArmoWebsite: portal.armo.cloud
+          CGO_ENABLED: 0
+        run: python build.py
+
+      - name: Upload build artifacts 
+        uses: actions/upload-artifact@v2
+        with:
+          name: kubescape-${{ matrix.os }}
+          path: build/${{ matrix.os }}/kubescape 
