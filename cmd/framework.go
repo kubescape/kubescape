@@ -95,9 +95,9 @@ func init() {
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code 1")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Deprecated. Please use `--local` instead")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Use this flag if you wish to send your Kubescape results to Armo backend to control exceptions and maintain chronological scan results. By default the results are not submitted")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Deprecated. Please use `--keep-local` instead")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 
 }
@@ -187,11 +187,11 @@ func (clihandler *CLIHandler) Scan() error {
 
 func flagValidation() {
 	if scanInfo.DoNotSendResults {
-		fmt.Println("Deprecated. Please use `--local` instead")
+		fmt.Println("Deprecated. Please use `--keep-local` instead")
 	}
 
 	if scanInfo.Submit && scanInfo.Local {
-		fmt.Println("You can use `local` or `submit`, but not both")
+		fmt.Println("You can use `keep-local` or `submit`, but not both")
 		os.Exit(1)
 	}
 	if 100 < scanInfo.FailThreshold {
