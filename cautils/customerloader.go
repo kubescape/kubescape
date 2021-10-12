@@ -65,7 +65,7 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 			Submit - Create tenant & Submit report
 
 		If "Submitted but not signed up" -
-			Default	- Submit report (submit)
+			Default	- Delete local config & Do not send report (local)
 			Local - Delete local config & Do not send report
 			Submit - Submit report
 
@@ -85,11 +85,11 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 		return NewEmptyConfig() // local/default - Do not send report
 	}
 	if !IsRegistered(clusterConfig) {
-		if scanInfo.Local {
-			DeleteConfig(k8s)
-			return NewEmptyConfig() // local - Delete local config & Do not send report
+		if scanInfo.Submit {
+			return clusterConfig // submit/default - Submit report
 		}
-		return clusterConfig // submit/default -  Submit report
+		DeleteConfig(k8s)
+		return NewEmptyConfig() // local - Delete local config & Do not send report
 	}
 	if scanInfo.Local {
 		return NewEmptyConfig() // local - Do not send report
