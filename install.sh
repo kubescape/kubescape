@@ -9,23 +9,17 @@ KUBESCAPE_EXEC=kubescape
 
 osName=$(uname -s)
 if [[ $osName == *"MINGW"* ]]; then
-    osName=windows-latest
+    osName=windows
 elif [[ $osName == *"Darwin"* ]]; then
-    osName=macos-latest
+    osName=macos
 else
-    osName=ubuntu-latest
+    osName=ubuntu
 fi
-
-GITHUB_OWNER=armosec
-
-DOWNLOAD_URL=$(curl --silent "https://api.github.com/repos/$GITHUB_OWNER/kubescape/releases/latest" | grep -o "browser_download_url.*${osName}.*")
-DOWNLOAD_URL=${DOWNLOAD_URL//\"}
-DOWNLOAD_URL=${DOWNLOAD_URL/browser_download_url: /}
 
 mkdir -p $BASE_DIR 
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
-
+DOWNLOAD_URL="https://github.com/armosec/kubescape/releases/latest/download/kubescape-${osName}-latest"
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
 # Checking if SUDO needed/exists 
