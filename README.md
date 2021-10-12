@@ -78,8 +78,8 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--use-from` | | Load local framework object from specified path. If not used will download latest |
 | `--use-default` | `false` | Load local framework object from default path. If not used will download latest | `true`/`false` |
 | `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal |
-| `--submit` | `false` | If set, Kubescape will send scan results to Armo management portal to allow users to control exceptions and maintain chronological scan results. By default the results are not sent | `true`/`false`|
-| `--local` | `false` | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results | `true`/`false`|
+| `--submit` | `false` | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`|
+| `--keep-local` | `false` | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results | `true`/`false`|
 | `--account` | | Armo portal account ID. Default will load account ID from configMap or config file | |
 
 ## Usage & Examples
@@ -97,7 +97,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --subm
 kubescape scan framework mitre --exclude-namespaces kube-system,kube-public --submit
 ```
 
-* Scan local `yaml`/`json` files before deploying
+* Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
 ```
 kubescape scan framework nsa *.yaml
 ```
