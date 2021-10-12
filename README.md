@@ -97,7 +97,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --subm
 kubescape scan framework mitre --exclude-namespaces kube-system,kube-public --submit
 ```
 
-* Scan local `yaml`/`json` files before deploying
+* Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
 ```
 kubescape scan framework nsa *.yaml
 ```

@@ -130,6 +130,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	return &ClusterConfig{
 		k8s:        k8s,
 		backendAPI: backendAPI,
+		configObj:  &ConfigObj{},
 		defaultNS:  k8sinterface.GetDefaultNamespace(),
 	}
 }
