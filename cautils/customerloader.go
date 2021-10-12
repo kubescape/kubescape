@@ -76,9 +76,8 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 
 	*/
 	clusterConfig := NewClusterConfig(k8s, beAPI)
-	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
-		fmt.Println(err)
-	}
+	clusterConfig.LoadConfig()
+
 	if !IsSubmitted(clusterConfig) {
 		if scanInfo.Submit {
 			return clusterConfig // submit - Create tenant & Submit report
@@ -171,21 +170,8 @@ func (c *ClusterConfig) GetCustomerGUID() string {
 
 func (c *ClusterConfig) SetCustomerGUID(customerGUID string) error {
 
-	updateConfig := false
-	createConfig := false
-
-	// get from configMap
-	if c.existsConfigMap() {
-		c.configObj, _ = c.loadConfigFromConfigMap()
-	} else if existsConfigFile() { // get from file
-		c.configObj, _ = loadConfigFromFile()
-	} else {
-		c.configObj = &ConfigObj{}
-		createConfig = true
-	}
 	if customerGUID != "" && c.GetCustomerGUID() != customerGUID {
 		c.configObj.CustomerGUID = customerGUID // override config customerGUID
-		updateConfig = true
 	}
 
 	customerGUID = c.GetCustomerGUID()
@@ -199,25 +185,38 @@ func (c *ClusterConfig) SetCustomerGUID(customerGUID string) error {
 			c.configObj.Token = tenantResponse.Token
 			c.configObj.CustomerGUID = tenantResponse.TenantID
 		}
-		updateConfig = true
 	} else {
 		if err != nil && !strings.Contains(err.Error(), "already exists") {
 			return err
 		}
 	}
-	if createConfig {
+
+	// update/create config
+	if c.existsConfigMap() {
+		c.updateConfigMap()
+	} else {
 		c.createConfigMap()
-		c.createConfigFile()
-	} else if updateConfig {
-		if c.existsConfigMap() {
-			c.updateConfigMap()
-		}
-		if existsConfigFile() {
-			c.updateConfigFile()
-		}
 	}
+	if existsConfigFile() {
+		c.updateConfigFile()
+	} else {
+		c.createConfigFile()
+	}
+
 	return nil
 }
+
+func (c *ClusterConfig) LoadConfig() {
+	// get from configMap
+	if c.existsConfigMap() {
+		c.configObj, _ = c.loadConfigFromConfigMap()
+	} else if existsConfigFile() { // get from file
+		c.configObj, _ = loadConfigFromFile()
+	} else {
+		c.configObj = &ConfigObj{}
+	}
+}
+
 func (c *ClusterConfig) ToMapString() map[string]interface{} {
 	m := map[string]interface{}{}
 	bc, _ := json.Marshal(c.configObj)

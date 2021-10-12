@@ -121,6 +121,9 @@ func CliSetup() error {
 
 	// setup cluster config
 	clusterConfig := cautils.ClusterConfigSetup(&scanInfo, k8s, getter.NewArmoAPI())
+	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
+		fmt.Println(err)
+	}
 
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
 	cautils.ClusterName = k8sinterface.GetClusterName()
