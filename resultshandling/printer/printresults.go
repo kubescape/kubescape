@@ -107,7 +107,7 @@ func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {
 
 			printer.summary[cr.Name] = ControlSummary{
 				TotalResources:  cr.GetNumberOfResources(),
-				TotalFailed:     cr.GetNumberOfFailedResources(),
+				TotalFailed:     len(workloadsSummary),
 				TotalWarnign:    cr.GetNumberOfWarningResources(),
 				WorkloadSummary: mapResources,
 				Description:     cr.Description,
