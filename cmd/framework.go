@@ -107,10 +107,14 @@ func CliSetup() error {
 	flagValidation()
 
 	var k8s *k8sinterface.KubernetesApi
+	var clusterConfig cautils.IClusterConfig
 	if !scanInfo.ScanRunningCluster() {
 		k8sinterface.ConnectedToCluster = false
+		clusterConfig = cautils.NewEmptyConfig()
 	} else {
 		k8s = k8sinterface.NewKubernetesApi()
+		// setup cluster config
+		clusterConfig = cautils.ClusterConfigSetup(&scanInfo, k8s, getter.NewArmoAPI())
 	}
 
 	processNotification := make(chan *cautils.OPASessionObj)
@@ -119,8 +123,6 @@ func CliSetup() error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	// setup cluster config
-	clusterConfig := cautils.ClusterConfigSetup(&scanInfo, k8s, getter.NewArmoAPI())
 	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
 		fmt.Println(err)
 	}
