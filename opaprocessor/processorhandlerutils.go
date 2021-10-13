@@ -98,6 +98,7 @@ func editRuleResponses(ruleResponses []opapolicy.RuleResponse) []opapolicy.RuleR
 				// resource found -> remove from slice
 				ruleResponses = removeFromSlice(ruleResponses, i)
 				lenRuleResponses -= 1
+				i -= 1
 				break
 			} else {
 				cleanRuleResponses(w)

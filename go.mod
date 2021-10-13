@@ -30,7 +30,7 @@ require (
 )
 
 require (
-	github.com/armosec/armoapi-go v0.0.5
+	github.com/armosec/armoapi-go v0.0.6
 	github.com/armosec/k8s-interface v0.0.2
 	github.com/armosec/opa-utils v0.0.1
 	github.com/armosec/utils-go v0.0.3
