@@ -11,7 +11,7 @@ import (
 var downloadInfo cautils.DownloadInfo
 
 var downloadCmd = &cobra.Command{
-	Use:   fmt.Sprintf("Download framework <framework-name> [flags]\nSupported frameworks: %s", validFrameworks),
+	Use:   fmt.Sprintf("download framework <framework-name> [flags]\nSupported frameworks: %s", validFrameworks),
 	Short: "Download framework controls",
 	Long:  ``,
 	Args: func(cmd *cobra.Command, args []string) error {
