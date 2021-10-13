@@ -9,10 +9,10 @@ import (
 	"github.com/armosec/kubescape/scapepkg/exceptions"
 	"github.com/armosec/kubescape/scapepkg/score"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/k8s-interface/k8sinterface"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
-	"github.com/armosec/kubescape/cautils/opapolicy/resources"
+	"github.com/armosec/armoapi-go/opapolicy"
+	"github.com/armosec/opa-utils/resources"
 	"github.com/golang/glog"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
@@ -42,7 +42,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj) *OPAProcessor {
 
 func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessorHandler {
 
-	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig())
+	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), cautils.ClusterName)
 	store, err := regoDependenciesData.TOStorage()
 	if err != nil {
 		panic(err)

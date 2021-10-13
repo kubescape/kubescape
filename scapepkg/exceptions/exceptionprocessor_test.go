@@ -3,7 +3,7 @@ package exceptions
 import (
 	"testing"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 func PostureExceptionPolicyDisableMock() *armotypes.PostureExceptionPolicy {

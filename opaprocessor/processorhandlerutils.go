@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 
-	pkgcautils "github.com/armosec/kubescape/cautils/cautils"
+	pkgcautils "github.com/armosec/utils-go/utils"
 
 	"github.com/armosec/kubescape/cautils"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
-	resources "github.com/armosec/kubescape/cautils/opapolicy/resources"
+	"github.com/armosec/armoapi-go/opapolicy"
+	"github.com/armosec/k8s-interface/k8sinterface"
+	resources "github.com/armosec/opa-utils/resources"
 	"github.com/open-policy-agent/opa/rego"
 
 	"github.com/golang/glog"

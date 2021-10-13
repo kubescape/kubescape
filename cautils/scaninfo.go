@@ -3,8 +3,8 @@ package cautils
 import (
 	"path/filepath"
 
+	"github.com/armosec/armoapi-go/opapolicy"
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
 type ScanInfo struct {

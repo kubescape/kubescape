@@ -1,8 +1,8 @@
 package cautils
 
 import (
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/opapolicy"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>]<resource object>

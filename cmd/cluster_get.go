@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
 	"github.com/spf13/cobra"
 )
 

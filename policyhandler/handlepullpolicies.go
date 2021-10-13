@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/opapolicy"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
 func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapolicy.PolicyNotification) ([]opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {

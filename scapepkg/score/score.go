@@ -9,8 +9,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 
 	// corev1 "k8s.io/api/core/v1"
-	k8sinterface "github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/opapolicy"
+	k8sinterface "github.com/armosec/k8s-interface/k8sinterface"
 )
 
 type ControlScoreWeights struct {

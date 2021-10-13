@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/opapolicy"
 )
 
 func GetDefaultPath(name string) string {

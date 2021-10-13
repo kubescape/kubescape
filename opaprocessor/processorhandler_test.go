@@ -5,10 +5,10 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/k8s-interface/k8sinterface"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/opapolicy"
 )
 
 func NewOPAProcessorMock() *OPAProcessor {

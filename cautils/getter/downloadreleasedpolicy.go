@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/opapolicy"
 )
 
 // =======================================================================================================================

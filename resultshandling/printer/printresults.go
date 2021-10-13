@@ -9,7 +9,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/opapolicy"
 
 	"github.com/enescakir/emoji"
 	"github.com/olekukonko/tablewriter"

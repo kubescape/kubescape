@@ -6,10 +6,10 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/k8s-interface/k8sinterface"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/opapolicy"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"

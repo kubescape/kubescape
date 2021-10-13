@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	k8sinterface "github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/opapolicy"
+	k8sinterface "github.com/armosec/k8s-interface/k8sinterface"
 )
 
 func loadResourcesMock() []map[string]interface{} {

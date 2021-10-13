@@ -5,10 +5,10 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/k8s-interface/k8sinterface"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/opapolicy"
 )
 
 // PolicyHandler -
