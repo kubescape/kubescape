@@ -65,7 +65,7 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 			Submit - Create tenant & Submit report
 
 		If "Submitted but not signed up" -
-			Default	- Submit report (submit)
+			Default	- Delete local config & Do not send report (local)
 			Local - Delete local config & Do not send report
 			Submit - Submit report
 
@@ -85,11 +85,11 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 		return NewEmptyConfig() // local/default - Do not send report
 	}
 	if !IsRegistered(clusterConfig) {
-		if scanInfo.Local {
-			DeleteConfig(k8s)
-			return NewEmptyConfig() // local - Delete local config & Do not send report
+		if scanInfo.Submit {
+			return clusterConfig // submit/default - Submit report
 		}
-		return clusterConfig // submit/default -  Submit report
+		DeleteConfig(k8s)
+		return NewEmptyConfig() // local - Delete local config & Do not send report
 	}
 	if scanInfo.Local {
 		return NewEmptyConfig() // local - Do not send report
@@ -111,7 +111,7 @@ func (c *EmptyConfig) GetK8sAPI() *k8sinterface.KubernetesApi    { return nil } 
 func (c *EmptyConfig) GetDefaultNS() string                      { return k8sinterface.GetDefaultNamespace() }
 func (c *EmptyConfig) GetBackendAPI() getter.IBackend            { return nil } // TODO: return mock obj
 func (c *EmptyConfig) GenerateURL() {
-	message := fmt.Sprintf("If you wish to submit your cluster so you can control exceptions and maintain chronological scan results, please run Kubescape with the `--submit` flag or sign-up here: https://%s", getter.ArmoFEURL)
+	message := fmt.Sprintf("You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s", getter.ArmoFEURL)
 	InfoTextDisplay(os.Stdout, message+"\n")
 }
 
@@ -130,6 +130,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	return &ClusterConfig{
 		k8s:        k8s,
 		backendAPI: backendAPI,
+		configObj:  &ConfigObj{},
 		defaultNS:  k8sinterface.GetDefaultNamespace(),
 	}
 }
@@ -139,15 +140,16 @@ func (c *ClusterConfig) GetDefaultNS() string                   { return c.defau
 func (c *ClusterConfig) GetBackendAPI() getter.IBackend         { return c.backendAPI }
 
 func (c *ClusterConfig) GenerateURL() {
+
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.ArmoFEURL
 	if c.configObj == nil {
 		return
 	}
+	message := fmt.Sprintf("You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: %s", u.String())
 	if c.configObj.CustomerAdminEMail != "" {
-		msgStr := fmt.Sprintf("To view all controls and get remediation's ask access permissions to %s from %s", u.String(), c.configObj.CustomerAdminEMail)
-		InfoTextDisplay(os.Stdout, msgStr+"\n")
+		InfoTextDisplay(os.Stdout, message+"\n")
 		return
 	}
 	u.Path = "account/sign-up"
@@ -156,8 +158,7 @@ func (c *ClusterConfig) GenerateURL() {
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
-	fmt.Println("To view all controls and get remediation's visit:")
-	InfoTextDisplay(os.Stdout, u.String()+"\n")
+	InfoTextDisplay(os.Stdout, message+"\n")
 
 }
 
