@@ -37,7 +37,7 @@ func initEventReceiverURL() *url.URL {
 	urlObj := url.URL{}
 
 	urlObj.Scheme = "https"
-	urlObj.Host = getter.ArmoERURL
+	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
 	urlObj.Path = "/k8s/postureReport"
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.FromStringOrNil(cautils.CustomerGUID).String())
