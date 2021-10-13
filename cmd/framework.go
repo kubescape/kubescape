@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -32,7 +31,7 @@ type CLIHandler struct {
 
 var frameworkCmd = &cobra.Command{
 
-	Use:       fmt.Sprintf("framework <framework name> [`<glob patter>`/`-`] [flags]\nSupported frameworks: %s", validFrameworks),
+	Use:       fmt.Sprintf("framework <framework name> [`<glob pattern>`/`-`] [flags]\nSupported frameworks: %s", validFrameworks),
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(supportedFrameworks, ", ")),
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
@@ -103,7 +102,6 @@ func init() {
 }
 
 func CliSetup() error {
-	flag.Parse()
 	flagValidation()
 
 	var k8s *k8sinterface.KubernetesApi
@@ -120,7 +118,7 @@ func CliSetup() error {
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
 	// setup cluster config
-	clusterConfig := cautils.ClusterConfigSetup(&scanInfo, k8s, getter.NewArmoAPI())
+	clusterConfig := cautils.ClusterConfigSetup(&scanInfo, k8s, getter.GetArmoAPIConnector())
 	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
 		fmt.Println(err)
 	}
