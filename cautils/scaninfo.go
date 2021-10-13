@@ -43,7 +43,7 @@ func (scanInfo *ScanInfo) setUseExceptions() {
 		// load exceptions from file
 		scanInfo.ExceptionsGetter = getter.NewLoadPolicy(scanInfo.UseExceptions)
 	} else {
-		scanInfo.ExceptionsGetter = getter.NewArmoAPI()
+		scanInfo.ExceptionsGetter = getter.GetArmoAPIConnector()
 	}
 
 }
