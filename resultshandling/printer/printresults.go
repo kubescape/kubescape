@@ -45,12 +45,7 @@ func calculatePostureScore(postureReport *opapolicy.PostureReport) float32 {
 	totalFailed := 0
 	for _, frameworkReport := range postureReport.FrameworkReports {
 		for _, controlReport := range frameworkReport.ControlReports {
-			for _, ruleReport := range controlReport.RuleReports {
-				for _, ruleResponses := range ruleReport.RuleResponses {
-					totalFailed += len(ruleResponses.AlertObject.K8SApiObjects)
-					totalFailed += len(ruleResponses.AlertObject.ExternalObjects)
-				}
-			}
+			totalFailed += controlReport.GetNumberOfFailedResources()
 			totalResources += controlReport.GetNumberOfResources()
 		}
 	}
@@ -107,7 +102,7 @@ func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {
 
 			printer.summary[cr.Name] = ControlSummary{
 				TotalResources:  cr.GetNumberOfResources(),
-				TotalFailed:     len(workloadsSummary) - cr.GetNumberOfWarningResources(),
+				TotalFailed:     cr.GetNumberOfFailedResources(),
 				TotalWarnign:    cr.GetNumberOfWarningResources(),
 				WorkloadSummary: mapResources,
 				Description:     cr.Description,
@@ -133,7 +128,7 @@ func (printer *Printer) PrintResults() {
 
 func (printer *Printer) printSummary(controlName string, controlSummary *ControlSummary) {
 	cautils.SimpleDisplay(printer.writer, "Summary - ")
-	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed)
+	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed-controlSummary.TotalWarnign)
 	cautils.WarningDisplay(printer.writer, "Excluded:%v   ", controlSummary.TotalWarnign)
 	cautils.FailureDisplay(printer.writer, "Failed:%v   ", controlSummary.TotalFailed)
 	cautils.InfoDisplay(printer.writer, "Total:%v\n", controlSummary.TotalResources)
