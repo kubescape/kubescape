@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/scapepkg/exceptions"
-	"github.com/armosec/kubescape/scapepkg/score"
+	"github.com/armosec/opa-utils/exceptions"
+	"github.com/armosec/opa-utils/score"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 
