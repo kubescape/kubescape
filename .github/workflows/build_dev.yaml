@@ -31,7 +31,7 @@ jobs:
           ArmoERServer: report.euprod1.cyberarmorsoft.com
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
-        run: python build.py
+        run: python --version && python build.py
       
       - name: Upload build artifacts 
         uses: actions/upload-artifact@v2
