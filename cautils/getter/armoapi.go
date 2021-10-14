@@ -3,9 +3,11 @@ package getter
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/golang/glog"
 )
 
 // =======================================================================================================================
@@ -15,22 +17,80 @@ import (
 var (
 	// ATTENTION!!!
 	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFULL
-	ArmoBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
-	ArmoERURL = "report.eudev3.cyberarmorsoft.com"
-	ArmoFEURL = "armoui.eudev3.cyberarmorsoft.com"
-	// ArmoURL = "https://dashbe.euprod1.cyberarmorsoft.com"
+	armoERURL = "report.armo.cloud"
+	armoBEURL = "api.armo.cloud"
+	armoFEURL = "portal.armo.cloud"
+
+	armoDevERURL = "report.eudev3.cyberarmorsoft.com"
+	armoDevBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
+	armoDevFEURL = "armoui.eudev3.cyberarmorsoft.com"
 )
 
 // Armo API for downloading policies
 type ArmoAPI struct {
 	httpClient *http.Client
+	apiURL     string
+	erURL      string
+	feURL      string
 }
 
-func NewArmoAPI() *ArmoAPI {
+var globalArmoAPIConnecctor *ArmoAPI
+
+func SetARMOAPIConnector(armoAPI *ArmoAPI) {
+	globalArmoAPIConnecctor = armoAPI
+}
+
+func GetArmoAPIConnector() *ArmoAPI {
+	if globalArmoAPIConnecctor == nil {
+		glog.Error("returning nil API connector")
+	}
+	return globalArmoAPIConnecctor
+}
+
+func NewARMOAPIDev() *ArmoAPI {
+	apiObj := newArmoAPI()
+
+	apiObj.apiURL = armoDevBEURL
+	apiObj.erURL = armoDevERURL
+	apiObj.feURL = armoDevFEURL
+
+	return apiObj
+}
+
+func NewARMOAPIProd() *ArmoAPI {
+	apiObj := newArmoAPI()
+
+	apiObj.apiURL = armoBEURL
+	apiObj.erURL = armoERURL
+	apiObj.feURL = armoFEURL
+
+	return apiObj
+}
+
+func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL string) *ArmoAPI {
+	apiObj := newArmoAPI()
+
+	apiObj.erURL = armoERURL
+	apiObj.apiURL = armoBEURL
+	apiObj.feURL = armoFEURL
+
+	return apiObj
+}
+
+func newArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
 	}
 }
+
+func (armoAPI *ArmoAPI) GetFrontendURL() string {
+	return armoAPI.feURL
+}
+
+func (armoAPI *ArmoAPI) GetReportReceiverURL() string {
+	return armoAPI.erURL
+}
+
 func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name))
 	if err != nil {

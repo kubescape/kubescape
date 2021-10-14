@@ -31,7 +31,7 @@ var getCmd = &cobra.Command{
 		key := keyValue[0]
 
 		k8s := k8sinterface.NewKubernetesApi()
-		clusterConfig := cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
+		clusterConfig := cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector())
 		val, err := clusterConfig.GetValueByKeyFromConfigMap(key)
 		if err != nil {
 			if err.Error() == "value does not exist." {

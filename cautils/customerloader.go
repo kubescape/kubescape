@@ -111,7 +111,7 @@ func (c *EmptyConfig) GetK8sAPI() *k8sinterface.KubernetesApi    { return nil } 
 func (c *EmptyConfig) GetDefaultNS() string                      { return k8sinterface.GetDefaultNamespace() }
 func (c *EmptyConfig) GetBackendAPI() getter.IBackend            { return nil } // TODO: return mock obj
 func (c *EmptyConfig) GenerateURL() {
-	message := fmt.Sprintf("You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s", getter.ArmoFEURL)
+	message := fmt.Sprintf("You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s", getter.GetArmoAPIConnector().GetFrontendURL())
 	InfoTextDisplay(os.Stdout, message+"\n")
 }
 
@@ -143,7 +143,7 @@ func (c *ClusterConfig) GenerateURL() {
 
 	u := url.URL{}
 	u.Scheme = "https"
-	u.Host = getter.ArmoFEURL
+	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 	if c.configObj == nil {
 		return
 	}

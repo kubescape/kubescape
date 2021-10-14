@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -22,7 +23,7 @@ type DownloadReleasedPolicy struct {
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
 		hostURL:    "",
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 61 * time.Second},
 	}
 }
 

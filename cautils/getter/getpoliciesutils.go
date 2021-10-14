@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -21,14 +21,26 @@ func GetDefaultPath(name string) string {
 	return defaultfilePath
 }
 
-func SaveFrameworkInFile(framework *reporthandling.Framework, path string) error {
+func SaveFrameworkInFile(framework *reporthandling.Framework, pathStr string) error {
 	encodedData, err := json.Marshal(framework)
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(path, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+	err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
 	if err != nil {
-		return err
+		if os.IsNotExist(err) {
+			pathDir := path.Dir(pathStr)
+			if err := os.Mkdir(pathDir, 0744); err != nil {
+				return err
+			}
+		} else {
+			return err
+
+		}
+		err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -85,30 +97,4 @@ func httpRespToString(resp *http.Response) (string, error) {
 	}
 
 	return respStr, err
-}
-
-// URLEncoder encode url
-func urlEncoder(oldURL string) string {
-	fullURL := strings.Split(oldURL, "?")
-	baseURL, err := url.Parse(fullURL[0])
-	if err != nil {
-		return ""
-	}
-
-	// Prepare Query Parameters
-	if len(fullURL) > 1 {
-		params := url.Values{}
-		queryParams := strings.Split(fullURL[1], "&")
-		for _, i := range queryParams {
-			queryParam := strings.Split(i, "=")
-			val := ""
-			if len(queryParam) > 1 {
-				val = queryParam[1]
-			}
-			params.Add(queryParam[0], val)
-		}
-		baseURL.RawQuery = params.Encode()
-	}
-
-	return baseURL.String()
 }

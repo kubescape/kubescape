@@ -228,9 +228,6 @@ func (printer *Printer) PrintSummaryTable() {
 	for i := 0; i < len(printer.sortedControlNames); i++ {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
-		// sumFailed += controlSummary.TotalFailed
-		// sumWarning += controlSummary.TotalWarnign
-		// sumTotal += controlSummary.TotalResources
 	}
 	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarnign, printer.frameworkSummary.TotalResources))
 	summaryTable.Render()
