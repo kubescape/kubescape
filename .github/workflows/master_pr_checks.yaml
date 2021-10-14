@@ -29,7 +29,7 @@ jobs:
           ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
-        run: python build.py
+        run: python3 --version && python3 build.py
 
       - name: Upload build artifacts 
         uses: actions/upload-artifact@v2
