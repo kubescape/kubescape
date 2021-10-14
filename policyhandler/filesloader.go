@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 
 	"gopkg.in/yaml.v2"
 )
@@ -27,7 +27,7 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func (policyHandler *PolicyHandler) loadResources(frameworks []opapolicy.Framework, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) loadResources(frameworks []reporthandling.Framework, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
 	workloads := []k8sinterface.IWorkload{}
 
 	// load resource from local file system

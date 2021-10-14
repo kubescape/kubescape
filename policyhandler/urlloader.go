@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
 )
 
 func loadResourcesFromUrl(inputPatterns []string) ([]k8sinterface.IWorkload, error) {

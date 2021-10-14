@@ -1,10 +1,10 @@
 package policyhandler
 
 // func TestGetPoliciesFromBackend(t *testing.T) {
-// 	notification := opapolicy.PolicyNotification{
-// 		Rules: []opapolicy.PolicyIdentifier{
+// 	notification := reporthandling.PolicyNotification{
+// 		Rules: []reporthandling.PolicyIdentifier{
 // 			{
-// 				Kind: opapolicy.KindFramework,
+// 				Kind: reporthandling.KindFramework,
 // 				Name: "mitretest",
 // 			},
 // 		},
