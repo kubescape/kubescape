@@ -3,7 +3,6 @@ package policyhandler
 import (
 	"fmt"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,8 +10,9 @@ import (
 
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
-	return filepath.Join(path.Dir(o), "examples/online-boutique/*")
+	return filepath.Join(filepath.Dir(o), "examples/online-boutique/*")
 }
+
 func TestListFiles(t *testing.T) {
 	workDir, err := os.Getwd()
 	fmt.Printf("\n------------------\n%s,%v\n--------------\n", workDir, err)
