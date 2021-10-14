@@ -3,8 +3,6 @@ package opapolicy
 import (
 	"bytes"
 	"encoding/json"
-
-	"github.com/armosec/kubescape/cautils/k8sinterface"
 )
 
 func (pn *PolicyNotification) ToJSONBytesBuffer() (*bytes.Buffer, error) {
@@ -124,53 +122,17 @@ func (ruleReport *RuleReport) GetNumberOfFailedResources() int {
 	sum := 0
 	for i := len(ruleReport.RuleResponses) - 1; i >= 0; i-- {
 		if ruleReport.RuleResponses[i].GetSingleResultStatus() == "failed" {
-			//if !ruleReport.DeleteIfRedundantResponse(&ruleReport.RuleResponses[i], i) {
 			sum += len(ruleReport.RuleResponses[i].AlertObject.K8SApiObjects)
-			//}
 		}
 	}
 	return sum
-}
-
-func (ruleReport *RuleReport) DeleteIfRedundantResponse(RuleResponse *RuleResponse, index int) bool {
-	if b, rr := ruleReport.IsDuplicateResponseOfResource(RuleResponse, index); b {
-		rr.AddMessageToResponse(RuleResponse.AlertMessage)
-		ruleReport.RuleResponses = removeResponse(ruleReport.RuleResponses, index)
-		return true
-	}
-	return false
-}
-
-func (ruleResponse *RuleResponse) AddMessageToResponse(message string) {
-	ruleResponse.AlertMessage += message
-}
-
-func (ruleReport *RuleReport) IsDuplicateResponseOfResource(RuleResponse *RuleResponse, index int) (bool, *RuleResponse) {
-	for i := range ruleReport.RuleResponses {
-		if i != index {
-			for j := range ruleReport.RuleResponses[i].AlertObject.K8SApiObjects {
-				for k := range RuleResponse.AlertObject.K8SApiObjects {
-					w1 := k8sinterface.NewWorkloadObj(ruleReport.RuleResponses[i].AlertObject.K8SApiObjects[j])
-					w2 := k8sinterface.NewWorkloadObj(RuleResponse.AlertObject.K8SApiObjects[k])
-					if w1.GetName() == w2.GetName() && w1.GetNamespace() == w2.GetNamespace() && w1.GetKind() != "Role" && w1.GetKind() != "ClusterRole" {
-						return true, &ruleReport.RuleResponses[i]
-					}
-				}
-			}
-		}
-	}
-	return false, nil
-}
-
-func removeResponse(slice []RuleResponse, index int) []RuleResponse {
-	return append(slice[:index], slice[index+1:]...)
 }
 
 func (ruleReport *RuleReport) GetNumberOfWarningResources() int {
 	sum := 0
 	for i := range ruleReport.RuleResponses {
 		if ruleReport.RuleResponses[i].GetSingleResultStatus() == "warning" {
-			sum += 1
+			sum += len(ruleReport.RuleResponses[i].AlertObject.K8SApiObjects)
 		}
 	}
 	return sum
