@@ -59,6 +59,8 @@ def main():
            ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite)
     status = subprocess.call(["go", "build", "-o", "%s/%s" % (buildDir, packageName), "-ldflags" ,ldflags])
     checkStatus(status, "Failed to build kubescape")
+    
+    test_cli_prints(buildDir,packageName)
 
 
     sha1 = hashlib.sha1()
@@ -68,6 +70,12 @@ def main():
             kube_sha.write(sha1.hexdigest())
 
     print("Build Done")
+
+def test_cli_prints(buildDir,packageName):
+    print("testing CLI prints")
+    bin_cli = os.path.join(buildDir,packageName)
+    status = str(subprocess.check_output([bin_cli, "-h"]))
+    assert "download" in status, "download is missing: " + status    
 
 if __name__ == "__main__":
     main()
