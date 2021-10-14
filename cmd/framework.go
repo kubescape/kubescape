@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/opapolicy"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -17,6 +16,7 @@ import (
 	"github.com/armosec/kubescape/resultshandling"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
+	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/spf13/cobra"
 )
@@ -47,8 +47,8 @@ var frameworkCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
-		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
+		scanInfo.PolicyIdentifier = reporthandling.PolicyIdentifier{}
+		scanInfo.PolicyIdentifier.Kind = reporthandling.KindFramework
 
 		if !(cmd.Flags().Lookup("use-from").Changed) {
 			scanInfo.PolicyIdentifier.Name = strings.ToLower(args[0])
@@ -168,15 +168,15 @@ func NewCLIHandler(policyHandler *policyhandler.PolicyHandler) *CLIHandler {
 
 func (clihandler *CLIHandler) Scan() error {
 	cautils.ScanStartDisplay()
-	policyNotification := &opapolicy.PolicyNotification{
-		NotificationType: opapolicy.TypeExecPostureScan,
-		Rules: []opapolicy.PolicyIdentifier{
+	policyNotification := &reporthandling.PolicyNotification{
+		NotificationType: reporthandling.TypeExecPostureScan,
+		Rules: []reporthandling.PolicyIdentifier{
 			clihandler.scanInfo.PolicyIdentifier,
 		},
 		Designators: armotypes.PortalDesignator{},
 	}
 	switch policyNotification.NotificationType {
-	case opapolicy.TypeExecPostureScan:
+	case reporthandling.TypeExecPostureScan:
 		//
 		if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
 			return err

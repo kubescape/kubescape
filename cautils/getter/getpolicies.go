@@ -2,11 +2,11 @@ package getter
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type IPolicyGetter interface {
-	GetFramework(name string) (*opapolicy.Framework, error)
+	GetFramework(name string) (*reporthandling.Framework, error)
 }
 
 type IExceptionsGetter interface {

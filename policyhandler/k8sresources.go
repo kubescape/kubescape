@@ -5,11 +5,11 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/opapolicy"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -20,7 +20,7 @@ import (
 
 const SelectAllResources = "*"
 
-func (policyHandler *PolicyHandler) getK8sResources(frameworks []opapolicy.Framework, designator *armotypes.PortalDesignator, excludedNamespaces string) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) getK8sResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator, excludedNamespaces string) (*cautils.K8SResources, error) {
 	// get k8s resources
 	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
 

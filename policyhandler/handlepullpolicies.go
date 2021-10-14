@@ -5,19 +5,19 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/opapolicy"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
-func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapolicy.PolicyNotification) ([]opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
 	var errs error
-	frameworks := []opapolicy.Framework{}
+	frameworks := []reporthandling.Framework{}
 	exceptionPolicies := []armotypes.PostureExceptionPolicy{}
 
 	// Get - cacli opa get
 	for _, rule := range notification.Rules {
 		switch rule.Kind {
-		case opapolicy.KindFramework:
+		case reporthandling.KindFramework:
 			receivedFramework, recExceptionPolicies, err := policyHandler.getFrameworkPolicies(rule.Name)
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
@@ -32,14 +32,14 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *opapoli
 			}
 
 		default:
-			err := fmt.Errorf("missing rule kind, expected: %s", opapolicy.KindFramework)
+			err := fmt.Errorf("missing rule kind, expected: %s", reporthandling.KindFramework)
 			errs = fmt.Errorf("%s", err.Error())
 		}
 	}
 	return frameworks, exceptionPolicies, errs
 }
 
-func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
 	receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(policyName)
 	if err != nil {
 		return nil, nil, err

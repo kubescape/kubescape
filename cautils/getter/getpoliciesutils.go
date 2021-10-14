@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/armoapi-go/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 func GetDefaultPath(name string) string {
@@ -21,7 +21,7 @@ func GetDefaultPath(name string) string {
 	return defaultfilePath
 }
 
-func SaveFrameworkInFile(framework *opapolicy.Framework, path string) error {
+func SaveFrameworkInFile(framework *reporthandling.Framework, path string) error {
 	encodedData, err := json.Marshal(framework)
 	if err != nil {
 		return err

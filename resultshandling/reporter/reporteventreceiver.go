@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/armosec/armoapi-go/opapolicy"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type ReportEventReceiver struct {
@@ -39,7 +39,7 @@ func (report *ReportEventReceiver) ActionSendReportListenner(opaSessionObj *caut
 		fmt.Println(err)
 	}
 }
-func (report *ReportEventReceiver) Send(postureReport *opapolicy.PostureReport) error {
+func (report *ReportEventReceiver) Send(postureReport *reporthandling.PostureReport) error {
 
 	reqBody, err := json.Marshal(*postureReport)
 	if err != nil {

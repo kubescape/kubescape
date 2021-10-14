@@ -4,7 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 
-	"github.com/armosec/armoapi-go/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type JUnitTestSuites struct {
@@ -52,7 +52,7 @@ type JUnitFailure struct {
 	Contents string `xml:",chardata"`
 }
 
-func convertPostureReportToJunitResult(postureResult *opapolicy.PostureReport) (*JUnitTestSuites, error) {
+func convertPostureReportToJunitResult(postureResult *reporthandling.PostureReport) (*JUnitTestSuites, error) {
 	juResult := JUnitTestSuites{XMLName: xml.Name{Local: "Kubescape scan results"}}
 	for _, framework := range postureResult.FrameworkReports {
 		suite := JUnitTestSuite{Name: framework.Name}

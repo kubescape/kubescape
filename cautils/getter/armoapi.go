@@ -5,7 +5,7 @@ import (
 	"net/http"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // =======================================================================================================================
@@ -31,13 +31,13 @@ func NewArmoAPI() *ArmoAPI {
 		httpClient: &http.Client{},
 	}
 }
-func (armoAPI *ArmoAPI) GetFramework(name string) (*opapolicy.Framework, error) {
+func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name))
 	if err != nil {
 		return nil, err
 	}
 
-	framework := &opapolicy.Framework{}
+	framework := &reporthandling.Framework{}
 	if err = JSONDecoder(respStr).Decode(framework); err != nil {
 		return nil, err
 	}

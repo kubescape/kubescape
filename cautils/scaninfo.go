@@ -3,13 +3,13 @@ package cautils
 import (
 	"path/filepath"
 
-	"github.com/armosec/armoapi-go/opapolicy"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type ScanInfo struct {
 	Getters
-	PolicyIdentifier   opapolicy.PolicyIdentifier
+	PolicyIdentifier   reporthandling.PolicyIdentifier
 	UseExceptions      string   // Load exceptions configuration
 	UseFrom            string   // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // =======================================================================================================================
@@ -26,9 +26,9 @@ func NewLoadPolicy(filePath string) *LoadPolicy {
 	}
 }
 
-func (lp *LoadPolicy) GetFramework(frameworkName string) (*opapolicy.Framework, error) {
+func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framework, error) {
 
-	framework := &opapolicy.Framework{}
+	framework := &reporthandling.Framework{}
 	f, err := os.ReadFile(lp.filePath)
 	if err != nil {
 		return nil, err

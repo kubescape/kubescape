@@ -3,8 +3,8 @@ package printer
 import (
 	"fmt"
 
-	"github.com/armosec/armoapi-go/opapolicy"
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
@@ -20,7 +20,7 @@ func groupByNamespace(resources []WorkloadSummary) map[string][]WorkloadSummary 
 	}
 	return mapResources
 }
-func listResultSummary(ruleReports []opapolicy.RuleReport) []WorkloadSummary {
+func listResultSummary(ruleReports []reporthandling.RuleReport) []WorkloadSummary {
 	workloadsSummary := []WorkloadSummary{}
 	track := map[string]bool{}
 
@@ -44,7 +44,7 @@ func listResultSummary(ruleReports []opapolicy.RuleReport) []WorkloadSummary {
 	}
 	return workloadsSummary
 }
-func ruleResultSummary(obj opapolicy.AlertObject) ([]WorkloadSummary, error) {
+func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error) {
 	resource := []WorkloadSummary{}
 
 	for i := range obj.K8SApiObjects {
