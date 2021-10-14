@@ -4,18 +4,22 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
-	return path.Join(o+"/..", "examples/online-boutique/*")
+	return filepath.Join(path.Dir(o), "examples/online-boutique/*")
 }
 func TestListFiles(t *testing.T) {
 	workDir, err := os.Getwd()
 	fmt.Printf("\n------------------\n%s,%v\n--------------\n", workDir, err)
-	files, errs := listFiles([]string{onlineBoutiquePath()})
+	filesPath := onlineBoutiquePath()
+	fmt.Printf("\n------------------\n%s\n--------------\n", filesPath)
+
+	files, errs := listFiles([]string{filesPath})
 	if len(errs) > 0 {
 		t.Error(errs)
 	}
