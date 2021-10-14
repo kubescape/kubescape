@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
@@ -10,8 +9,6 @@ import (
 
 func main() {
 	CheckLatestVersion()
-	flag.Parse()
-	cmd.InitArmoBEConnector()
 	cmd.Execute()
 }
 
