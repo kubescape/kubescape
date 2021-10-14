@@ -72,8 +72,9 @@ def main():
     print("Build Done")
 
 def test_cli_prints(buildDir,packageName):
-    print("testing CLI prints")
-    bin_cli = os.path.join(buildDir,packageName)
+    bin_cli = os.path.abspath(os.path.join(buildDir,packageName))
+
+    print(f"testing CLI prints on {bin_cli}")
     status = str(subprocess.check_output([bin_cli, "-h"]))
     assert "download" in status, "download is missing: " + status    
 
