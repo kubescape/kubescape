@@ -13,10 +13,17 @@ import (
 var cfgFile string
 var armoBEURLs = ""
 
+const envFlagUsage = "Send report results to specific URL. Format:<ReportReceiver>,<Backend>,<Frontend>.\n\t\tExample:report.armo.cloud,api.armo.cloud,portal.armo.cloud"
+
 var rootCmd = &cobra.Command{
 	Use:   "kubescape",
 	Short: "Kubescape is a tool for testing Kubernetes security posture",
 	Long:  `Kubescape is a tool for testing Kubernetes security posture based on NSA \ MITRE ATT&CK® specifications.`,
+	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		flag.Parse()
+		InitArmoBEConnector()
+		return nil
+	},
 }
 
 func Execute() {
@@ -36,9 +43,6 @@ func initConfig() {
 }
 
 func InitArmoBEConnector() {
-	if armoBEURLs == "" && rootCmd.Flag("environment") != nil {
-		armoBEURLs = rootCmd.Flag("environment").Value.String()
-	}
 	urlSlices := strings.Split(armoBEURLs, ",")
 	if len(urlSlices) > 3 {
 		glog.Errorf("Too many URLs")
