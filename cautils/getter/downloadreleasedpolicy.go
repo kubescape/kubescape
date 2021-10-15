@@ -3,8 +3,9 @@ package getter
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"time"
 
 	"github.com/armosec/kubescape/cautils/opapolicy"
 )
@@ -22,7 +23,7 @@ type DownloadReleasedPolicy struct {
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
 		hostURL:    "",
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 61 * time.Second},
 	}
 }
 
@@ -56,7 +57,7 @@ func (drp *DownloadReleasedPolicy) setURL(frameworkName string) error {
 		return fmt.Errorf("failed to download file, status code: %s", resp.Status)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("failed to read response body from '%s', reason: %s", latestReleases, err.Error())
 	}

@@ -6,29 +6,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/armosec/kubescape/cautils"
 )
 
-func combine(base, rel string) string {
-	finalPath := []string{}
-	sBase := strings.Split(base, "/")
-	sRel := strings.Split(rel, "/")
-	for i := range sBase {
-		if cautils.StringInSlice(sRel, sBase[i]) != cautils.ValueNotFound {
-			finalPath = append(finalPath, sRel...)
-			break
-		}
-		finalPath = append(finalPath, sBase[i])
-	}
-	return fmt.Sprintf("/%s", filepath.Join(finalPath...))
-}
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
-	return combine(o, "github.com/armosec/kubescape/examples/online-boutique/*")
+	return filepath.Join(filepath.Dir(o), "examples/online-boutique/*")
 }
+
 func TestListFiles(t *testing.T) {
-	files, errs := listFiles([]string{onlineBoutiquePath()})
+	workDir, err := os.Getwd()
+	fmt.Printf("\n------------------\n%s,%v\n--------------\n", workDir, err)
+	filesPath := onlineBoutiquePath()
+	fmt.Printf("\n------------------\n%s\n--------------\n", filesPath)
+
+	files, errs := listFiles([]string{filesPath})
 	if len(errs) > 0 {
 		t.Error(errs)
 	}
@@ -44,15 +35,15 @@ func TestLoadFiles(t *testing.T) {
 }
 
 func TestLoadFile(t *testing.T) {
-	files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "bi-monitor.yaml", 1)})
+	files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1)})
 	_, err := loadFile(files[0])
 	if err != nil {
 		t.Errorf("%v", err)
 	}
 }
 func TestLoadResources(t *testing.T) {
-
-	// k8sResources, err = policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
+	// policyHandler := &PolicyHandler{}
+	// k8sResources, err := policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
 	// files, _ := listFiles([]string{onlineBoutiquePath()})
 	// bb, err := loadFile(files[0])
 	// if len(err) > 0 {

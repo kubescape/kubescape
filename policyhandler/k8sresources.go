@@ -65,11 +65,8 @@ func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVer
 
 	// set labels
 	listOptions := metav1.ListOptions{}
-	if excludedNamespaces != "" && k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
-		excludedNamespacesSlice := strings.Split(excludedNamespaces, ",")
-		for _, excludedNamespace := range excludedNamespacesSlice {
-			listOptions.FieldSelector += "metadata.namespace!=" + excludedNamespace + ","
-		}
+	if excludedNamespaces != "" {
+		setFieldSelector(&listOptions, resource, excludedNamespaces)
 	}
 	if len(labels) > 0 {
 		set := k8slabels.Set(labels)
@@ -92,4 +89,19 @@ func (policyHandler *PolicyHandler) pullSingleResource(resource *schema.GroupVer
 
 	return result.Items, nil
 
+}
+
+func setFieldSelector(listOptions *metav1.ListOptions, resource *schema.GroupVersionResource, excludedNamespaces string) {
+	fieldSelector := "metadata."
+	if resource.Resource == "namespaces" {
+		fieldSelector += "name"
+	} else if k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
+		fieldSelector += "namespace"
+	} else {
+		return
+	}
+	excludedNamespacesSlice := strings.Split(excludedNamespaces, ",")
+	for _, excludedNamespace := range excludedNamespacesSlice {
+		listOptions.FieldSelector += fmt.Sprintf("%s!=%s,", fieldSelector, excludedNamespace)
+	}
 }

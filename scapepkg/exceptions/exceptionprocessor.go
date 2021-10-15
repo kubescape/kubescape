@@ -1,6 +1,8 @@
 package exceptions
 
 import (
+	"regexp"
+
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/k8sinterface"
 
@@ -96,7 +98,7 @@ func hasException(designator *armotypes.PortalDesignator, workload k8sinterface.
 		return false // if designators are empty
 	}
 
-	if cluster != "" && cautils.ClusterName != "" && cluster != cautils.ClusterName { // TODO - where do we receive cluster name from?
+	if cluster != "" && cautils.ClusterName != "" && !regexCompare(cluster, cautils.ClusterName) { // TODO - where do we receive cluster name from?
 		return false // cluster name does not match
 	}
 
@@ -120,17 +122,17 @@ func hasException(designator *armotypes.PortalDesignator, workload k8sinterface.
 
 func compareNamespace(workload k8sinterface.IWorkload, namespace string) bool {
 	if workload.GetKind() == "Namespace" {
-		return namespace == workload.GetName()
+		return regexCompare(namespace, workload.GetName())
 	}
-	return namespace == workload.GetNamespace()
+	return regexCompare(namespace, workload.GetNamespace())
 }
 
 func compareKind(workload k8sinterface.IWorkload, kind string) bool {
-	return kind == workload.GetKind()
+	return regexCompare(kind, workload.GetKind())
 }
 
 func compareName(workload k8sinterface.IWorkload, name string) bool {
-	return name == workload.GetName()
+	return regexCompare(workload.GetName(), name)
 }
 
 func compareLabels(workload k8sinterface.IWorkload, attributes map[string]string) bool {
@@ -138,4 +140,9 @@ func compareLabels(workload k8sinterface.IWorkload, attributes map[string]string
 	designators := labels.Set(attributes).AsSelector()
 
 	return designators.Matches(workloadLabels)
+}
+
+func regexCompare(reg, name string) bool {
+	r, _ := regexp.MatchString(reg, name)
+	return r
 }

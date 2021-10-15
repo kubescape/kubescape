@@ -10,7 +10,6 @@ var configCmd = &cobra.Command{
 	Short: "Set configuration",
 	Long:  ``,
 	Run: func(cmd *cobra.Command, args []string) {
-
 	},
 }
 

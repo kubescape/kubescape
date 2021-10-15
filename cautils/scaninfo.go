@@ -10,16 +10,19 @@ import (
 type ScanInfo struct {
 	Getters
 	PolicyIdentifier   opapolicy.PolicyIdentifier
-	UseExceptions      string
-	UseFrom            string
-	UseDefault         bool
-	Format             string
-	Output             string
-	ExcludedNamespaces string
-	InputPatterns      []string
-	Silent             bool
-	FailThreshold      uint16
-	DoNotSendResults   bool
+	UseExceptions      string   // Load exceptions configuration
+	UseFrom            string   // Load framework from local file (instead of download). Use when running offline
+	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline
+	Format             string   // Format results (table, json, junit ...)
+	Output             string   // Store results in an output file, Output file name
+	ExcludedNamespaces string   // DEPRECATED?
+	InputPatterns      []string // Yaml files input patterns
+	Silent             bool     // Silent mode - Do not print progress logs
+	FailThreshold      uint16   // Failure score threshold
+	DoNotSendResults   bool     // DEPRECATED
+	Submit             bool     // Submit results to Armo BE
+	Local              bool     // Do not submit results
+	Account            string   // account ID
 }
 
 type Getters struct {
@@ -40,7 +43,7 @@ func (scanInfo *ScanInfo) setUseExceptions() {
 		// load exceptions from file
 		scanInfo.ExceptionsGetter = getter.NewLoadPolicy(scanInfo.UseExceptions)
 	} else {
-		scanInfo.ExceptionsGetter = getter.NewArmoAPI()
+		scanInfo.ExceptionsGetter = getter.GetArmoAPIConnector()
 	}
 
 }
