@@ -2,10 +2,7 @@ name: build
 
 on:
   push:
-    branches: [ master ]
-  pull_request:
-    branches: [ master ]
-    types: [ closed ]
+    branches: [ master ] 
 jobs:
   once:
     name: Create release
@@ -36,20 +33,19 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: 1.16
+          go-version: 1.17
+
+      - name: Test
+        run: go test -v ./...
+
       - name: Build
         env:
           RELEASE: v1.0.${{ github.run_number }} 
           ArmoBEServer: api.armo.cloud
-          ArmoERServer: report.euprod1.cyberarmorsoft.com
+          ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
-        run: |
-          pip install sha1          
-          mkdir -p build/${{ matrix.os }}  
-          go mod tidy && go build -ldflags "-w -s -X github.com/armosec/kubescape/cmd.BuildNumber=$RELEASE -X github.com/armosec/kubescape/cautils/getter.ArmoBEURL=$ArmoBEServer -X github.com/armosec/kubescape/cautils/getter.ArmoERURL=$ArmoERServer -X github.com/armosec/kubescape/cautils/getter.ArmoFEURL=$ArmoWebsite" -o build/${{ matrix.os }}/kubescape
-          python -m sha1 build/${{ matrix.os }}/kubescape > build/${{ matrix.os }}/kubescape.sha1
-          python -m zipfile -c build/${{ matrix.os }}/kubescape.zip build/${{ matrix.os }}/kubescape build/${{ matrix.os }}/kubescape.sha1
+        run: python3 --version && python3 build.py
       
       - name: Upload Release binaries
         id: upload-release-asset

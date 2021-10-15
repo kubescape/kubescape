@@ -30,7 +30,7 @@ var setCmd = &cobra.Command{
 		data := keyValue[1]
 
 		k8s := k8sinterface.NewKubernetesApi()
-		clusterConfig := cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
+		clusterConfig := cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector())
 		if err := clusterConfig.SetKeyValueInConfigmap(key, data); err != nil {
 			return err
 		}

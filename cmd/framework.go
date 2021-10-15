@@ -1,10 +1,8 @@
 package cmd
 
 import (
-	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -23,7 +21,8 @@ import (
 )
 
 var scanInfo cautils.ScanInfo
-var supportedFrameworks = []string{"nsa"}
+var supportedFrameworks = []string{"nsa", "mitre"}
+var validFrameworks = strings.Join(supportedFrameworks, ", ")
 
 type CLIHandler struct {
 	policyHandler *policyhandler.PolicyHandler
@@ -31,7 +30,8 @@ type CLIHandler struct {
 }
 
 var frameworkCmd = &cobra.Command{
-	Use:       "framework <framework name> [`<glob patter>`/`-`] [flags]",
+
+	Use:       fmt.Sprintf("framework <framework name> [`<glob pattern>`/`-`] [flags]\nSupported frameworks: %s", validFrameworks),
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(supportedFrameworks, ", ")),
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: supportedFrameworks,
@@ -39,7 +39,7 @@ var frameworkCmd = &cobra.Command{
 		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
 			return fmt.Errorf("requires at least one argument")
 		} else if len(args) > 0 {
-			if !isValidFramework(args[0]) {
+			if !isValidFramework(strings.ToLower(args[0])) {
 				return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(supportedFrameworks, ", ")))
 			}
 		}
@@ -50,13 +50,13 @@ var frameworkCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
 
 		if !(cmd.Flags().Lookup("use-from").Changed) {
-			scanInfo.PolicyIdentifier.Name = args[0]
+			scanInfo.PolicyIdentifier.Name = strings.ToLower(args[0])
 		}
 		if len(args) > 0 {
 			if len(args[1:]) == 0 || args[1] != "-" {
 				scanInfo.InputPatterns = args[1:]
 			} else { // store stout to file
-				tempFile, err := ioutil.TempFile(".", "tmp-kubescape*.yaml")
+				tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
 				if err != nil {
 					return err
 				}
@@ -86,30 +86,33 @@ func isValidFramework(framework string) bool {
 func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = cautils.ScanInfo{}
-	frameworkCmd.Flags().StringVar(&scanInfo.UseFrom, "use-from", "", "Path to load framework from")
-	frameworkCmd.Flags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load framework from default path")
-	frameworkCmd.Flags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to file containing list of exceptions")
-	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from check")
-	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. supported formats: "pretty-printer"/"json"/"junit"`)
-	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. print output to file and not stdout")
+	frameworkCmd.Flags().StringVar(&scanInfo.UseFrom, "use-from", "", "Load local framework object from specified path. If not used will download latest")
+	frameworkCmd.Flags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load local framework object from default path. If not used will download latest")
+	frameworkCmd.Flags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from Armo management portal")
+	frameworkCmd.Flags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. Recommended: kube-system, kube-public")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. Supported formats: "pretty-printer"/"json"/"junit"`)
+	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
-	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code -1")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Kubescape sends scan results to Armosec backend to allow users to control exceptions and maintain chronological scan results. Use this flag if you do not wish to use these features")
+	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code 1")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Deprecated. Please use `--keep-local` instead")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results")
+	frameworkCmd.Flags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+
 }
 
 func CliSetup() error {
-	flag.Parse()
-
-	if 100 < scanInfo.FailThreshold {
-		fmt.Println("bad argument: out of range threshold")
-		os.Exit(1)
-	}
+	flagValidation()
 
 	var k8s *k8sinterface.KubernetesApi
+	var clusterConfig cautils.IClusterConfig
 	if !scanInfo.ScanRunningCluster() {
 		k8sinterface.ConnectedToCluster = false
+		clusterConfig = cautils.NewEmptyConfig()
 	} else {
 		k8s = k8sinterface.NewKubernetesApi()
+		// setup cluster config
+		clusterConfig =  cautils.ClusterConfigSetup(&scanInfo, k8s, getter.GetArmoAPIConnector())
 	}
 
 	processNotification := make(chan *cautils.OPASessionObj)
@@ -118,17 +121,10 @@ func CliSetup() error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	// load cluster config
-	var clusterConfig cautils.IClusterConfig
-	if !scanInfo.DoNotSendResults && k8sinterface.ConnectedToCluster {
-		clusterConfig = cautils.NewClusterConfig(k8s, getter.NewArmoAPI())
-	} else {
-		clusterConfig = cautils.NewEmptyConfig()
-	}
-
-	if err := clusterConfig.SetCustomerGUID(); err != nil {
+	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
 		fmt.Println(err)
 	}
+
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
 	cautils.ClusterName = k8sinterface.GetClusterName()
 
@@ -187,4 +183,19 @@ func (clihandler *CLIHandler) Scan() error {
 		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
 	}
 	return nil
+}
+
+func flagValidation() {
+	if scanInfo.DoNotSendResults {
+		fmt.Println("Deprecated. Please use `--keep-local` instead")
+	}
+
+	if scanInfo.Submit && scanInfo.Local {
+		fmt.Println("You can use `keep-local` or `submit`, but not both")
+		os.Exit(1)
+	}
+	if 100 < scanInfo.FailThreshold {
+		fmt.Println("bad argument: out of range threshold")
+		os.Exit(1)
+	}
 }

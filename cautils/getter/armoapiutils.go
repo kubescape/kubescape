@@ -8,7 +8,7 @@ import (
 func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	u := url.URL{}
 	u.Scheme = "https"
-	u.Host = ArmoBEURL
+	u.Host = armoAPI.apiURL
 	u.Path = "v1/armoFrameworks"
 	q := u.Query()
 	q.Add("customerGUID", "11111111-1111-1111-1111-111111111111")
@@ -22,7 +22,7 @@ func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) string {
 	u := url.URL{}
 	u.Scheme = "https"
-	u.Host = ArmoBEURL
+	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/armoPostureExceptions"
 
 	q := u.Query()
@@ -38,7 +38,7 @@ func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) strin
 func (armoAPI *ArmoAPI) getCustomerURL() string {
 	u := url.URL{}
 	u.Scheme = "https"
-	u.Host = ArmoBEURL
+	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/createTenant"
 	return u.String()
 }

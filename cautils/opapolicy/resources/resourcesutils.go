@@ -3,7 +3,6 @@ package resources
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,7 +93,7 @@ func LoadRegoFiles(dir string) map[string]string {
 	// Compile the module. The keys are used as identifiers in error messages.
 	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err == nil && strings.HasSuffix(path, ".rego") && !info.IsDir() {
-			content, err := ioutil.ReadFile(path)
+			content, err := os.ReadFile(path)
 			if err != nil {
 				glog.Errorf("LoadRegoFiles, Failed to load: %s: %v", path, err)
 			} else {

@@ -3,7 +3,7 @@ package score
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -157,7 +157,7 @@ func getPostureFrameworksScores(weightPath string) map[string]map[string]Control
 		weightPath = weightPath + "/"
 	}
 	frameworksScoreMap := make(map[string]map[string]ControlScoreWeights)
-	dat, err := ioutil.ReadFile(weightPath + "frameworkdict.json")
+	dat, err := os.ReadFile(weightPath + "frameworkdict.json")
 	if err != nil {
 		return nil
 	}
@@ -174,7 +174,7 @@ func getPostureResourceScores(weightPath string) map[string]float32 {
 		weightPath = weightPath + "/"
 	}
 	resourceScoreMap := make(map[string]float32)
-	dat, err := ioutil.ReadFile(weightPath + "resourcesdict.json")
+	dat, err := os.ReadFile(weightPath + "resourcesdict.json")
 	if err != nil {
 		return nil
 	}
