@@ -51,7 +51,7 @@ jobs:
       - name: Set name
         env:
           QUAY_REPO: ${{ secrets.QUAYIO_REPO }}
-        run: echo quay.io/${QUAY_REPO}/kubescape:dev-v1.0.${{ github.run_number }} > build_tag.txt
+        run: echo quay.io/$QUAY_REPO/kubescape:dev-v1.0.${{ github.run_number }} > build_tag.txt
 
       - name: Build the Docker image
         run: docker build . --file build/Dockerfile --tag $(cat build_tag.txt)
