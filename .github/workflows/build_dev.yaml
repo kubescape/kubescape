@@ -54,9 +54,6 @@ jobs:
       - name: Build the Docker image
         run: docker build . --file build/Dockerfile --tag $(cat build_tag.txt)
       
-      - name: re-tag Image to latest
-        run: docker tag $(cat build_tag.txt) quay.io/armosec/kubescape:latest
-
       - name: Login ot Quay.io
         env: # Or as an environment variable
           QUAY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
@@ -65,5 +62,4 @@ jobs:
       - name: Push Docker image
         run: |
           docker push $(cat build_tag.txt)
-          docker push quay.io/armosec/kubescape:latest
         
