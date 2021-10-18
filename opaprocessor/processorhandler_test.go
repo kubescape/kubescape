@@ -4,11 +4,10 @@ import (
 	"testing"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/k8s-interface/k8sinterface"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
-
-	"github.com/armosec/kubescape/cautils/opapolicy"
 )
 
 func NewOPAProcessorMock() *OPAProcessor {
@@ -22,7 +21,7 @@ func TestProcess(t *testing.T) {
 
 	// set opaSessionObj
 	opaSessionObj := cautils.NewOPASessionObjMock()
-	opaSessionObj.Frameworks = []opapolicy.Framework{*opapolicy.MockFrameworkA()}
+	opaSessionObj.Frameworks = []reporthandling.Framework{*reporthandling.MockFrameworkA()}
 	opaSessionObj.K8SResources = &k8sResources
 
 	opap := NewOPAProcessor(opaSessionObj)

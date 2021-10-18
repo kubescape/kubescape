@@ -3,7 +3,7 @@ package printer
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 type Summary map[string]ControlSummary
