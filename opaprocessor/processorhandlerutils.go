@@ -6,6 +6,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 	resources "github.com/armosec/opa-utils/resources"
 
@@ -56,7 +57,7 @@ func editRuleResponses(ruleResponses []reporthandling.RuleResponse) []reporthand
 	lenRuleResponses := len(ruleResponses)
 	for i := 0; i < lenRuleResponses; i++ {
 		for j := range ruleResponses[i].AlertObject.K8SApiObjects {
-			w := k8sinterface.NewWorkloadObj(ruleResponses[i].AlertObject.K8SApiObjects[j])
+			w := workloadinterface.NewWorkloadObj(ruleResponses[i].AlertObject.K8SApiObjects[j])
 			if w == nil {
 				continue
 			}
