@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v1
       - name: TestWorkflow
-        run: echo "$github.workflow"
+        run: echo $github.workflow
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
