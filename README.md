@@ -8,7 +8,7 @@ regulatory, customized company policies and DevSecOps best practices, such as th
 Kubescape scans K8s clusters, YAML files, and HELM charts, and detect misconfigurations and software vulnerabilities at early stages of the CI/CD pipeline and provides a risk score instantly and risk trends over time.
 Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI and Github workflows.
 
-
+</br>
 
 <img src="docs/demo.gif">
 
