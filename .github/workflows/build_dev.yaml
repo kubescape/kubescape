@@ -40,7 +40,6 @@ jobs:
   build-docker:
     name: Build docker container, tag and upload to registry
     needs: build
-    run: echo "$github.workflow"
     if: ${{ github.workflow == 'armosec/kubescape' }}
     runs-on: ubuntu-latest
 
