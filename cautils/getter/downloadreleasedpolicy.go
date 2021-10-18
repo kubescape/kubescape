@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // =======================================================================================================================
@@ -27,7 +27,7 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	}
 }
 
-func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framework, error) {
+func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Framework, error) {
 	if err := drp.setURL(name); err != nil {
 		return nil, err
 	}
@@ -36,7 +36,7 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*opapolicy.Framewo
 		return nil, err
 	}
 
-	framework := &opapolicy.Framework{}
+	framework := &reporthandling.Framework{}
 	if err = JSONDecoder(respStr).Decode(framework); err != nil {
 		return framework, err
 	}

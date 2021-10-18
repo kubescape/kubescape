@@ -8,7 +8,7 @@ import (
 	"net/url"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type ReportEventReceiver struct {
@@ -29,12 +29,17 @@ func (report *ReportEventReceiver) ActionSendReportListenner(opaSessionObj *caut
 		return
 	}
 	//Add score
-	opaSessionObj.PostureReport.RemoveData()
+
+	// Remove data before reporting
+	keepFields := []string{"kind", "apiVersion", "metadata"}
+	keepMetadataFields := []string{"name", "namespace", "labels"}
+	opaSessionObj.PostureReport.RemoveData(keepFields, keepMetadataFields)
+
 	if err := report.Send(opaSessionObj.PostureReport); err != nil {
 		fmt.Println(err)
 	}
 }
-func (report *ReportEventReceiver) Send(postureReport *opapolicy.PostureReport) error {
+func (report *ReportEventReceiver) Send(postureReport *reporthandling.PostureReport) error {
 
 	reqBody, err := json.Marshal(*postureReport)
 	if err != nil {

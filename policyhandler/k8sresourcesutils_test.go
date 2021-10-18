@@ -1,8 +1,8 @@
 package policyhandler
 
 import (
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/opa-utils/reporthandling"
 
 	"testing"
 )
@@ -11,8 +11,8 @@ func TestGetK8sResources(t *testing.T) {
 	// getK8sResources
 }
 func TestSetResourceMap(t *testing.T) {
-	framework := opapolicy.MockFrameworkA()
-	k8sResources := setResourceMap([]opapolicy.Framework{*framework})
+	framework := reporthandling.MockFrameworkA()
+	k8sResources := setResourceMap([]reporthandling.Framework{*framework})
 	resources := k8sinterface.ResourceGroupToString("*", "v1", "Pod")
 	if len(resources) == 0 {
 		t.Error("expected resources")
@@ -27,17 +27,17 @@ func TestSetResourceMap(t *testing.T) {
 func TestInsertK8sResources(t *testing.T) {
 	// insertK8sResources
 	k8sResources := make(map[string]map[string]map[string]interface{})
-	match1 := opapolicy.RuleMatchObjects{
+	match1 := reporthandling.RuleMatchObjects{
 		APIGroups:   []string{"apps"},
 		APIVersions: []string{"v1", "v1beta"},
 		Resources:   []string{"pods"},
 	}
-	match2 := opapolicy.RuleMatchObjects{
+	match2 := reporthandling.RuleMatchObjects{
 		APIGroups:   []string{"apps"},
 		APIVersions: []string{"v1"},
 		Resources:   []string{"deployments"},
 	}
-	match3 := opapolicy.RuleMatchObjects{
+	match3 := reporthandling.RuleMatchObjects{
 		APIGroups:   []string{"core"},
 		APIVersions: []string{"v1"},
 		Resources:   []string{"secrets"},

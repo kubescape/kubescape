@@ -2,12 +2,12 @@ package policyhandler
 
 import (
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/k8s-interface/k8sinterface"
 )
 
-func setResourceMap(frameworks []opapolicy.Framework) *cautils.K8SResources {
+func setResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResources {
 	k8sResources := make(cautils.K8SResources)
 	complexMap := setComplexResourceMap(frameworks)
 	for group := range complexMap {
@@ -23,7 +23,7 @@ func setResourceMap(frameworks []opapolicy.Framework) *cautils.K8SResources {
 	return &k8sResources
 }
 
-func convertComplexResourceMap(frameworks []opapolicy.Framework) map[string]map[string]map[string]interface{} {
+func convertComplexResourceMap(frameworks []reporthandling.Framework) map[string]map[string]map[string]interface{} {
 	k8sResources := make(map[string]map[string]map[string]interface{})
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
@@ -36,7 +36,7 @@ func convertComplexResourceMap(frameworks []opapolicy.Framework) map[string]map[
 	}
 	return k8sResources
 }
-func setComplexResourceMap(frameworks []opapolicy.Framework) map[string]map[string]map[string]interface{} {
+func setComplexResourceMap(frameworks []reporthandling.Framework) map[string]map[string]map[string]interface{} {
 	k8sResources := make(map[string]map[string]map[string]interface{})
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
@@ -49,7 +49,7 @@ func setComplexResourceMap(frameworks []opapolicy.Framework) map[string]map[stri
 	}
 	return k8sResources
 }
-func insertK8sResources(k8sResources map[string]map[string]map[string]interface{}, match opapolicy.RuleMatchObjects) {
+func insertK8sResources(k8sResources map[string]map[string]map[string]interface{}, match reporthandling.RuleMatchObjects) {
 	for _, apiGroup := range match.APIGroups {
 		if v, ok := k8sResources[apiGroup]; !ok || v == nil {
 			k8sResources[apiGroup] = make(map[string]map[string]interface{})

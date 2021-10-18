@@ -8,8 +8,7 @@ import (
 	"sort"
 
 	"github.com/armosec/kubescape/cautils"
-
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/enescakir/emoji"
 	"github.com/olekukonko/tablewriter"
@@ -30,6 +29,7 @@ type Printer struct {
 	summary            Summary
 	sortedControlNames []string
 	printerType        string
+	frameworkSummary   ControlSummary
 }
 
 func NewPrinter(printerType, outputFile string) *Printer {
@@ -40,14 +40,12 @@ func NewPrinter(printerType, outputFile string) *Printer {
 	}
 }
 
-func calculatePostureScore(postureReport *opapolicy.PostureReport) float32 {
+func calculatePostureScore(postureReport *reporthandling.PostureReport) float32 {
 	totalResources := 0
 	totalFailed := 0
 	for _, frameworkReport := range postureReport.FrameworkReports {
-		for _, controlReport := range frameworkReport.ControlReports {
-			totalFailed += controlReport.GetNumberOfFailedResources()
-			totalResources += controlReport.GetNumberOfResources()
-		}
+		totalFailed += frameworkReport.GetNumberOfFailedResources()
+		totalResources += frameworkReport.GetNumberOfResources()
 	}
 	if totalResources == 0 {
 		return float32(0)
@@ -91,8 +89,13 @@ func (printer *Printer) ActionPrint(opaSessionObj *cautils.OPASessionObj) float3
 	return score
 }
 
-func (printer *Printer) SummarySetup(postureReport *opapolicy.PostureReport) {
+func (printer *Printer) SummarySetup(postureReport *reporthandling.PostureReport) {
 	for _, fr := range postureReport.FrameworkReports {
+		printer.frameworkSummary = ControlSummary{
+			TotalResources: fr.GetNumberOfResources(),
+			TotalFailed:    fr.GetNumberOfFailedResources(),
+			TotalWarnign:   fr.GetNumberOfWarningResources(),
+		}
 		for _, cr := range fr.ControlReports {
 			if len(cr.RuleReports) == 0 {
 				continue
@@ -221,18 +224,12 @@ func (printer *Printer) PrintSummaryTable() {
 	summaryTable.SetHeader(generateHeader())
 	summaryTable.SetHeaderLine(true)
 	summaryTable.SetAlignment(tablewriter.ALIGN_LEFT)
-	sumTotal := 0
-	sumFailed := 0
-	sumWarning := 0
 
 	for i := 0; i < len(printer.sortedControlNames); i++ {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
-		sumFailed += controlSummary.TotalFailed
-		sumWarning += controlSummary.TotalWarnign
-		sumTotal += controlSummary.TotalResources
 	}
-	summaryTable.SetFooter(generateFooter(len(printer.summary), sumFailed, sumWarning, sumTotal))
+	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarnign, printer.frameworkSummary.TotalResources))
 	summaryTable.Render()
 }
 

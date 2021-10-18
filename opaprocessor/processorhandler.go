@@ -6,13 +6,13 @@ import (
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/scapepkg/exceptions"
-	"github.com/armosec/kubescape/scapepkg/score"
+	"github.com/armosec/opa-utils/exceptions"
+	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/score"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
+	"github.com/armosec/k8s-interface/k8sinterface"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
-	"github.com/armosec/kubescape/cautils/opapolicy/resources"
+	"github.com/armosec/opa-utils/resources"
 	"github.com/golang/glog"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
@@ -42,7 +42,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj) *OPAProcessor {
 
 func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessorHandler {
 
-	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig())
+	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), cautils.ClusterName)
 	store, err := regoDependenciesData.TOStorage()
 	if err != nil {
 		panic(err)
@@ -81,7 +81,7 @@ func (opap *OPAProcessor) Process() error {
 	// glog.Infof(fmt.Sprintf("Starting 'Process'. reportID: %s", opap.PostureReport.ReportID))
 	cautils.ProgressTextDisplay(fmt.Sprintf("Scanning cluster %s", cautils.ClusterName))
 	cautils.StartSpinner()
-	frameworkReports := []opapolicy.FrameworkReport{}
+	frameworkReports := []reporthandling.FrameworkReport{}
 	var errs error
 	for i := range opap.Frameworks {
 		frameworkReport, err := opap.processFramework(&opap.Frameworks[i])
@@ -100,13 +100,13 @@ func (opap *OPAProcessor) Process() error {
 	return errs
 }
 
-func (opap *OPAProcessor) processFramework(framework *opapolicy.Framework) (*opapolicy.FrameworkReport, error) {
+func (opap *OPAProcessor) processFramework(framework *reporthandling.Framework) (*reporthandling.FrameworkReport, error) {
 	var errs error
 
-	frameworkReport := opapolicy.FrameworkReport{}
+	frameworkReport := reporthandling.FrameworkReport{}
 	frameworkReport.Name = framework.Name
 
-	controlReports := []opapolicy.ControlReport{}
+	controlReports := []reporthandling.ControlReport{}
 	for i := range framework.Controls {
 		controlReport, err := opap.processControl(&framework.Controls[i])
 		if err != nil {
@@ -120,10 +120,10 @@ func (opap *OPAProcessor) processFramework(framework *opapolicy.Framework) (*opa
 	return &frameworkReport, errs
 }
 
-func (opap *OPAProcessor) processControl(control *opapolicy.Control) (*opapolicy.ControlReport, error) {
+func (opap *OPAProcessor) processControl(control *reporthandling.Control) (*reporthandling.ControlReport, error) {
 	var errs error
 
-	controlReport := opapolicy.ControlReport{}
+	controlReport := reporthandling.ControlReport{}
 	controlReport.PortalBase = control.PortalBase
 	controlReport.ControlID = control.ControlID
 	controlReport.Control_ID = control.Control_ID // TODO: delete when 'id' is deprecated
@@ -132,7 +132,7 @@ func (opap *OPAProcessor) processControl(control *opapolicy.Control) (*opapolicy
 	controlReport.Description = control.Description
 	controlReport.Remediation = control.Remediation
 
-	ruleReports := []opapolicy.RuleReport{}
+	ruleReports := []reporthandling.RuleReport{}
 	for i := range control.Rules {
 		ruleReport, err := opap.processRule(&control.Rules[i])
 		if err != nil {
@@ -149,7 +149,7 @@ func (opap *OPAProcessor) processControl(control *opapolicy.Control) (*opapolicy
 	return &controlReport, errs
 }
 
-func (opap *OPAProcessor) processRule(rule *opapolicy.PolicyRule) (*opapolicy.RuleReport, error) {
+func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporthandling.RuleReport, error) {
 	if ruleWithArmoOpaDependency(rule.Attributes) {
 		return nil, nil
 	}
@@ -166,17 +166,17 @@ func (opap *OPAProcessor) processRule(rule *opapolicy.PolicyRule) (*opapolicy.Ru
 	return &ruleReport, err
 }
 
-func (opap *OPAProcessor) runOPAOnSingleRule(rule *opapolicy.PolicyRule, k8sObjects []map[string]interface{}) (opapolicy.RuleReport, error) {
+func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
 	switch rule.RuleLanguage {
-	case opapolicy.RegoLanguage, opapolicy.RegoLanguage2:
+	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
 		return opap.runRegoOnK8s(rule, k8sObjects)
 	default:
-		return opapolicy.RuleReport{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
+		return reporthandling.RuleReport{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
-func (opap *OPAProcessor) runRegoOnK8s(rule *opapolicy.PolicyRule, k8sObjects []map[string]interface{}) (opapolicy.RuleReport, error) {
+func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
 	var errs error
-	ruleReport := opapolicy.RuleReport{
+	ruleReport := reporthandling.RuleReport{
 		Name: rule.Name,
 	}
 
@@ -203,7 +203,7 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *opapolicy.PolicyRule, k8sObjects []
 	return ruleReport, errs
 }
 
-func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRego *ast.Compiler) ([]opapolicy.RuleResponse, error) {
+func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRego *ast.Compiler) ([]reporthandling.RuleResponse, error) {
 	rego := rego.New(
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
@@ -216,7 +216,7 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 	if err != nil {
 		return nil, fmt.Errorf("in 'regoEval', failed to evaluate rule, reason: %s", err.Error())
 	}
-	results, err := parseRegoResult(&resultSet)
+	results, err := reporthandling.ParseRegoResult(&resultSet)
 
 	// results, err := ParseRegoResult(&resultSet)
 	if err != nil {
@@ -238,22 +238,26 @@ func (opap *OPAProcessor) updateScore() {
 }
 
 func (opap *OPAProcessor) updateResults() {
-	for f, frameworkReport := range opap.PostureReport.FrameworkReports {
-		sumFailed := 0
-		sumTotal := 0
-		for c, controlReport := range opap.PostureReport.FrameworkReports[f].ControlReports {
+	for f := range opap.PostureReport.FrameworkReports {
+		// set exceptions
+		exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
+
+		// set counters
+		reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
+
+		// set default score
+		reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+
+		// edit results - remove data
+
+		// TODO - move function to pkg - use RemoveData
+		for c := range opap.PostureReport.FrameworkReports[f].ControlReports {
 			for r, ruleReport := range opap.PostureReport.FrameworkReports[f].ControlReports[c].RuleReports {
 				// editing the responses -> removing duplications, clearing secret data, etc.
 				opap.PostureReport.FrameworkReports[f].ControlReports[c].RuleReports[r].RuleResponses = editRuleResponses(ruleReport.RuleResponses)
-
-				// adding exceptions to the rules
-				ruleExceptions := exceptions.ListRuleExceptions(opap.Exceptions, frameworkReport.Name, controlReport.Name, ruleReport.Name)
-				exceptions.AddExceptionsToRuleResponses(opap.PostureReport.FrameworkReports[f].ControlReports[c].RuleReports[r].RuleResponses, ruleExceptions)
 			}
-			sumFailed += controlReport.GetNumberOfFailedResources()
-			sumTotal += controlReport.GetNumberOfResources()
-			opap.PostureReport.FrameworkReports[f].ControlReports[c].Score = float32(percentage(controlReport.GetNumberOfResources(), controlReport.GetNumberOfFailedResources()))
 		}
-		opap.PostureReport.FrameworkReports[f].Score = float32(percentage(sumTotal, sumTotal-sumFailed))
+
 	}
+
 }

@@ -4,12 +4,12 @@ import (
 	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type ScanInfo struct {
 	Getters
-	PolicyIdentifier   opapolicy.PolicyIdentifier
+	PolicyIdentifier   reporthandling.PolicyIdentifier
 	UseExceptions      string   // Load exceptions configuration
 	UseFrom            string   // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline
@@ -19,7 +19,6 @@ type ScanInfo struct {
 	InputPatterns      []string // Yaml files input patterns
 	Silent             bool     // Silent mode - Do not print progress logs
 	FailThreshold      uint16   // Failure score threshold
-	DoNotSendResults   bool     // DEPRECATED
 	Submit             bool     // Submit results to Armo BE
 	Local              bool     // Do not submit results
 	Account            string   // account ID
