@@ -5,13 +5,14 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/clihandler"
 	"github.com/spf13/cobra"
 )
 
 var downloadInfo cautils.DownloadInfo
 
 var downloadCmd = &cobra.Command{
-	Use:   fmt.Sprintf("download framework <framework-name> [flags]\nSupported frameworks: %s", validFrameworks),
+	Use:   fmt.Sprintf("download framework <framework-name> [flags]\nSupported frameworks: %s", clihandler.ValidFrameworks),
 	Short: "Download framework controls",
 	Long:  ``,
 	Args: func(cmd *cobra.Command, args []string) error {

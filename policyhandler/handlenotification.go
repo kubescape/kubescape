@@ -10,6 +10,11 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 )
 
+var supportedFrameworks = []reporthandling.PolicyIdentifier{
+	{Kind: "Framework", Name: "nsa"},
+	{Kind: "Framework", Name: "mitre"},
+}
+
 // PolicyHandler -
 type PolicyHandler struct {
 	k8s *k8sinterface.KubernetesApi
@@ -59,7 +64,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 
 func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
 
-	cautils.ProgressTextDisplay("Downloading/Loading framework definitions")
+	cautils.ProgressTextDisplay("Downloading/Loading policy definitions")
 
 	frameworks, exceptions, err := policyHandler.GetPoliciesFromBackend(notification)
 	if err != nil {
@@ -70,7 +75,8 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 		err := fmt.Errorf("could not download any policies, please check previous logs")
 		return frameworks, exceptions, err
 	}
-	cautils.SuccessTextDisplay("Downloaded/Loaded framework")
+	//if notification.Rules
+	cautils.SuccessTextDisplay("Downloaded/Loaded policy")
 
 	return frameworks, exceptions, nil
 }

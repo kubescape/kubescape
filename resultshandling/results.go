@@ -20,13 +20,16 @@ func NewResultsHandler(opaSessionObj *chan *cautils.OPASessionObj, reporterObj *
 	}
 }
 
-func (resultsHandler *ResultsHandler) HandleResults() float32 {
+func (resultsHandler *ResultsHandler) HandleResults(scanInfo cautils.ScanInfo) float32 {
 
 	opaSessionObj := <-*resultsHandler.opaSessionObj
 
 	score := resultsHandler.printerObj.ActionPrint(opaSessionObj)
 
-	resultsHandler.reporterObj.ActionSendReportListenner(opaSessionObj)
+	// Don't send report for control scan
+	if scanInfo.FrameworkScan {
+		resultsHandler.reporterObj.ActionSendReportListenner(opaSessionObj)
+	}
 
 	return score
 }

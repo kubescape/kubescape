@@ -26,6 +26,21 @@ func NewLoadPolicy(filePath string) *LoadPolicy {
 	}
 }
 
+func (lp *LoadPolicy) GetControl(controlName string, controlPath string) (*reporthandling.Control, error) {
+
+	control := &reporthandling.Control{}
+	f, err := os.ReadFile(controlPath)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(f, control)
+	if controlName != "" && !strings.EqualFold(controlName, control.Name) {
+		return nil, fmt.Errorf("control from file not matching")
+	}
+	return control, err
+}
+
 func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framework, error) {
 
 	framework := &reporthandling.Framework{}
