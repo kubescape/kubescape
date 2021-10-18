@@ -29,7 +29,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v1
-
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
@@ -62,7 +61,7 @@ jobs:
   build-docker:
     name: Build docker container, tag and upload to registry
     needs: build
-    if: ${{ github.workflow == 'armosec/kubescape' }}
+    if: ${{ github.repository == 'armosec/kubescape' }}
     runs-on: ubuntu-latest
 
     steps:
