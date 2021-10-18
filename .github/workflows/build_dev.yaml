@@ -3,9 +3,6 @@ name: build-dev
 on:
   push:
     branches: [ dev ]
-  pull_request:
-    branches: [ dev ]
-    types: [ closed ]
 jobs:
   build:
     name: Create cross-platform dev build
