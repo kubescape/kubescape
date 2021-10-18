@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/armosec/k8s-interface/workloadinterface"
+
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -180,7 +182,7 @@ func readYamlFile(yamlFile []byte) ([]k8sinterface.IWorkload, []error) {
 			continue
 		}
 		if obj, ok := j.(map[string]interface{}); ok {
-			yamlObjs = append(yamlObjs, k8sinterface.NewWorkloadObj(obj))
+			yamlObjs = append(yamlObjs, workloadinterface.NewWorkloadObj(obj))
 		} else {
 			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
 		}
@@ -204,7 +206,7 @@ func convertJsonToWorkload(jsonObj interface{}, workloads *[]k8sinterface.IWorkl
 
 	switch x := jsonObj.(type) {
 	case map[string]interface{}:
-		(*workloads) = append(*workloads, k8sinterface.NewWorkloadObj(x))
+		(*workloads) = append(*workloads, workloadinterface.NewWorkloadObj(x))
 	case []interface{}:
 		for i := range x {
 			convertJsonToWorkload(x[i], workloads)

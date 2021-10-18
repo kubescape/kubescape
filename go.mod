@@ -3,7 +3,6 @@ module github.com/armosec/kubescape
 go 1.17
 
 require (
-	github.com/aws/aws-sdk-go v1.41.1 // indirect
 	github.com/briandowns/spinner v1.16.0
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
 	github.com/docker/docker v20.10.9+incompatible // indirect
@@ -31,8 +30,8 @@ require (
 
 require (
 	github.com/armosec/armoapi-go v0.0.7
-	github.com/armosec/k8s-interface v0.0.2
-	github.com/armosec/opa-utils v0.0.6
+	github.com/armosec/k8s-interface v0.0.5
+	github.com/armosec/opa-utils v0.0.7
 	github.com/armosec/utils-go v0.0.3
 )
 
@@ -58,7 +57,6 @@ require (
 	github.com/googleapis/gnostic v0.5.5 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
-	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/json-iterator/go v1.1.11 // indirect
 	github.com/mattn/go-colorable v0.1.8 // indirect
 	github.com/mattn/go-runewidth v0.0.9 // indirect
@@ -71,9 +69,6 @@ require (
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/yashtewari/glob-intersection v0.0.0-20180916065949-5c77d914dd0b // indirect
-	go.uber.org/atomic v1.7.0 // indirect
-	go.uber.org/multierr v1.6.0 // indirect
-	go.uber.org/zap v1.19.1 // indirect
 	golang.org/x/crypto v0.0.0-20210220033148-5ea612d1eb83 // indirect
 	golang.org/x/net v0.0.0-20210825183410-e898025ed96a // indirect
 	golang.org/x/sys v0.0.0-20210823070655-63515b42dcdf // indirect

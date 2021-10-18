@@ -3,7 +3,7 @@ package printer
 import (
 	"fmt"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -62,7 +62,7 @@ func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error
 func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
 	r := &WorkloadSummary{}
 
-	workload := k8sinterface.NewWorkloadObj(obj)
+	workload := workloadinterface.NewWorkloadObj(obj)
 	if workload == nil {
 		return r, fmt.Errorf("expecting k8s API object")
 	}
