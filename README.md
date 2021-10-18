@@ -9,7 +9,6 @@ Kubescape scans K8s clusters, YAML files, and HELM charts, and detect misconfigu
 Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI and Github workflows.
 
 
-Use Kubescape to test clusters or scan single YAML files and integrate it to your processes.
 
 <img src="docs/demo.gif">
 
