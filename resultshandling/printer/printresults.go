@@ -101,16 +101,16 @@ func (printer *Printer) SummarySetup(postureReport *reporthandling.PostureReport
 				continue
 			}
 			workloadsSummary := listResultSummary(cr.RuleReports)
-			mapResources := groupByNamespace(workloadsSummary)
 
 			printer.summary[cr.Name] = ControlSummary{
-				TotalResources:  cr.GetNumberOfResources(),
-				TotalFailed:     cr.GetNumberOfFailedResources(),
-				TotalWarnign:    cr.GetNumberOfWarningResources(),
-				WorkloadSummary: mapResources,
-				Description:     cr.Description,
-				Remediation:     cr.Remediation,
-				ListInputKinds:  cr.ListControlsInputKinds(),
+				TotalResources:    cr.GetNumberOfResources(),
+				TotalFailed:       cr.GetNumberOfFailedResources(),
+				TotalWarnign:      cr.GetNumberOfWarningResources(),
+				FailedWorkloads:   groupByNamespace(workloadsSummary, workloadSummaryFailed),
+				ExcludedWorkloads: groupByNamespace(workloadsSummary, workloadSummaryExclude),
+				Description:       cr.Description,
+				Remediation:       cr.Remediation,
+				ListInputKinds:    cr.ListControlsInputKinds(),
 			}
 		}
 	}
@@ -120,8 +120,7 @@ func (printer *Printer) PrintResults() {
 	for i := 0; i < len(printer.sortedControlNames); i++ {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
 		printer.printTitle(printer.sortedControlNames[i], &controlSummary)
-		printer.printResult(printer.sortedControlNames[i], &controlSummary)
-
+		printer.printResources(&controlSummary)
 		if printer.summary[printer.sortedControlNames[i]].TotalResources > 0 {
 			printer.printSummary(printer.sortedControlNames[i], &controlSummary)
 		}
@@ -144,7 +143,7 @@ func (printer *Printer) printSummary(controlName string, controlSummary *Control
 
 func (printer *Printer) printTitle(controlName string, controlSummary *ControlSummary) {
 	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
-	if controlSummary.TotalResources == 0 && len(controlSummary.ListInputKinds) > 0 {
+	if controlSummary.TotalResources == 0 {
 		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed != 0 {
 		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
@@ -157,10 +156,24 @@ func (printer *Printer) printTitle(controlName string, controlSummary *ControlSu
 	cautils.DescriptionDisplay(printer.writer, "Description: %s\n", controlSummary.Description)
 
 }
-func (printer *Printer) printResult(controlName string, controlSummary *ControlSummary) {
+func (printer *Printer) printResources(controlSummary *ControlSummary) {
+
+	if len(controlSummary.FailedWorkloads) > 0 {
+		cautils.FailureDisplay(printer.writer, "Failed:\n")
+		printer.printGroupedResources(controlSummary.FailedWorkloads)
+	}
+	if len(controlSummary.ExcludedWorkloads) > 0 {
+		cautils.WarningDisplay(printer.writer, "Excluded:\n")
+		printer.printGroupedResources(controlSummary.ExcludedWorkloads)
+	}
+
+}
+
+func (printer *Printer) printGroupedResources(workloads map[string][]WorkloadSummary) {
 
 	indent := INDENT
-	for ns, rsc := range controlSummary.WorkloadSummary {
+
+	for ns, rsc := range workloads {
 		preIndent := indent
 		if ns != "" {
 			cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
@@ -207,7 +220,7 @@ func percentage(big, small int) int {
 func generateFooter(numControlers, sumFailed, sumWarning, sumTotal int) []string {
 	// Control name | # failed resources | all resources | % success
 	row := []string{}
-	row = append(row, fmt.Sprintf("%d", numControlers))
+	row = append(row, "Resource Summary") //fmt.Sprintf(""%d", numControlers"))
 	row = append(row, fmt.Sprintf("%d", sumFailed))
 	row = append(row, fmt.Sprintf("%d", sumWarning))
 	row = append(row, fmt.Sprintf("%d", sumTotal))
