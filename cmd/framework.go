@@ -120,12 +120,12 @@ func CliSetup() error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
+	if err := clusterConfig.SetConfig(scanInfo.Account); err != nil {
 		fmt.Println(err)
 	}
 
+	cautils.ClusterName = clusterConfig.GetClusterName()
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
-	cautils.ClusterName = k8sinterface.GetClusterName()
 
 	// cli handler setup
 	go func() {
