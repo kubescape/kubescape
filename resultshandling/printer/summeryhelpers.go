@@ -8,14 +8,16 @@ import (
 )
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
-func groupByNamespace(resources []WorkloadSummary) map[string][]WorkloadSummary {
+func groupByNamespace(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
-		if r, ok := mapResources[resources[i].Namespace]; ok {
-			r = append(r, resources[i])
-			mapResources[resources[i].Namespace] = r
-		} else {
-			mapResources[resources[i].Namespace] = []WorkloadSummary{resources[i]}
+		if status(&resources[i]) {
+			if r, ok := mapResources[resources[i].Namespace]; ok {
+				r = append(r, resources[i])
+				mapResources[resources[i].Namespace] = r
+			} else {
+				mapResources[resources[i].Namespace] = []WorkloadSummary{resources[i]}
+			}
 		}
 	}
 	return mapResources
