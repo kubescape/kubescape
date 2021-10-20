@@ -127,7 +127,13 @@ func (c *EmptyConfig) GetCustomerGUID() string                { return "" }
 func (c *EmptyConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return nil } // TODO: return mock obj
 func (c *EmptyConfig) GetDefaultNS() string                   { return k8sinterface.GetDefaultNamespace() }
 func (c *EmptyConfig) GetBackendAPI() getter.IBackend         { return nil } // TODO: return mock obj
-func (c *EmptyConfig) GetClusterName() string                 { return "unknown" }
+func (c *EmptyConfig) GetClusterName() string {
+	clusterName := k8sinterface.GetClusterName()
+	if clusterName == "" {
+		return "unknown"
+	}
+	return k8sinterface.GetClusterName()
+}
 func (c *EmptyConfig) GenerateURL() {
 	message := fmt.Sprintf("You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s", getter.GetArmoAPIConnector().GetFrontendURL())
 	InfoTextDisplay(os.Stdout, message+"\n")

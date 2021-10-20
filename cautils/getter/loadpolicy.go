@@ -26,10 +26,10 @@ func NewLoadPolicy(filePath string) *LoadPolicy {
 	}
 }
 
-func (lp *LoadPolicy) GetControl(controlName string, controlPath string) (*reporthandling.Control, error) {
+func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, error) {
 
 	control := &reporthandling.Control{}
-	f, err := os.ReadFile(controlPath)
+	f, err := os.ReadFile(lp.filePath)
 	if err != nil {
 		return nil, err
 	}

@@ -13,7 +13,6 @@ func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *reporth
 	var errs error
 	frameworks := []reporthandling.Framework{}
 	exceptionPolicies := []armotypes.PostureExceptionPolicy{}
-
 	// Get - cacli opa get
 	for _, rule := range notification.Rules {
 		switch rule.Kind {
@@ -71,21 +70,12 @@ func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*re
 
 func (policyHandler *PolicyHandler) getControl(policyName string) ([]reporthandling.Control, []armotypes.PostureExceptionPolicy, error) {
 
-	// get all frameworks
-	frameworks := []reporthandling.Framework{}
 	controls := []reporthandling.Control{}
 
-	for i := range supportedFrameworks {
-		// TODO : implement getControl in policygetter
-		framework, err := policyHandler.getters.PolicyGetter.GetFramework(supportedFrameworks[i].Name)
-		if err != nil {
-			return nil, nil, err
-		}
-		if framework != nil {
-			frameworks = append(frameworks, *framework)
-		}
+	control, err := policyHandler.getters.PolicyGetter.GetControl(policyName)
+	if err != nil {
+		return nil, nil, err
 	}
-	control := findControlInFrameworks(frameworks, policyName)
 	if control == nil {
 		return nil, nil, fmt.Errorf("control not found")
 	}

@@ -12,7 +12,7 @@ import (
 
 // controlCmd represents the control command
 var controlCmd = &cobra.Command{
-	Use:   fmt.Sprint("control <control name>"),
+	Use:   "control <control name>/<control id>",
 	Short: fmt.Sprintf("The control you wish to use for scan. It must be present in at least one of the folloiwng frameworks: %s", clihandler.ValidFrameworks),
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 {
