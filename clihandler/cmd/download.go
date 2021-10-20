@@ -24,7 +24,7 @@ var downloadCmd = &cobra.Command{
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if strings.EqualFold(args[0], "framework") {
-			downloadInfo.FrameworkName = args[1]
+			downloadInfo.FrameworkName = strings.ToLower(args[1])
 			g := getter.NewDownloadReleasedPolicy()
 			if downloadInfo.Path == "" {
 				downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName + ".json")
@@ -38,7 +38,7 @@ var downloadCmd = &cobra.Command{
 				return err
 			}
 		} else if strings.EqualFold(args[0], "control") {
-			downloadInfo.ControlName = args[1]
+			downloadInfo.ControlName = strings.ToLower(args[1])
 			g := getter.NewDownloadReleasedPolicy()
 			if downloadInfo.Path == "" {
 				downloadInfo.Path = getter.GetDefaultPath(downloadInfo.ControlName + ".json")
