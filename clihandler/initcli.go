@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
@@ -34,12 +33,12 @@ func CliSetup(scanInfo cautils.ScanInfo) error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
+	if err := clusterConfig.SetConfig(scanInfo.Account); err != nil {
 		fmt.Println(err)
 	}
 
+	cautils.ClusterName = clusterConfig.GetClusterName()
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
-	cautils.ClusterName = k8sinterface.GetClusterName()
 
 	// cli handler setup
 	go func() {
