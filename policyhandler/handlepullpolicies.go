@@ -68,6 +68,7 @@ func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*re
 	return receivedFramework, receivedException, nil
 }
 
+// Get control by name
 func (policyHandler *PolicyHandler) getControl(policyName string) ([]reporthandling.Control, []armotypes.PostureExceptionPolicy, error) {
 
 	controls := []reporthandling.Control{}
@@ -87,15 +88,4 @@ func (policyHandler *PolicyHandler) getControl(policyName string) ([]reporthandl
 	}
 
 	return controls, exceptions, nil
-}
-
-func findControlInFrameworks(frameworks []reporthandling.Framework, controlName string) *reporthandling.Control {
-	for _, framework := range frameworks {
-		for _, control := range framework.Controls {
-			if strings.EqualFold(control.Name, controlName) || strings.EqualFold(control.ControlID, controlName) {
-				return &control
-			}
-		}
-	}
-	return nil
 }

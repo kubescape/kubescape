@@ -22,6 +22,7 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	}
 }
 
+// Return control per name/id using ARMO api
 func (drp *DownloadReleasedPolicy) GetControl(policyName string) (*reporthandling.Control, error) {
 	var control *reporthandling.Control
 	var err error
