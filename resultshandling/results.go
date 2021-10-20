@@ -27,7 +27,7 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo cautils.ScanInfo) f
 	score := resultsHandler.printerObj.ActionPrint(opaSessionObj)
 
 	// Don't send report for control scan
-	if scanInfo.FrameworkScan {
+	if scanInfo.FrameworkScan { // TODO - use interface for ActionSendReportListenner
 		resultsHandler.reporterObj.ActionSendReportListenner(opaSessionObj)
 	}
 

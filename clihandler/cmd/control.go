@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/clihandler"
@@ -15,18 +16,19 @@ var controlCmd = &cobra.Command{
 	Use:   "control <control name>/<control id>",
 	Short: fmt.Sprintf("The control you wish to use for scan. It must be present in at least one of the folloiwng frameworks: %s", clihandler.ValidFrameworks),
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 {
-			return fmt.Errorf("requires  one argument")
+		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
+			return fmt.Errorf("requires at least one argument")
 		}
-
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		flagValidationControl()
-		scanInfo.FrameworkScan = false
 		scanInfo.PolicyIdentifier = reporthandling.PolicyIdentifier{}
+		if !(cmd.Flags().Lookup("use-from").Changed) {
+			scanInfo.PolicyIdentifier.Name = strings.ToLower(args[0])
+		}
+		scanInfo.FrameworkScan = false
 		scanInfo.PolicyIdentifier.Kind = reporthandling.KindControl
-		scanInfo.PolicyIdentifier.Name = args[0]
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
 		err := clihandler.CliSetup(scanInfo)

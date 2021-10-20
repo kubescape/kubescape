@@ -9,7 +9,7 @@ var scanInfo cautils.ScanInfo
 
 // scanCmd represents the scan command
 var scanCmd = &cobra.Command{
-	Use:   "scan",
+	Use:   "scan <command>",
 	Short: "Scan the current running cluster or yaml files",
 	Long:  `The action you want to perform`,
 	Run: func(cmd *cobra.Command, args []string) {

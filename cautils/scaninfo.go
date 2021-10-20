@@ -55,7 +55,6 @@ func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier.Name + ".json")
 	}
-
 }
 func (scanInfo *ScanInfo) setGetter() {
 	if scanInfo.UseFrom != "" {

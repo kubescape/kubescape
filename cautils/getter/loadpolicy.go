@@ -35,7 +35,7 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 	}
 
 	err = json.Unmarshal(f, control)
-	if controlName != "" && !strings.EqualFold(controlName, control.Name) {
+	if controlName != "" && !strings.EqualFold(controlName, control.Name) && !strings.EqualFold(controlName, control.ControlID) {
 		return nil, fmt.Errorf("control from file not matching")
 	}
 	return control, err

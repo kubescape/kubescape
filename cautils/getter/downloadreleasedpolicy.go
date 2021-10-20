@@ -1,6 +1,8 @@
 package getter
 
 import (
+	"strings"
+
 	"github.com/armosec/opa-utils/gitregostore"
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -21,12 +23,15 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 }
 
 func (drp *DownloadReleasedPolicy) GetControl(policyName string) (*reporthandling.Control, error) {
-	control, err := drp.gs.GetOPAControlByName(policyName)
-	if err != nil {
+	var control *reporthandling.Control
+	var err error
+	if strings.HasPrefix(policyName, "C-") || strings.HasPrefix(policyName, "c-") {
 		control, err = drp.gs.GetOPAControlByID(policyName)
-		if err != nil {
-			return nil, err
-		}
+	} else {
+		control, err = drp.gs.GetOPAControlByName(policyName)
+	}
+	if err != nil {
+		return nil, err
 	}
 	return control, nil
 }
