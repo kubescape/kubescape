@@ -18,7 +18,10 @@ var downloadCmd = &cobra.Command{
 	Long:  ``,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) != 2 {
-			return fmt.Errorf("requires two arguments : framework <framework-name>")
+			return fmt.Errorf("requires two arguments : framework/control <framework-name>/<control-name>")
+		}
+		if !strings.EqualFold(args[0], "framework") && !strings.EqualFold(args[0], "control") {
+			return fmt.Errorf("invalid parameter '%s'. Supported parameters: framework, control", args[0])
 		}
 		return nil
 	},

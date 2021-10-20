@@ -21,6 +21,7 @@ func GetDefaultPath(name string) string {
 	return defaultfilePath
 }
 
+// Save control as json in file
 func SaveControlInFile(control *reporthandling.Control, pathStr string) error {
 	encodedData, err := json.Marshal(control)
 	if err != nil {

@@ -26,6 +26,7 @@ func NewLoadPolicy(filePath string) *LoadPolicy {
 	}
 }
 
+// Return control from file
 func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, error) {
 
 	control := &reporthandling.Control{}

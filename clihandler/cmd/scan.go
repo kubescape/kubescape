@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"fmt"
+	"strings"
+
 	"github.com/armosec/kubescape/cautils"
 	"github.com/spf13/cobra"
 )
@@ -12,6 +15,15 @@ var scanCmd = &cobra.Command{
 	Use:   "scan <command>",
 	Short: "Scan the current running cluster or yaml files",
 	Long:  `The action you want to perform`,
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return fmt.Errorf("requires one  argument: framework/control")
+		}
+		if !strings.EqualFold(args[0], "framework") && !strings.EqualFold(args[0], "control") {
+			return fmt.Errorf("invalid parameter '%s'. Supported parameters: framework, control", args[0])
+		}
+		return nil
+	},
 	Run: func(cmd *cobra.Command, args []string) {
 	},
 }
