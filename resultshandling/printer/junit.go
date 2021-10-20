@@ -17,9 +17,11 @@ type JUnitTestSuites struct {
 type JUnitTestSuite struct {
 	XMLName    xml.Name        `xml:"testsuite"`
 	Tests      int             `xml:"tests,attr"`
-	Failures   int             `xml:"failures,attr"`
 	Time       string          `xml:"time,attr"`
 	Name       string          `xml:"name,attr"`
+	Resources  int             `xml:"resources,attr"`
+	Excluded   int             `xml:"excluded,attr"`
+	Failed     int             `xml:"filed,attr"`
 	Properties []JUnitProperty `xml:"properties>property,omitempty"`
 	TestCases  []JUnitTestCase `xml:"testcase"`
 }
@@ -30,6 +32,9 @@ type JUnitTestCase struct {
 	Classname   string            `xml:"classname,attr"`
 	Name        string            `xml:"name,attr"`
 	Time        string            `xml:"time,attr"`
+	Resources   int               `xml:"resources,attr"`
+	Excluded    int               `xml:"excluded,attr"`
+	Failed      int               `xml:"filed,attr"`
 	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
 	Failure     *JUnitFailure     `xml:"failure,omitempty"`
 }
@@ -55,7 +60,12 @@ type JUnitFailure struct {
 func convertPostureReportToJunitResult(postureResult *reporthandling.PostureReport) (*JUnitTestSuites, error) {
 	juResult := JUnitTestSuites{XMLName: xml.Name{Local: "Kubescape scan results"}}
 	for _, framework := range postureResult.FrameworkReports {
-		suite := JUnitTestSuite{Name: framework.Name}
+		suite := JUnitTestSuite{
+			Name:      framework.Name,
+			Resources: framework.GetNumberOfResources(),
+			Excluded:  framework.GetNumberOfWarningResources(),
+			Failed:    framework.GetNumberOfFailedResources(),
+		}
 		for _, controlReports := range framework.ControlReports {
 			suite.Tests = suite.Tests + 1
 			testCase := JUnitTestCase{}
@@ -63,9 +73,12 @@ func convertPostureReportToJunitResult(postureResult *reporthandling.PostureRepo
 			testCase.Classname = "Kubescape"
 			testCase.Time = "0"
 			if 0 < len(controlReports.RuleReports[0].RuleResponses) {
-				suite.Failures = suite.Failures + 1
+
+				testCase.Resources = framework.GetNumberOfResources()
+				testCase.Excluded = framework.GetNumberOfWarningResources()
+				testCase.Failed = framework.GetNumberOfFailedResources()
 				failure := JUnitFailure{}
-				failure.Message = fmt.Sprintf("%d resources failed", len(controlReports.RuleReports[0].RuleResponses))
+				failure.Message = fmt.Sprintf("%d resources failed", testCase.Failed)
 				for _, ruleResponses := range controlReports.RuleReports[0].RuleResponses {
 					failure.Contents = fmt.Sprintf("%s\n%s", failure.Contents, ruleResponses.AlertMessage)
 				}

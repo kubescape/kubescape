@@ -22,6 +22,6 @@ require (
 require (
 	github.com/armosec/armoapi-go v0.0.7
 	github.com/armosec/k8s-interface v0.0.5
-	github.com/armosec/opa-utils v0.0.12
+	github.com/armosec/opa-utils v0.0.13
 	github.com/armosec/utils-go v0.0.3
 )

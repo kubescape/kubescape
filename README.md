@@ -24,10 +24,8 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+kubescape scan framework nsa
 ```
-
-If you wish to scan all namespaces in your cluster, remove the `--exclude-namespaces` flag.
 
 <img src="docs/summary.png">
 
@@ -89,15 +87,15 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to [Armo portal](https://portal.armo.cloud/)
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --submit
+kubescape scan framework nsa --submit
 ```
 
 
-* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework and submit results to [Armo portal](https://portal.armo.cloud/)
+* Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
 ```
-kubescape scan framework mitre --exclude-namespaces kube-system,kube-public --submit
+kubescape scan framework mitre --submit
 ```
 
 * Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
@@ -190,7 +188,7 @@ go build -o kubescape .
 
 3. Run
 ```
-./kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+./kubescape scan framework nsa
 ```
 
 4. Enjoy :zany_face:
