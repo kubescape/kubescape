@@ -56,9 +56,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 		return fmt.Errorf("empty list of resources")
 	}
 	opaSessionObj.K8SResources = k8sResources
-	if opaSessionObj.PostureReport.ClusterAPIServerInfo, err = policyHandler.k8s.KubernetesClient.Discovery().ServerVersion(); err != nil {
-		cautils.ErrorDisplay(fmt.Sprintf("Failed to discover API server inforamtion: %v", err))
-	}
+
 	// update channel
 	*policyHandler.processPolicy <- opaSessionObj
 	return nil
@@ -86,7 +84,10 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
 	var k8sResources *cautils.K8SResources
 	var err error
-	if k8sinterface.ConnectedToCluster {
+	if k8sinterface.ConnectedToCluster { // TODO - use interface
+		if opaSessionObj.PostureReport.ClusterAPIServerInfo, err = policyHandler.k8s.KubernetesClient.Discovery().ServerVersion(); err != nil {
+			cautils.ErrorDisplay(fmt.Sprintf("Failed to discover API server inforamtion: %v", err))
+		}
 		k8sResources, err = policyHandler.getK8sResources(opaSessionObj.Frameworks, &notification.Designators, scanInfo.ExcludedNamespaces)
 	} else {
 		k8sResources, err = policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
