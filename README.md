@@ -3,9 +3,12 @@
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
-Kubescape is the first tool for testing if Kubernetes is deployed securely as defined in [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
+Kubescape is the first open-source tool for testing if Kubernetes is deployed securely according to multiple frameworks:
+regulatory, customized company policies and DevSecOps best practices, such as the  [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo) and the [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) .  
+Kubescape scans K8s clusters, YAML files, and HELM charts, and detect misconfigurations and software vulnerabilities at early stages of the CI/CD pipeline and provides a risk score instantly and risk trends over time.
+Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI and Github workflows.
 
-Use Kubescape to test clusters or scan single YAML files and integrate it to your processes.
+</br>
 
 <img src="docs/demo.gif">
 
@@ -118,7 +121,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --form
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
 ```
 
-* Scan with exceptions, objects with exceptions will be presented as `warning` and not `fail`  <img src="docs/new-feature.svg">
+* Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
 ```
 kubescape scan framework nsa --exceptions examples/exceptions.json
 ```

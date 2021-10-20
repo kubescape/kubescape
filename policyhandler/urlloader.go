@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
 )
 
 func loadResourcesFromUrl(inputPatterns []string) ([]k8sinterface.IWorkload, error) {
@@ -28,9 +28,18 @@ func listUrls(patterns []string) []string {
 	urls := []string{}
 	for i := range patterns {
 		if strings.HasPrefix(patterns[i], "http") {
-			urls = append(urls, patterns[i])
+			if !isYaml(patterns[i]) || !isJson(patterns[i]) { // if url of repo
+				if yamls, err := ScanRepository(patterns[i], ""); err == nil { // TODO - support branch
+					urls = append(urls, yamls...)
+				} else {
+					fmt.Print(err) // TODO - handle errors
+				}
+			} else { // url of single file
+				urls = append(urls, patterns[i])
+			}
 		}
 	}
+
 	return urls
 }
 

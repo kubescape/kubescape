@@ -3,24 +3,26 @@ package printer
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
-func groupByNamespace(resources []WorkloadSummary) map[string][]WorkloadSummary {
+func groupByNamespace(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
-		if r, ok := mapResources[resources[i].Namespace]; ok {
-			r = append(r, resources[i])
-			mapResources[resources[i].Namespace] = r
-		} else {
-			mapResources[resources[i].Namespace] = []WorkloadSummary{resources[i]}
+		if status(&resources[i]) {
+			if r, ok := mapResources[resources[i].Namespace]; ok {
+				r = append(r, resources[i])
+				mapResources[resources[i].Namespace] = r
+			} else {
+				mapResources[resources[i].Namespace] = []WorkloadSummary{resources[i]}
+			}
 		}
 	}
 	return mapResources
 }
-func listResultSummary(ruleReports []opapolicy.RuleReport) []WorkloadSummary {
+func listResultSummary(ruleReports []reporthandling.RuleReport) []WorkloadSummary {
 	workloadsSummary := []WorkloadSummary{}
 	track := map[string]bool{}
 
@@ -44,7 +46,7 @@ func listResultSummary(ruleReports []opapolicy.RuleReport) []WorkloadSummary {
 	}
 	return workloadsSummary
 }
-func ruleResultSummary(obj opapolicy.AlertObject) ([]WorkloadSummary, error) {
+func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error) {
 	resource := []WorkloadSummary{}
 
 	for i := range obj.K8SApiObjects {
@@ -62,7 +64,7 @@ func ruleResultSummary(obj opapolicy.AlertObject) ([]WorkloadSummary, error) {
 func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
 	r := &WorkloadSummary{}
 
-	workload := k8sinterface.NewWorkloadObj(obj)
+	workload := workloadinterface.NewWorkloadObj(obj)
 	if workload == nil {
 		return r, fmt.Errorf("expecting k8s API object")
 	}

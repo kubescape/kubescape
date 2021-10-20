@@ -4,11 +4,10 @@ import (
 	"fmt"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/k8s-interface/k8sinterface"
 )
 
 // PolicyHandler -
@@ -27,7 +26,7 @@ func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, k8s *k8sinterf
 	}
 }
 
-func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opapolicy.PolicyNotification, scanInfo *cautils.ScanInfo) error {
+func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *reporthandling.PolicyNotification, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj := cautils.NewOPASessionObj(nil, nil)
 	// validate notification
 	// TODO
@@ -58,7 +57,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 	return nil
 }
 
-func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNotification) ([]opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
 
 	cautils.ProgressTextDisplay("Downloading/Loading framework definitions")
 
@@ -76,7 +75,7 @@ func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNo
 	return frameworks, exceptions, nil
 }
 
-func (policyHandler *PolicyHandler) getResources(notification *opapolicy.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
 	var k8sResources *cautils.K8SResources
 	var err error
 	if k8sinterface.ConnectedToCluster {

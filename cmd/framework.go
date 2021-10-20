@@ -6,16 +6,16 @@ import (
 	"os"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/armotypes"
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-	"github.com/armosec/kubescape/cautils/opapolicy"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
 	"github.com/armosec/kubescape/resultshandling"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
+	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/spf13/cobra"
 )
@@ -46,8 +46,8 @@ var frameworkCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		scanInfo.PolicyIdentifier = opapolicy.PolicyIdentifier{}
-		scanInfo.PolicyIdentifier.Kind = opapolicy.KindFramework
+		scanInfo.PolicyIdentifier = reporthandling.PolicyIdentifier{}
+		scanInfo.PolicyIdentifier.Kind = reporthandling.KindFramework
 
 		if !(cmd.Flags().Lookup("use-from").Changed) {
 			scanInfo.PolicyIdentifier.Name = strings.ToLower(args[0])
@@ -94,9 +94,8 @@ func init() {
 	frameworkCmd.Flags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	frameworkCmd.Flags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 0, "Failure threshold is the percent bellow which the command fails and returns exit code 1")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.DoNotSendResults, "results-locally", "", false, "Deprecated. Please use `--keep-local` instead")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results")
+	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the '--submit' flag in the past and you do not want to submit your current scan results")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 
 }
@@ -112,7 +111,7 @@ func CliSetup() error {
 	} else {
 		k8s = k8sinterface.NewKubernetesApi()
 		// setup cluster config
-		clusterConfig =  cautils.ClusterConfigSetup(&scanInfo, k8s, getter.GetArmoAPIConnector())
+		clusterConfig = cautils.ClusterConfigSetup(&scanInfo, k8s, getter.GetArmoAPIConnector())
 	}
 
 	processNotification := make(chan *cautils.OPASessionObj)
@@ -121,12 +120,12 @@ func CliSetup() error {
 	// policy handler setup
 	policyHandler := policyhandler.NewPolicyHandler(&processNotification, k8s)
 
-	if err := clusterConfig.SetCustomerGUID(scanInfo.Account); err != nil {
+	if err := clusterConfig.SetConfig(scanInfo.Account); err != nil {
 		fmt.Println(err)
 	}
 
+	cautils.ClusterName = clusterConfig.GetClusterName()
 	cautils.CustomerGUID = clusterConfig.GetCustomerGUID()
-	cautils.ClusterName = k8sinterface.GetClusterName()
 
 	// cli handler setup
 	go func() {
@@ -166,15 +165,15 @@ func NewCLIHandler(policyHandler *policyhandler.PolicyHandler) *CLIHandler {
 
 func (clihandler *CLIHandler) Scan() error {
 	cautils.ScanStartDisplay()
-	policyNotification := &opapolicy.PolicyNotification{
-		NotificationType: opapolicy.TypeExecPostureScan,
-		Rules: []opapolicy.PolicyIdentifier{
+	policyNotification := &reporthandling.PolicyNotification{
+		NotificationType: reporthandling.TypeExecPostureScan,
+		Rules: []reporthandling.PolicyIdentifier{
 			clihandler.scanInfo.PolicyIdentifier,
 		},
 		Designators: armotypes.PortalDesignator{},
 	}
 	switch policyNotification.NotificationType {
-	case opapolicy.TypeExecPostureScan:
+	case reporthandling.TypeExecPostureScan:
 		//
 		if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
 			return err
@@ -186,9 +185,6 @@ func (clihandler *CLIHandler) Scan() error {
 }
 
 func flagValidation() {
-	if scanInfo.DoNotSendResults {
-		fmt.Println("Deprecated. Please use `--keep-local` instead")
-	}
 
 	if scanInfo.Submit && scanInfo.Local {
 		fmt.Println("You can use `keep-local` or `submit`, but not both")

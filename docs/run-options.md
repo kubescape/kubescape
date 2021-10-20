@@ -51,7 +51,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --form
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
 ```
 
-* Scan with exceptions, objects with exceptions will be presented as `warning` and not `fail`  <img src="docs/new-feature.svg">
+* Scan with exceptions, objects with exceptions will be presented as `warning` and not `fail`
 ```
 kubescape scan framework nsa --exceptions examples/exceptions.json
 ```
