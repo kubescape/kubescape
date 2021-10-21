@@ -40,6 +40,7 @@ jobs:
   build-docker:
     name: Build docker container, tag and upload to registry
     needs: build
+    if: ${{ github.repository == 'armosec/kubescape' }}
     runs-on: ubuntu-latest
 
     steps:

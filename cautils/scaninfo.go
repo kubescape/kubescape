@@ -3,6 +3,7 @@ package cautils
 import (
 	"path/filepath"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -22,6 +23,7 @@ type ScanInfo struct {
 	Submit             bool     // Submit results to Armo BE
 	Local              bool     // Do not submit results
 	Account            string   // account ID
+	FrameworkScan      bool     // false if scanning control
 }
 
 type Getters struct {
@@ -53,7 +55,6 @@ func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier.Name + ".json")
 	}
-
 }
 func (scanInfo *ScanInfo) setGetter() {
 	if scanInfo.UseFrom != "" {
@@ -82,6 +83,20 @@ func (scanInfo *ScanInfo) setOutputFile() {
 
 func (scanInfo *ScanInfo) ScanRunningCluster() bool {
 	return len(scanInfo.InputPatterns) == 0
+}
+
+func (scanInfo *ScanInfo) SetClusterConfig() (IClusterConfig, *k8sinterface.KubernetesApi) {
+	var clusterConfig IClusterConfig
+	var k8s *k8sinterface.KubernetesApi
+	if !scanInfo.ScanRunningCluster() {
+		k8sinterface.ConnectedToCluster = false
+		clusterConfig = NewEmptyConfig()
+	} else {
+		k8s = k8sinterface.NewKubernetesApi()
+		// setup cluster config
+		clusterConfig = ClusterConfigSetup(scanInfo, k8s, getter.GetArmoAPIConnector())
+	}
+	return clusterConfig, k8s
 }
 
 // func (scanInfo *ScanInfo) ConnectedToCluster(k8s k8sinterface.) bool {

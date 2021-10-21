@@ -7,6 +7,7 @@ import (
 
 type IPolicyGetter interface {
 	GetFramework(name string) (*reporthandling.Framework, error)
+	GetControl(policyName string) (*reporthandling.Control, error)
 }
 
 type IExceptionsGetter interface {
