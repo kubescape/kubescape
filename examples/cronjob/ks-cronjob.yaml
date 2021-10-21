@@ -72,10 +72,8 @@ metadata:
 data:
   config.json: |
     {
-      "adminMail": "",
-      "customerGUID": "<MyGUID>",
-      "clusterName": "<MyK8sClusterName>",
-      "invitationParam": ""
+      "customerGUID": <MyGUID>,
+      "clusterName": <MyK8sClusterName>
     }
 
 ---
@@ -104,12 +102,11 @@ spec:
         spec:
           containers:
           - name: kubescape
-            image: quay.io/armosec/kubescape:latset
+            image: quay.io/armosec/kubescape:latest
             imagePullPolicy: IfNotPresent
             command: ["/bin/sh","-c"]
             args: 
-            - kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
-            #- kubescape scan framework nsa --use-default --exclude-namespaces kube-system,kube-public
+            - kubescape scan framework nsa --submit
             volumeMounts:
             - name: kubescape-config-volume
               mountPath: /root/.kubescape/config.json
