@@ -54,7 +54,7 @@ func calculatePostureScore(postureReport *reporthandling.PostureReport) float32 
 }
 
 func (printer *Printer) ActionPrint(opaSessionObj *cautils.OPASessionObj) float32 {
-	var score float32
+	score := calculatePostureScore(opaSessionObj.PostureReport)
 
 	if printer.printerType == PrettyPrinter {
 		printer.SummarySetup(opaSessionObj.PostureReport)
@@ -67,6 +67,7 @@ func (printer *Printer) ActionPrint(opaSessionObj *cautils.OPASessionObj) float3
 			os.Exit(1)
 		}
 		printer.writer.Write(postureReportStr)
+		fmt.Printf("\nFinal score: %d\n", int(score*100))
 	} else if printer.printerType == JunitResultPrinter {
 		junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
 		if err != nil {
@@ -79,12 +80,11 @@ func (printer *Printer) ActionPrint(opaSessionObj *cautils.OPASessionObj) float3
 			os.Exit(1)
 		}
 		printer.writer.Write(postureReportStr)
+		fmt.Printf("\nFinal score: %d\n", int(score*100))
 	} else if !cautils.IsSilent() {
 		fmt.Println("unknown output printer")
 		os.Exit(1)
 	}
-
-	score = calculatePostureScore(opaSessionObj.PostureReport)
 
 	return score
 }
@@ -236,7 +236,8 @@ func (printer *Printer) PrintSummaryTable() {
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
 	summaryTable.SetHeaderLine(true)
-	summaryTable.SetAlignment(tablewriter.ALIGN_LEFT)
+	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	summaryTable.SetColumnAlignment(alignments)
 
 	for i := 0; i < len(printer.sortedControlNames); i++ {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]

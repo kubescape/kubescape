@@ -24,10 +24,8 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+kubescape scan framework nsa
 ```
-
-If you wish to scan all namespaces in your cluster, remove the `--exclude-namespaces` flag.
 
 <img src="docs/summary.png">
 
@@ -89,15 +87,21 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to [Armo portal](https://portal.armo.cloud/)
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --submit
+kubescape scan framework nsa --submit
 ```
 
 
-* Scan a running Kubernetes cluster with [`mitre`](https://www.microsoft.com/security/blog/2020/04/02/attack-matrix-kubernetes/) framework and submit results to [Armo portal](https://portal.armo.cloud/)
+* Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
 ```
-kubescape scan framework mitre --exclude-namespaces kube-system,kube-public --submit
+kubescape scan framework mitre --submit
+```
+
+
+* Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armo.cloud/docs/controls) 
+```
+kubescape scan control "Privileged container"
 ```
 
 * Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
@@ -106,9 +110,9 @@ kubescape scan framework nsa *.yaml
 ```
 
 
-* Scan `yaml`/`json` files from url
+* Scan kubernetes manifest files from a public github repository 
 ```
-kubescape scan framework nsa https://raw.githubusercontent.com/GoogleCloudPlatform/microservices-demo/master/release/kubernetes-manifests.yaml
+kubescape scan framework nsa https://github.com/armosec/kubescape
 ```
 
 * Output in `json` format
@@ -190,12 +194,18 @@ go build -o kubescape .
 
 3. Run
 ```
-./kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+./kubescape scan framework nsa
 ```
 
 4. Enjoy :zany_face:
 
-## How to build in Docker
+## Docker Support
+
+### Official Docker image
+```
+quay.io/armosec/kubescape
+```
+### Build your own Docker image
 
 1. Clone Project
 ```

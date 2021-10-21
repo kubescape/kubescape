@@ -10,6 +10,11 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 )
 
+var supportedFrameworks = []reporthandling.PolicyIdentifier{
+	{Kind: "Framework", Name: "nsa"},
+	{Kind: "Framework", Name: "mitre"},
+}
+
 // PolicyHandler -
 type PolicyHandler struct {
 	k8s *k8sinterface.KubernetesApi
@@ -51,9 +56,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 		return fmt.Errorf("empty list of resources")
 	}
 	opaSessionObj.K8SResources = k8sResources
-	if opaSessionObj.PostureReport.ClusterAPIServerInfo, err = policyHandler.k8s.KubernetesClient.Discovery().ServerVersion(); err != nil {
-		cautils.ErrorDisplay(fmt.Sprintf("Failed to discover API server inforamtion: %v", err))
-	}
+
 	// update channel
 	*policyHandler.processPolicy <- opaSessionObj
 	return nil
@@ -61,7 +64,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 
 func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
 
-	cautils.ProgressTextDisplay("Downloading/Loading framework definitions")
+	cautils.ProgressTextDisplay("Downloading/Loading policy definitions")
 
 	frameworks, exceptions, err := policyHandler.GetPoliciesFromBackend(notification)
 	if err != nil {
@@ -72,7 +75,8 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 		err := fmt.Errorf("could not download any policies, please check previous logs")
 		return frameworks, exceptions, err
 	}
-	cautils.SuccessTextDisplay("Downloaded/Loaded framework")
+	//if notification.Rules
+	cautils.SuccessTextDisplay("Downloaded/Loaded policy")
 
 	return frameworks, exceptions, nil
 }
@@ -80,7 +84,10 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
 	var k8sResources *cautils.K8SResources
 	var err error
-	if k8sinterface.ConnectedToCluster {
+	if k8sinterface.ConnectedToCluster { // TODO - use interface
+		if opaSessionObj.PostureReport.ClusterAPIServerInfo, err = policyHandler.k8s.KubernetesClient.Discovery().ServerVersion(); err != nil {
+			cautils.ErrorDisplay(fmt.Sprintf("Failed to discover API server inforamtion: %v", err))
+		}
 		k8sResources, err = policyHandler.getK8sResources(opaSessionObj.Frameworks, &notification.Designators, scanInfo.ExcludedNamespaces)
 	} else {
 		k8sResources, err = policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
