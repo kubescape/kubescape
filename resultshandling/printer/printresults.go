@@ -236,7 +236,8 @@ func (printer *Printer) PrintSummaryTable() {
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
 	summaryTable.SetHeaderLine(true)
-	summaryTable.SetAlignment(tablewriter.ALIGN_LEFT)
+	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	summaryTable.SetColumnAlignment(alignments)
 
 	for i := 0; i < len(printer.sortedControlNames); i++ {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]

@@ -1,12 +1,9 @@
 package getter
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"time"
+	"strings"
 
+	"github.com/armosec/opa-utils/gitregostore"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -16,71 +13,34 @@ import (
 
 // Download released version
 type DownloadReleasedPolicy struct {
-	hostURL    string
-	httpClient *http.Client
+	gs *gitregostore.GitRegoStore
 }
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
-		hostURL:    "",
-		httpClient: &http.Client{Timeout: 61 * time.Second},
+		gs: gitregostore.InitDefaultGitRegoStore(),
 	}
+}
+
+// Return control per name/id using ARMO api
+func (drp *DownloadReleasedPolicy) GetControl(policyName string) (*reporthandling.Control, error) {
+	var control *reporthandling.Control
+	var err error
+	if strings.HasPrefix(policyName, "C-") || strings.HasPrefix(policyName, "c-") {
+		control, err = drp.gs.GetOPAControlByID(policyName)
+	} else {
+		control, err = drp.gs.GetOPAControlByName(policyName)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return control, nil
 }
 
 func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Framework, error) {
-	if err := drp.setURL(name); err != nil {
-		return nil, err
-	}
-	respStr, err := HttpGetter(drp.httpClient, drp.hostURL)
+	framework, err := drp.gs.GetOPAFrameworkByName(name)
 	if err != nil {
 		return nil, err
 	}
-
-	framework := &reporthandling.Framework{}
-	if err = JSONDecoder(respStr).Decode(framework); err != nil {
-		return framework, err
-	}
-
-	SaveFrameworkInFile(framework, GetDefaultPath(name+".json"))
 	return framework, err
-}
-
-func (drp *DownloadReleasedPolicy) setURL(frameworkName string) error {
-
-	latestReleases := "https://api.github.com/repos/armosec/regolibrary/releases/latest"
-	resp, err := http.Get(latestReleases)
-	if err != nil {
-		return fmt.Errorf("failed to get latest releases from '%s', reason: %s", latestReleases, err.Error())
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || 301 < resp.StatusCode {
-		return fmt.Errorf("failed to download file, status code: %s", resp.Status)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response body from '%s', reason: %s", latestReleases, err.Error())
-	}
-	var data map[string]interface{}
-	err = json.Unmarshal(body, &data)
-	if err != nil {
-		return fmt.Errorf("failed to unmarshal response body from '%s', reason: %s", latestReleases, err.Error())
-	}
-
-	if assets, ok := data["assets"].([]interface{}); ok {
-		for i := range assets {
-			if asset, ok := assets[i].(map[string]interface{}); ok {
-				if name, ok := asset["name"].(string); ok {
-					if name == frameworkName {
-						if url, ok := asset["browser_download_url"].(string); ok {
-							drp.hostURL = url
-							return nil
-						}
-					}
-				}
-			}
-		}
-	}
-	return fmt.Errorf("failed to download '%s' - not found", frameworkName)
-
 }
