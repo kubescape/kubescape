@@ -3,9 +3,36 @@ package printer
 import (
 	"encoding/xml"
 	"fmt"
+	"os"
 
+	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
 )
+
+type JunitPrinter struct {
+	writer *os.File
+}
+
+func NewJunitPrinter() *JunitPrinter {
+	return &JunitPrinter{}
+}
+
+func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
+	junitPrinter.writer = getWriter(outputFile)
+}
+func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
+	if err != nil {
+		fmt.Println("Failed to convert posture report object!")
+		os.Exit(1)
+	}
+	postureReportStr, err := xml.Marshal(junitResult)
+	if err != nil {
+		fmt.Println("Failed to convert posture report object!")
+		os.Exit(1)
+	}
+	junitPrinter.writer.Write(postureReportStr)
+}
 
 type JUnitTestSuites struct {
 	XMLName xml.Name         `xml:"testsuites"`
