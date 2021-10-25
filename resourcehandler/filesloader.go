@@ -1,4 +1,4 @@
-package policyhandler
+package resourcehandler
 
 import (
 	"bytes"
@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"k8s.io/apimachinery/pkg/version"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
@@ -29,11 +31,22 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func (policyHandler *PolicyHandler) loadResources(frameworks []reporthandling.Framework, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
+// FileResourceHandler handle resources from files and URLs
+type FileResourceHandler struct {
+	inputPatterns []string
+}
+
+func NewFileResourceHandler(inputPatterns []string) *FileResourceHandler {
+	return &FileResourceHandler{
+		inputPatterns: inputPatterns,
+	}
+}
+
+func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, error) {
 	workloads := []k8sinterface.IWorkload{}
 
 	// load resource from local file system
-	w, err := loadResourcesFromFiles(scanInfo.InputPatterns)
+	w, err := loadResourcesFromFiles(fileHandler.inputPatterns)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +55,7 @@ func (policyHandler *PolicyHandler) loadResources(frameworks []reporthandling.Fr
 	}
 
 	// load resources from url
-	w, err = loadResourcesFromUrl(scanInfo.InputPatterns)
+	w, err = loadResourcesFromUrl(fileHandler.inputPatterns)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +72,7 @@ func (policyHandler *PolicyHandler) loadResources(frameworks []reporthandling.Fr
 
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads>
-	k8sResources := setResourceMap(frameworks)
+	k8sResources := setResourceMap(frameworks) // TODO - support designators
 
 	// save only relevant resources
 	for i := range allResources {
@@ -70,6 +83,10 @@ func (policyHandler *PolicyHandler) loadResources(frameworks []reporthandling.Fr
 
 	return k8sResources, nil
 
+}
+
+func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info {
+	return nil
 }
 
 func loadResourcesFromFiles(inputPatterns []string) ([]k8sinterface.IWorkload, error) {
