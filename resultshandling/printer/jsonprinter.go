@@ -21,7 +21,7 @@ func (jsonPrinter *JsonPrinter) SetWriter(outputFile string) {
 }
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
-	fmt.Printf("\nFinal score: %d\n", int(score))
+	fmt.Printf("\nFinal score: %d", int(score*100))
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
