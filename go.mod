@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/armosec/armoapi-go v0.0.8
-	github.com/armosec/k8s-interface v0.0.5
+	github.com/armosec/k8s-interface v0.0.8
 	github.com/armosec/opa-utils v0.0.13
 	github.com/armosec/utils-go v0.0.3
 	github.com/briandowns/spinner v1.16.0
