@@ -106,9 +106,9 @@ func convertPostureReportToJunitResult(postureResult *reporthandling.PostureRepo
 			testCase.Time = "0"
 			if 0 < len(controlReports.RuleReports[0].RuleResponses) {
 
-				testCase.Resources = framework.GetNumberOfResources()
-				testCase.Excluded = framework.GetNumberOfWarningResources()
-				testCase.Failed = framework.GetNumberOfFailedResources()
+				testCase.Resources = controlReports.GetNumberOfResources()
+				testCase.Excluded = controlReports.GetNumberOfWarningResources()
+				testCase.Failed = controlReports.GetNumberOfFailedResources()
 				failure := JUnitFailure{}
 				failure.Message = fmt.Sprintf("%d resources failed", testCase.Failed)
 				for _, ruleResponses := range controlReports.RuleReports[0].RuleResponses {
