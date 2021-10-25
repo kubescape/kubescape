@@ -17,6 +17,7 @@ const (
 type IPrinter interface {
 	ActionPrint(opaSessionObj *cautils.OPASessionObj)
 	SetWriter(outputFile string)
+	Score(score float32)
 }
 
 func GetPrinter(printFormat string) IPrinter {

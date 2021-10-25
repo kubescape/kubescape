@@ -20,6 +20,11 @@ func NewJunitPrinter() *JunitPrinter {
 func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
 	junitPrinter.writer = getWriter(outputFile)
 }
+
+func (junitPrinter *JunitPrinter) Score(score float32) {
+	fmt.Printf("\nFinal score: %d\n", int(score))
+}
+
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
 	if err != nil {

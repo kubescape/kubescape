@@ -37,6 +37,10 @@ func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 func (printer *PrettyPrinter) SetWriter(outputFile string) {
 	printer.writer = getWriter(outputFile)
 }
+
+func (printer *PrettyPrinter) Score(score float32) {
+}
+
 func (printer *PrettyPrinter) summarySetup(postureReport *reporthandling.PostureReport) {
 	for _, fr := range postureReport.FrameworkReports {
 		printer.frameworkSummary = ControlSummary{

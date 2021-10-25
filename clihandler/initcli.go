@@ -114,9 +114,7 @@ func CliSetup(scanInfo *cautils.ScanInfo) error {
 	score := resultsHandling.HandleResults(scanInfo)
 
 	// print report url
-	if scanInfo.FrameworkScan {
-		interfaces.clusterConfig.GenerateURL()
-	}
+	interfaces.clusterConfig.GenerateURL()
 
 	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
 	if score < adjustedFailThreshold {

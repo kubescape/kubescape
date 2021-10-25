@@ -19,6 +19,11 @@ func NewJsonPrinter() *JsonPrinter {
 func (jsonPrinter *JsonPrinter) SetWriter(outputFile string) {
 	jsonPrinter.writer = getWriter(outputFile)
 }
+
+func (jsonPrinter *JsonPrinter) Score(score float32) {
+	fmt.Printf("\nFinal score: %d\n", int(score))
+}
+
 func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	postureReportStr, err := json.Marshal(opaSessionObj.PostureReport.FrameworkReports[0])
 	if err != nil {

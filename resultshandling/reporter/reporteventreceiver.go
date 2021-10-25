@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -19,7 +18,6 @@ type IReport interface {
 
 type ReportEventReceiver struct {
 	httpClient   http.Client
-	host         url.URL
 	clusterName  string
 	customerGUID string
 }
@@ -27,7 +25,6 @@ type ReportEventReceiver struct {
 func NewReportEventReceiver() *ReportEventReceiver {
 	return &ReportEventReceiver{
 		httpClient: http.Client{},
-		// host:       *hostURL,
 	}
 }
 

@@ -30,7 +30,10 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 	resultsHandler.reporterObj.ActionSendReport(opaSessionObj)
 
 	// TODO - get score from table
-	return CalculatePostureScore(opaSessionObj.PostureReport)
+	score := CalculatePostureScore(opaSessionObj.PostureReport)
+	resultsHandler.printerObj.Score(score)
+
+	return score
 }
 
 // CalculatePostureScore calculate final score
