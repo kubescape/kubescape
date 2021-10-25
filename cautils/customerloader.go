@@ -109,8 +109,10 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 		return NewEmptyConfig() // local - Delete local config & Do not send report
 	}
 	if scanInfo.Local {
+		scanInfo.Submit = false
 		return NewEmptyConfig() // local - Do not send report
 	}
+	scanInfo.Submit = true
 	return clusterConfig // submit/default -  Submit report
 }
 
@@ -158,7 +160,7 @@ func (c *ClusterConfig) GetDefaultNS() string                   { return c.defau
 func (c *ClusterConfig) GetBackendAPI() getter.IBackend         { return c.backendAPI }
 
 func (c *ClusterConfig) GenerateURL() {
-	message := "\nCheckout for more cool features: "
+	message := "Checkout for more cool features: "
 
 	u := url.URL{}
 	u.Scheme = "https"
@@ -167,7 +169,7 @@ func (c *ClusterConfig) GenerateURL() {
 		return
 	}
 	if c.configObj.CustomerAdminEMail != "" {
-		InfoTextDisplay(os.Stdout, message+u.String()+"\n")
+		InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
 		return
 	}
 	u.Path = "account/sign-up"
@@ -176,7 +178,7 @@ func (c *ClusterConfig) GenerateURL() {
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
-	InfoTextDisplay(os.Stdout, message+u.String()+"\n")
+	InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
 }
 
 func (c *ClusterConfig) GetCustomerGUID() string {

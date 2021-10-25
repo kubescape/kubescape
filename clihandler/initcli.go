@@ -34,7 +34,7 @@ type componentInterfaces struct {
 }
 
 func getReporter(scanInfo *cautils.ScanInfo) reporter.IReport {
-	if scanInfo.Local {
+	if !scanInfo.Submit {
 		return reporter.NewReportMock()
 	}
 	if !scanInfo.FrameworkScan {
