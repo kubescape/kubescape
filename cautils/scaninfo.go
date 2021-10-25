@@ -9,7 +9,7 @@ import (
 
 type ScanInfo struct {
 	Getters
-	PolicyIdentifier   reporthandling.PolicyIdentifier
+	PolicyIdentifier   []reporthandling.PolicyIdentifier
 	UseExceptions      string   // Load exceptions configuration
 	UseFrom            string   // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline
@@ -52,7 +52,7 @@ func (scanInfo *ScanInfo) setUseFrom() {
 		return
 	}
 	if scanInfo.UseDefault {
-		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier.Name + ".json")
+		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier[0].Name + ".json")
 	}
 }
 func (scanInfo *ScanInfo) setGetter() {

@@ -26,10 +26,11 @@ func NewPrettyPrinter() *PrettyPrinter {
 
 func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	// score := calculatePostureScore(opaSessionObj.PostureReport)
-
-	printer.summarySetup(opaSessionObj.PostureReport)
-	printer.printResults()
-	printer.printSummaryTable()
+	for _, report := range opaSessionObj.PostureReport.FrameworkReports {
+		printer.summarySetup(report)
+		printer.printResults()
+		printer.printSummaryTable()
+	}
 
 	// return score
 }
@@ -41,29 +42,27 @@ func (printer *PrettyPrinter) SetWriter(outputFile string) {
 func (printer *PrettyPrinter) Score(score float32) {
 }
 
-func (printer *PrettyPrinter) summarySetup(postureReport *reporthandling.PostureReport) {
-	for _, fr := range postureReport.FrameworkReports {
-		printer.frameworkSummary = ControlSummary{
-			TotalResources: fr.GetNumberOfResources(),
-			TotalFailed:    fr.GetNumberOfFailedResources(),
-			TotalWarnign:   fr.GetNumberOfWarningResources(),
+func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport) {
+	printer.frameworkSummary = ControlSummary{
+		TotalResources: fr.GetNumberOfResources(),
+		TotalFailed:    fr.GetNumberOfFailedResources(),
+		TotalWarnign:   fr.GetNumberOfWarningResources(),
+	}
+	for _, cr := range fr.ControlReports {
+		if len(cr.RuleReports) == 0 {
+			continue
 		}
-		for _, cr := range fr.ControlReports {
-			if len(cr.RuleReports) == 0 {
-				continue
-			}
-			workloadsSummary := listResultSummary(cr.RuleReports)
+		workloadsSummary := listResultSummary(cr.RuleReports)
 
-			printer.summary[cr.Name] = ControlSummary{
-				TotalResources:    cr.GetNumberOfResources(),
-				TotalFailed:       cr.GetNumberOfFailedResources(),
-				TotalWarnign:      cr.GetNumberOfWarningResources(),
-				FailedWorkloads:   groupByNamespace(workloadsSummary, workloadSummaryFailed),
-				ExcludedWorkloads: groupByNamespace(workloadsSummary, workloadSummaryExclude),
-				Description:       cr.Description,
-				Remediation:       cr.Remediation,
-				ListInputKinds:    cr.ListControlsInputKinds(),
-			}
+		printer.summary[cr.Name] = ControlSummary{
+			TotalResources:    cr.GetNumberOfResources(),
+			TotalFailed:       cr.GetNumberOfFailedResources(),
+			TotalWarnign:      cr.GetNumberOfWarningResources(),
+			FailedWorkloads:   groupByNamespace(workloadsSummary, workloadSummaryFailed),
+			ExcludedWorkloads: groupByNamespace(workloadsSummary, workloadSummaryExclude),
+			Description:       cr.Description,
+			Remediation:       cr.Remediation,
+			ListInputKinds:    cr.ListControlsInputKinds(),
 		}
 	}
 	printer.sortedControlNames = printer.getSortedControlsNames()

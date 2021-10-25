@@ -135,10 +135,8 @@ func (clihandler *CLIHandler) Scan() error {
 	cautils.ScanStartDisplay()
 	policyNotification := &reporthandling.PolicyNotification{
 		NotificationType: reporthandling.TypeExecPostureScan,
-		Rules: []reporthandling.PolicyIdentifier{
-			clihandler.scanInfo.PolicyIdentifier,
-		},
-		Designators: armotypes.PortalDesignator{},
+		Rules:            clihandler.scanInfo.PolicyIdentifier,
+		Designators:      armotypes.PortalDesignator{},
 	}
 	switch policyNotification.NotificationType {
 	case reporthandling.TypeExecPostureScan:

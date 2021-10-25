@@ -17,7 +17,11 @@ func CheckLatestVersion() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	} else if latest != cmd.BuildNumber {
-		fmt.Println("Warning: You are not updated to the latest release: " + latest)
+		if latest == "unknown" {
+			fmt.Println("Warning: You are not updated to the latest release!")
+		} else {
+			fmt.Println("Warning: You are not updated to the latest release: " + latest)
+		}
 	}
 
 }
