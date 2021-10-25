@@ -38,14 +38,16 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 
 // CalculatePostureScore calculate final score
 func CalculatePostureScore(postureReport *reporthandling.PostureReport) float32 {
-	totalResources := 0
-	totalFailed := 0
+	lowestScore := float32(0)
 	for _, frameworkReport := range postureReport.FrameworkReports {
-		totalFailed += frameworkReport.GetNumberOfFailedResources()
-		totalResources += frameworkReport.GetNumberOfResources()
+		totalFailed := frameworkReport.GetNumberOfFailedResources()
+		totalResources := frameworkReport.GetNumberOfResources()
+
+		frameworkScore := (float32(totalResources) - float32(totalFailed)) / float32(totalResources)
+		if lowestScore > frameworkScore || frameworkScore == 0 {
+			frameworkScore = lowestScore
+		}
 	}
-	if totalResources == 0 {
-		return float32(0)
-	}
-	return (float32(totalResources) - float32(totalFailed)) / float32(totalResources)
+
+	return lowestScore
 }
