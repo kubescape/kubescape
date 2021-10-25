@@ -158,6 +158,7 @@ func (c *ClusterConfig) GetDefaultNS() string                   { return c.defau
 func (c *ClusterConfig) GetBackendAPI() getter.IBackend         { return c.backendAPI }
 
 func (c *ClusterConfig) GenerateURL() {
+	message := "\nCheckout for more cool features: "
 
 	u := url.URL{}
 	u.Scheme = "https"
@@ -165,9 +166,8 @@ func (c *ClusterConfig) GenerateURL() {
 	if c.configObj == nil {
 		return
 	}
-	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
 	if c.configObj.CustomerAdminEMail != "" {
-		InfoTextDisplay(os.Stdout, message+"\n")
+		InfoTextDisplay(os.Stdout, message+u.String()+"\n")
 		return
 	}
 	u.Path = "account/sign-up"
@@ -176,8 +176,7 @@ func (c *ClusterConfig) GenerateURL() {
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
-	InfoTextDisplay(os.Stdout, message+"\n")
-
+	InfoTextDisplay(os.Stdout, message+u.String()+"\n")
 }
 
 func (c *ClusterConfig) GetCustomerGUID() string {
