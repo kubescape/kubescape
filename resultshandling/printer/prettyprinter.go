@@ -24,12 +24,24 @@ func NewPrettyPrinter() *PrettyPrinter {
 	}
 }
 
+// Initializes empty printer for new table
+func (printer *PrettyPrinter) init() *PrettyPrinter {
+	printer.frameworkSummary = ControlSummary{}
+	printer.summary = Summary{}
+	printer.sortedControlNames = []string{}
+	return printer
+}
+
 func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	// score := calculatePostureScore(opaSessionObj.PostureReport)
 	for _, report := range opaSessionObj.PostureReport.FrameworkReports {
+		// Print summary table together for control scan
+		if report.Name != "" {
+			printer = printer.init()
+		}
 		printer.summarySetup(report)
 		printer.printResults()
-		printer.printSummaryTable()
+		printer.printSummaryTable(report.Name)
 	}
 
 	// return score
@@ -178,7 +190,11 @@ func generateFooter(numControlers, sumFailed, sumWarning, sumTotal int) []string
 	}
 	return row
 }
-func (printer *PrettyPrinter) printSummaryTable() {
+func (printer *PrettyPrinter) printSummaryTable(framework string) {
+	// For control scan framework will be nil
+	if framework != "" {
+		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORK\n", framework))
+	}
 	summaryTable := tablewriter.NewWriter(printer.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())

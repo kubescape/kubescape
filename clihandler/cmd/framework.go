@@ -43,7 +43,6 @@ var frameworkCmd = &cobra.Command{
 			newPolicy.Kind = reporthandling.KindFramework
 			newPolicy.Name = frameworks[0]
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-
 			if !(cmd.Flags().Lookup("use-from").Changed) && !(cmd.Flags().Lookup("use-default").Changed) {
 				if len(frameworks) > 1 {
 					scanInfo.PolicyIdentifier = SetScanForGivenFrameworks(frameworks[1:])
@@ -88,7 +87,6 @@ func init() {
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the '--submit' flag in the past and you do not want to submit your current scan results")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
-
 }
 
 func SetScanForGivenFrameworks(frameworks []string) []reporthandling.PolicyIdentifier {
