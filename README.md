@@ -69,19 +69,19 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ## Flags
 
-| flag |  default | description | options |
-| --- | --- | --- | --- |
-| `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces |
-| `-s`/`--silent` | Display progress messages | Silent progress messages |
-| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result bellow threshold| `0` -> `100` |
-| `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` |
-| `-o`/`--output` | print to stdout | Save scan result in file |
-| `--use-from` | | Load local framework object from specified path. If not used will download latest |
-| `--use-default` | `false` | Load local framework object from default path. If not used will download latest | `true`/`false` |
-| `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal |
-| `--submit` | `false` | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`|
-| `--keep-local` | `false` | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results | `true`/`false`|
-| `--account` | | Armo portal account ID. Default will load account ID from configMap or config file | |
+| flag                        | default                   | description                                                                                                                                                                                                                                                                                                          | options                          |
+|-----------------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
+| `-e`/`--exclude-namespaces` | Scan all namespaces       | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces                                                                                                                                                                                                               |                                              |
+| `-s`/`--silent`             | Display progress messages | Silent progress messages                                                                                                                                                                                                                                                                                             |                                              |
+| `-t`/`--fail-threshold`     | `0` (do not fail)         | fail command (return exit code 1) if result bellow threshold                                                                                                                                                                                                                                                         | `0` -> `100`                                 |
+| `-f`/`--format`             | `pretty-printer`          | Output format                                                                                                                                                                                                                                                                                                        | `pretty-printer`/`json`/`junit`/`prometheus` |
+| `-o`/`--output`             | print to stdout           | Save scan result in file                                                                                                                                                                                                                                                                                             |                                              |
+| `--use-from`                |                           | Load local framework object from specified path. If not used will download latest                                                                                                                                                                                                                                    |                                              |
+| `--use-default`             | `false`                   | Load local framework object from default path. If not used will download latest                                                                                                                                                                                                                                      | `true`/`false`                               |
+| `--exceptions`              |                           | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal                                                                                                                                                                                               |                                              |
+| `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
+| `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
+| `--account`                 |                           | Armo portal account ID. Default will load account ID from configMap or config file                                                                                                                                                                                                                                   |                                              |
 
 ## Usage & Examples
 
@@ -123,6 +123,11 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --form
 * Output in `junit xml` format
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
+```
+
+* Output in `prometheus` metrics format
+```
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format prometheus
 ```
 
 * Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
