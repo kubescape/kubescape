@@ -35,7 +35,10 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 		return nil, err
 	}
 
-	err = json.Unmarshal(f, control)
+	if err = json.Unmarshal(f, control); err != nil {
+		return control, err
+	}
+
 	if controlName != "" && !strings.EqualFold(controlName, control.Name) && !strings.EqualFold(controlName, control.ControlID) {
 		return nil, fmt.Errorf("control from file not matching")
 	}
@@ -50,7 +53,10 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 		return nil, err
 	}
 
-	err = json.Unmarshal(f, framework)
+	if err = json.Unmarshal(f, framework); err != nil {
+		return framework, err
+	}
+
 	if frameworkName != "" && !strings.EqualFold(frameworkName, framework.Name) {
 		return nil, fmt.Errorf("framework from file not matching")
 	}
