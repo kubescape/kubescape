@@ -243,7 +243,7 @@ func (c *ClusterConfig) setCustomerGUID(customerGUID string) {
 }
 
 func (c *ClusterConfig) setClusterName(clusterName string) {
-	c.configObj.ClusterName = clusterName
+	c.configObj.ClusterName = adoptClusterName(clusterName)
 }
 func (c *ClusterConfig) GetClusterName() string {
 	return c.configObj.ClusterName
@@ -471,4 +471,8 @@ func DeleteConfigMap(k8s *k8sinterface.KubernetesApi) error {
 
 func DeleteConfigFile() error {
 	return os.Remove(ConfigFileFullPath())
+}
+
+func adoptClusterName(clusterName string) string {
+	return strings.ReplaceAll(clusterName, "/", "-")
 }
