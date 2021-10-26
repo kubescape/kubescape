@@ -8,7 +8,6 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/exceptions"
 	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/opa-utils/score"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 
@@ -224,17 +223,6 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 	}
 
 	return results, nil
-}
-
-func (opap *OPAProcessor) updateScore() {
-
-	if !k8sinterface.ConnectedToCluster {
-		return
-	}
-
-	// calculate score
-	s := score.NewScore(k8sinterface.NewKubernetesApi(), ScoreConfigPath)
-	s.Calculate(opap.PostureReport.FrameworkReports)
 }
 
 func (opap *OPAProcessor) updateResults() {
