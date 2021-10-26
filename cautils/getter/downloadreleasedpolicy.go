@@ -18,7 +18,7 @@ type DownloadReleasedPolicy struct {
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
-		gs: gitregostore.InitDefaultGitRegoStore(),
+		gs: gitregostore.InitDefaultGitRegoStore(-1),
 	}
 }
 
