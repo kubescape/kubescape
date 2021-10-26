@@ -15,7 +15,7 @@ func NewSummary() Summary {
 type ControlSummary struct {
 	TotalResources    int
 	TotalFailed       int
-	TotalWarnign      int
+	TotalWarning      int
 	Description       string
 	Remediation       string
 	ListInputKinds    []string
@@ -34,7 +34,7 @@ type WorkloadSummary struct {
 func (controlSummary *ControlSummary) ToSlice() []string {
 	s := []string{}
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalFailed))
-	s = append(s, fmt.Sprintf("%d", controlSummary.TotalWarnign))
+	s = append(s, fmt.Sprintf("%d", controlSummary.TotalWarning))
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalResources))
 	return s
 }
