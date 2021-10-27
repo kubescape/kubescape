@@ -38,9 +38,18 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 	if err = json.Unmarshal(f, control); err != nil {
 		return control, err
 	}
-
 	if controlName != "" && !strings.EqualFold(controlName, control.Name) && !strings.EqualFold(controlName, control.ControlID) {
-		return nil, fmt.Errorf("control from file not matching")
+		framework, err := lp.GetFramework(control.PortalBase.Name)
+		if err != nil {
+			return nil, fmt.Errorf("control from file not matching")
+		} else {
+			for _, ctrl := range framework.Controls {
+				if strings.EqualFold(ctrl.Name, controlName) || strings.EqualFold(ctrl.ControlID, controlName) {
+					control = &ctrl
+					break
+				}
+			}
+		}
 	}
 	return control, err
 }

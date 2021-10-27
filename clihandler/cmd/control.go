@@ -33,12 +33,15 @@ var controlCmd = &cobra.Command{
 		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
 			scanInfo.PolicyIdentifier = SetScanForGivenFrameworks(clihandler.SupportedFrameworks)
 		} else {
-			controls := strings.Split(args[0], ",")
-			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
-			newPolicy := reporthandling.PolicyIdentifier{}
-			newPolicy.Kind = reporthandling.KindControl
-			newPolicy.Name = controls[0]
-			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+			var controls []string
+			if len(args) > 0 {
+				controls = strings.Split(args[0], ",")
+				scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
+				newPolicy := reporthandling.PolicyIdentifier{}
+				newPolicy.Kind = reporthandling.KindControl
+				newPolicy.Name = controls[0]
+				scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+			}
 
 			if !(cmd.Flags().Lookup("use-from").Changed) {
 				if len(controls) > 1 {
