@@ -13,7 +13,7 @@ import (
 )
 
 var frameworkCmd = &cobra.Command{
-	Use:       fmt.Sprintf("framework <framework names list> [`<glob pattern>`/`-`] [flags]\nSupported frameworks: %s", clihandler.ValidFrameworks),
+	Use:       fmt.Sprintf("framework <framework names list> [`<glob pattern>`/`-`] [flags]\nExamples:\nscan framework nsa [flags]\nscanframework mitre,nsa [flags]\nSupported frameworks: %s", clihandler.ValidFrameworks),
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(clihandler.SupportedFrameworks, ", ")),
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: clihandler.SupportedFrameworks,

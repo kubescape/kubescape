@@ -192,9 +192,8 @@ func generateFooter(numControlers, sumFailed, sumWarning, sumTotal int) []string
 }
 func (printer *PrettyPrinter) printSummaryTable(framework string) {
 	// For control scan framework will be nil
-	if framework != "" {
-		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORK\n", framework))
-	}
+	printer.printFramework(framework)
+
 	summaryTable := tablewriter.NewWriter(printer.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
@@ -208,6 +207,12 @@ func (printer *PrettyPrinter) printSummaryTable(framework string) {
 	}
 	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarnign, printer.frameworkSummary.TotalResources))
 	summaryTable.Render()
+}
+
+func (printer *PrettyPrinter) printFramework(framework string) {
+	if framework != "" {
+		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORK\n", framework))
+	}
 }
 
 func (printer *PrettyPrinter) getSortedControlsNames() []string {

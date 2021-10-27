@@ -13,7 +13,7 @@ import (
 
 // controlCmd represents the control command
 var controlCmd = &cobra.Command{
-	Use:   "control <control names list>/<control ids list>",
+	Use:   "control <control names list>/<control ids list>.\nExamples:\nscan control C-0058,C-0057 [flags]\nscan contol C-0058 [flags]\nscan control 'privileged container,allowed hostpath' [flags]",
 	Short: fmt.Sprintf("The control you wish to use for scan. It must be present in at least one of the folloiwng frameworks: %s", clihandler.ValidFrameworks),
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
@@ -75,9 +75,7 @@ func flagValidationControl() {
 
 func SetScanForGivenControls(controls []string) []reporthandling.PolicyIdentifier {
 	for _, control := range controls {
-		if control[0] == ' ' {
-			control = control[1:]
-		}
+		control := strings.TrimLeft(control, " ")
 		newPolicy := reporthandling.PolicyIdentifier{}
 		newPolicy.Kind = reporthandling.KindControl
 		newPolicy.Name = control
