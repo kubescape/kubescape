@@ -13,7 +13,7 @@ import (
 )
 
 var frameworkCmd = &cobra.Command{
-	Use:       fmt.Sprintf("framework <framework names list> [`<glob pattern>`/`-`] [flags]\nExamples:\nscan framework nsa [flags]\nscanframework mitre,nsa [flags]\nSupported frameworks: %s", clihandler.ValidFrameworks),
+	Use:       fmt.Sprintf("framework <framework names list> [`<glob pattern>`/`-`] [flags]\nExamples:\n$ kubescape scan framework nsa [flags]\n$ kubescape scan framework mitre,nsa [flags]\n$ kubescape scan framework 'nsa, mitre' [flags]\nSupported frameworks: %s", clihandler.ValidFrameworks),
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(clihandler.SupportedFrameworks, ", ")),
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: clihandler.SupportedFrameworks,
@@ -26,6 +26,8 @@ var frameworkCmd = &cobra.Command{
 					return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(clihandler.SupportedFrameworks, ", ")))
 				}
 			}
+		} else {
+			return fmt.Errorf("requires at least one framework name")
 		}
 		return nil
 	},
@@ -33,7 +35,7 @@ var frameworkCmd = &cobra.Command{
 		flagValidationFramework()
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 		// If no framework provided, use all
-		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
+		if len(args) < 1 {
 			scanInfo.PolicyIdentifier = SetScanForGivenFrameworks(clihandler.SupportedFrameworks)
 		} else {
 			// Read frameworks from input args
