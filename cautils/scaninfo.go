@@ -11,7 +11,7 @@ type ScanInfo struct {
 	Getters
 	PolicyIdentifier   []reporthandling.PolicyIdentifier
 	UseExceptions      string   // Load exceptions configuration
-	UseFrom            string   // Load framework from local file (instead of download). Use when running offline
+	UseFrom            []string // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline
 	Format             string   // Format results (table, json, junit ...)
 	Output             string   // Store results in an output file, Output file name
@@ -41,22 +41,21 @@ func (scanInfo *ScanInfo) Init() {
 func (scanInfo *ScanInfo) setUseExceptions() {
 	if scanInfo.UseExceptions != "" {
 		// load exceptions from file
-		scanInfo.ExceptionsGetter = getter.NewLoadPolicy(scanInfo.UseExceptions)
+		scanInfo.ExceptionsGetter = getter.NewLoadPolicy([]string{scanInfo.UseExceptions})
 	} else {
 		scanInfo.ExceptionsGetter = getter.GetArmoAPIConnector()
 	}
 
 }
 func (scanInfo *ScanInfo) setUseFrom() {
-	if scanInfo.UseFrom != "" {
-		return
-	}
 	if scanInfo.UseDefault {
-		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier[0].Name + ".json")
+		for _, policy := range scanInfo.PolicyIdentifier {
+			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Name+".json"))
+		}
 	}
 }
 func (scanInfo *ScanInfo) setGetter() {
-	if scanInfo.UseFrom != "" {
+	if len(scanInfo.UseFrom) > 0 {
 		// load from file
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
 	} else {

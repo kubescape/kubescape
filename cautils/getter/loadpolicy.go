@@ -17,12 +17,12 @@ const DefaultLocalStore = ".kubescape"
 
 // Load policies from a local repository
 type LoadPolicy struct {
-	filePath string
+	filePaths []string
 }
 
-func NewLoadPolicy(filePath string) *LoadPolicy {
+func NewLoadPolicy(filePaths []string) *LoadPolicy {
 	return &LoadPolicy{
-		filePath: filePath,
+		filePaths: filePaths,
 	}
 }
 
@@ -30,7 +30,8 @@ func NewLoadPolicy(filePath string) *LoadPolicy {
 func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, error) {
 
 	control := &reporthandling.Control{}
-	f, err := os.ReadFile(lp.filePath)
+	filePath := lp.getFileForControl()
+	f, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -55,31 +56,44 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 }
 
 func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framework, error) {
-
 	framework := &reporthandling.Framework{}
-	f, err := os.ReadFile(lp.filePath)
-	if err != nil {
-		return nil, err
-	}
+	var err error
+	for _, filePath := range lp.filePaths {
+		f, err := os.ReadFile(filePath)
+		if err != nil {
+			return nil, err
+		}
 
-	if err = json.Unmarshal(f, framework); err != nil {
-		return framework, err
+		if err = json.Unmarshal(f, framework); err != nil {
+			return framework, err
+		}
+		if strings.EqualFold(frameworkName, framework.Name) {
+			break
+		}
 	}
-
 	if frameworkName != "" && !strings.EqualFold(frameworkName, framework.Name) {
+
 		return nil, fmt.Errorf("framework from file not matching")
 	}
 	return framework, err
 }
 
 func (lp *LoadPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-
+	filePath := lp.getFileForException()
 	exception := []armotypes.PostureExceptionPolicy{}
-	f, err := os.ReadFile(lp.filePath)
+	f, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
 
 	err = json.Unmarshal(f, &exception)
 	return exception, err
+}
+
+func (lp *LoadPolicy) getFileForException() string {
+	return lp.filePaths[0]
+}
+
+func (lp *LoadPolicy) getFileForControl() string {
+	return lp.filePaths[0]
 }

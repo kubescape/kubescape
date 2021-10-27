@@ -37,16 +37,11 @@ var frameworkCmd = &cobra.Command{
 			scanInfo.PolicyIdentifier = SetScanForGivenFrameworks(clihandler.SupportedFrameworks)
 		} else {
 			// Read frameworks from input args
-			frameworks := strings.Split(strings.Join(strings.Fields(args[0]), ""), ",")
 			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
-			newPolicy := reporthandling.PolicyIdentifier{}
-			newPolicy.Kind = reporthandling.KindFramework
-			newPolicy.Name = frameworks[0]
-			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-			if !(cmd.Flags().Lookup("use-from").Changed) && !(cmd.Flags().Lookup("use-default").Changed) {
-				if len(frameworks) > 1 {
-					scanInfo.PolicyIdentifier = SetScanForGivenFrameworks(frameworks[1:])
-				}
+			frameworks := strings.Split(strings.Join(strings.Fields(args[0]), ""), ",")
+			scanInfo.PolicyIdentifier = SetScanForFirstFramework(frameworks)
+			if len(frameworks) > 1 {
+				scanInfo.PolicyIdentifier = SetScanForGivenFrameworks(frameworks[1:])
 			}
 		}
 		if len(args) > 0 {
@@ -88,7 +83,6 @@ func init() {
 	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the '--submit' flag in the past and you do not want to submit your current scan results")
 	frameworkCmd.Flags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 }
-
 func SetScanForGivenFrameworks(frameworks []string) []reporthandling.PolicyIdentifier {
 	for _, framework := range frameworks {
 		newPolicy := reporthandling.PolicyIdentifier{}
@@ -96,6 +90,14 @@ func SetScanForGivenFrameworks(frameworks []string) []reporthandling.PolicyIdent
 		newPolicy.Name = framework
 		scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 	}
+	return scanInfo.PolicyIdentifier
+}
+
+func SetScanForFirstFramework(frameworks []string) []reporthandling.PolicyIdentifier {
+	newPolicy := reporthandling.PolicyIdentifier{}
+	newPolicy.Kind = reporthandling.KindFramework
+	newPolicy.Name = frameworks[0]
+	scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 	return scanInfo.PolicyIdentifier
 }
 
