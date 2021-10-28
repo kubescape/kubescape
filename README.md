@@ -130,7 +130,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --form
 kubescape scan framework nsa --exceptions examples/exceptions.json
 ```
 
-### Repeatedly Kubescape Scanning using a CronJob
+### CronJob Scan Periodically 
 
 For setting up a cronJob please follow the [instructions](examples/cronJob-support/README.md) 
 

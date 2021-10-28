@@ -1,13 +1,13 @@
-# Repeatedly Kubescape Scanning
+# Periodically Kubescape Scanning
 
-You can scan your cluster repeatedly by adding a `CronJob` that will repeatedly trigger kubescape
+You can scan your cluster periodically by adding a `CronJob` that will repeatedly trigger kubescape
 
-* Setup [scanning & submitting](#scanning-&-submitting)
+* Setup [scanning & submitting](#scanning-and-submitting)
 * Setup [scanning without submitting](#scanning-without-submitting)
 
-## Scanning & Submitting
+## Scanning And Submitting
 
-If you wish to repeatedly scan and submit the result to the [Kubescape SaaS version](https://portal.armo.cloud/) where you can benefit the features the SaaS version provides, please follow this instructions ->
+If you wish to periodically scan and submit the result to the [Kubescape SaaS version](https://portal.armo.cloud/) where you can benefit the features the SaaS version provides, please follow this instructions ->
 
 1. Apply kubescape namespace
     ```
@@ -28,8 +28,10 @@ If you wish to repeatedly scan and submit the result to the [Kubescape SaaS vers
     * Set account ID:
         1. Navigate to the [Kubescape SaaS version](https://portal.armo.cloud/) and login/sign up for free 
         2. Click the `Add Cluster` button on the top right of the page 
+            </br>
             <img src="screenshots/add-cluster.png"  alt="add-cluster">
         3. Copy the value of `--account` and set it in the `data.customerGUID` field
+            </br>
             <img src="screenshots/account.png"  alt="account">
 
         Make sure the configMap looks as following;
@@ -63,7 +65,7 @@ If you wish to repeatedly scan and submit the result to the [Kubescape SaaS vers
 
 ## Scanning Without Submitting
 
-If you wish to repeatedly scan but not submit the scan results, follow this instructions ->
+If you wish to periodically scan but not submit the scan results, follow this instructions ->
 
 1. Apply kubescape namespace
     ```
