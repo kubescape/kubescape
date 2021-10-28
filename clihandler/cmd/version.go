@@ -29,7 +29,7 @@ func GetLatestVersion() (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || 301 < resp.StatusCode {
-		return "unknown", fmt.Errorf("failed to download file, status code: %s", resp.Status)
+		return "unknown", nil
 	}
 
 	body, err := io.ReadAll(resp.Body)
