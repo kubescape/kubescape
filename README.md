@@ -130,6 +130,10 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --form
 kubescape scan framework nsa --exceptions examples/exceptions.json
 ```
 
+### Repeatedly Kubescape Scanning using a CronJob
+
+For setting up a cronJob please follow the [instructions](examples/cronJob-suport/README.md) 
+
 ### Helm Support
 
 * Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout
