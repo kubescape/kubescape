@@ -1,8 +1,11 @@
 # Repeatedly Kubescape Scanning
 
-You can scan your cluster repeatedly by adding a cronJob that will repeatedly trigger kubescape
+You can scan your cluster repeatedly by adding a `CronJob` that will repeatedly trigger kubescape
 
-## Repeatedly Scanning & Submitting
+* Setup [scanning & submitting](#scanning-&-submitting)
+* Setup [scanning without submitting](#scanning-without-submitting)
+
+## Scanning & Submitting
 
 If you wish to repeatedly scan and submit the result to the [SaaS UI](https://portal.armo.cloud/) where you can benefit the features the SaaS version provides, please follow this instructions ->
 
@@ -58,7 +61,7 @@ If you wish to repeatedly scan and submit the result to the [SaaS UI](https://po
     kubectl apply ks-cronJob-submit.yaml
     ```
 
-## Repeatedly Scanning Without Submitting
+## Scanning Without Submitting
 
 If you wish to repeatedly scan but not submit the scan results, follow this instructions ->
 
