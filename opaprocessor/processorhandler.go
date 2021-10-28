@@ -15,42 +15,37 @@ import (
 	"github.com/golang/glog"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
-	"github.com/open-policy-agent/opa/storage"
 	uuid "github.com/satori/go.uuid"
 )
 
 const ScoreConfigPath = "/resources/config"
 
-var RegoK8sCredentials storage.Store
-
 type OPAProcessorHandler struct {
-	processedPolicy *chan *cautils.OPASessionObj
-	reportResults   *chan *cautils.OPASessionObj
-	// componentConfig    cautils.ComponentConfig
+	processedPolicy      *chan *cautils.OPASessionObj
+	reportResults        *chan *cautils.OPASessionObj
+	regoDependenciesData *resources.RegoDependenciesData
 }
 
 type OPAProcessor struct {
 	*cautils.OPASessionObj
+	regoDependenciesData *resources.RegoDependenciesData
 }
 
-func NewOPAProcessor(sessionObj *cautils.OPASessionObj) *OPAProcessor {
+func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData) *OPAProcessor {
+	if regoDependenciesData != nil && sessionObj != nil {
+		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
+	}
 	return &OPAProcessor{
-		OPASessionObj: sessionObj,
+		OPASessionObj:        sessionObj,
+		regoDependenciesData: regoDependenciesData,
 	}
 }
 
 func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessorHandler {
-
-	regoDependenciesData := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), cautils.ClusterName)
-	store, err := regoDependenciesData.TOStorage()
-	if err != nil {
-		panic(err)
-	}
-	RegoK8sCredentials = store
-
 	return &OPAProcessorHandler{
-		processedPolicy: processedPolicy,
-		reportResults:   reportResults,
+		processedPolicy:      processedPolicy,
+		reportResults:        reportResults,
+		regoDependenciesData: resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), cautils.ClusterName),
 	}
 }
 
@@ -58,7 +53,7 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 
 	for {
 		opaSessionObj := <-*opaHandler.processedPolicy
-		opap := NewOPAProcessor(opaSessionObj)
+		opap := NewOPAProcessor(opaSessionObj, opaHandler.regoDependenciesData)
 
 		// process
 		if err := opap.Process(); err != nil {
@@ -203,11 +198,16 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjec
 }
 
 func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRego *ast.Compiler) ([]reporthandling.RuleResponse, error) {
+	store, err := opap.regoDependenciesData.TOStorage() // get store
+	if err != nil {
+		return nil, err
+	}
+
 	rego := rego.New(
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
 		rego.Input(inputObj),
-		rego.Store(RegoK8sCredentials),
+		rego.Store(store),
 	)
 
 	// Run evaluation

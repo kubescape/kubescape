@@ -35,6 +35,22 @@ func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) strin
 	return u.String()
 }
 
+func (armoAPI *ArmoAPI) getAccountConfig(customerGUID, clusterName string) string {
+	u := url.URL{}
+	u.Scheme = "https"
+	u.Host = armoAPI.apiURL
+	u.Path = "api/v1/customerConfiguration"
+
+	q := u.Query()
+	q.Add("customerGUID", customerGUID)
+	if clusterName != "" { // TODO - fix customer name support in Armo BE
+		q.Add("clusterName", clusterName)
+	}
+	u.RawQuery = q.Encode()
+
+	return u.String()
+}
+
 func (armoAPI *ArmoAPI) getCustomerURL() string {
 	u := url.URL{}
 	u.Scheme = "https"

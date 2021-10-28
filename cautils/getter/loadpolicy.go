@@ -30,7 +30,7 @@ func NewLoadPolicy(filePaths []string) *LoadPolicy {
 func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, error) {
 
 	control := &reporthandling.Control{}
-	filePath := lp.getFileForControl()
+	filePath := lp.filePath()
 	f, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
@@ -79,7 +79,7 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 }
 
 func (lp *LoadPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	filePath := lp.getFileForException()
+	filePath := lp.filePath()
 	exception := []armotypes.PostureExceptionPolicy{}
 	f, err := os.ReadFile(filePath)
 	if err != nil {
@@ -90,10 +90,24 @@ func (lp *LoadPolicy) GetExceptions(customerGUID, clusterName string) ([]armotyp
 	return exception, err
 }
 
-func (lp *LoadPolicy) getFileForException() string {
-	return lp.filePaths[0]
+func (lp *LoadPolicy) GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error) {
+	filePath := lp.filePath()
+	accountConfig := &armotypes.CustomerConfig{}
+	f, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = json.Unmarshal(f, &accountConfig); err == nil {
+		return accountConfig.Settings.PostureControlInputs, nil
+	}
+	return nil, err
 }
 
-func (lp *LoadPolicy) getFileForControl() string {
-	return lp.filePaths[0]
+// temporary support for a list of files
+func (lp *LoadPolicy) filePath() string {
+	if len(lp.filePaths) > 0 {
+		return lp.filePaths[0]
+	}
+	return ""
 }

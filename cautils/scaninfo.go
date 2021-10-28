@@ -10,7 +10,8 @@ import (
 type ScanInfo struct {
 	Getters
 	PolicyIdentifier   []reporthandling.PolicyIdentifier
-	UseExceptions      string   // Load exceptions configuration
+	UseExceptions      string   // Load file with exceptions configuration
+	ControlsInputs     string   // Load file with inputs for controls
 	UseFrom            []string // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline
 	Format             string   // Format results (table, json, junit ...)
@@ -26,13 +27,15 @@ type ScanInfo struct {
 }
 
 type Getters struct {
-	ExceptionsGetter getter.IExceptionsGetter
-	PolicyGetter     getter.IPolicyGetter
+	ExceptionsGetter     getter.IExceptionsGetter
+	ControlsInputsGetter getter.IControlsInputsGetter
+	PolicyGetter         getter.IPolicyGetter
 }
 
 func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setUseExceptions()
+	scanInfo.setAccountConfig()
 	scanInfo.setOutputFile()
 	scanInfo.setGetter()
 
@@ -45,7 +48,15 @@ func (scanInfo *ScanInfo) setUseExceptions() {
 	} else {
 		scanInfo.ExceptionsGetter = getter.GetArmoAPIConnector()
 	}
+}
 
+func (scanInfo *ScanInfo) setAccountConfig() {
+	if scanInfo.ControlsInputs != "" {
+		// load account config from file
+		scanInfo.ControlsInputsGetter = getter.NewLoadPolicy([]string{scanInfo.ControlsInputs})
+	} else {
+		scanInfo.ControlsInputsGetter = getter.GetArmoAPIConnector()
+	}
 }
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
