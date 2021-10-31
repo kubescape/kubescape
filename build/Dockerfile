@@ -1,5 +1,7 @@
 FROM golang:1.17-alpine as builder
 #ENV GOPROXY=https://goproxy.io,direct
+ARG run_number
+ENV RELEASE=v1.0.${run_number}
 ENV GO111MODULE=
 
 ENV CGO_ENABLED=0
