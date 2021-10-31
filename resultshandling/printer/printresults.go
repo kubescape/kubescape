@@ -11,7 +11,8 @@ const EmptyPercentage = "NaN"
 const (
 	PrettyFormat       string = "pretty-printer"
 	JsonFormat         string = "json"
-	JunitResultPrinter string = "junit"
+	JunitResultFormat  string = "junit"
+	PrometheusFormat   string = "prometheus"
 )
 
 type IPrinter interface {
@@ -24,8 +25,10 @@ func GetPrinter(printFormat string) IPrinter {
 	switch printFormat {
 	case JsonFormat:
 		return NewJsonPrinter()
-	case JunitResultPrinter:
+	case JunitResultFormat:
 		return NewJunitPrinter()
+	case PrometheusFormat:
+		return NewPrometheusPrinter()
 	default:
 		return NewPrettyPrinter()
 	}
