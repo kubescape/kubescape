@@ -54,7 +54,7 @@ var frameworkCmd = &cobra.Command{
 		}
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
-		err := clihandler.CliSetup(scanInfo)
+		err := clihandler.CliSetup(&scanInfo)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

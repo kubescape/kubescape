@@ -3,9 +3,41 @@ package printer
 import (
 	"encoding/xml"
 	"fmt"
+	"os"
 
+	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
 )
+
+type JunitPrinter struct {
+	writer *os.File
+}
+
+func NewJunitPrinter() *JunitPrinter {
+	return &JunitPrinter{}
+}
+
+func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
+	junitPrinter.writer = getWriter(outputFile)
+}
+
+func (junitPrinter *JunitPrinter) Score(score float32) {
+	fmt.Printf("\nFinal score: %d", int(score*100))
+}
+
+func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
+	if err != nil {
+		fmt.Println("Failed to convert posture report object!")
+		os.Exit(1)
+	}
+	postureReportStr, err := xml.Marshal(junitResult)
+	if err != nil {
+		fmt.Println("Failed to convert posture report object!")
+		os.Exit(1)
+	}
+	junitPrinter.writer.Write(postureReportStr)
+}
 
 type JUnitTestSuites struct {
 	XMLName xml.Name         `xml:"testsuites"`
@@ -74,9 +106,9 @@ func convertPostureReportToJunitResult(postureResult *reporthandling.PostureRepo
 			testCase.Time = "0"
 			if 0 < len(controlReports.RuleReports[0].RuleResponses) {
 
-				testCase.Resources = framework.GetNumberOfResources()
-				testCase.Excluded = framework.GetNumberOfWarningResources()
-				testCase.Failed = framework.GetNumberOfFailedResources()
+				testCase.Resources = controlReports.GetNumberOfResources()
+				testCase.Excluded = controlReports.GetNumberOfWarningResources()
+				testCase.Failed = controlReports.GetNumberOfFailedResources()
 				failure := JUnitFailure{}
 				failure.Message = fmt.Sprintf("%d resources failed", testCase.Failed)
 				for _, ruleResponses := range controlReports.RuleReports[0].RuleResponses {

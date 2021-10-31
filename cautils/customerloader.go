@@ -109,8 +109,10 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 		return NewEmptyConfig() // local - Delete local config & Do not send report
 	}
 	if scanInfo.Local {
+		scanInfo.Submit = false
 		return NewEmptyConfig() // local - Do not send report
 	}
+	scanInfo.Submit = true
 	return clusterConfig // submit/default -  Submit report
 }
 
@@ -158,6 +160,7 @@ func (c *ClusterConfig) GetDefaultNS() string                   { return c.defau
 func (c *ClusterConfig) GetBackendAPI() getter.IBackend         { return c.backendAPI }
 
 func (c *ClusterConfig) GenerateURL() {
+	message := "Checkout for more cool features: "
 
 	u := url.URL{}
 	u.Scheme = "https"
@@ -165,9 +168,8 @@ func (c *ClusterConfig) GenerateURL() {
 	if c.configObj == nil {
 		return
 	}
-	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
 	if c.configObj.CustomerAdminEMail != "" {
-		InfoTextDisplay(os.Stdout, message+"\n")
+		InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
 		return
 	}
 	u.Path = "account/sign-up"
@@ -176,8 +178,7 @@ func (c *ClusterConfig) GenerateURL() {
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
-	InfoTextDisplay(os.Stdout, message+"\n")
-
+	InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
 }
 
 func (c *ClusterConfig) GetCustomerGUID() string {
@@ -242,7 +243,7 @@ func (c *ClusterConfig) setCustomerGUID(customerGUID string) {
 }
 
 func (c *ClusterConfig) setClusterName(clusterName string) {
-	c.configObj.ClusterName = clusterName
+	c.configObj.ClusterName = adoptClusterName(clusterName)
 }
 func (c *ClusterConfig) GetClusterName() string {
 	return c.configObj.ClusterName
@@ -470,4 +471,8 @@ func DeleteConfigMap(k8s *k8sinterface.KubernetesApi) error {
 
 func DeleteConfigFile() error {
 	return os.Remove(ConfigFileFullPath())
+}
+
+func adoptClusterName(clusterName string) string {
+	return strings.ReplaceAll(clusterName, "/", "-")
 }
