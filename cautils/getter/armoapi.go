@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/golang/glog"
 )
 
@@ -91,13 +91,13 @@ func (armoAPI *ArmoAPI) GetReportReceiverURL() string {
 	return armoAPI.erURL
 }
 
-func (armoAPI *ArmoAPI) GetFramework(name string) (*opapolicy.Framework, error) {
+func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name))
 	if err != nil {
 		return nil, err
 	}
 
-	framework := &opapolicy.Framework{}
+	framework := &reporthandling.Framework{}
 	if err = JSONDecoder(respStr).Decode(framework); err != nil {
 		return nil, err
 	}

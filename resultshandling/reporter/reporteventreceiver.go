@@ -5,42 +5,55 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
+type IReport interface {
+	ActionSendReport(opaSessionObj *cautils.OPASessionObj)
+	SetCustomerGUID(customerGUID string)
+	SetClusterName(clusterName string)
+}
+
 type ReportEventReceiver struct {
-	httpClient http.Client
-	host       url.URL
+	httpClient   http.Client
+	clusterName  string
+	customerGUID string
 }
 
 func NewReportEventReceiver() *ReportEventReceiver {
-	hostURL := initEventReceiverURL()
 	return &ReportEventReceiver{
 		httpClient: http.Client{},
-		host:       *hostURL,
 	}
 }
 
-func (report *ReportEventReceiver) ActionSendReportListenner(opaSessionObj *cautils.OPASessionObj) {
-	if cautils.CustomerGUID == "" {
-		return
-	}
-	//Add score
-	opaSessionObj.PostureReport.RemoveData()
-	if err := report.Send(opaSessionObj.PostureReport); err != nil {
+func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) {
+	// Remove data before reporting
+	keepFields := []string{"kind", "apiVersion", "metadata"}
+	keepMetadataFields := []string{"name", "namespace", "labels"}
+	opaSessionObj.PostureReport.RemoveData(keepFields, keepMetadataFields)
+
+	if err := report.send(opaSessionObj.PostureReport); err != nil {
 		fmt.Println(err)
 	}
 }
-func (report *ReportEventReceiver) Send(postureReport *opapolicy.PostureReport) error {
+
+func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
+	report.customerGUID = customerGUID
+}
+
+func (report *ReportEventReceiver) SetClusterName(clusterName string) {
+	report.clusterName = clusterName
+}
+
+func (report *ReportEventReceiver) send(postureReport *reporthandling.PostureReport) error {
 
 	reqBody, err := json.Marshal(*postureReport)
 	if err != nil {
 		return fmt.Errorf("in 'Send' failed to json.Marshal, reason: %v", err)
 	}
-	host := hostToString(&report.host, postureReport.ReportID)
+	host := hostToString(report.initEventReceiverURL(), postureReport.ReportID)
 
 	req, err := http.NewRequest("POST", host, bytes.NewReader(reqBody))
 	if err != nil {

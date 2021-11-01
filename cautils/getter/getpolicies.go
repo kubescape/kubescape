@@ -1,12 +1,13 @@
 package getter
 
 import (
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type IPolicyGetter interface {
-	GetFramework(name string) (*opapolicy.Framework, error)
+	GetFramework(name string) (*reporthandling.Framework, error)
+	GetControl(policyName string) (*reporthandling.Control, error)
 }
 
 type IExceptionsGetter interface {

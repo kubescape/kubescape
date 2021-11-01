@@ -4,30 +4,29 @@ import (
 	"fmt"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/resourcehandler"
+	"github.com/armosec/opa-utils/reporthandling"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
-	"github.com/armosec/kubescape/cautils/k8sinterface"
-
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 // PolicyHandler -
 type PolicyHandler struct {
-	k8s *k8sinterface.KubernetesApi
+	resourceHandler resourcehandler.IResourceHandler
 	// we are listening on this chan in opaprocessor/processorhandler.go/ProcessRulesListenner func
 	processPolicy *chan *cautils.OPASessionObj
 	getters       *cautils.Getters
 }
 
 // CreatePolicyHandler Create ws-handler obj
-func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, k8s *k8sinterface.KubernetesApi) *PolicyHandler {
+func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, resourceHandler resourcehandler.IResourceHandler) *PolicyHandler {
 	return &PolicyHandler{
-		k8s:           k8s,
-		processPolicy: processPolicy,
+		resourceHandler: resourceHandler,
+		processPolicy:   processPolicy,
 	}
 }
 
-func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opapolicy.PolicyNotification, scanInfo *cautils.ScanInfo) error {
+func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *reporthandling.PolicyNotification, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj := cautils.NewOPASessionObj(nil, nil)
 	// validate notification
 	// TODO
@@ -58,9 +57,9 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *opap
 	return nil
 }
 
-func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNotification) ([]opapolicy.Framework, []armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
 
-	cautils.ProgressTextDisplay("Downloading/Loading framework definitions")
+	cautils.ProgressTextDisplay("Downloading/Loading policy definitions")
 
 	frameworks, exceptions, err := policyHandler.GetPoliciesFromBackend(notification)
 	if err != nil {
@@ -71,19 +70,14 @@ func (policyHandler *PolicyHandler) getPolicies(notification *opapolicy.PolicyNo
 		err := fmt.Errorf("could not download any policies, please check previous logs")
 		return frameworks, exceptions, err
 	}
-	cautils.SuccessTextDisplay("Downloaded/Loaded framework")
+	//if notification.Rules
+	cautils.SuccessTextDisplay("Downloaded/Loaded policy")
 
 	return frameworks, exceptions, nil
 }
 
-func (policyHandler *PolicyHandler) getResources(notification *opapolicy.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
-	var k8sResources *cautils.K8SResources
-	var err error
-	if k8sinterface.ConnectedToCluster {
-		k8sResources, err = policyHandler.getK8sResources(opaSessionObj.Frameworks, &notification.Designators, scanInfo.ExcludedNamespaces)
-	} else {
-		k8sResources, err = policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
-	}
+func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
 
-	return k8sResources, err
+	opaSessionObj.PostureReport.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
+	return policyHandler.resourceHandler.GetResources(opaSessionObj.Frameworks, &notification.Designators)
 }

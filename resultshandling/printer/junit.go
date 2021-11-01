@@ -3,9 +3,41 @@ package printer
 import (
 	"encoding/xml"
 	"fmt"
+	"os"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 )
+
+type JunitPrinter struct {
+	writer *os.File
+}
+
+func NewJunitPrinter() *JunitPrinter {
+	return &JunitPrinter{}
+}
+
+func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
+	junitPrinter.writer = getWriter(outputFile)
+}
+
+func (junitPrinter *JunitPrinter) Score(score float32) {
+	fmt.Printf("\nFinal score: %d", int(score*100))
+}
+
+func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
+	if err != nil {
+		fmt.Println("Failed to convert posture report object!")
+		os.Exit(1)
+	}
+	postureReportStr, err := xml.Marshal(junitResult)
+	if err != nil {
+		fmt.Println("Failed to convert posture report object!")
+		os.Exit(1)
+	}
+	junitPrinter.writer.Write(postureReportStr)
+}
 
 type JUnitTestSuites struct {
 	XMLName xml.Name         `xml:"testsuites"`
@@ -17,9 +49,11 @@ type JUnitTestSuites struct {
 type JUnitTestSuite struct {
 	XMLName    xml.Name        `xml:"testsuite"`
 	Tests      int             `xml:"tests,attr"`
-	Failures   int             `xml:"failures,attr"`
 	Time       string          `xml:"time,attr"`
 	Name       string          `xml:"name,attr"`
+	Resources  int             `xml:"resources,attr"`
+	Excluded   int             `xml:"excluded,attr"`
+	Failed     int             `xml:"filed,attr"`
 	Properties []JUnitProperty `xml:"properties>property,omitempty"`
 	TestCases  []JUnitTestCase `xml:"testcase"`
 }
@@ -30,6 +64,9 @@ type JUnitTestCase struct {
 	Classname   string            `xml:"classname,attr"`
 	Name        string            `xml:"name,attr"`
 	Time        string            `xml:"time,attr"`
+	Resources   int               `xml:"resources,attr"`
+	Excluded    int               `xml:"excluded,attr"`
+	Failed      int               `xml:"filed,attr"`
 	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
 	Failure     *JUnitFailure     `xml:"failure,omitempty"`
 }
@@ -52,10 +89,15 @@ type JUnitFailure struct {
 	Contents string `xml:",chardata"`
 }
 
-func convertPostureReportToJunitResult(postureResult *opapolicy.PostureReport) (*JUnitTestSuites, error) {
+func convertPostureReportToJunitResult(postureResult *reporthandling.PostureReport) (*JUnitTestSuites, error) {
 	juResult := JUnitTestSuites{XMLName: xml.Name{Local: "Kubescape scan results"}}
 	for _, framework := range postureResult.FrameworkReports {
-		suite := JUnitTestSuite{Name: framework.Name}
+		suite := JUnitTestSuite{
+			Name:      framework.Name,
+			Resources: framework.GetNumberOfResources(),
+			Excluded:  framework.GetNumberOfWarningResources(),
+			Failed:    framework.GetNumberOfFailedResources(),
+		}
 		for _, controlReports := range framework.ControlReports {
 			suite.Tests = suite.Tests + 1
 			testCase := JUnitTestCase{}
@@ -63,9 +105,12 @@ func convertPostureReportToJunitResult(postureResult *opapolicy.PostureReport) (
 			testCase.Classname = "Kubescape"
 			testCase.Time = "0"
 			if 0 < len(controlReports.RuleReports[0].RuleResponses) {
-				suite.Failures = suite.Failures + 1
+
+				testCase.Resources = controlReports.GetNumberOfResources()
+				testCase.Excluded = controlReports.GetNumberOfWarningResources()
+				testCase.Failed = controlReports.GetNumberOfFailedResources()
 				failure := JUnitFailure{}
-				failure.Message = fmt.Sprintf("%d resources failed", len(controlReports.RuleReports[0].RuleResponses))
+				failure.Message = fmt.Sprintf("%d resources failed", testCase.Failed)
 				for _, ruleResponses := range controlReports.RuleReports[0].RuleResponses {
 					failure.Contents = fmt.Sprintf("%s\n%s", failure.Contents, ruleResponses.AlertMessage)
 				}

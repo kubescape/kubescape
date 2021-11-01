@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 func GetDefaultPath(name string) string {
@@ -21,7 +21,32 @@ func GetDefaultPath(name string) string {
 	return defaultfilePath
 }
 
-func SaveFrameworkInFile(framework *opapolicy.Framework, pathStr string) error {
+// Save control as json in file
+func SaveControlInFile(control *reporthandling.Control, pathStr string) error {
+	encodedData, err := json.Marshal(control)
+	if err != nil {
+		return err
+	}
+	err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+	if err != nil {
+		if os.IsNotExist(err) {
+			pathDir := path.Dir(pathStr)
+			if err := os.Mkdir(pathDir, 0744); err != nil {
+				return err
+			}
+		} else {
+			return err
+
+		}
+		err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SaveFrameworkInFile(framework *reporthandling.Framework, pathStr string) error {
 	encodedData, err := json.Marshal(framework)
 	if err != nil {
 		return err

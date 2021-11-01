@@ -4,12 +4,12 @@ import (
 	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/opapolicy"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type ScanInfo struct {
 	Getters
-	PolicyIdentifier   opapolicy.PolicyIdentifier
+	PolicyIdentifier   reporthandling.PolicyIdentifier
 	UseExceptions      string   // Load exceptions configuration
 	UseFrom            string   // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline
@@ -19,10 +19,10 @@ type ScanInfo struct {
 	InputPatterns      []string // Yaml files input patterns
 	Silent             bool     // Silent mode - Do not print progress logs
 	FailThreshold      uint16   // Failure score threshold
-	DoNotSendResults   bool     // DEPRECATED
 	Submit             bool     // Submit results to Armo BE
 	Local              bool     // Do not submit results
 	Account            string   // account ID
+	FrameworkScan      bool     // false if scanning control
 }
 
 type Getters struct {
@@ -54,7 +54,6 @@ func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		scanInfo.UseFrom = getter.GetDefaultPath(scanInfo.PolicyIdentifier.Name + ".json")
 	}
-
 }
 func (scanInfo *ScanInfo) setGetter() {
 	if scanInfo.UseFrom != "" {
@@ -84,8 +83,3 @@ func (scanInfo *ScanInfo) setOutputFile() {
 func (scanInfo *ScanInfo) ScanRunningCluster() bool {
 	return len(scanInfo.InputPatterns) == 0
 }
-
-// func (scanInfo *ScanInfo) ConnectedToCluster(k8s k8sinterface.) bool {
-// 	_, err := k8s.KubernetesClient.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
-// 	return err == nil
-// }
