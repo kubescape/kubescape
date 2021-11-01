@@ -3,7 +3,7 @@ package printer
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/cautils/armotypes"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 type Summary map[string]ControlSummary
@@ -13,13 +13,14 @@ func NewSummary() Summary {
 }
 
 type ControlSummary struct {
-	TotalResources  int
-	TotalFailed     int
-	TotalWarnign    int
-	Description     string
-	Remediation     string
-	ListInputKinds  []string
-	WorkloadSummary map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
+	TotalResources    int
+	TotalFailed       int
+	TotalWarnign      int
+	Description       string
+	Remediation       string
+	ListInputKinds    []string
+	FailedWorkloads   map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
+	ExcludedWorkloads map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
 }
 
 type WorkloadSummary struct {
@@ -40,4 +41,12 @@ func (controlSummary *ControlSummary) ToSlice() []string {
 
 func (workloadSummary *WorkloadSummary) ToString() string {
 	return fmt.Sprintf("/%s/%s/%s/%s", workloadSummary.Group, workloadSummary.Namespace, workloadSummary.Kind, workloadSummary.Name)
+}
+
+func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.Exception == nil
+}
+
+func workloadSummaryExclude(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.Exception != nil && workloadSummary.Exception.IsAlertOnly()
 }

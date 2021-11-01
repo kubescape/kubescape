@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/gofrs/uuid"
 )
@@ -33,15 +32,15 @@ func httpRespToString(resp *http.Response) (string, error) {
 	return strBuilder.String(), err
 }
 
-func initEventReceiverURL() *url.URL {
+func (report *ReportEventReceiver) initEventReceiverURL() *url.URL {
 	urlObj := url.URL{}
 
 	urlObj.Scheme = "https"
 	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
 	urlObj.Path = "/k8s/postureReport"
 	q := urlObj.Query()
-	q.Add("customerGUID", uuid.FromStringOrNil(cautils.CustomerGUID).String())
-	q.Add("clusterName", cautils.ClusterName)
+	q.Add("customerGUID", uuid.FromStringOrNil(report.customerGUID).String())
+	q.Add("clusterName", report.clusterName)
 
 	urlObj.RawQuery = q.Encode()
 

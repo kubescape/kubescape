@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/armosec/kubescape/cmd"
+	"github.com/armosec/kubescape/clihandler/cmd"
 )
 
 func main() {
