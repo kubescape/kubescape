@@ -44,6 +44,11 @@ Want to contribute? Want to discuss something? Have an issue?
 
 # Options and examples
 
+## Tutorials
+
+* [Overview](https://youtu.be/wdBkt_0Qhbg)
+* [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+
 ## Install on Windows
 
 **Requires powershell v5.0+**

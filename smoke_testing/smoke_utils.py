@@ -8,7 +8,7 @@ def get_exec_from_args(args: list):
 
 def run_command(command):
     try:
-        return str(subprocess.check_output(command))
+        return f"{subprocess.check_output(command)}"
     except Exception as e:
-        return e
+        return f"{e}"
 

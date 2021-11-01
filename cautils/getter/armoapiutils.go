@@ -39,7 +39,7 @@ func (armoAPI *ArmoAPI) getAccountConfig(customerGUID, clusterName string) strin
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = armoAPI.apiURL
-	u.Path = "api/v1/customerConfiguration"
+	u.Path = "api/v1/armoCustomerConfiguration"
 
 	q := u.Query()
 	q.Add("customerGUID", customerGUID)
