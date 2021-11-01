@@ -19,7 +19,6 @@ def run(kubescape_exec:str):
     test_command(command=[kubescape_exec, "download"])
     test_command(command=[kubescape_exec, "config"])
     test_command(command=[kubescape_exec, "help"])
-    test_command(command=[kubescape_exec, "scan"])
     test_command(command=[kubescape_exec, "scan", "framework"])
     test_command(command=[kubescape_exec, "scan", "control"])
     
