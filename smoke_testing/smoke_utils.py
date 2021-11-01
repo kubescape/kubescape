@@ -28,3 +28,7 @@ def check_status(status, msg):
         stderr.write(msg)
         exit(status)
 
+
+def get_exec_from_args(args: list):
+    return args[1]
+

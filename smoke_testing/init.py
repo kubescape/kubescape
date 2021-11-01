@@ -1,3 +1,6 @@
+import sys
+import smoke_utils
+
 
 tests_pkg = [
     "test_command"
@@ -5,11 +8,11 @@ tests_pkg = [
 ]
 
 
-def run():
+def run(**kwargs):
     for i in tests_pkg:
         m = __import__(i)
-        m.run()
+        m.run(**kwargs)
 
 
 if __name__ == "__main__":
-    run()
+    run(kubescape_exec=smoke_utils.get_exec_from_args(sys.argv))

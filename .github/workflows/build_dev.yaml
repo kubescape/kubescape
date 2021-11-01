@@ -34,7 +34,7 @@ jobs:
         env:
           RELEASE: v1.0.${{ github.run_number }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py
+        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
 
       - name: Upload build artifacts 
         uses: actions/upload-artifact@v2

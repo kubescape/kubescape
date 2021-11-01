@@ -1,5 +1,6 @@
 import subprocess
 import smoke_utils
+import sys
 
 
 def test_command(command: list):
@@ -12,20 +13,19 @@ def test_command(command: list):
     print(f"Done testing \"{' '.join(command[1:])}\" command")
 
 
-def run():
+def run(kubescape_exec:str):
     print("Testing supported commands")
 
-    bin_cli = smoke_utils.get_bin_cli()
-    test_command(command=[bin_cli, "version"])
-    test_command(command=[bin_cli, "download"])
-    test_command(command=[bin_cli, "config"])
-    test_command(command=[bin_cli, "help"])
-    test_command(command=[bin_cli, "scan"])
-    test_command(command=[bin_cli, "scan", "framework"])
-    test_command(command=[bin_cli, "scan", "control"])
+    test_command(command=[kubescape_exec, "version"])
+    test_command(command=[kubescape_exec, "download"])
+    test_command(command=[kubescape_exec, "config"])
+    test_command(command=[kubescape_exec, "help"])
+    test_command(command=[kubescape_exec, "scan"])
+    test_command(command=[kubescape_exec, "scan", "framework"])
+    test_command(command=[kubescape_exec, "scan", "control"])
     
     print("Done testing commands")
 
 
 if __name__ == "__main__":
-    run()
+    run(kubescape_exec=smoke_utils.get_exec_from_args(sys.argv))
