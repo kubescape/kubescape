@@ -1,4 +1,3 @@
-import subprocess
 import smoke_utils
 import sys
 
@@ -6,7 +5,7 @@ import sys
 def test_command(command: list):
     print(f"Testing \"{' '.join(command[1:])}\" command")
 
-    msg = str(subprocess.check_output(command))
+    msg = smoke_utils.run_command(command)
     assert "unknown command" not in msg, f"{command[1:]} is missing: {msg}"
     assert "invalid parameter" not in msg, f"{command[1:]} is invalid: {msg}"
 

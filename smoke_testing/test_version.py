@@ -4,11 +4,11 @@ import smoke_utils
 import sys
 
 
-def run(kubescape_exec:str):
+def run(kubescape_exec: str):
     print("Testing version")
 
     ver = os.getenv("RELEASE")
-    msg = str(subprocess.check_output([kubescape_exec, "version"]))
+    msg = smoke_utils.run_command(command=[kubescape_exec, "version"])
     assert ver in msg, f"expected version: {ver}, found: {msg}"
 
     print("Done testing version")
