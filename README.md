@@ -174,6 +174,24 @@ kubescape scan framework nsa --use-from nsa.json
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
 
+# Submit data manually
+
+Use the `submit` command if you wish to submit data manually
+
+## Submit Role-Based Access Control (RBAC)
+```
+kubescape submit rbac
+```
+
+
+## Submit scan results manually
+
+First, scan your cluster using the `json` format flag: `kubescape scan framework <name> --format json --output path/to/results.json`.
+
+Now you can submit the results to the Kubaescape SaaS version -
+```
+kubescape submit results path/to/results.json
+```
 # How to build
 
 ## Build using python (3.7^) script
