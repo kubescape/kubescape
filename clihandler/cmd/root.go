@@ -31,6 +31,7 @@ func Execute() {
 }
 
 func init() {
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 	flag.CommandLine.StringVar(&armoBEURLs, "environment", "", envFlagUsage)
 	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "environment", "", envFlagUsage)
 	rootCmd.PersistentFlags().MarkHidden("environment")

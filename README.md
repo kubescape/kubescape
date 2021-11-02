@@ -48,6 +48,7 @@ Want to contribute? Want to discuss something? Have an issue?
 
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
 * [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 
 ## Install on Windows
 
