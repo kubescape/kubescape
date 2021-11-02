@@ -1,4 +1,3 @@
-from sys import stderr
 import subprocess
 
 
@@ -8,7 +7,7 @@ def get_exec_from_args(args: list):
 
 def run_command(command):
     try:
-        return f"{subprocess.check_output(command)}"
+        return f"{subprocess.check_output(command, stderr=subprocess.STDOUT)}"
     except Exception as e:
         return f"{e}"
 

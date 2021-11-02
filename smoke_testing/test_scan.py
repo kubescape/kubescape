@@ -7,7 +7,6 @@ def full_scan(kubescape_exec: str):
     return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa", os.path.join("..", "*.yaml")])
 
 
-
 def run(kubescape_exec: str):
     # return
     print("Testing E2E yaml files")
