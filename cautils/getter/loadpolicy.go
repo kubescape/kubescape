@@ -40,7 +40,7 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 		return control, err
 	}
 	if controlName != "" && !strings.EqualFold(controlName, control.Name) && !strings.EqualFold(controlName, control.ControlID) {
-		framework, err := lp.GetFramework(controlName)
+		framework, err := lp.GetFramework(control.Name)
 		if err != nil {
 			return nil, fmt.Errorf("control from file not matching")
 		} else {
@@ -72,7 +72,6 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 		}
 	}
 	if frameworkName != "" && !strings.EqualFold(frameworkName, framework.Name) {
-
 		return nil, fmt.Errorf("framework from file not matching")
 	}
 	return framework, err

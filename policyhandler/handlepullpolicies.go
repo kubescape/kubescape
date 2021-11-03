@@ -59,9 +59,10 @@ func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling
 			if err != nil {
 				return frameworks, policyDownloadError(err)
 			}
-		}
-		if receivedControl != nil {
-			f.Controls = append(f.Controls, *receivedControl)
+
+			if receivedControl != nil {
+				f.Controls = append(f.Controls, *receivedControl)
+			}
 		}
 		frameworks = append(frameworks, f)
 		// TODO: add case for control from file
