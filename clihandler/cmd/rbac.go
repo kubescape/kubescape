@@ -39,7 +39,7 @@ func (rbacObjects *RBACObjects) SetResourcesReport() (*reporthandling.PostureRep
 
 // rabcCmd represents the RBAC command
 var rabcCmd = &cobra.Command{
-	Use:   "rbac\nExample:\n$ kubescape submit rbac",
+	Use:   "rbac \nExample:\n$ kubescape submit rbac",
 	Short: "Submit cluster's Role-Based Access Control(RBAC)",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
