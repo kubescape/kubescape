@@ -149,6 +149,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	}
 	k8sObjects := getKubernetesObjects(opap.K8SResources, rule.Match)
 	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects)
+
 	if err != nil {
 		ruleReport.RuleStatus.Status = "failure"
 		ruleReport.RuleStatus.Message = err.Error()
@@ -157,6 +158,8 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 		ruleReport.RuleStatus.Status = "success"
 	}
 	ruleReport.ListInputResources = k8sObjects
+	_, err = opap.runOPAOnSingleCountRule(rule, k8sObjects)
+
 	return &ruleReport, err
 }
 
@@ -168,6 +171,16 @@ func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8
 		return reporthandling.RuleReport{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
+
+func (opap *OPAProcessor) runOPAOnSingleCountRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
+	switch rule.RuleLanguage {
+	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
+		return opap.runCounterRegoOnK8s(rule, k8sObjects)
+	default:
+		return reporthandling.RuleReport{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
+	}
+}
+
 func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
 	var errs error
 	ruleReport := reporthandling.RuleReport{
@@ -193,6 +206,36 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjec
 
 	if results != nil {
 		ruleReport.RuleResponses = append(ruleReport.RuleResponses, results...)
+	}
+	return ruleReport, errs
+}
+
+func (opap *OPAProcessor) runCounterRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
+	var errs error
+	ruleReport := reporthandling.RuleReport{
+		Name: rule.Name,
+	}
+
+	// compile modules
+	modules, err := getRuleDependencies()
+	if err != nil {
+		return ruleReport, fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
+	}
+	modules["ResourceEnumerator"] = rule.ResourceEnumerator
+	compiled, err := ast.CompileModules(modules)
+	if err != nil {
+		return ruleReport, fmt.Errorf("in 'runRegoOnSingleRule', failed to compile rule, name: %s, reason: %s", rule.Name, err.Error())
+	}
+
+	// Eval
+	results, err := opap.regoEval(k8sObjects, compiled)
+
+	if err != nil {
+		errs = fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
+	}
+
+	if results != nil {
+		ruleReport.ListCountResources = append(ruleReport.ListCountResources, results[0].AlertObject.ExternalObjects) // TODO: return []interface{} from new regoEval func
 	}
 	return ruleReport, errs
 }
