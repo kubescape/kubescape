@@ -32,24 +32,27 @@ var controlCmd = &cobra.Command{
 		flagValidationControl()
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 
-		if len(args) < 1 {
+		if len(args) == 0 {
 			scanInfo.PolicyIdentifier = SetScanForGivenFrameworks(clihandler.SupportedFrameworks)
 		} else {
-			var controls []string
-			if len(args) > 0 {
-				controls = strings.Split(args[0], ",")
-				scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
-				scanInfo.PolicyIdentifier = setScanForFirstControl(controls)
-			}
+			controls := strings.Split(args[0], ",")
+			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
+			scanInfo.PolicyIdentifier = setScanForFirstControl(controls)
 
 			if len(controls) > 1 {
 				scanInfo.PolicyIdentifier = SetScanForGivenControls(controls[1:])
+			}
+
+			if len(args) > 1 {
+				if err := scanInfo.SetInputPatterns(args); err != nil {
+					return err
+				}
 			}
 		}
 		scanInfo.FrameworkScan = false
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
-		err := clihandler.CliSetup(&scanInfo)
+		err := clihandler.ScanCliSetup(&scanInfo)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)

@@ -21,7 +21,9 @@ def run(kubescape_exec:str):
     test_command(command=[kubescape_exec, "help"])
     test_command(command=[kubescape_exec, "scan", "framework"])
     test_command(command=[kubescape_exec, "scan", "control"])
-    
+    test_command(command=[kubescape_exec, "submit", "results"])
+    test_command(command=[kubescape_exec, "submit", "rbac"])
+
     print("Done testing commands")
 
 

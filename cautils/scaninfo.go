@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils/getter"
@@ -64,6 +66,24 @@ func (scanInfo *ScanInfo) setUseFrom() {
 			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Name+".json"))
 		}
 	}
+}
+
+func (scanInfo *ScanInfo) SetInputPatterns(args []string) error {
+	if args[1] != "-" {
+		scanInfo.InputPatterns = args[1:]
+	} else { // store stout to file
+		tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(tempFile.Name())
+
+		if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+			return err
+		}
+		scanInfo.InputPatterns = []string{tempFile.Name()}
+	}
+	return nil
 }
 func (scanInfo *ScanInfo) setGetter() {
 	if len(scanInfo.UseFrom) > 0 {

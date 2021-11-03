@@ -11,7 +11,7 @@ import (
 )
 
 type IReport interface {
-	ActionSendReport(opaSessionObj *cautils.OPASessionObj)
+	ActionSendReport(opaSessionObj *cautils.OPASessionObj) error
 	SetCustomerGUID(customerGUID string)
 	SetClusterName(clusterName string)
 }
@@ -22,21 +22,24 @@ type ReportEventReceiver struct {
 	customerGUID string
 }
 
-func NewReportEventReceiver() *ReportEventReceiver {
+func NewReportEventReceiver(customerGUID, clusterName string) *ReportEventReceiver {
 	return &ReportEventReceiver{
-		httpClient: http.Client{},
+		httpClient:   http.Client{},
+		clusterName:  clusterName,
+		customerGUID: customerGUID,
 	}
 }
 
-func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) {
+func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
 	// Remove data before reporting
 	keepFields := []string{"kind", "apiVersion", "metadata"}
 	keepMetadataFields := []string{"name", "namespace", "labels"}
 	opaSessionObj.PostureReport.RemoveData(keepFields, keepMetadataFields)
 
 	if err := report.send(opaSessionObj.PostureReport); err != nil {
-		fmt.Println(err)
+		return err
 	}
+	return nil
 }
 
 func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
