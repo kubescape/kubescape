@@ -39,6 +39,17 @@ func getReporter(scanInfo *cautils.ScanInfo) reporter.IReport {
 
 	return reporter.NewReportEventReceiver("", "")
 }
+
+func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector {
+	if scanInfo.IncludeNamespaces != "" {
+		return resourcehandler.NewIncludeSelector(scanInfo.IncludeNamespaces)
+	}
+	if scanInfo.ExcludedNamespaces != "" {
+		return resourcehandler.NewExcludeSelector(scanInfo.ExcludedNamespaces)
+	}
+
+	return &resourcehandler.EmptySelector{}
+}
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
 	var clusterConfig cautils.IClusterConfig
@@ -55,7 +66,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		reportHandler = reporter.NewReportMock()
 	} else {
 		k8s := k8sinterface.NewKubernetesApi()
-		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, scanInfo.ExcludedNamespaces)
+		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
 		clusterConfig = cautils.ClusterConfigSetup(scanInfo, k8s, getter.GetArmoAPIConnector())
 
 		// setup reporter

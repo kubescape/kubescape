@@ -19,6 +19,7 @@ type ScanInfo struct {
 	Format             string   // Format results (table, json, junit ...)
 	Output             string   // Store results in an output file, Output file name
 	ExcludedNamespaces string   // DEPRECATED?
+	IncludeNamespaces  string   // DEPRECATED?
 	InputPatterns      []string // Yaml files input patterns
 	Silent             bool     // Silent mode - Do not print progress logs
 	FailThreshold      uint16   // Failure score threshold
