@@ -3,7 +3,6 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -21,14 +20,14 @@ import (
 )
 
 type K8sResourceHandler struct {
-	k8s                *k8sinterface.KubernetesApi
-	excludedNamespaces string // excluded namespaces (separated by comma)
+	k8s           *k8sinterface.KubernetesApi
+	fieldSelector IFieldSelector
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, excludedNamespaces string) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector) *K8sResourceHandler {
 	return &K8sResourceHandler{
-		k8s:                k8s,
-		excludedNamespaces: excludedNamespaces,
+		k8s:           k8s,
+		fieldSelector: fieldSelector,
 	}
 }
 
@@ -43,7 +42,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
 
 	// pull k8s recourses
-	if err := k8sHandler.pullResources(k8sResourcesMap, namespace, labels, k8sHandler.excludedNamespaces); err != nil {
+	if err := k8sHandler.pullResources(k8sResourcesMap, namespace, labels); err != nil {
 		return k8sResourcesMap, err
 	}
 
@@ -59,13 +58,13 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 	}
 	return clusterAPIServerInfo
 }
-func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, namespace string, labels map[string]string, excludedNamespaces string) error {
+func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, namespace string, labels map[string]string) error {
 
 	var errs error
 	for groupResource := range *k8sResources {
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(groupResource)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels, excludedNamespaces)
+		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels)
 		if err != nil {
 			// handle error
 			if errs == nil {
@@ -81,13 +80,13 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 	return errs
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string, excludedNamespaces string) ([]unstructured.Unstructured, error) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string) ([]unstructured.Unstructured, error) {
 
 	// set labels
 	listOptions := metav1.ListOptions{}
-	if excludedNamespaces != "" {
-		setFieldSelector(&listOptions, resource, excludedNamespaces)
-	}
+
+	listOptions.FieldSelector += k8sHandler.fieldSelector.GetNamespacesSelector(resource)
+
 	if len(labels) > 0 {
 		set := k8slabels.Set(labels)
 		listOptions.LabelSelector = set.AsSelector().String()
@@ -109,19 +108,4 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 
 	return result.Items, nil
 
-}
-
-func setFieldSelector(listOptions *metav1.ListOptions, resource *schema.GroupVersionResource, excludedNamespaces string) {
-	fieldSelector := "metadata."
-	if resource.Resource == "namespaces" {
-		fieldSelector += "name"
-	} else if k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
-		fieldSelector += "namespace"
-	} else {
-		return
-	}
-	excludedNamespacesSlice := strings.Split(excludedNamespaces, ",")
-	for _, excludedNamespace := range excludedNamespacesSlice {
-		listOptions.FieldSelector += fmt.Sprintf("%s!=%s,", fieldSelector, excludedNamespace)
-	}
 }

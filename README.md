@@ -78,6 +78,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | flag                        | default                   | description                                                                                                                                                                                                                                                                                                          | options                          |
 |-----------------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
 | `-e`/`--exclude-namespaces` | Scan all namespaces       | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces                                                                                                                                                                                                               |                                              |
+| `--include-namespaces`      | Scan all namespaces       | Scan specific namespaces                                                                                                                            |                                              |
 | `-s`/`--silent`             | Display progress messages | Silent progress messages                                                                                                                                                                                                                                                                                             |                                              |
 | `-t`/`--fail-threshold`     | `0` (do not fail)         | fail command (return exit code 1) if result bellow threshold                                                                                                                                                                                                                                                         | `0` -> `100`                                 |
 | `-f`/`--format`             | `pretty-printer`          | Output format                                                                                                                                                                                                                                                                                                        | `pretty-printer`/`json`/`junit`/`prometheus` |
@@ -110,11 +111,20 @@ kubescape scan framework mitre --submit
 kubescape scan control "Privileged container"
 ```
 
+* Scan specific namespaces
+```
+kubescape scan framework nsa --include-namespaces development,staging,production
+```
+
+* Scan cluster and exclude some namespaces
+```
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+```
+
 * Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
 ```
 kubescape scan framework nsa *.yaml
 ```
-
 
 * Scan kubernetes manifest files from a public github repository 
 ```
@@ -123,17 +133,17 @@ kubescape scan framework nsa https://github.com/armosec/kubescape
 
 * Output in `json` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format json --output results.json
+kubescape scan framework nsa --format json --output results.json
 ```
 
 * Output in `junit xml` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
+kubescape scan framework nsa --format junit --output results.xml
 ```
 
 * Output in `prometheus` metrics format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format prometheus
+kubescape scan framework nsa --format prometheus
 ```
 
 * Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
