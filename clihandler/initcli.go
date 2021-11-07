@@ -19,7 +19,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
-var SupportedFrameworks = []string{"nsa", "mitre"}
+var SupportedFrameworks = []string{"nsa", "mitre", "armobest"}
 var ValidFrameworks = strings.Join(SupportedFrameworks, ", ")
 
 type componentInterfaces struct {
