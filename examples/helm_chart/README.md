@@ -17,12 +17,10 @@ Kubescape is the first open-source tool for testing if Kubernetes is deployed se
 | nodeSelector | object | `{}` |  |
 | podAnnotations | object | `{}` |  |
 | podSecurityContext | object | `{}` |  |
-| resources | object | `{}` |  |
+| resources | object | `{"limits":{"cpu":"500m","memory":"512Mi"},"requests":{"cpu":"200m","memory":"256Mi"}}` | Default resources for running the service in cluster |
 | schedule | string | `"0 0 * * *"` | Frequency of running the scan |
 | securityContext | object | `{}` |  |
-| serviceAccount.annotations | object | `{}` |  |
-| serviceAccount.create | bool | `true` |  |
-| serviceAccount.name | string | `"kubescape-discovery"` |  |
+| serviceAccount | object | `{"annotations":{},"create":true,"name":"kubescape-discovery"}` | Service account that runs the scan and has permissions to view the cluster |
 | tolerations | list | `[]` |  |
 
 ----------------------------------------------
