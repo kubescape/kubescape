@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -55,22 +54,8 @@ func getNamespacesSelector(resource *schema.GroupVersionResource, ns, operator s
 	}
 	namespacesSlice := strings.Split(ns, ",")
 	for _, n := range namespacesSlice {
-		fieldSelectors += fmt.Sprintf("%s!=%s,", fieldSelector, n)
+		fieldSelectors += fmt.Sprintf("%s%s%s,", fieldSelector, operator, n)
 	}
 	return fieldSelectors
 
-}
-func setFieldSelector(listOptions *metav1.ListOptions, resource *schema.GroupVersionResource, excludedNamespaces string) {
-	fieldSelector := "metadata."
-	if resource.Resource == "namespaces" {
-		fieldSelector += "name"
-	} else if k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
-		fieldSelector += "namespace"
-	} else {
-		return
-	}
-	excludedNamespacesSlice := strings.Split(excludedNamespaces, ",")
-	for _, excludedNamespace := range excludedNamespacesSlice {
-		listOptions.FieldSelector += fmt.Sprintf("%s!=%s,", fieldSelector, excludedNamespace)
-	}
 }
