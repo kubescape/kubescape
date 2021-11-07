@@ -33,10 +33,15 @@ if __name__ == "__main__":
     run(kubescape_exec=smoke_utils.get_exec_from_args(sys.argv))
 
 '''
-Tests to add:
-1. Scan E2E
-2. Download and add --use-from
+Supported tests:
+1. Commands
+2. Version number
+3. E2E yaml scanning
 
-3. Test formats + output
-4. Test -t
+TODO:
+1. Test formats + output
+2. Test --fail-threshold
+3. Test known supported FW
+4. Test FW list
+5. Test Controls list
 '''
