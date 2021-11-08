@@ -44,6 +44,7 @@ var controlCmd = &cobra.Command{
 			}
 
 			if len(args) > 1 {
+				// Set scan to run on yamls
 				if err := scanInfo.SetInputPatterns(args); err != nil {
 					return err
 				}
