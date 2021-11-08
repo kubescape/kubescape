@@ -260,6 +260,11 @@ git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 docker build -t kubescape -f build/Dockerfile .
 ```
 
+### Run using docker image
+```
+docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan framework nsa /app/example.yaml
+```
+
 # Under the hood
 
 ## Tests

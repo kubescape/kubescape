@@ -77,8 +77,8 @@ jobs:
         run: echo quay.io/armosec/kubescape:v1.0.${{ github.run_number }} > build_tag.txt
 
       - name: Build the Docker image
-        run: docker build . --file build/Dockerfile --tag $(cat build_tag.txt)
-      
+        run: docker build . --file build/Dockerfile --tag $(cat build_tag.txt) --build-arg run_number=${{ github.run_number }}
+
       - name: Re-Tag Image to latest
         run: docker tag $(cat build_tag.txt) quay.io/armosec/kubescape:latest
 

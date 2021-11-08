@@ -56,7 +56,7 @@ jobs:
         run: echo quay.io/armosec/kubescape:dev-v1.0.${{ github.run_number }} > build_tag.txt
 
       - name: Build the Docker image
-        run: docker build . --file build/Dockerfile --tag $(cat build_tag.txt)
+        run: docker build . --file build/Dockerfile --tag $(cat build_tag.txt) --build-arg run_number=${{ github.run_number }}
       
       - name: Login to Quay.io
         env: # Or as an environment variable
