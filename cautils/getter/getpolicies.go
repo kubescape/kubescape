@@ -7,7 +7,7 @@ import (
 
 type IPolicyGetter interface {
 	GetFramework(name string) (*reporthandling.Framework, error)
-	GetControl(policyName string) (*reporthandling.Control, error)
+	GetControl(name string) (*reporthandling.Control, error)
 }
 
 type IExceptionsGetter interface {
@@ -15,4 +15,8 @@ type IExceptionsGetter interface {
 }
 type IBackend interface {
 	GetCustomerGUID(customerGUID string) (*TenantResponse, error)
+}
+
+type IControlsInputsGetter interface {
+	GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error)
 }

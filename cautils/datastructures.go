@@ -13,6 +13,7 @@ type OPASessionObj struct {
 	K8SResources  *K8SResources
 	Exceptions    []armotypes.PostureExceptionPolicy
 	PostureReport *reporthandling.PostureReport
+	RegoInputData RegoInputData // map[<control name>][<input arguments>]
 }
 
 func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources) *OPASessionObj {
@@ -48,4 +49,10 @@ type Exception struct {
 	MultipleScore *reporthandling.AlertScore `json:"multipleScore"` // MultipleScore number - float32
 	Namespaces    []string                   `json:"namespaces"`
 	Regex         string                     `json:"regex"` // not supported
+}
+
+type RegoInputData struct {
+	PostureControlInputs map[string][]string `json:"postureControlInputs"`
+	// ClusterName          string              `json:"clusterName"`
+	// K8sConfig            RegoK8sConfig       `json:"k8sconfig"`
 }

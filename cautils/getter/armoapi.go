@@ -140,6 +140,33 @@ func (armoAPI *ArmoAPI) GetCustomerGUID(customerGUID string) (*TenantResponse, e
 	return tenant, nil
 }
 
+// ControlsInputs  // map[<control name>][<input arguments>]
+func (armoAPI *ArmoAPI) GetAccountConfig(customerGUID, clusterName string) (*armotypes.CustomerConfig, error) {
+	accountConfig := &armotypes.CustomerConfig{}
+	if customerGUID == "" {
+		return accountConfig, nil
+	}
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(customerGUID, clusterName))
+	if err != nil {
+		return nil, err
+	}
+
+	if err = JSONDecoder(respStr).Decode(&accountConfig); err != nil {
+		return nil, err
+	}
+
+	return accountConfig, nil
+}
+
+// ControlsInputs  // map[<control name>][<input arguments>]
+func (armoAPI *ArmoAPI) GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error) {
+	accountConfig, err := armoAPI.GetAccountConfig(customerGUID, clusterName)
+	if err == nil {
+		return accountConfig.Settings.PostureControlInputs, nil
+	}
+	return nil, err
+}
+
 type TenantResponse struct {
 	TenantID  string `json:"tenantId"`
 	Token     string `json:"token"`

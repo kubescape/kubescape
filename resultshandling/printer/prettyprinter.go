@@ -24,12 +24,25 @@ func NewPrettyPrinter() *PrettyPrinter {
 	}
 }
 
+// Initializes empty printer for new table
+func (printer *PrettyPrinter) init() *PrettyPrinter {
+	printer.frameworkSummary = ControlSummary{}
+	printer.summary = Summary{}
+	printer.sortedControlNames = []string{}
+	return printer
+}
+
 func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	// score := calculatePostureScore(opaSessionObj.PostureReport)
-
-	printer.summarySetup(opaSessionObj.PostureReport)
-	printer.printResults()
-	printer.printSummaryTable()
+	for _, report := range opaSessionObj.PostureReport.FrameworkReports {
+		// Print summary table together for control scan
+		if report.Name != "" {
+			printer = printer.init()
+		}
+		printer.summarySetup(report)
+		printer.printResults()
+		printer.printSummaryTable(report.Name)
+	}
 
 	// return score
 }
@@ -41,29 +54,27 @@ func (printer *PrettyPrinter) SetWriter(outputFile string) {
 func (printer *PrettyPrinter) Score(score float32) {
 }
 
-func (printer *PrettyPrinter) summarySetup(postureReport *reporthandling.PostureReport) {
-	for _, fr := range postureReport.FrameworkReports {
-		printer.frameworkSummary = ControlSummary{
-			TotalResources: fr.GetNumberOfResources(),
-			TotalFailed:    fr.GetNumberOfFailedResources(),
-			TotalWarnign:   fr.GetNumberOfWarningResources(),
+func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport) {
+	printer.frameworkSummary = ControlSummary{
+		TotalResources: fr.GetNumberOfResources(),
+		TotalFailed:    fr.GetNumberOfFailedResources(),
+		TotalWarnign:   fr.GetNumberOfWarningResources(),
+	}
+	for _, cr := range fr.ControlReports {
+		if len(cr.RuleReports) == 0 {
+			continue
 		}
-		for _, cr := range fr.ControlReports {
-			if len(cr.RuleReports) == 0 {
-				continue
-			}
-			workloadsSummary := listResultSummary(cr.RuleReports)
+		workloadsSummary := listResultSummary(cr.RuleReports)
 
-			printer.summary[cr.Name] = ControlSummary{
-				TotalResources:    cr.GetNumberOfResources(),
-				TotalFailed:       cr.GetNumberOfFailedResources(),
-				TotalWarnign:      cr.GetNumberOfWarningResources(),
-				FailedWorkloads:   groupByNamespace(workloadsSummary, workloadSummaryFailed),
-				ExcludedWorkloads: groupByNamespace(workloadsSummary, workloadSummaryExclude),
-				Description:       cr.Description,
-				Remediation:       cr.Remediation,
-				ListInputKinds:    cr.ListControlsInputKinds(),
-			}
+		printer.summary[cr.Name] = ControlSummary{
+			TotalResources:    cr.GetNumberOfResources(),
+			TotalFailed:       cr.GetNumberOfFailedResources(),
+			TotalWarnign:      cr.GetNumberOfWarningResources(),
+			FailedWorkloads:   groupByNamespace(workloadsSummary, workloadSummaryFailed),
+			ExcludedWorkloads: groupByNamespace(workloadsSummary, workloadSummaryExclude),
+			Description:       cr.Description,
+			Remediation:       cr.Remediation,
+			ListInputKinds:    cr.ListControlsInputKinds(),
 		}
 	}
 	printer.sortedControlNames = printer.getSortedControlsNames()
@@ -179,7 +190,10 @@ func generateFooter(numControlers, sumFailed, sumWarning, sumTotal int) []string
 	}
 	return row
 }
-func (printer *PrettyPrinter) printSummaryTable() {
+func (printer *PrettyPrinter) printSummaryTable(framework string) {
+	// For control scan framework will be nil
+	printer.printFramework(framework)
+
 	summaryTable := tablewriter.NewWriter(printer.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
@@ -193,6 +207,12 @@ func (printer *PrettyPrinter) printSummaryTable() {
 	}
 	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarnign, printer.frameworkSummary.TotalResources))
 	summaryTable.Render()
+}
+
+func (printer *PrettyPrinter) printFramework(framework string) {
+	if framework != "" {
+		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORK\n", framework))
+	}
 }
 
 func (printer *PrettyPrinter) getSortedControlsNames() []string {
