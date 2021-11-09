@@ -264,7 +264,7 @@ docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape 
 You can scan your cluster periodically by adding a `CronJob` that will repeatedly trigger kubescape
 
 ```
-helm install kubescape  examples/helm_chart/ -f examples/helm_chart/values.yaml
+helm install kubescape examples/helm_chart/
 ```
 
 # Under the hood
