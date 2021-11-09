@@ -4,3 +4,5 @@
 *vender*
 *.pyc*
 .idea
+*~
+.#*
