@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,7 +88,24 @@ func HttpGetter(httpClient *http.Client, fullURL string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	respStr, err := httpRespToString(resp)
+	respStr, err := HttpRespToString(resp)
+	if err != nil {
+		return "", err
+	}
+	return respStr, nil
+}
+
+func HttpPost(httpClient *http.Client, fullURL string, body []byte) (string, error) {
+
+	req, err := http.NewRequest("POST", fullURL, bytes.NewReader(body))
+	if err != nil {
+		return "", err
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	respStr, err := HttpRespToString(resp)
 	if err != nil {
 		return "", err
 	}
@@ -95,7 +113,7 @@ func HttpGetter(httpClient *http.Client, fullURL string) (string, error) {
 }
 
 // HTTPRespToString parses the body as string and checks the HTTP status code, it closes the body reader at the end
-func httpRespToString(resp *http.Response) (string, error) {
+func HttpRespToString(resp *http.Response) (string, error) {
 	if resp == nil || resp.Body == nil {
 		return "", nil
 	}
