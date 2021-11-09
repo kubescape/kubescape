@@ -163,7 +163,7 @@ Kubescape is an open source project, we welcome your feedback and ideas for impr
 
 ## Build using python (3.7^) script
 
-Kubescpae can be built using:
+Kubescape can be built using:
 
 ``` sh
 python build.py
