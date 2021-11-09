@@ -8,7 +8,7 @@ metadata:
 data:
   config.json: |
     {
-      "customerGUID": {{ .Values.configMap.params.customerGUID }},
-      "clusterName": {{ .Values.configMap.params.clusterName }}
+      "customerGUID": "{{ .Values.configMap.params.customerGUID }}",
+      "clusterName": "{{ .Values.configMap.params.clusterName }}"
     }
 {{- end }}

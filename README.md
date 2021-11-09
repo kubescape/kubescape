@@ -141,7 +141,7 @@ kubescape scan framework nsa --format json --output results.json
 kubescape scan framework nsa --format junit --output results.xml
 ```
 
-* Output in `prometheus` metrics format
+* Output in `prometheus` metrics format - Contributed by [@Joibel](https://github.com/Joibel)
 ```
 kubescape scan framework nsa --format prometheus
 ```
@@ -187,12 +187,6 @@ Kubescape is an open source project, we welcome your feedback and ideas for impr
 # Submit data manually
 
 Use the `submit` command if you wish to submit data manually
-
-## Submit Role-Based Access Control (RBAC)
-```
-kubescape submit rbac
-```
-
 
 ## Submit scan results manually
 
@@ -260,9 +254,17 @@ git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 docker build -t kubescape -f build/Dockerfile .
 ```
 
-### Run using docker image
+### Scan using docker image
 ```
 docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan framework nsa /app/example.yaml
+```
+
+### Periodically Kubescape scanning using Helm - Contributed by [@yonahd](https://github.com/yonahd)
+
+You can scan your cluster periodically by adding a `CronJob` that will repeatedly trigger kubescape
+
+```
+helm install kubescape  examples/helm_chart/ -f examples/helm_chart/values.yaml
 ```
 
 # Under the hood
