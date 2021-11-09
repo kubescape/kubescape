@@ -41,7 +41,7 @@ def main():
 
     # Set some variables
     packageName = getPackageName()
-    buildUrl = "github.com/armosec/kubescape/clihandler/cmd.BuildNumber"
+    buildUrl = "github.com/armosec/kubescape/cautils.BuildNumber"
     releaseVersion = os.getenv("RELEASE")
     ArmoBEServer = os.getenv("ArmoBEServer")
     ArmoERServer = os.getenv("ArmoERServer")

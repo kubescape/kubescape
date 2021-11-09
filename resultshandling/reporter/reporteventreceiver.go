@@ -1,12 +1,12 @@
 package reporter
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -17,14 +17,14 @@ type IReport interface {
 }
 
 type ReportEventReceiver struct {
-	httpClient   http.Client
+	httpClient   *http.Client
 	clusterName  string
 	customerGUID string
 }
 
 func NewReportEventReceiver(customerGUID, clusterName string) *ReportEventReceiver {
 	return &ReportEventReceiver{
-		httpClient:   http.Client{},
+		httpClient:   &http.Client{},
 		clusterName:  clusterName,
 		customerGUID: customerGUID,
 	}
@@ -58,15 +58,7 @@ func (report *ReportEventReceiver) send(postureReport *reporthandling.PostureRep
 	}
 	host := hostToString(report.initEventReceiverURL(), postureReport.ReportID)
 
-	req, err := http.NewRequest("POST", host, bytes.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("in 'Send', http.NewRequest failed, host: %s, reason: %v", host, err)
-	}
-	res, err := report.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("httpClient.Do failed: %v", err)
-	}
-	msg, err := httpRespToString(res)
+	msg, err := getter.HttpPost(report.httpClient, host, reqBody)
 	if err != nil {
 		return fmt.Errorf("%s, %v:%s", host, err, msg)
 	}

@@ -54,6 +54,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
 	var clusterConfig cautils.IClusterConfig
 	var reportHandler reporter.IReport
+	var scanningTarget string
 
 	if !scanInfo.ScanRunningCluster() {
 		k8sinterface.ConnectedToCluster = false
@@ -64,6 +65,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 		// set mock report (do not send report)
 		reportHandler = reporter.NewReportMock()
+		scanningTarget = "yaml"
 	} else {
 		k8s := k8sinterface.NewKubernetesApi()
 		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
@@ -71,7 +73,11 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 		// setup reporter
 		reportHandler = getReporter(scanInfo)
+		scanningTarget = "cluster"
 	}
+
+	v := cautils.NewIVersionCheckHandler()
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", scanningTarget))
 
 	// setup printer
 	printerHandler := printer.GetPrinter(scanInfo.Format)
