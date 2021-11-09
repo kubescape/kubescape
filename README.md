@@ -73,7 +73,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | --- | --- | --- | --- |
 | `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces |
 | `-s`/`--silent` | Display progress messages | Silent progress messages |
-| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result bellow threshold| `0` -> `100` |
+| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result is below threshold| `0` -> `100` |
 | `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` |
 | `-o`/`--output` | print to stdout | Save scan result in file |
 | `--use-from` | | Load local framework object from specified path. If not used will download latest |
