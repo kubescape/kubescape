@@ -95,7 +95,7 @@ func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest)
 		return nil, fmt.Errorf("in 'CheckLatestVersion' failed to json.Marshal, reason: %v", err)
 	}
 
-	resp, err := getter.HttpPost(http.DefaultClient, v.versionURL, reqBody)
+	resp, err := getter.HttpPost(http.DefaultClient, v.versionURL, map[string]string{"Content-Type": "application/json"}, reqBody)
 	if err != nil {
 		return nil, err
 	}
