@@ -50,7 +50,11 @@ func (armoAPI *ArmoAPI) GetCustomFrameworksForCustomer(customerGUID string) ([]s
 	err = json.Unmarshal([]byte(respStr), &frs)
 
 	for _, fr := range frs {
-		frameworkList = append(frameworkList, fr.Name)
+		if isNativeFramework(fr.Name) {
+			frameworkList = append(frameworkList, strings.ToLower(fr.Name))
+		} else {
+			frameworkList = append(frameworkList, fr.Name)
+		}
 	}
 
 	return frameworkList, nil

@@ -196,10 +196,22 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 
 func SetScanForGivenFrameworks(scanInfo *cautils.ScanInfo, frameworks []string) *cautils.ScanInfo {
 	for _, framework := range frameworks {
-		newPolicy := reporthandling.PolicyIdentifier{}
-		newPolicy.Kind = reporthandling.KindFramework
-		newPolicy.Name = framework
-		scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+
+		if !contains(scanInfo, framework) {
+			newPolicy := reporthandling.PolicyIdentifier{}
+			newPolicy.Kind = reporthandling.KindFramework
+			newPolicy.Name = framework
+			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+		}
 	}
 	return scanInfo
+}
+
+func contains(scanInfo *cautils.ScanInfo, framework string) bool {
+	for _, policy := range scanInfo.PolicyIdentifier {
+		if policy.Name == framework {
+			return true
+		}
+	}
+	return false
 }
