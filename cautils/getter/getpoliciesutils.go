@@ -78,42 +78,53 @@ func JSONDecoder(origin string) *json.Decoder {
 	return dec
 }
 
-func HttpGetter(httpClient *http.Client, fullURL string) (string, error) {
+func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
 
 	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
 		return "", err
 	}
+	addHeaders(req, headers)
+
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	respStr, err := HttpRespToString(resp)
+	respStr, err := httpRespToString(resp)
 	if err != nil {
 		return "", err
 	}
 	return respStr, nil
 }
 
-func HttpPost(httpClient *http.Client, fullURL string, body []byte) (string, error) {
+func HttpPost(httpClient *http.Client, fullURL string, headers map[string]string, body []byte) (string, error) {
 
 	req, err := http.NewRequest("POST", fullURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
+	addHeaders(req, headers)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
 	}
-	respStr, err := HttpRespToString(resp)
+	respStr, err := httpRespToString(resp)
 	if err != nil {
 		return "", err
 	}
 	return respStr, nil
 }
 
+func addHeaders(req *http.Request, headers map[string]string) {
+	if len(headers) >= 0 { // might be nil
+		for k, v := range headers {
+			req.Header.Add(k, v)
+		}
+	}
+}
+
 // HTTPRespToString parses the body as string and checks the HTTP status code, it closes the body reader at the end
-func HttpRespToString(resp *http.Response) (string, error) {
+func httpRespToString(resp *http.Response) (string, error) {
 	if resp == nil || resp.Body == nil {
 		return "", nil
 	}

@@ -58,7 +58,7 @@ func (report *ReportEventReceiver) send(postureReport *reporthandling.PostureRep
 	}
 	host := hostToString(report.initEventReceiverURL(), postureReport.ReportID)
 
-	msg, err := getter.HttpPost(report.httpClient, host, reqBody)
+	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
 	if err != nil {
 		return fmt.Errorf("%s, %v:%s", host, err, msg)
 	}

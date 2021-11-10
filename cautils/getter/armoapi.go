@@ -92,7 +92,7 @@ func (armoAPI *ArmoAPI) GetReportReceiverURL() string {
 }
 
 func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name))
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armot
 	if customerGUID == "" {
 		return exceptions, nil
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(customerGUID, clusterName))
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(customerGUID, clusterName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (armoAPI *ArmoAPI) GetCustomerGUID(customerGUID string) (*TenantResponse, e
 	if customerGUID != "" {
 		url = fmt.Sprintf("%s?customerGUID=%s", url, customerGUID)
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, url)
+	respStr, err := HttpGetter(armoAPI.httpClient, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -146,7 +146,7 @@ func (armoAPI *ArmoAPI) GetAccountConfig(customerGUID, clusterName string) (*arm
 	if customerGUID == "" {
 		return accountConfig, nil
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(customerGUID, clusterName))
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(customerGUID, clusterName), nil)
 	if err != nil {
 		return nil, err
 	}
