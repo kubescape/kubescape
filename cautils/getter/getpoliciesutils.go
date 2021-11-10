@@ -10,9 +10,14 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/armosec/opa-utils/reporthandling"
 )
+
+func GetFilename(name string) string {
+	return strings.ToLower(name) + ".json"
+}
 
 func GetDefaultPath(name string) string {
 	defaultfilePath := filepath.Join(DefaultLocalStore, name)
@@ -20,6 +25,14 @@ func GetDefaultPath(name string) string {
 		defaultfilePath = filepath.Join(homeDir, defaultfilePath)
 	}
 	return defaultfilePath
+}
+
+func GetTimestamp(path string) time.Time {
+	stat, err := os.Stat(path)
+	if err != nil {
+		return time.Unix(0,0)
+	}
+	return stat.ModTime()
 }
 
 // Save control as json in file

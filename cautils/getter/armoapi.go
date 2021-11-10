@@ -110,7 +110,7 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, er
 	if err = JSONDecoder(respStr).Decode(framework); err != nil {
 		return nil, err
 	}
-	SaveFrameworkInFile(framework, GetDefaultPath(name+".json"))
+	SaveFrameworkInFile(framework, GetDefaultPath(GetFilename(name)))
 
 	return framework, err
 }

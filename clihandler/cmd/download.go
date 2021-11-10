@@ -29,7 +29,7 @@ var downloadCmd = &cobra.Command{
 			downloadInfo.FrameworkName = strings.ToLower(args[1])
 			g := getter.NewDownloadReleasedPolicy()
 			if downloadInfo.Path == "" {
-				downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName + ".json")
+				downloadInfo.Path = getter.GetDefaultPath(getter.GetFilename(downloadInfo.FrameworkName))
 			}
 			frameworks, err := g.GetFramework(downloadInfo.FrameworkName)
 			if err != nil {
@@ -43,7 +43,7 @@ var downloadCmd = &cobra.Command{
 			downloadInfo.ControlName = strings.ToLower(args[1])
 			g := getter.NewDownloadReleasedPolicy()
 			if downloadInfo.Path == "" {
-				downloadInfo.Path = getter.GetDefaultPath(downloadInfo.ControlName + ".json")
+				downloadInfo.Path = getter.GetDefaultPath(getter.GetFilename(downloadInfo.ControlName))
 			}
 			controls, err := g.GetControl(downloadInfo.ControlName)
 			if err != nil {

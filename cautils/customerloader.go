@@ -132,7 +132,7 @@ func (c *EmptyConfig) GetBackendAPI() getter.IBackend         { return nil } // 
 func (c *EmptyConfig) GetClusterName() string                 { return adoptClusterName(k8sinterface.GetClusterName()) }
 func (c *EmptyConfig) GenerateURL() {
 	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
-	InfoTextDisplay(os.Stdout, fmt.Sprintf("\n%s\n", message))
+	InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", message))
 }
 
 // ======================================================================================

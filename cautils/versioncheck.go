@@ -79,11 +79,11 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 	}
 
 	if latestVersion.ClientUpdate != "" {
-		fmt.Println(warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
+		fmt.Fprintf(os.Stderr, warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
 	}
 
 	if latestVersion.FrameworkUpdate != "" {
-		fmt.Println(warningMessage(latestVersion.Framework, latestVersion.FrameworkUpdate))
+		fmt.Fprintf(os.Stderr, warningMessage(latestVersion.Framework, latestVersion.FrameworkUpdate))
 	}
 	return nil
 }
@@ -108,5 +108,5 @@ func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest)
 }
 
 func warningMessage(kind, release string) string {
-	return fmt.Sprintf("Warning: '%s' is not updated to the latest release: '%s'", kind, release)
+	return fmt.Sprintf("Warning: '%s' is not updated to the latest release: '%s'\n", kind, release)
 }
