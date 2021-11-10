@@ -46,7 +46,7 @@ func (printer *PrettyPrinter) summarySetup(postureReport *reporthandling.Posture
 		printer.frameworkSummary = ControlSummary{
 			TotalResources: fr.GetNumberOfResources(),
 			TotalFailed:    fr.GetNumberOfFailedResources(),
-			TotalWarnign:   fr.GetNumberOfWarningResources(),
+			TotalWarning:   fr.GetNumberOfWarningResources(),
 		}
 		for _, cr := range fr.ControlReports {
 			if len(cr.RuleReports) == 0 {
@@ -57,7 +57,7 @@ func (printer *PrettyPrinter) summarySetup(postureReport *reporthandling.Posture
 			printer.summary[cr.Name] = ControlSummary{
 				TotalResources:    cr.GetNumberOfResources(),
 				TotalFailed:       cr.GetNumberOfFailedResources(),
-				TotalWarnign:      cr.GetNumberOfWarningResources(),
+				TotalWarning:      cr.GetNumberOfWarningResources(),
 				FailedWorkloads:   groupByNamespace(workloadsSummary, workloadSummaryFailed),
 				ExcludedWorkloads: groupByNamespace(workloadsSummary, workloadSummaryExclude),
 				Description:       cr.Description,
@@ -82,8 +82,8 @@ func (printer *PrettyPrinter) printResults() {
 
 func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *ControlSummary) {
 	cautils.SimpleDisplay(printer.writer, "Summary - ")
-	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed-controlSummary.TotalWarnign)
-	cautils.WarningDisplay(printer.writer, "Excluded:%v   ", controlSummary.TotalWarnign)
+	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed-controlSummary.TotalWarning)
+	cautils.WarningDisplay(printer.writer, "Excluded:%v   ", controlSummary.TotalWarning)
 	cautils.FailureDisplay(printer.writer, "Failed:%v   ", controlSummary.TotalFailed)
 	cautils.InfoDisplay(printer.writer, "Total:%v\n", controlSummary.TotalResources)
 	if controlSummary.TotalFailed > 0 {
@@ -99,7 +99,7 @@ func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *Con
 		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed != 0 {
 		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
-	} else if controlSummary.TotalWarnign != 0 {
+	} else if controlSummary.TotalWarning != 0 {
 		cautils.WarningDisplay(printer.writer, "excluded %v\n", emoji.NeutralFace)
 	} else {
 		cautils.SuccessDisplay(printer.writer, "passed %v\n", emoji.ThumbsUp)
@@ -191,7 +191,7 @@ func (printer *PrettyPrinter) printSummaryTable() {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
 	}
-	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarnign, printer.frameworkSummary.TotalResources))
+	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarning, printer.frameworkSummary.TotalResources))
 	summaryTable.Render()
 }
 

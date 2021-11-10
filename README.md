@@ -69,6 +69,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ## Flags
 
+<<<<<<< HEAD
 | flag                        | default                   | description                                                                                                                                                                                                                                                                                                          | options                          |
 |-----------------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
 | `-e`/`--exclude-namespaces` | Scan all namespaces       | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces                                                                                                                                                                                                               |                                              |
@@ -82,6 +83,21 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
 | `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
 | `--account`                 |                           | Armo portal account ID. Default will load account ID from configMap or config file                                                                                                                                                                                                                                   |                                              |
+=======
+| flag |  default | description | options |
+| --- | --- | --- | --- |
+| `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces |
+| `-s`/`--silent` | Display progress messages | Silent progress messages |
+| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result is below threshold| `0` -> `100` |
+| `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` |
+| `-o`/`--output` | print to stdout | Save scan result in file |
+| `--use-from` | | Load local framework object from specified path. If not used will download latest |
+| `--use-default` | `false` | Load local framework object from default path. If not used will download latest | `true`/`false` |
+| `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal |
+| `--submit` | `false` | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`|
+| `--keep-local` | `false` | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results | `true`/`false`|
+| `--account` | | Armo portal account ID. Default will load account ID from configMap or config file | |
+>>>>>>> 0168b768d26c74b2f55565067c3a12bc8d259689
 
 ## Usage & Examples
 
@@ -168,7 +184,7 @@ Kubescape is an open source project, we welcome your feedback and ideas for impr
 
 ## Build using python (3.7^) script
 
-Kubescpae can be built using:
+Kubescape can be built using:
 
 ``` sh
 python build.py
