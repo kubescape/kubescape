@@ -27,6 +27,7 @@ type ScanInfo struct {
 	Local              bool     // Do not submit results
 	Account            string   // account ID
 	FrameworkScan      bool     // false if scanning control
+	ScanAll            bool     // true if scan all frameworks
 }
 
 type Getters struct {
@@ -40,7 +41,6 @@ func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseExceptions()
 	scanInfo.setAccountConfig()
 	scanInfo.setOutputFile()
-	scanInfo.setGetter()
 
 }
 
@@ -85,14 +85,6 @@ func (scanInfo *ScanInfo) SetInputPatterns(args []string) error {
 		scanInfo.InputPatterns = []string{tempFile.Name()}
 	}
 	return nil
-}
-func (scanInfo *ScanInfo) setGetter() {
-	if len(scanInfo.UseFrom) > 0 {
-		// load from file
-		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
-	} else {
-		scanInfo.PolicyGetter = getter.NewDownloadReleasedPolicy()
-	}
 }
 
 func (scanInfo *ScanInfo) setOutputFile() {

@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/getter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/kubescape/cautils/getter"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -154,6 +154,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		defaultNS:  k8sinterface.GetDefaultNamespace(),
 	}
 }
+
 func (c *ClusterConfig) GetConfigObj() *ConfigObj               { return c.configObj }
 func (c *ClusterConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return c.k8s }
 func (c *ClusterConfig) GetDefaultNS() string                   { return c.defaultNS }

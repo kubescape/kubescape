@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/clihandler"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/spf13/cobra"
 )
 
@@ -26,8 +26,10 @@ var scanCmd = &cobra.Command{
 	},
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
-			frameworkArgs := []string{clihandler.ValidFrameworks}
-			frameworkArgs = append(frameworkArgs, args...)
+			scanInfo.ScanAll = true
+			frameworks := getter.NativeFrameworks
+			frameworks = append(frameworks, args...)
+			frameworkArgs := []string{strings.Join(frameworks, ",")}
 			frameworkCmd.RunE(cmd, frameworkArgs)
 		}
 	},
