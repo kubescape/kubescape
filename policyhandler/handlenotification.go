@@ -6,8 +6,6 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/opa-utils/reporthandling"
-
-	"github.com/armosec/armoapi-go/armotypes"
 )
 
 // PolicyHandler -
@@ -33,15 +31,9 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 	policyHandler.getters = &scanInfo.Getters
 
 	// get policies
-	frameworks, exceptions, err := policyHandler.getPolicies(notification)
-	if err != nil {
+	if err := policyHandler.getPolicies(notification, opaSessionObj); err != nil {
 		return err
 	}
-	if len(frameworks) == 0 {
-		return fmt.Errorf("empty list of frameworks")
-	}
-	opaSessionObj.Frameworks = frameworks
-	opaSessionObj.Exceptions = exceptions
 
 	k8sResources, err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
 	if err != nil {
@@ -55,25 +47,6 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 	// update channel
 	*policyHandler.processPolicy <- opaSessionObj
 	return nil
-}
-
-func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
-
-	cautils.ProgressTextDisplay("Downloading/Loading policy definitions")
-
-	frameworks, exceptions, err := policyHandler.GetPoliciesFromBackend(notification)
-	if err != nil {
-		return frameworks, exceptions, err
-	}
-
-	if len(frameworks) == 0 {
-		err := fmt.Errorf("could not download any policies, please check previous logs")
-		return frameworks, exceptions, err
-	}
-	//if notification.Rules
-	cautils.SuccessTextDisplay("Downloaded/Loaded policy")
-
-	return frameworks, exceptions, nil
 }
 
 func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {

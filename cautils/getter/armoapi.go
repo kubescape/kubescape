@@ -92,7 +92,7 @@ func (armoAPI *ArmoAPI) GetReportReceiverURL() string {
 }
 
 func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name))
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armot
 	if customerGUID == "" {
 		return exceptions, nil
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(customerGUID, clusterName))
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(customerGUID, clusterName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +128,7 @@ func (armoAPI *ArmoAPI) GetCustomerGUID(customerGUID string) (*TenantResponse, e
 	if customerGUID != "" {
 		url = fmt.Sprintf("%s?customerGUID=%s", url, customerGUID)
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, url)
+	respStr, err := HttpGetter(armoAPI.httpClient, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -138,6 +138,33 @@ func (armoAPI *ArmoAPI) GetCustomerGUID(customerGUID string) (*TenantResponse, e
 	}
 
 	return tenant, nil
+}
+
+// ControlsInputs  // map[<control name>][<input arguments>]
+func (armoAPI *ArmoAPI) GetAccountConfig(customerGUID, clusterName string) (*armotypes.CustomerConfig, error) {
+	accountConfig := &armotypes.CustomerConfig{}
+	if customerGUID == "" {
+		return accountConfig, nil
+	}
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(customerGUID, clusterName), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if err = JSONDecoder(respStr).Decode(&accountConfig); err != nil {
+		return nil, err
+	}
+
+	return accountConfig, nil
+}
+
+// ControlsInputs  // map[<control name>][<input arguments>]
+func (armoAPI *ArmoAPI) GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error) {
+	accountConfig, err := armoAPI.GetAccountConfig(customerGUID, clusterName)
+	if err == nil {
+		return accountConfig.Settings.PostureControlInputs, nil
+	}
+	return nil, err
 }
 
 type TenantResponse struct {

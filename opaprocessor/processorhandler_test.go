@@ -5,6 +5,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/resources"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -24,7 +25,7 @@ func TestProcess(t *testing.T) {
 	opaSessionObj.Frameworks = []reporthandling.Framework{*reporthandling.MockFrameworkA()}
 	opaSessionObj.K8SResources = &k8sResources
 
-	opap := NewOPAProcessor(opaSessionObj)
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())
 	opap.Process()
 	opap.updateResults()
 	for _, f := range opap.PostureReport.FrameworkReports {

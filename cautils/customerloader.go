@@ -129,7 +129,7 @@ func (c *EmptyConfig) GetCustomerGUID() string                { return "" }
 func (c *EmptyConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return nil } // TODO: return mock obj
 func (c *EmptyConfig) GetDefaultNS() string                   { return k8sinterface.GetDefaultNamespace() }
 func (c *EmptyConfig) GetBackendAPI() getter.IBackend         { return nil } // TODO: return mock obj
-func (c *EmptyConfig) GetClusterName() string                 { return k8sinterface.GetClusterName() }
+func (c *EmptyConfig) GetClusterName() string                 { return adoptClusterName(k8sinterface.GetClusterName()) }
 func (c *EmptyConfig) GenerateURL() {
 	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
 	InfoTextDisplay(os.Stdout, fmt.Sprintf("\n%s\n", message))

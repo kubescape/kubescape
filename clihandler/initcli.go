@@ -9,6 +9,7 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
 	"github.com/armosec/kubescape/resourcehandler"
@@ -18,12 +19,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
-type CLIHandler struct {
-	policyHandler *policyhandler.PolicyHandler
-	scanInfo      *cautils.ScanInfo
-}
-
-var SupportedFrameworks = []string{"nsa", "mitre"}
+var SupportedFrameworks = []string{"nsa", "mitre", "armobest"}
 var ValidFrameworks = strings.Join(SupportedFrameworks, ", ")
 
 type componentInterfaces struct {
@@ -41,12 +37,24 @@ func getReporter(scanInfo *cautils.ScanInfo) reporter.IReport {
 		return reporter.NewReportMock()
 	}
 
-	return reporter.NewReportEventReceiver()
+	return reporter.NewReportEventReceiver("", "")
+}
+
+func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector {
+	if scanInfo.IncludeNamespaces != "" {
+		return resourcehandler.NewIncludeSelector(scanInfo.IncludeNamespaces)
+	}
+	if scanInfo.ExcludedNamespaces != "" {
+		return resourcehandler.NewExcludeSelector(scanInfo.ExcludedNamespaces)
+	}
+
+	return &resourcehandler.EmptySelector{}
 }
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
 	var clusterConfig cautils.IClusterConfig
 	var reportHandler reporter.IReport
+	var scanningTarget string
 
 	if !scanInfo.ScanRunningCluster() {
 		k8sinterface.ConnectedToCluster = false
@@ -57,14 +65,19 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 		// set mock report (do not send report)
 		reportHandler = reporter.NewReportMock()
+		scanningTarget = "yaml"
 	} else {
 		k8s := k8sinterface.NewKubernetesApi()
-		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, scanInfo.ExcludedNamespaces)
+		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
 		clusterConfig = cautils.ClusterConfigSetup(scanInfo, k8s, getter.GetArmoAPIConnector())
 
 		// setup reporter
 		reportHandler = getReporter(scanInfo)
+		scanningTarget = "cluster"
 	}
+
+	v := cautils.NewIVersionCheckHandler()
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", scanningTarget))
 
 	// setup printer
 	printerHandler := printer.GetPrinter(scanInfo.Format)
@@ -78,7 +91,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	}
 }
 
-func CliSetup(scanInfo *cautils.ScanInfo) error {
+func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 
 	interfaces := getInterfaces(scanInfo)
 
@@ -97,8 +110,8 @@ func CliSetup(scanInfo *cautils.ScanInfo) error {
 	go func() {
 		// policy handler setup
 		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler)
-		cli := NewCLIHandler(policyHandler, scanInfo)
-		if err := cli.Scan(); err != nil {
+
+		if err := Scan(policyHandler, scanInfo); err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}
@@ -124,30 +137,39 @@ func CliSetup(scanInfo *cautils.ScanInfo) error {
 	return nil
 }
 
-func NewCLIHandler(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) *CLIHandler {
-	return &CLIHandler{
-		scanInfo:      scanInfo,
-		policyHandler: policyHandler,
-	}
-}
-
-func (clihandler *CLIHandler) Scan() error {
+func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
 	cautils.ScanStartDisplay()
 	policyNotification := &reporthandling.PolicyNotification{
 		NotificationType: reporthandling.TypeExecPostureScan,
-		Rules: []reporthandling.PolicyIdentifier{
-			clihandler.scanInfo.PolicyIdentifier,
-		},
-		Designators: armotypes.PortalDesignator{},
+		Rules:            scanInfo.PolicyIdentifier,
+		Designators:      armotypes.PortalDesignator{},
 	}
 	switch policyNotification.NotificationType {
 	case reporthandling.TypeExecPostureScan:
-		if err := clihandler.policyHandler.HandleNotificationRequest(policyNotification, clihandler.scanInfo); err != nil {
+		if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
 			return err
 		}
 
 	default:
 		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
 	}
+	return nil
+}
+
+func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
+
+	// list resources
+	postureReport, err := submitInterfaces.SubmitObjects.SetResourcesReport()
+	if err != nil {
+		return err
+	}
+
+	// report
+	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport}); err != nil {
+		return err
+	}
+	fmt.Printf("\nData has been submitted successfully")
+	submitInterfaces.ClusterConfig.GenerateURL()
+
 	return nil
 }

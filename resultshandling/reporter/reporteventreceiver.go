@@ -1,42 +1,45 @@
 package reporter
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type IReport interface {
-	ActionSendReport(opaSessionObj *cautils.OPASessionObj)
+	ActionSendReport(opaSessionObj *cautils.OPASessionObj) error
 	SetCustomerGUID(customerGUID string)
 	SetClusterName(clusterName string)
 }
 
 type ReportEventReceiver struct {
-	httpClient   http.Client
+	httpClient   *http.Client
 	clusterName  string
 	customerGUID string
 }
 
-func NewReportEventReceiver() *ReportEventReceiver {
+func NewReportEventReceiver(customerGUID, clusterName string) *ReportEventReceiver {
 	return &ReportEventReceiver{
-		httpClient: http.Client{},
+		httpClient:   &http.Client{},
+		clusterName:  clusterName,
+		customerGUID: customerGUID,
 	}
 }
 
-func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) {
+func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
 	// Remove data before reporting
 	keepFields := []string{"kind", "apiVersion", "metadata"}
 	keepMetadataFields := []string{"name", "namespace", "labels"}
 	opaSessionObj.PostureReport.RemoveData(keepFields, keepMetadataFields)
 
 	if err := report.send(opaSessionObj.PostureReport); err != nil {
-		fmt.Println(err)
+		return err
 	}
+	return nil
 }
 
 func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
@@ -55,15 +58,7 @@ func (report *ReportEventReceiver) send(postureReport *reporthandling.PostureRep
 	}
 	host := hostToString(report.initEventReceiverURL(), postureReport.ReportID)
 
-	req, err := http.NewRequest("POST", host, bytes.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("in 'Send', http.NewRequest failed, host: %s, reason: %v", host, err)
-	}
-	res, err := report.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("httpClient.Do failed: %v", err)
-	}
-	msg, err := httpRespToString(res)
+	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
 	if err != nil {
 		return fmt.Errorf("%s, %v:%s", host, err, msg)
 	}

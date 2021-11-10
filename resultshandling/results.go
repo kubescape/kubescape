@@ -1,6 +1,8 @@
 package resultshandling
 
 import (
+	"fmt"
+
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
@@ -27,7 +29,9 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 
 	resultsHandler.printerObj.ActionPrint(opaSessionObj)
 
-	resultsHandler.reporterObj.ActionSendReport(opaSessionObj)
+	if err := resultsHandler.reporterObj.ActionSendReport(opaSessionObj); err != nil {
+		fmt.Println(err)
+	}
 
 	// TODO - get score from table
 	score := CalculatePostureScore(opaSessionObj.PostureReport)

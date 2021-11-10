@@ -25,7 +25,15 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	postureReportStr, err := json.Marshal(opaSessionObj.PostureReport.FrameworkReports[0])
+	var postureReportStr []byte
+	var err error
+
+	if len(opaSessionObj.PostureReport.FrameworkReports) == 1 {
+		postureReportStr, err = json.Marshal(opaSessionObj.PostureReport.FrameworkReports[0])
+	} else {
+		postureReportStr, err = json.Marshal(opaSessionObj.PostureReport.FrameworkReports)
+	}
+
 	if err != nil {
 		fmt.Println("Failed to convert posture report object!")
 		os.Exit(1)

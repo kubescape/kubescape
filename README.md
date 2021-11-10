@@ -44,6 +44,12 @@ Want to contribute? Want to discuss something? Have an issue?
 
 # Options and examples
 
+## Tutorials
+
+* [Overview](https://youtu.be/wdBkt_0Qhbg)
+* [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
+
 ## Install on Windows
 
 **Requires powershell v5.0+**
@@ -72,6 +78,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | flag                        | default                   | description                                                                                                                                                                                                                                                                                                          | options                          |
 |-----------------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
 | `-e`/`--exclude-namespaces` | Scan all namespaces       | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces                                                                                                                                                                                                               |                                              |
+| `--include-namespaces`      | Scan all namespaces       | Scan specific namespaces                                                                                                                            |                                              |
 | `-s`/`--silent`             | Display progress messages | Silent progress messages                                                                                                                                                                                                                                                                                             |                                              |
 | `-t`/`--fail-threshold`     | `0` (do not fail)         | fail command (return exit code 1) if result is below threshold                                                                                                                                                                                                                                                         | `0` -> `100`                                 |
 | `-f`/`--format`             | `pretty-printer`          | Output format                                                                                                                                                                                                                                                                                                        | `pretty-printer`/`json`/`junit`/`prometheus` |
@@ -88,13 +95,13 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
 kubescape scan framework nsa --submit
 ```
 
 
-* Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
+* Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
 kubescape scan framework mitre --submit
 ```
@@ -105,11 +112,20 @@ kubescape scan framework mitre --submit
 kubescape scan control "Privileged container"
 ```
 
+* Scan specific namespaces
+```
+kubescape scan framework nsa --include-namespaces development,staging,production
+```
+
+* Scan cluster and exclude some namespaces
+```
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+```
+
 * Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
 ```
 kubescape scan framework nsa *.yaml
 ```
-
 
 * Scan kubernetes manifest files from a public github repository 
 ```
@@ -118,23 +134,27 @@ kubescape scan framework nsa https://github.com/armosec/kubescape
 
 * Output in `json` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format json --output results.json
+kubescape scan framework nsa --format json --output results.json
 ```
 
 * Output in `junit xml` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
+kubescape scan framework nsa --format junit --output results.xml
 ```
 
-* Output in `prometheus` metrics format
+* Output in `prometheus` metrics format - Contributed by [@Joibel](https://github.com/Joibel)
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format prometheus
+kubescape scan framework nsa --format prometheus
 ```
 
 * Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
 ```
 kubescape scan framework nsa --exceptions examples/exceptions.json
 ```
+
+### CronJob Scan Periodically 
+
+For setting up a cronJob please follow the [instructions](examples/cronJob-support/README.md) 
 
 ### Helm Support
 
@@ -165,6 +185,18 @@ kubescape scan framework nsa --use-from nsa.json
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
 
+# Submit data manually
+
+Use the `submit` command if you wish to submit data manually
+
+## Submit scan results manually
+
+First, scan your cluster using the `json` format flag: `kubescape scan framework <name> --format json --output path/to/results.json`.
+
+Now you can submit the results to the Kubaescape SaaS version -
+```
+kubescape submit results path/to/results.json
+```
 # How to build
 
 ## Build using python (3.7^) script
@@ -221,6 +253,19 @@ git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 2. Build
 ```
 docker build -t kubescape -f build/Dockerfile .
+```
+
+### Scan using docker image
+```
+docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan framework nsa /app/example.yaml
+```
+
+### Periodically Kubescape scanning using Helm - Contributed by [@yonahd](https://github.com/yonahd)
+
+You can scan your cluster periodically by adding a `CronJob` that will repeatedly trigger kubescape
+
+```
+helm install kubescape examples/helm_chart/
 ```
 
 # Under the hood
