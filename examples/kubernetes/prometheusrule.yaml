@@ -1,0 +1,25 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubescape-rules
+  namespace: kubescape
+spec:
+  groups:
+  - name: kubescape.rules
+    rules:
+    - alert: kubescapeFailedObject
+      annotations:
+        description: |-
+          {{ $labels.groupVersionKind }}/{{ $labels.name }} in namespace {{ $labels.exported_namespace }} failed the {{ $labels.control }} control in the {{ $labels.framework }} Kubescape framework
+        summary: Kubescape framework violation
+      expr: count by(framework,control,groupVersionKind,exported_namespace,name) (kubescape_object_failed_count{}) > 0
+      labels:
+        severity: warning
+    - alert: kubescapeResourcesFound
+      annotations:
+        description: |-
+          {{ $value }} violations for Control {{ $labels.control }} in the {{ $labels.framework }} Kubescape framework
+        summary: Kubescape framework violation
+      expr: count by(framework,control) (kubescape_resources_found_count) > 0
+      labels:
+        severity: warning

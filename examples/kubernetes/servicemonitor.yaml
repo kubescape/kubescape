@@ -1,0 +1,20 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  labels:
+    app.kubernetes.io/name: kubescape
+  name: kubescape
+  namespace: kubescape
+spec:
+  endpoints:
+  - interval: 60s
+    path: /metrics
+    scrapeTimeout: 10s
+    targetPort: 80
+  jobLabel: kubescape
+  namespaceSelector:
+    matchNames:
+    - kubescape
+  selector:
+    matchLabels:
+      app: kubescape

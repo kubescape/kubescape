@@ -1,0 +1,65 @@
+apiVersion: apps/v1 
+kind: Deployment
+metadata:
+  name: kubescape
+  namespace: kubescape
+  labels:
+    app: kubescape
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubescape
+  template:
+    metadata:
+      labels:
+        app: kubescape
+    spec:
+      serviceAccount: kubescape
+      automountServiceAccountToken: true
+      containers:
+        - name: kubescape
+          image: quay.io/armosec/kubescape
+          imagePullPolicy: Always
+          ports:
+          - containerPort: 80
+            name: http
+          command: ["kubescape"]
+          args: ["metrics", "framework", "nsa"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /readyz
+              port: 80
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            failureThreshold: 3
+            httpGet:
+              path: /livez
+              port: 80
+              scheme: HTTP
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 300m
+              memory: 1024Mi
+            limits:
+              cpu: 1000m
+              memory: 2048Mi
+          volumeMounts:
+            - mountPath: /root/.kubescape
+              name: frameworks-tmp
+            - mountPath: /tmp
+              name: tmp
+      volumes:
+        - name: frameworks-tmp
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

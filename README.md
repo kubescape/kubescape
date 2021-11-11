@@ -157,6 +157,8 @@ kubescape scan framework nsa --format junit --output results.xml
 kubescape scan framework nsa --format prometheus
 ```
 
+See [docs/prometheus.md](docs/prometheus.md) for more information on using kubescape in prometheus.
+
 #### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
 ```
 kubescape scan framework nsa --exceptions examples/exceptions.json
