@@ -1,0 +1,32 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kubescape
+  labels:
+    app: kubescape
+  namespace: kubescape
+spec:
+  #      ┌────────────────── timezone (optional)
+  #      |      ┌───────────── minute (0 - 59)
+  #      |      │ ┌───────────── hour (0 - 23)
+  #      |      │ │ ┌───────────── day of the month (1 - 31)
+  #      |      │ │ │ ┌───────────── month (1 - 12)
+  #      |      │ │ │ │ ┌───────────── day of the week (0 - 6) (Sunday to Saturday;
+  #      |      │ │ │ │ │                         7 is also Sunday on some systems)
+  #      |      │ │ │ │ │
+  #      |      │ │ │ │ │
+  # CRON_TZ=UTC * * * * *
+  schedule: "0 0 1 * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: kubescape
+            image: quay.io/armosec/kubescape:latest
+            imagePullPolicy: IfNotPresent
+            command: ["/bin/sh","-c"]
+            args: 
+            - kubescape scan framework nsa
+          restartPolicy: OnFailure
+          serviceAccountName: kubescape-discovery

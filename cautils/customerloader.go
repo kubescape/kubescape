@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/getter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/kubescape/cautils/getter"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -129,7 +129,7 @@ func (c *EmptyConfig) GetCustomerGUID() string                { return "" }
 func (c *EmptyConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return nil } // TODO: return mock obj
 func (c *EmptyConfig) GetDefaultNS() string                   { return k8sinterface.GetDefaultNamespace() }
 func (c *EmptyConfig) GetBackendAPI() getter.IBackend         { return nil } // TODO: return mock obj
-func (c *EmptyConfig) GetClusterName() string                 { return k8sinterface.GetClusterName() }
+func (c *EmptyConfig) GetClusterName() string                 { return adoptClusterName(k8sinterface.GetClusterName()) }
 func (c *EmptyConfig) GenerateURL() {
 	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
 	InfoTextDisplay(os.Stdout, fmt.Sprintf("\n%s\n", message))
@@ -154,6 +154,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		defaultNS:  k8sinterface.GetDefaultNamespace(),
 	}
 }
+
 func (c *ClusterConfig) GetConfigObj() *ConfigObj               { return c.configObj }
 func (c *ClusterConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return c.k8s }
 func (c *ClusterConfig) GetDefaultNS() string                   { return c.defaultNS }

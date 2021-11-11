@@ -87,11 +87,12 @@ github.com/armosec/armoapi-go v0.0.2/go.mod h1:vIK17yoKbJRQyZXWWLe3AqfqCRITxW8qm
 github.com/armosec/armoapi-go v0.0.7/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9yQTU3qWRpaw=
 github.com/armosec/armoapi-go v0.0.8 h1:JPa9rZynuE2RucamDh6dsy/sjCScmWDsyt1zagJFCDo=
 github.com/armosec/armoapi-go v0.0.8/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9yQTU3qWRpaw=
-github.com/armosec/k8s-interface v0.0.5/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
 github.com/armosec/k8s-interface v0.0.8 h1:Eo3Qen4yFXxzVem49FNeij2ckyzHSAJ0w6PZMaSEIm8=
 github.com/armosec/k8s-interface v0.0.8/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
-github.com/armosec/opa-utils v0.0.18 h1:1hL5v2KCD8yStuwzul+gq1zg9+RCV9N3kHoRepKnrg0=
-github.com/armosec/opa-utils v0.0.18/go.mod h1:E0mFTVx+4BYAVvO2hxWnIniv/IZIogRCak8BkKd7KK4=
+github.com/armosec/opa-utils v0.0.39 h1:YOPMmwZaseqZT2/io918YycrMoJYu+ggbINnZJR9ZUA=
+github.com/armosec/opa-utils v0.0.39/go.mod h1:JaE2a0kB2O22JZCqBBfOS9Pvh9rXs9xXXb9lVo01rTs=
+github.com/armosec/rbac-utils v0.0.1 h1:N2MI98F/0zbDjmRZ29CNElU1AXkFLk5csd/qAHOBdXY=
+github.com/armosec/rbac-utils v0.0.1/go.mod h1:pQ8CBiij8kSKV7aeZm9FMvtZN28VgA7LZcYyTWimq40=
 github.com/armosec/utils-go v0.0.2/go.mod h1:itWmRLzRdsnwjpEOomL0mBWGnVNNIxSjDAdyc+b0iUo=
 github.com/armosec/utils-go v0.0.3 h1:uyQI676yRciQM0sSN9uPoqHkbspTxHO0kmzXhBeE/xU=
 github.com/armosec/utils-go v0.0.3/go.mod h1:itWmRLzRdsnwjpEOomL0mBWGnVNNIxSjDAdyc+b0iUo=
@@ -99,6 +100,7 @@ github.com/armosec/utils-k8s-go v0.0.1 h1:Ay3y7fW+4+FjVc0+obOWm8YsnEvM31vPAVoKTy
 github.com/armosec/utils-k8s-go v0.0.1/go.mod h1:qrU4pmY2iZsOb39Eltpm0sTTNM3E4pmeyWx4dgDUC2U=
 github.com/asaskevich/govalidator v0.0.0-20190424111038-f61b66f89f4a/go.mod h1:lB+ZfQJz7igIIfQNfa7Ml4HSf2uFQQRzpGGRXenZAgY=
 github.com/aws/aws-sdk-go v1.41.1/go.mod h1:585smgzpB/KqRA+K3y/NL/oYRqQvpNJYvLm+LY1U59Q=
+github.com/aws/aws-sdk-go v1.41.11/go.mod h1:585smgzpB/KqRA+K3y/NL/oYRqQvpNJYvLm+LY1U59Q=
 github.com/benbjohnson/clock v1.0.3/go.mod h1:bGMdMPoPVvcYyt1gHDf4J2KE153Yf9BuiUKYMaxlTDM=
 github.com/benbjohnson/clock v1.1.0 h1:Q92kusRqC1XV2MjkWETPvjJVqKetz1OzxZB7mHJLju8=
 github.com/benbjohnson/clock v1.1.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=

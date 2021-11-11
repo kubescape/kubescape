@@ -1,3 +1,10 @@
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# 
+# This file is DEPRECATE, please navigate to the official docs ->
+# https://github.com/armosec/kubescape/tree/master/examples/cronJob-support/README.md
+#
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
 ---
 # ------------------- Kubescape Service Account ------------------- #
 apiVersion: v1

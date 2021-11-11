@@ -29,7 +29,16 @@ kubescape scan framework nsa
 
 <img src="docs/summary.png">
 
+</br>
+
+> Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
+
+</br>
+
 ### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
+
+</br>
+
 
 # Being part of the team
 
@@ -42,7 +51,14 @@ Want to contribute? Want to discuss something? Have an issue?
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
 
+
 # Options and examples
+
+## Tutorials
+
+* [Overview](https://youtu.be/wdBkt_0Qhbg)
+* [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 
 ## Install on Windows
 
@@ -69,78 +85,94 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ## Flags
 
-| flag |  default | description | options |
-| --- | --- | --- | --- |
-| `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces |
-| `-s`/`--silent` | Display progress messages | Silent progress messages |
-| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result is below threshold| `0` -> `100` |
-| `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` |
-| `-o`/`--output` | print to stdout | Save scan result in file |
-| `--use-from` | | Load local framework object from specified path. If not used will download latest |
-| `--use-default` | `false` | Load local framework object from default path. If not used will download latest | `true`/`false` |
-| `--exceptions` | | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal |
-| `--submit` | `false` | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`|
-| `--keep-local` | `false` | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results | `true`/`false`|
-| `--account` | | Armo portal account ID. Default will load account ID from configMap or config file | |
+| flag                        | default                   | description                                                                                                                                                                                                                                                                                                          | options                          |
+|-----------------------------|---------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
+| `-e`/`--exclude-namespaces` | Scan all namespaces       | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces                                                                                                                                                                                                               |                                              |
+| `--include-namespaces`      | Scan all namespaces       | Scan specific namespaces                                                                                                                            |                                              |
+| `-s`/`--silent`             | Display progress messages | Silent progress messages                                                                                                                                                                                                                                                                                             |                                              |
+| `-t`/`--fail-threshold`     | `0` (do not fail)         | fail command (return exit code 1) if result is below threshold                                                                                                                                                                                                                                                         | `0` -> `100`                                 |
+| `-f`/`--format`             | `pretty-printer`          | Output format                                                                                                                                                                                                                                                                                                        | `pretty-printer`/`json`/`junit`/`prometheus` |
+| `-o`/`--output`             | print to stdout           | Save scan result in file                                                                                                                                                                                                                                                                                             |                                              |
+| `--use-from`                |                           | Load local framework object from specified path. If not used will download latest                                                                                                                                                                                                                                    |                                              |
+| `--use-default`             | `false`                   | Load local framework object from default path. If not used will download latest                                                                                                                                                                                                                                      | `true`/`false`                               |
+| `--exceptions`              |                           | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal                                                                                                                                                                                               |                                              |
+| `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
+| `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
+| `--account`                 |                           | Armo portal account ID. Default will load account ID from configMap or config file                                                                                                                                                                                                                                   |                                              |
+
 
 ## Usage & Examples
 
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
+#### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
 kubescape scan framework nsa --submit
 ```
 
 
-* Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to [ARMO portal](https://portal.armo.cloud/)
+#### Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
 kubescape scan framework mitre --submit
 ```
 
 
-* Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armo.cloud/docs/controls) 
+#### Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armo.cloud/docs/controls) 
 ```
 kubescape scan control "Privileged container"
 ```
 
-* Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
+#### Scan specific namespaces
+```
+kubescape scan framework nsa --include-namespaces development,staging,production
+```
+
+#### Scan cluster and exclude some namespaces
+```
+kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+```
+
+#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
 ```
 kubescape scan framework nsa *.yaml
 ```
 
-
-* Scan kubernetes manifest files from a public github repository 
+#### Scan kubernetes manifest files from a public github repository 
 ```
 kubescape scan framework nsa https://github.com/armosec/kubescape
 ```
 
-* Output in `json` format
+#### Output in `json` format
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format json --output results.json
-```
-
-* Output in `junit xml` format
-```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public --format junit --output results.xml
+kubescape scan framework nsa --format json --output results.json
 ```
 
-* Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
+#### Output in `junit xml` format
+```
+kubescape scan framework nsa --format junit --output results.xml
+```
+
+#### Output in `prometheus` metrics format - Contributed by [@Joibel](https://github.com/Joibel)
+```
+kubescape scan framework nsa --format prometheus
+```
+
+#### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
 ```
 kubescape scan framework nsa --exceptions examples/exceptions.json
 ```
 
-### Helm Support
-
-* Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout
+#### Scan Helm charts - Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout
 ```
 helm template [NAME] [CHART] [flags] --dry-run | kubescape scan framework nsa -
 ```
 
-for example:
+e.g.
 ```
 helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
 ```
+
+
 ### Offline Support
 
 It is possible to run Kubescape offline!
@@ -157,8 +189,35 @@ kubescape download framework nsa --output nsa.json
 kubescape scan framework nsa --use-from nsa.json
 ```
 
-Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
 
+## Scan Periodically using Helm - Contributed by [@yonahd](https://github.com/yonahd)  
+ 
+You can scan your cluster periodically by adding a `CronJob` that will repeatedly trigger kubescape
+
+```
+helm install kubescape examples/helm_chart/
+```
+
+## Scan using docker image
+
+Official Docker image `quay.io/armosec/kubescape`
+
+```
+docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan framework nsa /app/example.yaml
+```
+
+# Submit data manually
+
+Use the `submit` command if you wish to submit data manually
+
+## Submit scan results manually
+
+First, scan your cluster using the `json` format flag: `kubescape scan framework <name> --format json --output path/to/results.json`.
+
+Now you can submit the results to the Kubaescape SaaS version -
+```
+kubescape submit results path/to/results.json
+```
 # How to build
 
 ## Build using python (3.7^) script
@@ -199,12 +258,8 @@ go build -o kubescape .
 
 4. Enjoy :zany_face:
 
-## Docker Support
+## Docker Build
 
-### Official Docker image
-```
-quay.io/armosec/kubescape
-```
 ### Build your own Docker image
 
 1. Clone Project
@@ -216,6 +271,7 @@ git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
 ```
 docker build -t kubescape -f build/Dockerfile .
 ```
+
 
 # Under the hood
 
