@@ -120,6 +120,8 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (*repo
 	controlReport := reporthandling.ControlReport{}
 	controlReport.PortalBase = control.PortalBase
 	controlReport.ControlID = control.ControlID
+	controlReport.BaseScore = control.BaseScore
+
 	controlReport.Control_ID = control.Control_ID // TODO: delete when 'id' is deprecated
 
 	controlReport.Name = control.Name
