@@ -1,11 +1,8 @@
 package getter
 
 import (
-	"encoding/json"
 	"net/url"
 	"strings"
-
-	"github.com/armosec/opa-utils/reporthandling"
 )
 
 var NativeFrameworks = []string{"nsa", "mitre", "armobest"}
@@ -39,27 +36,6 @@ func (armoAPI *ArmoAPI) getListFrameworkURL() string {
 
 	return u.String()
 }
-
-func (armoAPI *ArmoAPI) GetCustomFrameworksForCustomer(customerGUID string) ([]string, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
-	if err != nil {
-		return nil, err
-	}
-	frs := []reporthandling.Framework{}
-	frameworkList := []string{}
-	err = json.Unmarshal([]byte(respStr), &frs)
-
-	for _, fr := range frs {
-		if isNativeFramework(fr.Name) {
-			frameworkList = append(frameworkList, strings.ToLower(fr.Name))
-		} else {
-			frameworkList = append(frameworkList, fr.Name)
-		}
-	}
-
-	return frameworkList, nil
-}
-
 func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) string {
 	u := url.URL{}
 	u.Scheme = "https"

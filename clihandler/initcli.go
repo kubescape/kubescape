@@ -87,7 +87,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		printerHandler:  printerHandler,
 	}
 }
-func setGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
+func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
 	if len(scanInfo.UseFrom) > 0 {
 		//load from file
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
@@ -99,11 +99,11 @@ func setGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
 			g.SetCustomerGUID(customerGUID)
 			scanInfo.PolicyGetter = g
 			if scanInfo.ScanAll {
-				frameworks, err := g.GetCustomFrameworksForCustomer(customerGUID)
+				frameworks, err := g.ListCustomFrameworks(customerGUID)
 				if err != nil {
 					glog.Error("could not get custom frameworks")
 				}
-				scanInfo = SetScanForGivenFrameworks(scanInfo, frameworks)
+				scanInfo.SetPolicyIdentifierForGivenFrameworks(frameworks)
 			}
 		}
 	}
@@ -113,7 +113,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 
 	interfaces := getInterfaces(scanInfo)
 
-	setGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())
+	setPolicyGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())
 
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
@@ -192,26 +192,4 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 	submitInterfaces.ClusterConfig.GenerateURL()
 
 	return nil
-}
-
-func SetScanForGivenFrameworks(scanInfo *cautils.ScanInfo, frameworks []string) *cautils.ScanInfo {
-	for _, framework := range frameworks {
-
-		if !contains(scanInfo, framework) {
-			newPolicy := reporthandling.PolicyIdentifier{}
-			newPolicy.Kind = reporthandling.KindFramework
-			newPolicy.Name = framework
-			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-		}
-	}
-	return scanInfo
-}
-
-func contains(scanInfo *cautils.ScanInfo, framework string) bool {
-	for _, policy := range scanInfo.PolicyIdentifier {
-		if policy.Name == framework {
-			return true
-		}
-	}
-	return false
 }

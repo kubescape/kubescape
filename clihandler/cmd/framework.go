@@ -18,7 +18,7 @@ var frameworkCmd = &cobra.Command{
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: getter.NativeFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 0 {
+		if len(args) == 0 {
 			return fmt.Errorf("requires at least one framework name")
 		}
 		return nil
@@ -28,7 +28,7 @@ var frameworkCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 		// If no framework provided, use all
 		if len(args) == 0 {
-			scanInfo = *clihandler.SetScanForGivenFrameworks(&scanInfo, getter.NativeFrameworks)
+			scanInfo.SetPolicyIdentifierForGivenFrameworks(getter.NativeFrameworks)
 			scanInfo.ScanAll = true
 		} else {
 			// Read frameworks from input args
@@ -36,7 +36,7 @@ var frameworkCmd = &cobra.Command{
 			frameworks := strings.Split(strings.Join(strings.Fields(args[0]), ""), ",")
 			scanInfo.PolicyIdentifier = SetScanForFirstFramework(frameworks)
 			if len(frameworks) > 1 {
-				scanInfo = *clihandler.SetScanForGivenFrameworks(&scanInfo, frameworks[1:])
+				scanInfo.SetPolicyIdentifierForGivenFrameworks(frameworks[1:])
 			}
 
 			if len(args) > 1 {
@@ -54,10 +54,6 @@ var frameworkCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-func isValidFramework(framework string) bool {
-	return cautils.StringInSlice(getter.NativeFrameworks, framework) != cautils.ValueNotFound
 }
 
 func init() {

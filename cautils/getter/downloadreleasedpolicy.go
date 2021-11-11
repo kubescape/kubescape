@@ -25,11 +25,8 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 func (drp *DownloadReleasedPolicy) GetControl(policyName string) (*reporthandling.Control, error) {
 	var control *reporthandling.Control
 	var err error
-	if strings.HasPrefix(policyName, "C-") || strings.HasPrefix(policyName, "c-") {
-		control, err = drp.gs.GetOPAControlByID(policyName)
-	} else {
-		control, err = drp.gs.GetOPAControlByName(policyName)
-	}
+
+	control, err = drp.gs.GetOPAControl(policyName)
 	if err != nil {
 		return nil, err
 	}

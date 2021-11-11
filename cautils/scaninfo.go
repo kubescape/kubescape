@@ -106,3 +106,23 @@ func (scanInfo *ScanInfo) setOutputFile() {
 func (scanInfo *ScanInfo) ScanRunningCluster() bool {
 	return len(scanInfo.InputPatterns) == 0
 }
+
+func (scanInfo *ScanInfo) SetPolicyIdentifierForGivenFrameworks(frameworks []string) {
+	for _, framework := range frameworks {
+		if !scanInfo.contains(framework) {
+			newPolicy := reporthandling.PolicyIdentifier{}
+			newPolicy.Kind = reporthandling.KindFramework
+			newPolicy.Name = framework
+			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+		}
+	}
+}
+
+func (scanInfo *ScanInfo) contains(framework string) bool {
+	for _, policy := range scanInfo.PolicyIdentifier {
+		if policy.Name == framework {
+			return true
+		}
+	}
+	return false
+}

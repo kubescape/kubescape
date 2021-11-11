@@ -34,7 +34,7 @@ var controlCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 
 		if len(args) == 0 {
-			scanInfo = *clihandler.SetScanForGivenFrameworks(&scanInfo, getter.NativeFrameworks)
+			scanInfo.SetPolicyIdentifierForGivenFrameworks(getter.NativeFrameworks)
 		} else {
 			controls := strings.Split(args[0], ",")
 			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}

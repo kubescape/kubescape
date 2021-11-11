@@ -28,7 +28,6 @@ var scanCmd = &cobra.Command{
 		if len(args) == 0 {
 			scanInfo.ScanAll = true
 			frameworks := getter.NativeFrameworks
-			frameworks = append(frameworks, args...)
 			frameworkArgs := []string{strings.Join(frameworks, ",")}
 			frameworkCmd.RunE(cmd, frameworkArgs)
 		}

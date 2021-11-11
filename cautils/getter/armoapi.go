@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -187,6 +188,48 @@ func (armoAPI *ArmoAPI) GetControlsInputs(customerGUID, clusterName string) (map
 		return accountConfig.Settings.PostureControlInputs, nil
 	}
 	return nil, err
+}
+
+func (armoAPI *ArmoAPI) ListCustomFrameworks(customerGUID string) ([]string, error) {
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
+	if err != nil {
+		return nil, err
+	}
+	frs := []reporthandling.Framework{}
+	if err = json.Unmarshal([]byte(respStr), &frs); err != nil {
+		return nil, err
+	}
+
+	frameworkList := []string{}
+	for _, fr := range frs {
+		if !isNativeFramework(fr.Name) {
+			frameworkList = append(frameworkList, fr.Name)
+		}
+	}
+
+	return frameworkList, nil
+}
+
+func (armoAPI *ArmoAPI) ListFrameworks(customerGUID string) ([]string, error) {
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
+	if err != nil {
+		return nil, err
+	}
+	frs := []reporthandling.Framework{}
+	if err = json.Unmarshal([]byte(respStr), &frs); err != nil {
+		return nil, err
+	}
+
+	frameworkList := []string{}
+	for _, fr := range frs {
+		if isNativeFramework(fr.Name) {
+			frameworkList = append(frameworkList, strings.ToLower(fr.Name))
+		} else {
+			frameworkList = append(frameworkList, fr.Name)
+		}
+	}
+
+	return frameworkList, nil
 }
 
 type TenantResponse struct {
