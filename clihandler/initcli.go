@@ -3,7 +3,6 @@ package clihandler
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -17,10 +16,8 @@ import (
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/golang/glog"
 )
-
-var SupportedFrameworks = []string{"nsa", "mitre", "armobest"}
-var ValidFrameworks = strings.Join(SupportedFrameworks, ", ")
 
 type componentInterfaces struct {
 	clusterConfig   cautils.IClusterConfig
@@ -90,10 +87,33 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		printerHandler:  printerHandler,
 	}
 }
+func setGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
+	if len(scanInfo.UseFrom) > 0 {
+		//load from file
+		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
+	} else {
+		if customerGUID == "" || !scanInfo.FrameworkScan {
+			scanInfo.PolicyGetter = getter.NewDownloadReleasedPolicy()
+		} else {
+			g := getter.GetArmoAPIConnector()
+			g.SetCustomerGUID(customerGUID)
+			scanInfo.PolicyGetter = g
+			if scanInfo.ScanAll {
+				frameworks, err := g.GetCustomFrameworksForCustomer(customerGUID)
+				if err != nil {
+					glog.Error("could not get custom frameworks")
+				}
+				scanInfo = SetScanForGivenFrameworks(scanInfo, frameworks)
+			}
+		}
+	}
+}
 
 func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 
 	interfaces := getInterfaces(scanInfo)
+
+	setGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())
 
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
@@ -172,4 +192,26 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 	submitInterfaces.ClusterConfig.GenerateURL()
 
 	return nil
+}
+
+func SetScanForGivenFrameworks(scanInfo *cautils.ScanInfo, frameworks []string) *cautils.ScanInfo {
+	for _, framework := range frameworks {
+
+		if !contains(scanInfo, framework) {
+			newPolicy := reporthandling.PolicyIdentifier{}
+			newPolicy.Kind = reporthandling.KindFramework
+			newPolicy.Name = framework
+			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+		}
+	}
+	return scanInfo
+}
+
+func contains(scanInfo *cautils.ScanInfo, framework string) bool {
+	for _, policy := range scanInfo.PolicyIdentifier {
+		if policy.Name == framework {
+			return true
+		}
+	}
+	return false
 }

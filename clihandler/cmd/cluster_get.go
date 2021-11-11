@@ -7,7 +7,6 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/clihandler"
 	"github.com/spf13/cobra"
 )
 
@@ -15,7 +14,7 @@ var getCmd = &cobra.Command{
 	Use:       "get <key>",
 	Short:     "Get configuration in cluster",
 	Long:      ``,
-	ValidArgs: clihandler.SupportedFrameworks,
+	ValidArgs: getter.NativeFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 1 {
 			return fmt.Errorf("requires  one argument")

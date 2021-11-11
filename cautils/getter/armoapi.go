@@ -3,9 +3,11 @@ package getter
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/opa-utils/gitregostore"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/golang/glog"
 )
@@ -28,10 +30,12 @@ var (
 
 // Armo API for downloading policies
 type ArmoAPI struct {
-	httpClient *http.Client
-	apiURL     string
-	erURL      string
-	feURL      string
+	httpClient   *http.Client
+	apiURL       string
+	erURL        string
+	feURL        string
+	customerGUID string
+	gs           *gitregostore.GitRegoStore
 }
 
 var globalArmoAPIConnecctor *ArmoAPI
@@ -80,9 +84,13 @@ func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL string) *ArmoAPI {
 func newArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
+		gs:         gitregostore.InitDefaultGitRegoStore(-1),
 	}
 }
+func (armoAPI *ArmoAPI) SetCustomerGUID(customerGUID string) {
+	armoAPI.customerGUID = customerGUID
 
+}
 func (armoAPI *ArmoAPI) GetFrontendURL() string {
 	return armoAPI.feURL
 }
@@ -104,6 +112,20 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, er
 	SaveFrameworkInFile(framework, GetDefaultPath(name+".json"))
 
 	return framework, err
+}
+
+func (armoAPI *ArmoAPI) GetControl(policyName string) (*reporthandling.Control, error) {
+	var control *reporthandling.Control
+	var err error
+	if strings.HasPrefix(policyName, "C-") || strings.HasPrefix(policyName, "c-") {
+		control, err = armoAPI.gs.GetOPAControlByID(policyName)
+	} else {
+		control, err = armoAPI.gs.GetOPAControlByName(policyName)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return control, nil
 }
 
 func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
