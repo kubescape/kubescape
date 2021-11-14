@@ -1,0 +1,23 @@
+[
+    {
+        "name": "exclude-deployments-in-ns-default",
+        "policyType": "postureExceptionPolicy",
+        "actions": [
+            "alertOnly"
+        ],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "namespace": "default",
+                    "kind": "Deployment"
+                }
+            }
+        ],
+        "posturePolicies": [
+            {
+                "controlName": "Allowed hostPath" 
+            }
+        ]
+    }
+]
