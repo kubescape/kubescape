@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -21,7 +22,7 @@ var controlCmd = &cobra.Command{
 			controls := strings.Split(args[0], ",")
 			if len(controls) > 1 {
 				if controls[1] == "" {
-					return fmt.Errorf("usage: <control_one>,<control_two>")
+					return fmt.Errorf("usage: <control-0>,<control-1>")
 				}
 			}
 		} else {
@@ -34,23 +35,31 @@ var controlCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 
 		if len(args) == 0 {
-			scanInfo.SetPolicyIdentifierForGivenFrameworks(getter.NativeFrameworks)
-		} else {
-			controls := strings.Split(args[0], ",")
-			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
-			scanInfo.PolicyIdentifier = setScanForFirstControl(controls)
+			scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, reporthandling.KindFramework)
+			scanInfo.ScanAll = true
+		} else { // expected control or list of control sepparated by ","
 
-			if len(controls) > 1 {
-				scanInfo.PolicyIdentifier = SetScanForGivenControls(controls[1:])
-			}
+			// Read controls from input args
+			scanInfo.SetPolicyIdentifiers(strings.Split(args[0], ","), reporthandling.KindControl)
 
 			if len(args) > 1 {
-				// Set scan to run on yamls
-				if err := scanInfo.SetInputPatterns(args); err != nil {
-					return err
+				if len(args[1:]) == 0 || args[1] != "-" {
+					scanInfo.InputPatterns = args[1:]
+				} else { // store stdin to file - do NOT move to separate function !!
+					tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
+					if err != nil {
+						return err
+					}
+					defer os.Remove(tempFile.Name())
+
+					if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+						return err
+					}
+					scanInfo.InputPatterns = []string{tempFile.Name()}
 				}
 			}
 		}
+
 		scanInfo.FrameworkScan = false
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
