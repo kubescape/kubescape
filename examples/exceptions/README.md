@@ -27,10 +27,10 @@ e.g. When a `kube-system` resource fails and it is ok, simply add the resource t
 
 ## Usage
 
-The `resources` list and `posturePolicies` list are design to be a combination of the resources sand policies to exclude
+The `resources` list and `posturePolicies` list are design to be a combination of the resources and policies to exclude
 > You must declare at least one resource and one policy
 
-e.g. If you wish to exclude all namespaces with the label "environment": "dev", the resource list should look as following:
+e.g. If you wish to exclude all namespaces with the label `"environment": "dev"`, the resource list should look as following:
 ```
 "resources": [
     {
@@ -43,7 +43,7 @@ e.g. If you wish to exclude all namespaces with the label "environment": "dev", 
 ]
 ```
 
-But if you wish to exclude all namespaces **OR** any resource with the label "environment": "dev", the resource list should look as following:
+But if you wish to exclude all namespaces **OR** any resource with the label `"environment": "dev"`, the resource list should look as following:
 ```
 "resources": [
     {
@@ -63,17 +63,17 @@ But if you wish to exclude all namespaces **OR** any resource with the label "en
 
 Same works with the `posturePolicies` list ->
 
-e.g. If you wish to exclude the resources decleared in the `resources` list that faild when scanning the `NSA` framework **AND** failed the `Allowed hostPath` control, the `posturePolicies` list should look as following:
+e.g. If you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **AND** failed the `Allowed hostPath` control, the `posturePolicies` list should look as following:
 ```
 "posturePolicies": [
     {
-        "frameworkName": "NSA" 
+        "frameworkName": "NSA",
         "controlName": "Allowed hostPath" 
     }
 ]
 ```
 
-But if you wish to exclude the resources decleared in the `resources` list that faild when scanning the `NSA` framework **OR** failed the `Allowed hostPath` control, the `posturePolicies` list should look as following:
+But if you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **OR** failed the `Allowed hostPath` control, the `posturePolicies` list should look as following:
 ```
 "posturePolicies": [
     {
