@@ -3,7 +3,8 @@ import smoke_utils
 import sys
 
 
-all_files = os.path.join("..", "examples", "online-boutique", "*.yaml")
+all_files = os.path.join("..", "*.yaml")
+# all_files = os.path.join("..", "examples", "online-boutique", "*.yaml")
 single_file = os.path.join("..", "examples", "online-boutique", "frontend.yaml")
 
 
