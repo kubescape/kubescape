@@ -101,9 +101,10 @@ func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
 			if scanInfo.ScanAll {
 				frameworks, err := g.ListCustomFrameworks(customerGUID)
 				if err != nil {
-					glog.Error("could not get custom frameworks")
+					glog.Error("failed to get custom frameworks") // handle error
+					return
 				}
-				scanInfo.SetPolicyIdentifierForGivenFrameworks(frameworks)
+				scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
 			}
 		}
 	}

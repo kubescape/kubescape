@@ -131,7 +131,7 @@ func (c *EmptyConfig) GetDefaultNS() string                   { return k8sinterf
 func (c *EmptyConfig) GetBackendAPI() getter.IBackend         { return nil } // TODO: return mock obj
 func (c *EmptyConfig) GetClusterName() string                 { return adoptClusterName(k8sinterface.GetClusterName()) }
 func (c *EmptyConfig) GenerateURL() {
-	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
+	message := fmt.Sprintf("\nYou can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
 	InfoTextDisplay(os.Stdout, fmt.Sprintf("\n%s\n", message))
 }
 
@@ -161,7 +161,7 @@ func (c *ClusterConfig) GetDefaultNS() string                   { return c.defau
 func (c *ClusterConfig) GetBackendAPI() getter.IBackend         { return c.backendAPI }
 
 func (c *ClusterConfig) GenerateURL() {
-	message := "Checkout for more cool features: "
+	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: "
 
 	u := url.URL{}
 	u.Scheme = "https"

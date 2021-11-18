@@ -58,6 +58,7 @@ Want to contribute? Want to discuss something? Have an issue?
 
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
 * [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 
 ## Install on Windows
@@ -158,8 +159,9 @@ kubescape scan framework nsa --format prometheus
 ```
 
 #### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
+[Full documentation](examples/exceptions/README.md)
 ```
-kubescape scan framework nsa --exceptions examples/exceptions.json
+kubescape scan framework nsa --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 
 #### Scan Helm charts - Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout
@@ -174,6 +176,8 @@ helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework
 
 
 ### Offline Support
+
+[Video tutorial](https://youtu.be/IGXL9s37smM)
 
 It is possible to run Kubescape offline!
 
