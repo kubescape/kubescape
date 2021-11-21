@@ -57,6 +57,9 @@ func NewVersionCheckHandler() *VersionCheckHandler {
 	}
 }
 func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanningTarget string) *VersionCheckRequest {
+	if buildNumber == "" {
+		buildNumber = "unknown"
+	}
 	return &VersionCheckRequest{
 		Client:           "kubescape",
 		ClientVersion:    buildNumber,
@@ -82,17 +85,23 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 		fmt.Println(warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
 	}
 
-	if latestVersion.FrameworkUpdate != "" {
-		fmt.Println(warningMessage(latestVersion.Framework, latestVersion.FrameworkUpdate))
+	// TODO - Enable after supporting framework version
+	// if latestVersion.FrameworkUpdate != "" {
+	// 	fmt.Println(warningMessage(latestVersion.Framework, latestVersion.FrameworkUpdate))
+	// }
+
+	if latestVersion.Message != "" {
+		fmt.Println(latestVersion.Message)
 	}
+
 	return nil
 }
 
 func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest) (*VersionCheckResponse, error) {
 
-	reqBody, err := json.Marshal(versionData)
+	reqBody, err := json.Marshal(*versionData)
 	if err != nil {
-		return nil, fmt.Errorf("in 'CheckLatestVersion' failed to json.Marshal, reason: %v", err)
+		return nil, fmt.Errorf("in 'CheckLatestVersion' failed to json.Marshal, reason: %s", err.Error())
 	}
 
 	resp, err := getter.HttpPost(http.DefaultClient, v.versionURL, map[string]string{"Content-Type": "application/json"}, reqBody)

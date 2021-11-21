@@ -28,6 +28,12 @@
         "posturePolicies": [
             {
                 "frameworkName": "NSA"
+            },
+            {
+                "frameworkName": "MITRE"
+            },
+            {
+                "frameworkName": "ArmoBest"
             }
         ]
     }

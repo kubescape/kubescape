@@ -25,7 +25,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
  
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```

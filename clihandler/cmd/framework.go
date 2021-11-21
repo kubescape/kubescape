@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -18,34 +19,48 @@ var frameworkCmd = &cobra.Command{
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: getter.NativeFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
+		if len(args) > 0 {
+			frameworks := strings.Split(args[0], ",")
+			if len(frameworks) > 1 {
+				if frameworks[1] == "" {
+					return fmt.Errorf("usage: <framework-0>,<framework-1>")
+				}
+			}
+		} else {
 			return fmt.Errorf("requires at least one framework name")
 		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		flagValidationFramework()
-		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
-		// If no framework provided, use all
-		if len(args) == 0 {
-			scanInfo.SetPolicyIdentifierForGivenFrameworks(getter.NativeFrameworks)
+		var frameworks []string
+
+		if len(args) == 0 { // scan all frameworks
+			frameworks = getter.NativeFrameworks
 			scanInfo.ScanAll = true
 		} else {
 			// Read frameworks from input args
-			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
-			frameworks := strings.Split(strings.Join(strings.Fields(args[0]), ""), ",")
-			scanInfo.PolicyIdentifier = SetScanForFirstFramework(frameworks)
-			if len(frameworks) > 1 {
-				scanInfo.SetPolicyIdentifierForGivenFrameworks(frameworks[1:])
-			}
+			frameworks = strings.Split(args[0], ",")
 
 			if len(args) > 1 {
-				// expected yaml/url input
-				if err := scanInfo.SetInputPatterns(args); err != nil {
-					return err
+				if len(args[1:]) == 0 || args[1] != "-" {
+					scanInfo.InputPatterns = args[1:]
+				} else { // store stdin to file - do NOT move to separate function !!
+					tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
+					if err != nil {
+						return err
+					}
+					defer os.Remove(tempFile.Name())
+
+					if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+						return err
+					}
+					scanInfo.InputPatterns = []string{tempFile.Name()}
 				}
 			}
 		}
+		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
+
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
 		err := clihandler.ScanCliSetup(&scanInfo)
@@ -62,13 +77,13 @@ func init() {
 	scanInfo.FrameworkScan = true
 }
 
-func SetScanForFirstFramework(frameworks []string) []reporthandling.PolicyIdentifier {
-	newPolicy := reporthandling.PolicyIdentifier{}
-	newPolicy.Kind = reporthandling.KindFramework
-	newPolicy.Name = frameworks[0]
-	scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-	return scanInfo.PolicyIdentifier
-}
+// func SetScanForFirstFramework(frameworks []string) []reporthandling.PolicyIdentifier {
+// 	newPolicy := reporthandling.PolicyIdentifier{}
+// 	newPolicy.Kind = reporthandling.KindFramework
+// 	newPolicy.Name = frameworks[0]
+// 	scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+// 	return scanInfo.PolicyIdentifier
+// }
 
 func flagValidationFramework() {
 	if scanInfo.Submit && scanInfo.Local {

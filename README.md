@@ -24,7 +24,7 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan framework nsa
+kubescape scan framework nsa --submit
 ```
 
 <img src="docs/summary.png">
@@ -58,6 +58,7 @@ Want to contribute? Want to discuss something? Have an issue?
 
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
 * [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 
 ## Install on Windows
@@ -105,7 +106,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ### Examples
 
-#### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
+#### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
 kubescape scan framework nsa --submit
 ```
@@ -158,8 +159,9 @@ kubescape scan framework nsa --format prometheus
 ```
 
 #### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
+[Full documentation](examples/exceptions/README.md)
 ```
-kubescape scan framework nsa --exceptions examples/exceptions.json
+kubescape scan framework nsa --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 
 #### Scan Helm charts - Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout
@@ -174,6 +176,8 @@ helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework
 
 
 ### Offline Support
+
+[Video tutorial](https://youtu.be/IGXL9s37smM)
 
 It is possible to run Kubescape offline!
 
@@ -276,7 +280,7 @@ docker build -t kubescape -f build/Dockerfile .
 # Under the hood
 
 ## Tests
-Kubescape is running the following tests according to what is defined by [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
+Kubescape is running the following tests according to what is defined by [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
 * Non-root containers
 * Immutable container filesystem
 * Privileged containers

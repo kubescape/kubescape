@@ -1,8 +1,6 @@
 package cautils
 
 import (
-	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils/getter"
@@ -69,24 +67,6 @@ func (scanInfo *ScanInfo) setUseFrom() {
 	}
 }
 
-func (scanInfo *ScanInfo) SetInputPatterns(args []string) error {
-	if args[1] != "-" {
-		scanInfo.InputPatterns = args[1:]
-	} else { // store stout to file
-		tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
-		if err != nil {
-			return err
-		}
-		defer os.Remove(tempFile.Name())
-
-		if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-			return err
-		}
-		scanInfo.InputPatterns = []string{tempFile.Name()}
-	}
-	return nil
-}
-
 func (scanInfo *ScanInfo) setOutputFile() {
 	if scanInfo.Output == "" {
 		return
@@ -107,20 +87,20 @@ func (scanInfo *ScanInfo) ScanRunningCluster() bool {
 	return len(scanInfo.InputPatterns) == 0
 }
 
-func (scanInfo *ScanInfo) SetPolicyIdentifierForGivenFrameworks(frameworks []string) {
-	for _, framework := range frameworks {
-		if !scanInfo.contains(framework) {
+func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind reporthandling.NotificationPolicyKind) {
+	for _, policy := range policies {
+		if !scanInfo.contains(policy) {
 			newPolicy := reporthandling.PolicyIdentifier{}
-			newPolicy.Kind = reporthandling.KindFramework
-			newPolicy.Name = framework
+			newPolicy.Kind = kind // reporthandling.KindFramework
+			newPolicy.Name = policy
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 		}
 	}
 }
 
-func (scanInfo *ScanInfo) contains(framework string) bool {
+func (scanInfo *ScanInfo) contains(policyName string) bool {
 	for _, policy := range scanInfo.PolicyIdentifier {
-		if policy.Name == framework {
+		if policy.Name == policyName {
 			return true
 		}
 	}

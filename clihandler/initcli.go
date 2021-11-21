@@ -26,27 +26,6 @@ type componentInterfaces struct {
 	printerHandler  printer.IPrinter
 }
 
-func getReporter(scanInfo *cautils.ScanInfo) reporter.IReport {
-	if !scanInfo.Submit {
-		return reporter.NewReportMock()
-	}
-	if !scanInfo.FrameworkScan {
-		return reporter.NewReportMock()
-	}
-
-	return reporter.NewReportEventReceiver("", "")
-}
-
-func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector {
-	if scanInfo.IncludeNamespaces != "" {
-		return resourcehandler.NewIncludeSelector(scanInfo.IncludeNamespaces)
-	}
-	if scanInfo.ExcludedNamespaces != "" {
-		return resourcehandler.NewExcludeSelector(scanInfo.ExcludedNamespaces)
-	}
-
-	return &resourcehandler.EmptySelector{}
-}
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
 	var clusterConfig cautils.IClusterConfig
@@ -74,7 +53,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	}
 
 	v := cautils.NewIVersionCheckHandler()
-	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", scanningTarget))
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanningTarget))
 
 	// setup printer
 	printerHandler := printer.GetPrinter(scanInfo.Format)
@@ -101,9 +80,10 @@ func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
 			if scanInfo.ScanAll {
 				frameworks, err := g.ListCustomFrameworks(customerGUID)
 				if err != nil {
-					glog.Error("could not get custom frameworks")
+					glog.Error("failed to get custom frameworks") // handle error
+					return
 				}
-				scanInfo.SetPolicyIdentifierForGivenFrameworks(frameworks)
+				scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
 			}
 		}
 	}
