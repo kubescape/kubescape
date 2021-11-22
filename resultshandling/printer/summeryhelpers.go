@@ -8,11 +8,18 @@ import (
 )
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
-func groupByNamespace(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
+func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
 		if status(&resources[i]) {
-			if r, ok := mapResources[resources[i].Namespace]; ok {
+			if resources[i].Namespace == "" && (resources[i].Kind == "Group" || resources[i].Kind == "User") {
+				if r, ok := mapResources[resources[i].Kind]; ok {
+					r = append(r, resources[i])
+					mapResources[resources[i].Kind] = r
+				} else {
+					mapResources[resources[i].Kind] = []WorkloadSummary{resources[i]}
+				}
+			} else if r, ok := mapResources[resources[i].Namespace]; ok {
 				r = append(r, resources[i])
 				mapResources[resources[i].Namespace] = r
 			} else {
@@ -83,12 +90,16 @@ func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
 
 func newWorkloadSummaryExternalObj(obj map[string]interface{}) (*WorkloadSummary, error) {
 	r := &WorkloadSummary{}
-
+	relatedObjectsMap := []map[string]string{}
 	relatedObjects := []workloadinterface.IMetadata{}
 	if relatedObjectslist, ok := obj["relatedObjects"].([]interface{}); ok {
-		for _, related := range relatedObjectslist {
+		for i, related := range relatedObjectslist {
 			if r, ok := related.(map[string]interface{}); ok {
 				o := workloadinterface.NewWorkloadObj(r)
+				if ns := o.GetNamespace(); i == 0 && ns != "" {
+					relatedObjectsMap = append(relatedObjectsMap, map[string]string{"Namespace": ns})
+				}
+				relatedObjectsMap = append(relatedObjectsMap, map[string]string{o.GetKind(): o.GetName()})
 				relatedObjects = append(relatedObjects, o)
 			}
 		}
@@ -100,5 +111,6 @@ func newWorkloadSummaryExternalObj(obj map[string]interface{}) (*WorkloadSummary
 	r.Kind = vector.GetKind()
 	r.Namespace = vector.GetNamespace()
 	r.Name = vector.GetName()
+	r.RelatedObjects = relatedObjectsMap
 	return r, nil
 }

@@ -24,11 +24,12 @@ type ControlSummary struct {
 }
 
 type WorkloadSummary struct {
-	Kind      string
-	Name      string
-	Namespace string
-	Group     string
-	Exception *armotypes.PostureExceptionPolicy
+	Kind           string
+	Name           string
+	Namespace      string
+	Group          string
+	RelatedObjects []map[string]string // kind -> name
+	Exception      *armotypes.PostureExceptionPolicy
 }
 
 func (controlSummary *ControlSummary) ToSlice() []string {
