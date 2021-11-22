@@ -86,10 +86,11 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armosec/armoapi-go v0.0.2/go.mod h1:vIK17yoKbJRQyZXWWLe3AqfqCRITxW8qmSkApyq5xFs=
 github.com/armosec/armoapi-go v0.0.23 h1:jqoLIWM5CR7DCD9fpFgN0ePqtHvOCoZv/XzCwsUluJU=
 github.com/armosec/armoapi-go v0.0.23/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9yQTU3qWRpaw=
-github.com/armosec/k8s-interface v0.0.8 h1:Eo3Qen4yFXxzVem49FNeij2ckyzHSAJ0w6PZMaSEIm8=
 github.com/armosec/k8s-interface v0.0.8/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
-github.com/armosec/opa-utils v0.0.42 h1:7YzQJNVBmM0+1nWOAiUgDt+mvlVEwApg80FjMh4oxXo=
-github.com/armosec/opa-utils v0.0.42/go.mod h1:OqewZoSqKD5udtQ4lGFixb8yyFNqLq9zqinlAL6KSjM=
+github.com/armosec/k8s-interface v0.0.12 h1:SzFqu9dG+Pak+empVkYu+weznWTNSWlxcIqTaGFIgFo=
+github.com/armosec/k8s-interface v0.0.12/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
+github.com/armosec/opa-utils v0.0.45 h1:TZQ9QY6Lft4BxLrHADv0ERoJdzRMg8U6N7LBO9vAUMs=
+github.com/armosec/opa-utils v0.0.45/go.mod h1:HtOWZJXviVwuCeUBc5TMZFoxYz9QsITxCE3oJVx/Z6Y=
 github.com/armosec/rbac-utils v0.0.1 h1:N2MI98F/0zbDjmRZ29CNElU1AXkFLk5csd/qAHOBdXY=
 github.com/armosec/rbac-utils v0.0.1/go.mod h1:pQ8CBiij8kSKV7aeZm9FMvtZN28VgA7LZcYyTWimq40=
 github.com/armosec/utils-go v0.0.2/go.mod h1:itWmRLzRdsnwjpEOomL0mBWGnVNNIxSjDAdyc+b0iUo=

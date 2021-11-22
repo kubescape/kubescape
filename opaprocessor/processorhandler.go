@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
@@ -149,7 +150,11 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	if ruleWithArmoOpaDependency(rule.Attributes) {
 		return nil, nil
 	}
+	if strings.HasSuffix(rule.Name, "-v0") {
+		return nil, nil
+	}
 	k8sObjects := getKubernetesObjects(opap.K8SResources, rule.Match)
+	k8sObjects = reporthandling.RegoResourcesAggregator(rule, k8sObjects)
 	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects)
 	if err != nil {
 		ruleReport.RuleStatus.Status = "failure"

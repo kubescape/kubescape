@@ -57,6 +57,13 @@ func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error
 
 		resource = append(resource, *r)
 	}
+	if obj.ExternalObjects != nil {
+		r, err := newWorkloadSummaryExternalObj(obj.ExternalObjects)
+		if err != nil {
+			return resource, err
+		}
+		resource = append(resource, *r)
+	}
 
 	return resource, nil
 }
@@ -71,5 +78,27 @@ func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
 	r.Kind = workload.GetKind()
 	r.Namespace = workload.GetNamespace()
 	r.Name = workload.GetName()
+	return r, nil
+}
+
+func newWorkloadSummaryExternalObj(obj map[string]interface{}) (*WorkloadSummary, error) {
+	r := &WorkloadSummary{}
+
+	relatedObjects := []workloadinterface.IMetadata{}
+	if relatedObjectslist, ok := obj["relatedObjects"].([]interface{}); ok {
+		for _, related := range relatedObjectslist {
+			if r, ok := related.(map[string]interface{}); ok {
+				o := workloadinterface.NewWorkloadObj(r)
+				relatedObjects = append(relatedObjects, o)
+			}
+		}
+	}
+	vector := workloadinterface.NewRegoResponseVectorObject(obj, relatedObjects)
+	if vector == nil {
+		return r, fmt.Errorf("error creating rego response vector obj")
+	}
+	r.Kind = vector.GetKind()
+	r.Namespace = vector.GetNamespace()
+	r.Name = vector.GetName()
 	return r, nil
 }

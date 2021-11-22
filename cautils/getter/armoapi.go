@@ -85,7 +85,8 @@ func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL string) *ArmoAPI {
 func newArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
-		gs:         gitregostore.InitDefaultGitRegoStore(-1),
+		// gs:         gitregostore.InitDefaultGitRegoStore(-1),
+		gs: gitregostore.InitGitRegoStore("https://api.github.com/repos", "armosec", "regolibrary", "git/trees", "", "dev", -1),
 	}
 }
 func (armoAPI *ArmoAPI) SetCustomerGUID(customerGUID string) {
