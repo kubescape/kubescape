@@ -138,7 +138,7 @@ func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]Workl
 
 	for ns, rsc := range workloads {
 		preIndent := indent
-		if ns == "Group" || ns == "User" {
+		if isKindToBeGrouped(ns) {
 			cautils.SimpleDisplay(printer.writer, "%s%ss\n", indent, ns)
 		} else if ns != "" {
 			cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)

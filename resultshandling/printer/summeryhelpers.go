@@ -12,7 +12,7 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
 		if status(&resources[i]) {
-			if resources[i].Namespace == "" && (resources[i].Kind == "Group" || resources[i].Kind == "User") {
+			if resources[i].Namespace == "" && isKindToBeGrouped(resources[i].Kind) {
 				if r, ok := mapResources[resources[i].Kind]; ok {
 					r = append(r, resources[i])
 					mapResources[resources[i].Kind] = r
@@ -29,6 +29,14 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 	}
 	return mapResources
 }
+
+func isKindToBeGrouped(kind string) bool {
+	if kind == "Group" || kind == "User" {
+		return true
+	}
+	return false
+}
+
 func listResultSummary(ruleReports []reporthandling.RuleReport) []WorkloadSummary {
 	workloadsSummary := []WorkloadSummary{}
 	track := map[string]bool{}
