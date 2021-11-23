@@ -1,0 +1,26 @@
+[
+    {
+        "name": "exclude-nginx-in-minikube",
+        "policyType": "postureExceptionPolicy",
+        "actions": [
+            "alertOnly"
+        ],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "cluster": "minikube",
+                    "app": "nginx"
+                }
+            }
+        ],
+        "posturePolicies": [
+            {
+                "frameworkName": "NSA" 
+            },
+            {
+                "frameworkName": "MITRE" 
+            }
+        ]
+    }
+]

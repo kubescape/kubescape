@@ -1,0 +1,14 @@
+# ------------------- Kubescape User/Customer ID ------------------- #
+kind: ConfigMap 
+apiVersion: v1 
+metadata:
+  name: kubescape 
+  labels:
+    app: kubescape
+  namespace: kubescape
+data:
+  config.json: |
+    {
+      "customerGUID": "<ID>",
+      "clusterName": "<cluster name>"
+    }

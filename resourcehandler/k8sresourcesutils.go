@@ -1,4 +1,4 @@
-package policyhandler
+package resourcehandler
 
 import (
 	"github.com/armosec/kubescape/cautils"

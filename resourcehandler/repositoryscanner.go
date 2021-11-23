@@ -1,4 +1,4 @@
-package policyhandler
+package resourcehandler
 
 import (
 	"encoding/json"
@@ -95,7 +95,7 @@ func (g *GitHubRepository) setBranch(branchOptional string) error {
 	// By default it is "master", unless the branchOptional came with a value
 	if branchOptional == "" {
 
-		body, err := getter.HttpGetter(&http.Client{}, g.defaultBranchAPI())
+		body, err := getter.HttpGetter(&http.Client{}, g.defaultBranchAPI(), nil)
 		if err != nil {
 			return err
 		}
@@ -117,7 +117,7 @@ func (g *GitHubRepository) defaultBranchAPI() string {
 }
 
 func (g *GitHubRepository) setTree() error {
-	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI())
+	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI(), nil)
 	if err != nil {
 		return err
 	}

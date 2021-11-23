@@ -8,10 +8,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/getter"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/kubescape/cautils/getter"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -109,8 +109,10 @@ func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beA
 		return NewEmptyConfig() // local - Delete local config & Do not send report
 	}
 	if scanInfo.Local {
+		scanInfo.Submit = false
 		return NewEmptyConfig() // local - Do not send report
 	}
+	scanInfo.Submit = true
 	return clusterConfig // submit/default -  Submit report
 }
 
@@ -127,9 +129,9 @@ func (c *EmptyConfig) GetCustomerGUID() string                { return "" }
 func (c *EmptyConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return nil } // TODO: return mock obj
 func (c *EmptyConfig) GetDefaultNS() string                   { return k8sinterface.GetDefaultNamespace() }
 func (c *EmptyConfig) GetBackendAPI() getter.IBackend         { return nil } // TODO: return mock obj
-func (c *EmptyConfig) GetClusterName() string                 { return k8sinterface.GetClusterName() }
+func (c *EmptyConfig) GetClusterName() string                 { return adoptClusterName(k8sinterface.GetClusterName()) }
 func (c *EmptyConfig) GenerateURL() {
-	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
+	message := fmt.Sprintf("\nYou can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
 	InfoTextDisplay(os.Stdout, fmt.Sprintf("\n%s\n", message))
 }
 
@@ -152,12 +154,14 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		defaultNS:  k8sinterface.GetDefaultNamespace(),
 	}
 }
+
 func (c *ClusterConfig) GetConfigObj() *ConfigObj               { return c.configObj }
 func (c *ClusterConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return c.k8s }
 func (c *ClusterConfig) GetDefaultNS() string                   { return c.defaultNS }
 func (c *ClusterConfig) GetBackendAPI() getter.IBackend         { return c.backendAPI }
 
 func (c *ClusterConfig) GenerateURL() {
+	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: "
 
 	u := url.URL{}
 	u.Scheme = "https"
@@ -165,9 +169,8 @@ func (c *ClusterConfig) GenerateURL() {
 	if c.configObj == nil {
 		return
 	}
-	message := fmt.Sprintf("\nCheckout for more cool features: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
 	if c.configObj.CustomerAdminEMail != "" {
-		InfoTextDisplay(os.Stdout, message+"\n")
+		InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
 		return
 	}
 	u.Path = "account/sign-up"
@@ -176,8 +179,7 @@ func (c *ClusterConfig) GenerateURL() {
 	q.Add("customerGUID", c.configObj.CustomerGUID)
 
 	u.RawQuery = q.Encode()
-	InfoTextDisplay(os.Stdout, message+"\n")
-
+	InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
 }
 
 func (c *ClusterConfig) GetCustomerGUID() string {
@@ -242,7 +244,7 @@ func (c *ClusterConfig) setCustomerGUID(customerGUID string) {
 }
 
 func (c *ClusterConfig) setClusterName(clusterName string) {
-	c.configObj.ClusterName = clusterName
+	c.configObj.ClusterName = adoptClusterName(clusterName)
 }
 func (c *ClusterConfig) GetClusterName() string {
 	return c.configObj.ClusterName
@@ -470,4 +472,8 @@ func DeleteConfigMap(k8s *k8sinterface.KubernetesApi) error {
 
 func DeleteConfigFile() error {
 	return os.Remove(ConfigFileFullPath())
+}
+
+func adoptClusterName(clusterName string) string {
+	return strings.ReplaceAll(clusterName, "/", "-")
 }

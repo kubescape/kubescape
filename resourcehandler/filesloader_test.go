@@ -1,4 +1,4 @@
-package policyhandler
+package resourcehandler
 
 import (
 	"fmt"

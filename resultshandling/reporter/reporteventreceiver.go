@@ -1,61 +1,64 @@
 package reporter
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/url"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
+type IReport interface {
+	ActionSendReport(opaSessionObj *cautils.OPASessionObj) error
+	SetCustomerGUID(customerGUID string)
+	SetClusterName(clusterName string)
+}
+
 type ReportEventReceiver struct {
-	httpClient http.Client
-	host       url.URL
+	httpClient   *http.Client
+	clusterName  string
+	customerGUID string
 }
 
-func NewReportEventReceiver() *ReportEventReceiver {
-	hostURL := initEventReceiverURL()
+func NewReportEventReceiver(customerGUID, clusterName string) *ReportEventReceiver {
 	return &ReportEventReceiver{
-		httpClient: http.Client{},
-		host:       *hostURL,
+		httpClient:   &http.Client{},
+		clusterName:  clusterName,
+		customerGUID: customerGUID,
 	}
 }
 
-func (report *ReportEventReceiver) ActionSendReportListenner(opaSessionObj *cautils.OPASessionObj) {
-	if cautils.CustomerGUID == "" {
-		return
-	}
-	//Add score
-
+func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
 	// Remove data before reporting
 	keepFields := []string{"kind", "apiVersion", "metadata"}
 	keepMetadataFields := []string{"name", "namespace", "labels"}
 	opaSessionObj.PostureReport.RemoveData(keepFields, keepMetadataFields)
 
-	if err := report.Send(opaSessionObj.PostureReport); err != nil {
-		fmt.Println(err)
+	if err := report.send(opaSessionObj.PostureReport); err != nil {
+		return err
 	}
+	return nil
 }
-func (report *ReportEventReceiver) Send(postureReport *reporthandling.PostureReport) error {
+
+func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
+	report.customerGUID = customerGUID
+}
+
+func (report *ReportEventReceiver) SetClusterName(clusterName string) {
+	report.clusterName = clusterName
+}
+
+func (report *ReportEventReceiver) send(postureReport *reporthandling.PostureReport) error {
 
 	reqBody, err := json.Marshal(*postureReport)
 	if err != nil {
 		return fmt.Errorf("in 'Send' failed to json.Marshal, reason: %v", err)
 	}
-	host := hostToString(&report.host, postureReport.ReportID)
+	host := hostToString(report.initEventReceiverURL(), postureReport.ReportID)
 
-	req, err := http.NewRequest("POST", host, bytes.NewReader(reqBody))
-	if err != nil {
-		return fmt.Errorf("in 'Send', http.NewRequest failed, host: %s, reason: %v", host, err)
-	}
-	res, err := report.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("httpClient.Do failed: %v", err)
-	}
-	msg, err := httpRespToString(res)
+	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
 	if err != nil {
 		return fmt.Errorf("%s, %v:%s", host, err, msg)
 	}
