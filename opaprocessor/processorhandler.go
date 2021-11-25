@@ -3,7 +3,6 @@ package opaprocessor
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
@@ -150,11 +149,15 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	if ruleWithArmoOpaDependency(rule.Attributes) {
 		return nil, nil
 	}
-	if strings.HasSuffix(rule.Name, "-v0") {
+	if !isRuleKubescapeVersionCompatible(rule) {
 		return nil, nil
 	}
 	k8sObjects := getKubernetesObjects(opap.K8SResources, rule.Match)
-	k8sObjects = reporthandling.RegoResourcesAggregator(rule, k8sObjects)
+	k8sObjects, err := reporthandling.RegoResourcesAggregator(rule, k8sObjects)
+	if err != nil {
+		glog.Error(err)
+		return nil, fmt.Errorf("error getting aggregated k8sObjects: %s", err.Error())
+	}
 	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects)
 	if err != nil {
 		ruleReport.RuleStatus.Status = "failure"
@@ -165,6 +168,26 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	}
 	ruleReport.ListInputResources = k8sObjects
 	return &ruleReport, err
+}
+
+func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
+	if from, ok := rule.Attributes["useFromKubescapeVersion"]; ok {
+		if cautils.BuildNumber != "" {
+			if from.(string) > cautils.BuildNumber {
+				return false
+			}
+		}
+	}
+	if until, ok := rule.Attributes["useUntilKubescapeVersion"]; ok {
+		if cautils.BuildNumber != "" {
+			if until.(string) <= cautils.BuildNumber {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+	return true
 }
 
 func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
