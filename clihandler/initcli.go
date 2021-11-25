@@ -9,6 +9,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
+	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
 	"github.com/armosec/kubescape/resourcehandler"
@@ -44,6 +45,21 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		scanningTarget = "yaml"
 	} else {
 		k8s := k8sinterface.NewKubernetesApi()
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
+		if err != nil {
+			glog.Errorf("failed to deploy host sensor: %v", err)
+		}
+		data, err := hostSensorHandler.GetKubeletConfigurations()
+		if err != nil {
+			glog.Errorf("failed to get kubelet configuration from host sensor: %v", err)
+		} else {
+			glog.Infof("kubelet configurations from host sensor: %v", data)
+		}
+		if hostSensorHandler != nil {
+			if err := hostSensorHandler.TearDown(); err != nil {
+				glog.Errorf("failed to tear down host sensor: %v", err)
+			}
+		}
 		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
 		clusterConfig = cautils.ClusterConfigSetup(scanInfo, k8s, getter.GetArmoAPIConnector())
 

@@ -1,7 +1,6 @@
 package hostsensorutils
 
-const hostSensorYAML = `
-apiVersion: v1
+const hostSensorYAML = `apiVersion: v1
 kind: Namespace
 metadata:
   labels:
@@ -63,8 +62,4 @@ spec:
         name: host-filesystem
       hostNetwork: true
       hostPID: true
-      hostIPC: true
-
-    
-
-      `
+      hostIPC: true`
