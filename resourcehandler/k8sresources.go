@@ -8,6 +8,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 
 	"github.com/armosec/armoapi-go/armotypes"
 
@@ -74,7 +75,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 			}
 		} else {
 			// store result as []map[string]interface{}
-			(*k8sResources)[groupResource] = k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.FilterOutOwneredResources(result))
+			(*k8sResources)[groupResource] = ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.FilterOutOwneredResources(result)))
 		}
 	}
 	return errs
@@ -108,4 +109,13 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 
 	return result.Items, nil
 
+}
+func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterface.IMetadata {
+	workloads := []workloadinterface.IMetadata{}
+	for i := range resourceMap {
+		if w := workloadinterface.NewObject(resourceMap[i]); w != nil {
+			workloads = append(workloads, w)
+		}
+	}
+	return workloads
 }
