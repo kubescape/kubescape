@@ -5,6 +5,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/enescakir/emoji"
@@ -70,8 +71,8 @@ func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport) {
 			TotalResources:    cr.GetNumberOfResources(),
 			TotalFailed:       cr.GetNumberOfFailedResources(),
 			TotalWarning:      cr.GetNumberOfWarningResources(),
-			FailedWorkloads:   groupByNamespace(workloadsSummary, workloadSummaryFailed),
-			ExcludedWorkloads: groupByNamespace(workloadsSummary, workloadSummaryExclude),
+			FailedWorkloads:   groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed),
+			ExcludedWorkloads: groupByNamespaceOrKind(workloadsSummary, workloadSummaryExclude),
 			Description:       cr.Description,
 			Remediation:       cr.Remediation,
 			ListInputKinds:    cr.ListControlsInputKinds(),
@@ -133,23 +134,53 @@ func (printer *PrettyPrinter) printResources(controlSummary *ControlSummary) {
 }
 
 func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
-
 	indent := INDENT
-
 	for ns, rsc := range workloads {
-		preIndent := indent
-		if ns != "" {
-			cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
+		if !isKindToBeGrouped(ns) {
+			printer.printGroupedResource(indent, ns, rsc)
 		}
-		preIndent2 := indent
-		for r := range rsc {
-			indent += indent
-			cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s\n", indent, rsc[r].Kind, rsc[r].Name))
-			indent = preIndent2
-		}
-		indent = preIndent
 	}
+	if rsc, ok := workloads["User"]; ok {
+		printer.printGroupedResource(indent, "User", rsc)
+	}
+	if rsc, ok := workloads["Group"]; ok {
+		printer.printGroupedResource(indent, "Group", rsc)
+	}
+}
 
+func (printer *PrettyPrinter) printGroupedResource(indent string, ns string, rsc []WorkloadSummary) {
+	preIndent := indent
+	if isKindToBeGrouped(ns) {
+		cautils.SimpleDisplay(printer.writer, "%s%ss\n", indent, ns)
+	} else if ns != "" {
+		cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
+	}
+	preIndent2 := indent
+	for r := range rsc {
+		indent += indent
+		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
+		cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].FailedWorkload.GetKind(), rsc[r].FailedWorkload.GetName(), relatedObjectsStr))
+		indent = preIndent2
+	}
+	indent = preIndent
+}
+
+func generateRelatedObjectsStr(workload WorkloadSummary) string {
+	relatedStr := ""
+	w := workload.FailedWorkload.GetObject()
+	if workloadinterface.IsTypeRegoResponseVector(w) {
+		relatedObjects := workloadinterface.NewRegoResponseVectorObject(w).GetRelatedObjects()
+		for i, related := range relatedObjects {
+			if ns := related.GetNamespace(); i == 0 && ns != "" {
+				relatedStr += fmt.Sprintf("Namespace - %s, ", ns)
+			}
+			relatedStr += fmt.Sprintf("%s - %s, ", related.GetKind(), related.GetName())
+		}
+	}
+	if relatedStr != "" {
+		relatedStr = fmt.Sprintf(" [%s]", relatedStr[:len(relatedStr)-2])
+	}
+	return relatedStr
 }
 
 func generateRow(control string, cs ControlSummary) []string {
