@@ -37,7 +37,10 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandle
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
 	}
-	hsh := &HostSensorHandler{k8sObj: k8sObj}
+	hsh := &HostSensorHandler{
+		k8sObj:             k8sObj,
+		HostSensorPodNames: map[string]string{},
+	}
 	if err := hsh.applyYAML(); err != nil {
 		return nil, fmt.Errorf("in NewHostSensorHandler, failed to apply YAML: %v", err)
 	}
@@ -141,7 +144,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 	defer hsh.podListLock.Unlock()
 
 	switch eventType {
-	case watch.Added:
+	case watch.Added, watch.Modified:
 		if podObj.Status.Phase == corev1.PodRunning {
 			hsh.HostSensorPodNames[podObj.ObjectMeta.Name] = podObj.Spec.NodeName
 		} else {
