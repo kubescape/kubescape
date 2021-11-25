@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/k8s-interface/workloadinterface"
 )
 
 type Summary map[string]ControlSummary
@@ -24,11 +25,7 @@ type ControlSummary struct {
 }
 
 type WorkloadSummary struct {
-	Kind           string
-	Name           string
-	Namespace      string
-	Group          string
-	RelatedObjects []map[string]string // kind -> name
+	FailedWorkload workloadinterface.IMetadata
 	Exception      *armotypes.PostureExceptionPolicy
 }
 
@@ -41,7 +38,7 @@ func (controlSummary *ControlSummary) ToSlice() []string {
 }
 
 func (workloadSummary *WorkloadSummary) ToString() string {
-	return fmt.Sprintf("/%s/%s/%s/%s", workloadSummary.Group, workloadSummary.Namespace, workloadSummary.Kind, workloadSummary.Name)
+	return fmt.Sprintf("/%s/%s/%s/%s", workloadSummary.FailedWorkload.GetApiVersion(), workloadSummary.FailedWorkload.GetNamespace(), workloadSummary.FailedWorkload.GetKind(), workloadSummary.FailedWorkload.GetName())
 }
 
 func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {

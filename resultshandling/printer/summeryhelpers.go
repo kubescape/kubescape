@@ -12,18 +12,18 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
 		if status(&resources[i]) {
-			if resources[i].Namespace == "" && isKindToBeGrouped(resources[i].Kind) {
-				if r, ok := mapResources[resources[i].Kind]; ok {
+			if isKindToBeGrouped(resources[i].FailedWorkload.GetKind()) {
+				if r, ok := mapResources[resources[i].FailedWorkload.GetKind()]; ok {
 					r = append(r, resources[i])
-					mapResources[resources[i].Kind] = r
+					mapResources[resources[i].FailedWorkload.GetKind()] = r
 				} else {
-					mapResources[resources[i].Kind] = []WorkloadSummary{resources[i]}
+					mapResources[resources[i].FailedWorkload.GetKind()] = []WorkloadSummary{resources[i]}
 				}
-			} else if r, ok := mapResources[resources[i].Namespace]; ok {
+			} else if r, ok := mapResources[resources[i].FailedWorkload.GetNamespace()]; ok {
 				r = append(r, resources[i])
-				mapResources[resources[i].Namespace] = r
+				mapResources[resources[i].FailedWorkload.GetNamespace()] = r
 			} else {
-				mapResources[resources[i].Namespace] = []WorkloadSummary{resources[i]}
+				mapResources[resources[i].FailedWorkload.GetNamespace()] = []WorkloadSummary{resources[i]}
 			}
 		}
 	}
@@ -52,8 +52,8 @@ func listResultSummary(ruleReports []reporthandling.RuleReport) []WorkloadSummar
 			// add resource only once
 			for i := range resource {
 				resource[i].Exception = ruleReport.Exception
-				if ok := track[resource[i].ToString()]; !ok {
-					track[resource[i].ToString()] = true
+				if ok := track[resource[i].FailedWorkload.GetID()]; !ok {
+					track[resource[i].FailedWorkload.GetID()] = true
 					workloadsSummary = append(workloadsSummary, resource[i])
 				}
 			}
@@ -73,7 +73,7 @@ func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error
 		resource = append(resource, *r)
 	}
 	if obj.ExternalObjects != nil {
-		r, err := newWorkloadSummaryExternalObj(obj.ExternalObjects)
+		r, err := newWorkloadSummary(obj.ExternalObjects)
 		if err != nil {
 			return resource, err
 		}
@@ -86,39 +86,10 @@ func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error
 func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
 	r := &WorkloadSummary{}
 
-	workload := workloadinterface.NewWorkloadObj(obj)
+	workload := workloadinterface.NewObject(obj)
 	if workload == nil {
 		return r, fmt.Errorf("expecting k8s API object")
 	}
-	r.Kind = workload.GetKind()
-	r.Namespace = workload.GetNamespace()
-	r.Name = workload.GetName()
-	return r, nil
-}
-
-func newWorkloadSummaryExternalObj(obj map[string]interface{}) (*WorkloadSummary, error) {
-	r := &WorkloadSummary{}
-	relatedObjectsMap := []map[string]string{}
-	relatedObjects := []workloadinterface.IMetadata{}
-	if relatedObjectslist, ok := obj["relatedObjects"].([]interface{}); ok {
-		for i, related := range relatedObjectslist {
-			if r, ok := related.(map[string]interface{}); ok {
-				o := workloadinterface.NewWorkloadObj(r)
-				if ns := o.GetNamespace(); i == 0 && ns != "" {
-					relatedObjectsMap = append(relatedObjectsMap, map[string]string{"Namespace": ns})
-				}
-				relatedObjectsMap = append(relatedObjectsMap, map[string]string{o.GetKind(): o.GetName()})
-				relatedObjects = append(relatedObjects, o)
-			}
-		}
-	}
-	vector := workloadinterface.NewRegoResponseVectorObject(obj, relatedObjects)
-	if vector == nil {
-		return r, fmt.Errorf("error creating rego response vector obj")
-	}
-	r.Kind = vector.GetKind()
-	r.Namespace = vector.GetNamespace()
-	r.Name = vector.GetName()
-	r.RelatedObjects = relatedObjectsMap
+	r.FailedWorkload = workload
 	return r, nil
 }
