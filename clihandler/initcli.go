@@ -22,13 +22,14 @@ import (
 )
 
 type componentInterfaces struct {
-	clusterConfig   cautils.IClusterConfig
-	resourceHandler resourcehandler.IResourceHandler
-	report          reporter.IReport
-	printerHandler  printer.IPrinter
+	clusterConfig     cautils.IClusterConfig
+	resourceHandler   resourcehandler.IResourceHandler
+	report            reporter.IReport
+	printerHandler    printer.IPrinter
+	hostSensorHandler hostsensorutils.IHostSensor
 }
 
-func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) {
+func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
 
 	hasHostSensorControls := true
 	// we need to determined which controls needs host sensor
@@ -37,33 +38,23 @@ func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi)
 	}
 	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
-		if hostSensorHandler != nil {
-			defer func(hostSensorHandler *hostsensorutils.HostSensorHandler) {
-				if err := hostSensorHandler.TearDown(); err != nil {
-					glog.Errorf("failed to tear down host sensor: %v", err)
-				}
-			}(hostSensorHandler)
-		}
 		if err != nil {
-			glog.Errorf("failed to deploy host sensor: %v", err)
-			return
+			glog.Errorf("failed to create host sensor: %v", err)
+			return &hostsensorutils.HostSensorHandlerMock{}
 		}
 		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.DaemonSet.Namespace)
-		data, err := hostSensorHandler.GetKubeletConfigurations()
-		if err != nil {
-			glog.Errorf("failed to get kubelet configuration from host sensor: %v", err)
-		} else {
-			glog.Infof("kubelet configurations from host sensor: %v", data)
-		}
+		return hostSensorHandler
 	} else {
 		fmt.Printf("Skipping nodes scanning\n")
 	}
+	return &hostsensorutils.HostSensorHandlerMock{}
 }
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
 	var clusterConfig cautils.IClusterConfig
 	var reportHandler reporter.IReport
+	var hostSensorHandler hostsensorutils.IHostSensor
 	var scanningTarget string
 
 	if !scanInfo.ScanRunningCluster() {
@@ -78,7 +69,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		scanningTarget = "yaml"
 	} else {
 		k8s := k8sinterface.NewKubernetesApi()
-		initHostSensor(scanInfo, k8s)
+		hostSensorHandler = initHostSensor(scanInfo, k8s)
 		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
 		clusterConfig = cautils.ClusterConfigSetup(scanInfo, k8s, getter.GetArmoAPIConnector())
 
@@ -95,10 +86,11 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	printerHandler.SetWriter(scanInfo.Output)
 
 	return componentInterfaces{
-		clusterConfig:   clusterConfig,
-		resourceHandler: resourceHandler,
-		report:          reportHandler,
-		printerHandler:  printerHandler,
+		clusterConfig:     clusterConfig,
+		resourceHandler:   resourceHandler,
+		report:            reportHandler,
+		printerHandler:    printerHandler,
+		hostSensorHandler: hostSensorHandler,
 	}
 }
 func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
@@ -141,6 +133,9 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	cautils.CustomerGUID = interfaces.clusterConfig.GetCustomerGUID() // TODO - Deprecated
 	interfaces.report.SetClusterName(interfaces.clusterConfig.GetClusterName())
 	interfaces.report.SetCustomerGUID(interfaces.clusterConfig.GetCustomerGUID())
+	if err := interfaces.hostSensorHandler.Init(); err != nil {
+		InfoTextDisplay()
+	}
 	// cli handler setup
 	go func() {
 		// policy handler setup
