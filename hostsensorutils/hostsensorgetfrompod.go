@@ -9,12 +9,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-type HostSensorDataEnvelope struct {
-	schema.GroupVersionKind
-	NodeName string          `json:"nodeName"`
-	Data     json.RawMessage `json:"data"`
-}
-
 func (hsh *HostSensorHandler) getPodList() (res map[string]string, err error) {
 	hsh.podListLock.RLock()
 	jsonBytes, err := json.Marshal(hsh.HostSensorPodNames)
@@ -96,12 +90,23 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]HostSensorDataEnvelo
 		jsonBytes, err := yaml.YAMLToJSON(res[resIdx].Data)
 		if err != nil {
 			fmt.Printf("In GetKubeletConfigurations failed to YAMLToJSON: %v;\n%v", err, res[resIdx])
+			continue
 		}
 		res[resIdx].Data = jsonBytes
 		kindDet := schema.GroupVersionKind{}
 		if err = json.Unmarshal(jsonBytes, &kindDet); err != nil {
 			fmt.Printf("In GetKubeletConfigurations failed to Unmarshal GroupVersionKind: %v;\n%v", err, jsonBytes)
+			continue
 		}
+		res[resIdx].GroupVersionKind = kindDet
 	}
 	return res, err
+}
+
+func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, error) {
+	kcData, err := hsh.GetKubeletConfigurations()
+	if err != nil {
+		return kcData, err
+	}
+	return kcData, nil
 }

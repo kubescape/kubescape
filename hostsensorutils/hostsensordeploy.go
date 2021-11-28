@@ -34,28 +34,34 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandle
 	// store pod names
 	// make sure all pods are running, after X seconds treat has running anyway, and log an error on the pods not running yet
 	// return the object
+
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
+	}
+	hsh := &HostSensorHandler{
+		k8sObj:             k8sObj,
+		HostSensorPodNames: map[string]string{},
 	}
 	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
 	if nodeList, err := k8sObj.KubernetesClient.NodeV1().RuntimeClasses().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")
 		}
-		return nil, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %v", err)
+		return hsh, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %v", err)
 	}
-	hsh := &HostSensorHandler{
-		k8sObj:             k8sObj,
-		HostSensorPodNames: map[string]string{},
-	}
+
+	return hsh, nil
+}
+
+func (hsh *HostSensorHandler) Init() error {
 	if err := hsh.applyYAML(); err != nil {
-		return nil, fmt.Errorf("in NewHostSensorHandler, failed to apply YAML: %v", err)
+		return fmt.Errorf("in HostSensorHandler init failed to apply YAML: %v", err)
 	}
 	hsh.populatePodNamesToNodeNames()
 	if err := hsh.checkPodForEachNode(); err != nil {
 		fmt.Printf("failed to validate host-sensor pods status: %v", err)
 	}
-	return hsh, nil
+	return nil
 }
 
 func (hsh *HostSensorHandler) applyYAML() error {
@@ -119,7 +125,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceded", podsNum, len(nodesList.Items))
 		}
-		time.Sleep(10 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 	return nil
 }
