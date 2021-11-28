@@ -2,11 +2,12 @@ package cautils
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>]<resource object>
-type K8SResources map[string]interface{}
+type K8SResources map[string][]workloadinterface.IMetadata
 
 type OPASessionObj struct {
 	Frameworks    []reporthandling.Framework

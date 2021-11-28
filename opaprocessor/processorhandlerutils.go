@@ -11,11 +11,10 @@ import (
 	resources "github.com/armosec/opa-utils/resources"
 
 	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func getKubernetesObjects(k8sResources *cautils.K8SResources, match []reporthandling.RuleMatchObjects) []map[string]interface{} {
-	k8sObjects := []map[string]interface{}{}
+func getKubernetesObjects(k8sResources *cautils.K8SResources, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+	k8sObjects := []workloadinterface.IMetadata{}
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
 			for _, version := range match[m].APIVersions {
@@ -25,15 +24,8 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, match []reporthand
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
 							if k8sObj == nil {
 								// glog.Errorf("Resource '%s' is nil, probably failed to pull the resource", groupResource)
-							} else if v, k := k8sObj.([]map[string]interface{}); k {
-								k8sObjects = append(k8sObjects, v...)
-							} else if v, k := k8sObj.(map[string]interface{}); k {
-								k8sObjects = append(k8sObjects, v)
-							} else if v, k := k8sObj.([]unstructured.Unstructured); k {
-								k8sObjects = append(k8sObjects, k8sinterface.ConvertUnstructuredSliceToMap(v)...) //
-							} else {
-								glog.Errorf("In 'getKubernetesObjects' resource '%s' unknown type", groupResource)
 							}
+							k8sObjects = append(k8sObjects, k8sObj...)
 						}
 					}
 				}
@@ -82,4 +74,24 @@ func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
 		return pkgcautils.StringToBool(s.(string))
 	}
 	return false
+}
+
+func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
+	if from, ok := rule.Attributes["useFromKubescapeVersion"]; ok {
+		if cautils.BuildNumber != "" {
+			if from.(string) > cautils.BuildNumber {
+				return false
+			}
+		}
+	}
+	if until, ok := rule.Attributes["useUntilKubescapeVersion"]; ok {
+		if cautils.BuildNumber != "" {
+			if until.(string) <= cautils.BuildNumber {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+	return true
 }

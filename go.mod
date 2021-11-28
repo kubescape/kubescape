@@ -4,8 +4,8 @@ go 1.17
 
 require (
 	github.com/armosec/armoapi-go v0.0.23
-	github.com/armosec/k8s-interface v0.0.17
-	github.com/armosec/opa-utils v0.0.51
+	github.com/armosec/k8s-interface v0.0.19
+	github.com/armosec/opa-utils v0.0.53
 	github.com/armosec/rbac-utils v0.0.1
 	github.com/armosec/utils-go v0.0.3
 	github.com/briandowns/spinner v1.16.0
@@ -62,7 +62,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/opencontainers/image-spec v1.0.1 // indirect
+	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pquerna/cachecontrol v0.1.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20200313005456-10cdbea86bc0 // indirect

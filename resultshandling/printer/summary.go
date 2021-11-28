@@ -37,10 +37,6 @@ func (controlSummary *ControlSummary) ToSlice() []string {
 	return s
 }
 
-func (workloadSummary *WorkloadSummary) ToString() string {
-	return fmt.Sprintf("/%s/%s/%s/%s", workloadSummary.FailedWorkload.GetApiVersion(), workloadSummary.FailedWorkload.GetNamespace(), workloadSummary.FailedWorkload.GetKind(), workloadSummary.FailedWorkload.GetName())
-}
-
 func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {
 	return workloadSummary.Exception == nil
 }

@@ -87,10 +87,10 @@ github.com/armosec/armoapi-go v0.0.2/go.mod h1:vIK17yoKbJRQyZXWWLe3AqfqCRITxW8qm
 github.com/armosec/armoapi-go v0.0.23 h1:jqoLIWM5CR7DCD9fpFgN0ePqtHvOCoZv/XzCwsUluJU=
 github.com/armosec/armoapi-go v0.0.23/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9yQTU3qWRpaw=
 github.com/armosec/k8s-interface v0.0.8/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
-github.com/armosec/k8s-interface v0.0.17 h1:Wm6reX9eBQchFQACkn4mxNo6voJK3LVgPaghBcneMd0=
-github.com/armosec/k8s-interface v0.0.17/go.mod h1:Oy8JDHZ5/LEZDA+s734twVdsfAZydZ1GkNuhiPcgL5g=
-github.com/armosec/opa-utils v0.0.51 h1:i+/4jexyNpswWDrFS0H8rctkxUWLx2+Chf/hvID8M0I=
-github.com/armosec/opa-utils v0.0.51/go.mod h1:7985am4HVVyiZRdAwlrpJv5n2sINcqUVv9UjIYsTrdo=
+github.com/armosec/k8s-interface v0.0.19 h1:GhWxAyBCWLx2Qqw8uFSZ4rpZf3IV5k922mBtpQsoW2g=
+github.com/armosec/k8s-interface v0.0.19/go.mod h1:0ztwEWLez2lpMMKHbs0DoZV64S0YIA4s72vCs9iAAiE=
+github.com/armosec/opa-utils v0.0.53 h1:ibmKPK15kEcm53ddFIu8ZcL+hks1l/3ujMDYL1EXz2Q=
+github.com/armosec/opa-utils v0.0.53/go.mod h1:9uMk9NbbJydxVztXcwhSgX307xMdGRD2R4pYwzSPi28=
 github.com/armosec/rbac-utils v0.0.1 h1:N2MI98F/0zbDjmRZ29CNElU1AXkFLk5csd/qAHOBdXY=
 github.com/armosec/rbac-utils v0.0.1/go.mod h1:pQ8CBiij8kSKV7aeZm9FMvtZN28VgA7LZcYyTWimq40=
 github.com/armosec/utils-go v0.0.2/go.mod h1:itWmRLzRdsnwjpEOomL0mBWGnVNNIxSjDAdyc+b0iUo=
@@ -489,8 +489,9 @@ github.com/open-policy-agent/opa v0.33.1 h1:EJe00U5H82iMsemgxcNm9RFwjW8zPyRMvL+0
 github.com/open-policy-agent/opa v0.33.1/go.mod h1:Zb+IdRe0s7M++Rv/KgyuB0qvxO3CUpQ+ZW5v+w/cRUo=
 github.com/opencontainers/go-digest v1.0.0 h1:apOUWs51W5PlhuyGyz9FCeeBIOUDA/6nW8Oi/yOhh5U=
 github.com/opencontainers/go-digest v1.0.0/go.mod h1:0JzlMkj0TRzQZfJkVvzbP0HBR3IKzErnv2BNG4W4MAM=
-github.com/opencontainers/image-spec v1.0.1 h1:JMemWkRwHx4Zj+fVxWoMCFm/8sYGGrUVojFA6h/TRcI=
 github.com/opencontainers/image-spec v1.0.1/go.mod h1:BtxoFyWECRxE4U/7sNtV5W15zMzWCbyJoFRP3s7yZA0=
+github.com/opencontainers/image-spec v1.0.2 h1:9yCKha/T5XdGtO0q9Q9a6T5NUCsTn/DrBg0D7ufOcFM=
+github.com/opencontainers/image-spec v1.0.2/go.mod h1:BtxoFyWECRxE4U/7sNtV5W15zMzWCbyJoFRP3s7yZA0=
 github.com/opentracing/opentracing-go v1.1.0/go.mod h1:UkNAQd3GIcIGf0SeVgPpRdFStlNbqXla1AfSYxPUl2o=
 github.com/openzipkin/zipkin-go v0.1.1/go.mod h1:NtoC/o8u3JlF1lSlyPNswIbeQH9bJTmOf0Erfk+hxe8=
 github.com/pascaldekloe/goe v0.0.0-20180627143212-57f6aae5913c/go.mod h1:lzWF7FIEvWOWxwDKqyGYQf6ZUaNfKdP144TG7ZOy1lc=
