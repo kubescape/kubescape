@@ -37,6 +37,13 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandle
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
 	}
+	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
+	if nodeList, err := k8sObj.KubernetesClient.NodeV1().RuntimeClasses().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
+		if err == nil {
+			err = fmt.Errorf("no nodes to scan")
+		}
+		return nil, fmt.Errorf("in NewHostSensorHandler, failed to get nodes list: %v", err)
+	}
 	hsh := &HostSensorHandler{
 		k8sObj:             k8sObj,
 		HostSensorPodNames: map[string]string{},

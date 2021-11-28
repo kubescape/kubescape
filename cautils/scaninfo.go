@@ -1,31 +1,65 @@
 package cautils
 
 import (
+	"fmt"
 	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
+type BoolPtrFlag struct {
+	valPtr *bool
+}
+
+func (bpf *BoolPtrFlag) Type() string {
+	return "bool"
+}
+
+func (bpf *BoolPtrFlag) String() string {
+	if bpf.valPtr != nil {
+		return fmt.Sprintf("%v", *bpf.valPtr)
+	}
+	return ""
+}
+func (bpf *BoolPtrFlag) Get() *bool {
+	return bpf.valPtr
+}
+
+func (bpf *BoolPtrFlag) SetBool(val bool) {
+	bpf.valPtr = &val
+}
+
+func (bpf *BoolPtrFlag) Set(val string) error {
+	switch val {
+	case "true":
+		bpf.SetBool(true)
+	case "false":
+		bpf.SetBool(false)
+	}
+	return nil
+}
+
 type ScanInfo struct {
 	Getters
 	PolicyIdentifier   []reporthandling.PolicyIdentifier
-	UseExceptions      string   // Load file with exceptions configuration
-	ControlsInputs     string   // Load file with inputs for controls
-	UseFrom            []string // Load framework from local file (instead of download). Use when running offline
-	UseDefault         bool     // Load framework from cached file (instead of download). Use when running offline
-	Format             string   // Format results (table, json, junit ...)
-	Output             string   // Store results in an output file, Output file name
-	ExcludedNamespaces string   // DEPRECATED?
-	IncludeNamespaces  string   // DEPRECATED?
-	InputPatterns      []string // Yaml files input patterns
-	Silent             bool     // Silent mode - Do not print progress logs
-	FailThreshold      uint16   // Failure score threshold
-	Submit             bool     // Submit results to Armo BE
-	Local              bool     // Do not submit results
-	Account            string   // account ID
-	FrameworkScan      bool     // false if scanning control
-	ScanAll            bool     // true if scan all frameworks
+	UseExceptions      string      // Load file with exceptions configuration
+	ControlsInputs     string      // Load file with inputs for controls
+	UseFrom            []string    // Load framework from local file (instead of download). Use when running offline
+	UseDefault         bool        // Load framework from cached file (instead of download). Use when running offline
+	Format             string      // Format results (table, json, junit ...)
+	Output             string      // Store results in an output file, Output file name
+	ExcludedNamespaces string      // used for host sensor namespace
+	IncludeNamespaces  string      // DEPRECATED?
+	InputPatterns      []string    // Yaml files input patterns
+	Silent             bool        // Silent mode - Do not print progress logs
+	FailThreshold      uint16      // Failure score threshold
+	Submit             bool        // Submit results to Armo BE
+	HostSensor         BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
+	Local              bool        // Do not submit results
+	Account            string      // account ID
+	FrameworkScan      bool        // false if scanning control
+	ScanAll            bool        // true if scan all frameworks
 }
 
 type Getters struct {

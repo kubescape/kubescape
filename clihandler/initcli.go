@@ -2,6 +2,7 @@ package clihandler
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -27,6 +28,38 @@ type componentInterfaces struct {
 	printerHandler  printer.IPrinter
 }
 
+func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) {
+
+	hasHostSensorControls := true
+	// we need to determined which controls needs host sensor
+	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
+		scanInfo.HostSensor.SetBool(askUserForHostSensor())
+	}
+	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
+		if hostSensorHandler != nil {
+			defer func(hostSensorHandler *hostsensorutils.HostSensorHandler) {
+				if err := hostSensorHandler.TearDown(); err != nil {
+					glog.Errorf("failed to tear down host sensor: %v", err)
+				}
+			}(hostSensorHandler)
+		}
+		if err != nil {
+			glog.Errorf("failed to deploy host sensor: %v", err)
+			return
+		}
+		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.DaemonSet.Namespace)
+		data, err := hostSensorHandler.GetKubeletConfigurations()
+		if err != nil {
+			glog.Errorf("failed to get kubelet configuration from host sensor: %v", err)
+		} else {
+			glog.Infof("kubelet configurations from host sensor: %v", data)
+		}
+	} else {
+		fmt.Printf("Skipping nodes scanning\n")
+	}
+}
+
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
 	var clusterConfig cautils.IClusterConfig
@@ -45,21 +78,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		scanningTarget = "yaml"
 	} else {
 		k8s := k8sinterface.NewKubernetesApi()
-		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
-		if err != nil {
-			glog.Errorf("failed to deploy host sensor: %v", err)
-		}
-		data, err := hostSensorHandler.GetKubeletConfigurations()
-		if err != nil {
-			glog.Errorf("failed to get kubelet configuration from host sensor: %v", err)
-		} else {
-			glog.Infof("kubelet configurations from host sensor: %v", data)
-		}
-		if hostSensorHandler != nil {
-			if err := hostSensorHandler.TearDown(); err != nil {
-				glog.Errorf("failed to tear down host sensor: %v", err)
-			}
-		}
+		initHostSensor(scanInfo, k8s)
 		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
 		clusterConfig = cautils.ClusterConfigSetup(scanInfo, k8s, getter.GetArmoAPIConnector())
 
@@ -188,4 +207,21 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 	submitInterfaces.ClusterConfig.GenerateURL()
 
 	return nil
+}
+
+func askUserForHostSensor() bool {
+	if ssss, err := os.Stdin.Stat(); err == nil {
+		// fmt.Printf("Found stdin type: %s\n", ssss.Mode().Type())
+		if ssss.Mode().Type()&(fs.ModeDevice|fs.ModeCharDevice) > 0 { //has TTY
+			fmt.Printf("Would you like to scan K8s nodes? [y/N]. This is required to collect valuable data for certain controls\n")
+			fmt.Printf("Use --enable-host-scan flag to suppress this message\n")
+			var b []byte = make([]byte, 1)
+			if n, err := os.Stdin.Read(b); err == nil {
+				if n > 0 && len(b) > 0 && (b[0] == 'y' || b[0] == 'Y') {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
