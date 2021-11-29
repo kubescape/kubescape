@@ -4,7 +4,7 @@ go 1.17
 
 require (
 	github.com/armosec/armoapi-go v0.0.23
-	github.com/armosec/k8s-interface v0.0.19
+	github.com/armosec/k8s-interface v0.0.21
 	github.com/armosec/opa-utils v0.0.53
 	github.com/armosec/rbac-utils v0.0.1
 	github.com/armosec/utils-go v0.0.3
@@ -18,6 +18,7 @@ require (
 	github.com/open-policy-agent/opa v0.33.1
 	github.com/satori/go.uuid v1.2.0
 	github.com/spf13/cobra v1.2.1
+	github.com/stretchr/testify v1.7.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.22.2
 	k8s.io/apimachinery v0.22.2
@@ -64,6 +65,7 @@ require (
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/pquerna/cachecontrol v0.1.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20200313005456-10cdbea86bc0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
