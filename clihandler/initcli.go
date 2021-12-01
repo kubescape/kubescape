@@ -56,7 +56,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanningTarget))
 
 	// setup printer
-	printerHandler := printer.GetPrinter(scanInfo.Format)
+	printerHandler := printer.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	return componentInterfaces{

@@ -1,8 +1,6 @@
 package printer
 
 import (
-	"fmt"
-
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -12,18 +10,18 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
 		if status(&resources[i]) {
-			if isKindToBeGrouped(resources[i].FailedWorkload.GetKind()) {
-				if r, ok := mapResources[resources[i].FailedWorkload.GetKind()]; ok {
+			if isKindToBeGrouped(resources[i].resource.GetKind()) {
+				if r, ok := mapResources[resources[i].resource.GetKind()]; ok {
 					r = append(r, resources[i])
-					mapResources[resources[i].FailedWorkload.GetKind()] = r
+					mapResources[resources[i].resource.GetKind()] = r
 				} else {
-					mapResources[resources[i].FailedWorkload.GetKind()] = []WorkloadSummary{resources[i]}
+					mapResources[resources[i].resource.GetKind()] = []WorkloadSummary{resources[i]}
 				}
-			} else if r, ok := mapResources[resources[i].FailedWorkload.GetNamespace()]; ok {
+			} else if r, ok := mapResources[resources[i].resource.GetNamespace()]; ok {
 				r = append(r, resources[i])
-				mapResources[resources[i].FailedWorkload.GetNamespace()] = r
+				mapResources[resources[i].resource.GetNamespace()] = r
 			} else {
-				mapResources[resources[i].FailedWorkload.GetNamespace()] = []WorkloadSummary{resources[i]}
+				mapResources[resources[i].resource.GetNamespace()] = []WorkloadSummary{resources[i]}
 			}
 		}
 	}
@@ -37,59 +35,26 @@ func isKindToBeGrouped(kind string) bool {
 	return false
 }
 
-func listResultSummary(ruleReports []reporthandling.RuleReport) []WorkloadSummary {
+func listResultSummary(ruleReports []reporthandling.RuleReport, allResources map[string]workloadinterface.IMetadata) []WorkloadSummary {
 	workloadsSummary := []WorkloadSummary{}
-	track := map[string]bool{}
 
 	for c := range ruleReports {
-		for _, ruleReport := range ruleReports[c].RuleResponses {
-			resource, err := ruleResultSummary(ruleReport.AlertObject)
-			if err != nil {
-				fmt.Println(err.Error())
-				continue
-			}
-
-			// add resource only once
-			for i := range resource {
-				resource[i].Exception = ruleReport.Exception
-				if ok := track[resource[i].FailedWorkload.GetID()]; !ok {
-					track[resource[i].FailedWorkload.GetID()] = true
-					workloadsSummary = append(workloadsSummary, resource[i])
-				}
-			}
-		}
+		resourcesIDs := ruleReports[c].ListResourcesIDs()
+		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetFailedResources(), reporthandling.StatusFailed)...)
+		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetWarningResources(), reporthandling.StatusWarning)...)
+		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetPassedResources(), reporthandling.StatusPassed)...)
 	}
 	return workloadsSummary
 }
-func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error) {
-	resource := []WorkloadSummary{}
 
-	for i := range obj.K8SApiObjects {
-		r, err := newWorkloadSummary(obj.K8SApiObjects[i])
-		if err != nil {
-			return resource, err
-		}
+func newListWorkloadsSummary(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, status string) []WorkloadSummary {
+	workloadsSummary := []WorkloadSummary{}
 
-		resource = append(resource, *r)
+	for _, i := range resourcesIDs {
+		workloadsSummary = append(workloadsSummary, WorkloadSummary{
+			resource: allResources[i],
+			status:   status,
+		})
 	}
-	if obj.ExternalObjects != nil {
-		r, err := newWorkloadSummary(obj.ExternalObjects)
-		if err != nil {
-			return resource, err
-		}
-		resource = append(resource, *r)
-	}
-
-	return resource, nil
-}
-
-func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
-	r := &WorkloadSummary{}
-
-	workload := workloadinterface.NewObject(obj)
-	if workload == nil {
-		return r, fmt.Errorf("expecting k8s API object")
-	}
-	r.FailedWorkload = workload
-	return r, nil
+	return workloadsSummary
 }

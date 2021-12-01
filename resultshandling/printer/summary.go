@@ -3,8 +3,8 @@ package printer
 import (
 	"fmt"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type Summary map[string]ControlSummary
@@ -19,14 +19,16 @@ type ControlSummary struct {
 	TotalWarning      int
 	Description       string
 	Remediation       string
+	Framework         []string
 	ListInputKinds    []string
 	FailedWorkloads   map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
 	ExcludedWorkloads map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
+	PassedWorkloads   map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
 }
 
 type WorkloadSummary struct {
-	FailedWorkload workloadinterface.IMetadata
-	Exception      *armotypes.PostureExceptionPolicy
+	resource workloadinterface.IMetadata
+	status   string
 }
 
 func (controlSummary *ControlSummary) ToSlice() []string {
@@ -38,9 +40,13 @@ func (controlSummary *ControlSummary) ToSlice() []string {
 }
 
 func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {
-	return workloadSummary.Exception == nil
+	return workloadSummary.status == reporthandling.StatusFailed
 }
 
 func workloadSummaryExclude(workloadSummary *WorkloadSummary) bool {
-	return workloadSummary.Exception != nil && workloadSummary.Exception.IsAlertOnly()
+	return workloadSummary.status == reporthandling.StatusWarning
+}
+
+func workloadSummaryPassed(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.status == reporthandling.StatusPassed
 }
