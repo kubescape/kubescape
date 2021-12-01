@@ -47,7 +47,7 @@ func getNamespacesSelector(resource *schema.GroupVersionResource, ns, operator s
 	fieldSelector := "metadata."
 	if resource.Resource == "namespaces" {
 		fieldSelector += "name"
-	} else if k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
+	} else if k8sinterface.IsNamespaceScope(resource) {
 		fieldSelector += "namespace"
 	} else {
 		return ""

@@ -122,6 +122,7 @@ func removeConfigMapData(obj workloadinterface.IMetadata) {
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "data")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 
 }
 func removeSecretData(obj workloadinterface.IMetadata) {
@@ -129,7 +130,7 @@ func removeSecretData(obj workloadinterface.IMetadata) {
 		return // remove data only from kubernetes objects
 	}
 	workloadinterface.NewWorkloadObj(obj.GetObject()).RemoveSecretData()
-
+	workloadinterface.RemoveFromMap(obj.GetObject(), "metadata", "managedFields")
 }
 func removePodData(obj workloadinterface.IMetadata) {
 	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
@@ -137,6 +138,7 @@ func removePodData(obj workloadinterface.IMetadata) {
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 
 	containers, err := workload.GetContainers()
 	if err != nil || len(containers) == 0 {

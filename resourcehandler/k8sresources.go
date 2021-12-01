@@ -52,7 +52,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
-	clusterAPIServerInfo, err := k8sHandler.k8s.KubernetesClient.Discovery().ServerVersion()
+	clusterAPIServerInfo, err := k8sHandler.k8s.DiscoveryClient.ServerVersion()
 	if err != nil {
 		cautils.ErrorDisplay(fmt.Sprintf("Failed to discover API server information: %v", err))
 		return nil
@@ -95,7 +95,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 
 	// set dynamic object
 	var clientResource dynamic.ResourceInterface
-	if namespace != "" && k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
+	if namespace != "" && k8sinterface.IsNamespaceScope(resource) {
 		clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
 	} else {
 		clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
