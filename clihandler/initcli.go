@@ -36,7 +36,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		k8sinterface.ConnectedToCluster = false
 		clusterConfig = cautils.NewEmptyConfig()
 
-		// load fom file
+		// load from file
 		resourceHandler = resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
 
 		// set mock report (do not send report)
@@ -90,6 +90,7 @@ func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
 }
 
 func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
+	cautils.ScanStartDisplay()
 
 	interfaces := getInterfaces(scanInfo)
 
@@ -138,7 +139,6 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 }
 
 func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
-	cautils.ScanStartDisplay()
 	policyNotification := &reporthandling.PolicyNotification{
 		NotificationType: reporthandling.TypeExecPostureScan,
 		Rules:            scanInfo.PolicyIdentifier,

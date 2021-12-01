@@ -37,6 +37,7 @@ type FileResourceHandler struct {
 }
 
 func NewFileResourceHandler(inputPatterns []string) *FileResourceHandler {
+	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
 		inputPatterns: inputPatterns,
 	}
