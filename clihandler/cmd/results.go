@@ -62,13 +62,10 @@ var resultsCmd = &cobra.Command{
 			return err
 		}
 
-		clusterName := clusterConfig.GetClusterName()
-		customerGUID := clusterConfig.GetCustomerGUID()
-
-		resultsObjects := NewResultsObject(customerGUID, clusterName, args[0])
+		resultsObjects := NewResultsObject(clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName(), args[0])
 
 		// submit resources
-		r := reporter.NewReportEventReceiver(customerGUID, clusterName)
+		r := reporter.NewReportEventReceiver(clusterConfig.GetConfigObj())
 
 		submitInterfaces := cliinterfaces.SubmitInterfaces{
 			ClusterConfig: clusterConfig,

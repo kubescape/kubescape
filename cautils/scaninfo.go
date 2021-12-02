@@ -7,6 +7,11 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
+const (
+	ScanCluster    string = "cluster"
+	ScanLocalFiles string = "yaml"
+)
+
 type ScanInfo struct {
 	Getters
 	PolicyIdentifier   []reporthandling.PolicyIdentifier
@@ -84,8 +89,11 @@ func (scanInfo *ScanInfo) setOutputFile() {
 	}
 }
 
-func (scanInfo *ScanInfo) ScanRunningCluster() bool {
-	return len(scanInfo.InputPatterns) == 0
+func (scanInfo *ScanInfo) GetScanningEnvironment() string {
+	if len(scanInfo.InputPatterns) != 0 {
+		return ScanLocalFiles
+	}
+	return ScanCluster
 }
 
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind reporthandling.NotificationPolicyKind) {
