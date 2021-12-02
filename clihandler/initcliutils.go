@@ -65,12 +65,12 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		if !scanInfo.Local {
 			// Submit report
 			scanInfo.Submit = true
-		} else { // config not found in cache (not submitted)
-			if scanInfo.Submit {
-				// submit - Create tenant & Submit report
-				if err := tenantConfig.SetTenant(); err != nil {
-					fmt.Println(err)
-				}
+		}
+	} else { // config not found in cache (not submitted)
+		if scanInfo.Submit {
+			// submit - Create tenant & Submit report
+			if err := tenantConfig.SetTenant(); err != nil {
+				fmt.Println(err)
 			}
 		}
 	}
