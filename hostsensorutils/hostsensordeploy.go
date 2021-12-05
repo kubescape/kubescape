@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/kubescape/cautils"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -18,22 +19,15 @@ import (
 )
 
 type HostSensorHandler struct {
-	HostSensorNamespace     string
-	HostSensorPort          int32
-	HostSensorDaemonSetName string
-	HostSensorPodNames      map[string]string //map from pod names to node names
-	IsReady                 <-chan bool       //readonly chan
-	k8sObj                  *k8sinterface.KubernetesApi
-	DaemonSet               *appsv1.DaemonSet
-	podListLock             sync.RWMutex
+	HostSensorPort     int32
+	HostSensorPodNames map[string]string //map from pod names to node names
+	IsReady            <-chan bool       //readonly chan
+	k8sObj             *k8sinterface.KubernetesApi
+	DaemonSet          *appsv1.DaemonSet
+	podListLock        sync.RWMutex
 }
 
 func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandler, error) {
-	// deploy the YAML
-	// store namespace + port
-	// store pod names
-	// make sure all pods are running, after X seconds treat has running anyway, and log an error on the pods not running yet
-	// return the object
 
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
@@ -54,6 +48,13 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandle
 }
 
 func (hsh *HostSensorHandler) Init() error {
+	// deploy the YAML
+	// store namespace + port
+	// store pod names
+	// make sure all pods are running, after X seconds treat has running anyway, and log an error on the pods not running yet
+	cautils.ProgressTextDisplay("Installing host sensor")
+	cautils.StartSpinner()
+	defer cautils.StopSpinner()
 	if err := hsh.applyYAML(); err != nil {
 		return fmt.Errorf("in HostSensorHandler init failed to apply YAML: %v", err)
 	}
@@ -77,13 +78,14 @@ func (hsh *HostSensorHandler) applyYAML() error {
 	if err := yaml.Unmarshal(singleYAMLBytes, namespaceAC); err != nil {
 		return fmt.Errorf("failed to Unmarshal YAML of namespace: %v", err)
 	}
+	namespaceName := ""
 
 	if ns, err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Apply(hsh.k8sObj.Context, namespaceAC, metav1.ApplyOptions{
 		FieldManager: "kubescape",
 	}); err != nil {
 		return fmt.Errorf("failed to apply YAML of namespace: %v", err)
 	} else {
-		hsh.HostSensorNamespace = ns.Name
+		namespaceName = ns.Name
 	}
 	// apply deamonset
 	deamonAC := &appsapplyv1.DaemonSetApplyConfiguration{}
@@ -96,13 +98,12 @@ func (hsh *HostSensorHandler) applyYAML() error {
 	if err := yaml.Unmarshal(singleYAMLBytes, deamonAC); err != nil {
 		return fmt.Errorf("failed to Unmarshal YAML of deamonset: %v", err)
 	}
-	deamonAC.Namespace = &hsh.HostSensorNamespace
-	if ds, err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.HostSensorNamespace).Apply(hsh.k8sObj.Context, deamonAC, metav1.ApplyOptions{
+	deamonAC.Namespace = &namespaceName
+	if ds, err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(namespaceName).Apply(hsh.k8sObj.Context, deamonAC, metav1.ApplyOptions{
 		FieldManager: "kubescape",
 	}); err != nil {
 		return fmt.Errorf("failed to apply YAML of deamonset: %v", err)
 	} else {
-		hsh.HostSensorDaemonSetName = ds.Name
 		hsh.HostSensorPort = ds.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
 		hsh.DaemonSet = ds
 	}
@@ -171,14 +172,18 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 func (hsh *HostSensorHandler) TearDown() error {
 	// remove the namespace
 	gracePeriod := int64(15)
-	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.HostSensorNamespace).Delete(hsh.k8sObj.Context, hsh.HostSensorDaemonSetName, metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod}); err != nil {
+	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.GetNamespace()).Delete(hsh.k8sObj.Context, hsh.DaemonSet.Name, metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
 	}
-	if err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Delete(hsh.k8sObj.Context, hsh.HostSensorNamespace,
+	if err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Delete(hsh.k8sObj.Context, hsh.GetNamespace(),
 		metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor namespace: %v", err)
 	}
 	// TODO: wait for termination
 
 	return nil
+}
+
+func (hsh *HostSensorHandler) GetNamespace() string {
+	return hsh.DaemonSet.Namespace
 }

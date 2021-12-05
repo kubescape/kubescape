@@ -42,7 +42,6 @@ func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi)
 			glog.Errorf("failed to create host sensor: %v", err)
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
-		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.DaemonSet.Namespace)
 		return hostSensorHandler
 	} else {
 		fmt.Printf("Skipping nodes scanning\n")
@@ -55,6 +54,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var hostSensorHandler hostsensorutils.IHostSensor
 	var tenantConfig cautils.ITenantConfig
 
+	hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
 	// scanning environment
 	scanningTarget := scanInfo.GetScanningEnvironment()
 	switch scanningTarget {
@@ -108,13 +108,33 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
 	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
 
+	if err := interfaces.hostSensorHandler.Init(); err != nil {
+		errMsg := "failed to init host sensor"
+		if scanInfo.VerboseMode {
+			errMsg = fmt.Sprintf("%s: %v", errMsg, err)
+		}
+		cautils.ErrorDisplay(errMsg)
+	} else if len(scanInfo.IncludeNamespaces) == 0 && interfaces.hostSensorHandler.GetNamespace() != "" {
+		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, interfaces.hostSensorHandler)
+	}
+
+	defer func() {
+		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
+			errMsg := "failed to tear down host sensor"
+			if scanInfo.VerboseMode {
+				errMsg = fmt.Sprintf("%s: %v", errMsg, err)
+			}
+			cautils.ErrorDisplay(errMsg)
+		}
+	}()
+
 	// set policy getter only after setting the customerGUID
 	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID())
 
 	// cli handler setup
 	go func() {
 		// policy handler setup
-		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler)
+		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler, interfaces.hostSensorHandler)
 
 		if err := Scan(policyHandler, scanInfo); err != nil {
 			fmt.Println(err)

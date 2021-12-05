@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"github.com/armosec/kubescape/cautils"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -93,20 +94,26 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]HostSensorDataEnvelo
 			continue
 		}
 		res[resIdx].Data = jsonBytes
-		kindDet := schema.GroupVersionKind{}
+		kindDet := metav1.TypeMeta{}
 		if err = json.Unmarshal(jsonBytes, &kindDet); err != nil {
 			fmt.Printf("In GetKubeletConfigurations failed to Unmarshal GroupVersionKind: %v;\n%v", err, jsonBytes)
 			continue
 		}
-		res[resIdx].GroupVersionKind = kindDet
+		res[resIdx].GroupVersionResource.Resource = kindDet.Kind
+		res[resIdx].GroupVersionResource.Group = kindDet.GroupVersionKind().Group
+		res[resIdx].GroupVersionResource.Version = kindDet.GroupVersionKind().Version
 	}
 	return res, err
 }
 
 func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, error) {
+	cautils.ProgressTextDisplay("Accessing host sensor")
+	cautils.StartSpinner()
+	defer cautils.StopSpinner()
 	kcData, err := hsh.GetKubeletConfigurations()
 	if err != nil {
 		return kcData, err
 	}
+	cautils.SuccessTextDisplay("Read host information from host sensor")
 	return kcData, nil
 }
