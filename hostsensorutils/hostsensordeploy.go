@@ -145,7 +145,6 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames() {
 		for eve := range watchRes.ResultChan() {
 			pod, ok := eve.Object.(*corev1.Pod)
 			if !ok {
-				fmt.Printf("Failed to watch over daemonset pods: not a Pod")
 				continue
 			}
 			go hsh.updatePodInListAtomic(eve.Type, pod)

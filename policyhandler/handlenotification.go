@@ -48,7 +48,12 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 		return fmt.Errorf("empty list of resources")
 	}
 	opaSessionObj.K8SResources = k8sResources
-
+	for i := range *k8sResources {
+		for resourceIdx := range (*k8sResources)[i] {
+			// TODO: add remove data function
+			opaSessionObj.AllResources[(*k8sResources)[i][resourceIdx].GetID()] = (*k8sResources)[i][resourceIdx]
+		}
+	}
 	// update channel
 	*policyHandler.processPolicy <- opaSessionObj
 	return nil
