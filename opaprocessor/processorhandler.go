@@ -10,6 +10,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 
 	"github.com/armosec/opa-utils/resources"
 	"github.com/golang/glog"
@@ -146,19 +147,31 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (*repo
 }
 
 func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporthandling.RuleReport, error) {
-	if ruleWithArmoOpaDependency(rule.Attributes) {
+	if ruleWithArmoOpaDependency(rule.Attributes) || !isRuleKubescapeVersionCompatible(rule) {
 		return nil, nil
 	}
-	k8sObjects := getKubernetesObjects(opap.K8SResources, rule.Match)
-	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects)
+
+	inputResources, err := reporthandling.RegoResourcesAggregator(rule, getKubernetesObjects(opap.K8SResources, rule.Match))
 	if err != nil {
+		return nil, fmt.Errorf("error getting aggregated k8sObjects: %s", err.Error())
+	}
+
+	ruleReport, err := opap.runOPAOnSingleRule(rule, workloadinterface.ListMetaToMap(inputResources))
+	if err != nil {
+		// ruleReport.RuleStatus.Status = reporthandling.StatusFailed
 		ruleReport.RuleStatus.Status = "failure"
 		ruleReport.RuleStatus.Message = err.Error()
 		glog.Error(err)
 	} else {
-		ruleReport.RuleStatus.Status = "success"
+		ruleReport.RuleStatus.Status = reporthandling.StatusPassed
 	}
-	ruleReport.ListInputResources = k8sObjects
+	ruleReport.ListInputKinds = workloadinterface.ListMetaIDs(inputResources)
+
+	for i := range inputResources {
+		removeData(inputResources[i])
+		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
+	}
+
 	return &ruleReport, err
 }
 

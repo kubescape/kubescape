@@ -47,14 +47,16 @@ func getNamespacesSelector(resource *schema.GroupVersionResource, ns, operator s
 	fieldSelector := "metadata."
 	if resource.Resource == "namespaces" {
 		fieldSelector += "name"
-	} else if k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
+	} else if k8sinterface.IsNamespaceScope(resource) {
 		fieldSelector += "namespace"
 	} else {
 		return ""
 	}
 	namespacesSlice := strings.Split(ns, ",")
 	for _, n := range namespacesSlice {
-		fieldSelectors += fmt.Sprintf("%s%s%s,", fieldSelector, operator, n)
+		if n != "" {
+			fieldSelectors += fmt.Sprintf("%s%s%s,", fieldSelector, operator, n)
+		}
 	}
 	return fieldSelectors
 

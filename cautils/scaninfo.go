@@ -68,6 +68,7 @@ type ScanInfo struct {
 	ScanAll            bool        // true if scan all frameworks
 }
 
+
 type Getters struct {
 	ExceptionsGetter     getter.IExceptionsGetter
 	ControlsInputsGetter getter.IControlsInputsGetter
@@ -123,8 +124,11 @@ func (scanInfo *ScanInfo) setOutputFile() {
 	}
 }
 
-func (scanInfo *ScanInfo) ScanRunningCluster() bool {
-	return len(scanInfo.InputPatterns) == 0
+func (scanInfo *ScanInfo) GetScanningEnvironment() string {
+	if len(scanInfo.InputPatterns) != 0 {
+		return ScanLocalFiles
+	}
+	return ScanCluster
 }
 
 func (scanInfo *ScanInfo) GetScanningEnvironment() string {

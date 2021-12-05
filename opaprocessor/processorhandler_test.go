@@ -8,6 +8,7 @@ import (
 	"github.com/armosec/opa-utils/resources"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
@@ -18,7 +19,7 @@ func TestProcess(t *testing.T) {
 
 	// set k8s
 	k8sResources := make(cautils.K8SResources)
-	k8sResources["/v1/pods"] = k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.V1KubeSystemNamespaceMock().Items)
+	k8sResources["/v1/pods"] = workloadinterface.ListMapToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.V1KubeSystemNamespaceMock().Items))
 
 	// set opaSessionObj
 	opaSessionObj := cautils.NewOPASessionObjMock()

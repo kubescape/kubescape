@@ -18,7 +18,6 @@ import (
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/golang/glog"
 )
 
 type componentInterfaces struct {
@@ -73,10 +72,11 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
 		// use clusterConfig struct
 		tenantConfig = cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
-		hostSensorHandler = initHostSensor(scanInfo, k8s)
+    hostSensorHandler = initHostSensor(scanInfo, k8s)		
 	}
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(scanInfo, tenantConfig)
+  
 	v := cautils.NewIVersionCheckHandler()
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanningTarget))
 
