@@ -22,7 +22,7 @@ import (
 )
 
 type componentInterfaces struct {
-	clusterConfig     cautils.IClusterConfig
+	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
 	report            reporter.IReport
 	printerHandler    printer.IPrinter
@@ -52,90 +52,64 @@ func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi)
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
-	var clusterConfig cautils.IClusterConfig
-	var reportHandler reporter.IReport
 	var hostSensorHandler hostsensorutils.IHostSensor
-	var scanningTarget string
+	var tenantConfig cautils.ITenantConfig
 
-	if !scanInfo.ScanRunningCluster() {
-		k8sinterface.ConnectedToCluster = false
-		clusterConfig = cautils.NewEmptyConfig()
+	// scanning environment
+	scanningTarget := scanInfo.GetScanningEnvironment()
+	switch scanningTarget {
+	case cautils.ScanLocalFiles:
+		k8sinterface.ConnectedToCluster = false // DEPRECATED ?
+		scanInfo.Local = true                   // do not submit results when scanning YAML files
 
-		// load fom file
+		// not scanning a cluster - use localConfig struct
+		tenantConfig = cautils.NewLocalConfig(getter.GetArmoAPIConnector(), scanInfo.Account)
+
+		// load resources from file
 		resourceHandler = resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
-
-		// set mock report (do not send report)
-		reportHandler = reporter.NewReportMock()
-		scanningTarget = "yaml"
-	} else {
-		k8s := k8sinterface.NewKubernetesApi()
-		hostSensorHandler = initHostSensor(scanInfo, k8s)
+	case cautils.ScanCluster:
+		k8s := k8sinterface.NewKubernetesApi() // initialize kubernetes api object
+		// pull k8s resources
 		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
-		clusterConfig = cautils.ClusterConfigSetup(scanInfo, k8s, getter.GetArmoAPIConnector())
-
-		// setup reporter
-		reportHandler = getReporter(scanInfo)
-		scanningTarget = "cluster"
+		// use clusterConfig struct
+		tenantConfig = cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
+		hostSensorHandler = initHostSensor(scanInfo, k8s)
 	}
-
+	// reporting behavior - setup reporter
+	reportHandler := getReporter(scanInfo, tenantConfig)
 	v := cautils.NewIVersionCheckHandler()
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanningTarget))
 
 	// setup printer
-	printerHandler := printer.GetPrinter(scanInfo.Format)
+	printerHandler := printer.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	return componentInterfaces{
-		clusterConfig:     clusterConfig,
+		tenantConfig:      tenantConfig,
 		resourceHandler:   resourceHandler,
 		report:            reportHandler,
 		printerHandler:    printerHandler,
 		hostSensorHandler: hostSensorHandler,
 	}
 }
-func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
-	if len(scanInfo.UseFrom) > 0 {
-		//load from file
-		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
-	} else {
-		if customerGUID == "" || !scanInfo.FrameworkScan {
-			scanInfo.PolicyGetter = getter.NewDownloadReleasedPolicy()
-		} else {
-			g := getter.GetArmoAPIConnector()
-			g.SetCustomerGUID(customerGUID)
-			scanInfo.PolicyGetter = g
-			if scanInfo.ScanAll {
-				frameworks, err := g.ListCustomFrameworks(customerGUID)
-				if err != nil {
-					glog.Error("failed to get custom frameworks") // handle error
-					return
-				}
-				scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
-			}
-		}
-	}
-}
 
 func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
+	cautils.ScanStartDisplay()
 
 	interfaces := getInterfaces(scanInfo)
-
-	setPolicyGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())
+	// setPolicyGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())
 
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
 
-	if err := interfaces.clusterConfig.SetConfig(scanInfo.Account); err != nil {
-		fmt.Println(err)
-	}
+	cautils.ClusterName = interfaces.tenantConfig.GetClusterName()   // TODO - Deprecated
+	cautils.CustomerGUID = interfaces.tenantConfig.GetCustomerGUID() // TODO - Deprecated
+	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
+	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
 
-	cautils.ClusterName = interfaces.clusterConfig.GetClusterName()   // TODO - Deprecated
-	cautils.CustomerGUID = interfaces.clusterConfig.GetCustomerGUID() // TODO - Deprecated
-	interfaces.report.SetClusterName(interfaces.clusterConfig.GetClusterName())
-	interfaces.report.SetCustomerGUID(interfaces.clusterConfig.GetCustomerGUID())
-	if err := interfaces.hostSensorHandler.Init(); err != nil {
-		InfoTextDisplay()
-	}
+	// set policy getter only after setting the customerGUID
+	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID())
+
 	// cli handler setup
 	go func() {
 		// policy handler setup
@@ -157,7 +131,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	score := resultsHandling.HandleResults(scanInfo)
 
 	// print report url
-	interfaces.clusterConfig.GenerateURL()
+	interfaces.report.DisplayReportURL()
 
 	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
 	if score < adjustedFailThreshold {
@@ -168,7 +142,6 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 }
 
 func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
-	cautils.ScanStartDisplay()
 	policyNotification := &reporthandling.PolicyNotification{
 		NotificationType: reporthandling.TypeExecPostureScan,
 		Rules:            scanInfo.PolicyIdentifier,
@@ -193,13 +166,16 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 	if err != nil {
 		return err
 	}
-
+	allresources, err := submitInterfaces.SubmitObjects.ListAllResources()
+	if err != nil {
+		return err
+	}
 	// report
-	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport}); err != nil {
+	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
 		return err
 	}
 	fmt.Printf("\nData has been submitted successfully")
-	submitInterfaces.ClusterConfig.GenerateURL()
+	submitInterfaces.Reporter.DisplayReportURL()
 
 	return nil
 }

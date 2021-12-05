@@ -8,6 +8,11 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
+const (
+	ScanCluster    string = "cluster"
+	ScanLocalFiles string = "yaml"
+)
+
 type BoolPtrFlag struct {
 	valPtr *bool
 }
@@ -47,6 +52,7 @@ type ScanInfo struct {
 	ControlsInputs     string      // Load file with inputs for controls
 	UseFrom            []string    // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool        // Load framework from cached file (instead of download). Use when running offline
+	VerboseMode        bool        // Display all of the input resources and not only failed resources
 	Format             string      // Format results (table, json, junit ...)
 	Output             string      // Store results in an output file, Output file name
 	ExcludedNamespaces string      // used for host sensor namespace
@@ -119,6 +125,13 @@ func (scanInfo *ScanInfo) setOutputFile() {
 
 func (scanInfo *ScanInfo) ScanRunningCluster() bool {
 	return len(scanInfo.InputPatterns) == 0
+}
+
+func (scanInfo *ScanInfo) GetScanningEnvironment() string {
+	if len(scanInfo.InputPatterns) != 0 {
+		return ScanLocalFiles
+	}
+	return ScanCluster
 }
 
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind reporthandling.NotificationPolicyKind) {
