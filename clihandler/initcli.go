@@ -43,8 +43,6 @@ func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi)
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
 		return hostSensorHandler
-	} else {
-		fmt.Printf("Skipping nodes scanning\n")
 	}
 	return &hostsensorutils.HostSensorHandlerMock{}
 }
