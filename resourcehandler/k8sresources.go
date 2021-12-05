@@ -82,32 +82,38 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string) ([]unstructured.Unstructured, error) {
-
+	resourceList := []unstructured.Unstructured{}
 	// set labels
 	listOptions := metav1.ListOptions{}
+	fieldSelectors := k8sHandler.fieldSelector.GetNamespacesSelectors(resource)
+	for i := range fieldSelectors {
 
-	listOptions.FieldSelector += k8sHandler.fieldSelector.GetNamespacesSelector(resource)
+		listOptions.FieldSelector = fieldSelectors[i]
 
-	if len(labels) > 0 {
-		set := k8slabels.Set(labels)
-		listOptions.LabelSelector = set.AsSelector().String()
+		if len(labels) > 0 {
+			set := k8slabels.Set(labels)
+			listOptions.LabelSelector = set.AsSelector().String()
+		}
+
+		// set dynamic object
+		var clientResource dynamic.ResourceInterface
+		if namespace != "" && k8sinterface.IsNamespaceScope(resource) {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
+		} else {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
+		}
+
+		// list resources
+		result, err := clientResource.List(context.Background(), listOptions)
+		if err != nil || result == nil {
+			return nil, fmt.Errorf("failed to get resource: %v, namespace: %s, labelSelector: %v, reason: %v", resource, namespace, listOptions.LabelSelector, err)
+		}
+
+		resourceList = append(resourceList, result.Items...)
+
 	}
 
-	// set dynamic object
-	var clientResource dynamic.ResourceInterface
-	if namespace != "" && k8sinterface.IsNamespaceScope(resource) {
-		clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
-	} else {
-		clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
-	}
-
-	// list resources
-	result, err := clientResource.List(context.Background(), listOptions)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get resource: %v, namespace: %s, labelSelector: %v, reason: %s", resource, namespace, listOptions.LabelSelector, err.Error())
-	}
-
-	return result.Items, nil
+	return resourceList, nil
 
 }
 func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterface.IMetadata {
