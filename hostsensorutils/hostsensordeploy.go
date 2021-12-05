@@ -25,6 +25,7 @@ type HostSensorHandler struct {
 	k8sObj             *k8sinterface.KubernetesApi
 	DaemonSet          *appsv1.DaemonSet
 	podListLock        sync.RWMutex
+	gracePeriod        int64
 }
 
 func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandler, error) {
@@ -35,6 +36,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandle
 	hsh := &HostSensorHandler{
 		k8sObj:             k8sObj,
 		HostSensorPodNames: map[string]string{},
+		gracePeriod:        int64(15),
 	}
 	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
 	if nodeList, err := k8sObj.KubernetesClient.NodeV1().RuntimeClasses().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
@@ -87,22 +89,31 @@ func (hsh *HostSensorHandler) applyYAML() error {
 	} else {
 		namespaceName = ns.Name
 	}
-	// apply deamonset
-	deamonAC := &appsapplyv1.DaemonSetApplyConfiguration{}
+	// apply DaemonSet
+	daemonAC := &appsapplyv1.DaemonSetApplyConfiguration{}
 	singleYAMLBytes = make([]byte, 4096)
 	if readLen, err := dec.Read(singleYAMLBytes); err != nil {
-		return fmt.Errorf("failed to read YAML of deamonset: %v", err)
+		if erra := hsh.tearDownNamesapce(namespaceName); erra != nil {
+			err = fmt.Errorf("%v; In addidtion %v", err, erra)
+		}
+		return fmt.Errorf("failed to read YAML of DaemonSet: %v", err)
 	} else {
 		singleYAMLBytes = singleYAMLBytes[:readLen]
 	}
-	if err := yaml.Unmarshal(singleYAMLBytes, deamonAC); err != nil {
-		return fmt.Errorf("failed to Unmarshal YAML of deamonset: %v", err)
+	if err := yaml.Unmarshal(singleYAMLBytes, daemonAC); err != nil {
+		if erra := hsh.tearDownNamesapce(namespaceName); erra != nil {
+			err = fmt.Errorf("%v; In addidtion %v", err, erra)
+		}
+		return fmt.Errorf("failed to Unmarshal YAML of DaemonSet: %v", err)
 	}
-	deamonAC.Namespace = &namespaceName
-	if ds, err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(namespaceName).Apply(hsh.k8sObj.Context, deamonAC, metav1.ApplyOptions{
+	daemonAC.Namespace = &namespaceName
+	if ds, err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(namespaceName).Apply(hsh.k8sObj.Context, daemonAC, metav1.ApplyOptions{
 		FieldManager: "kubescape",
 	}); err != nil {
-		return fmt.Errorf("failed to apply YAML of deamonset: %v", err)
+		if erra := hsh.tearDownNamesapce(namespaceName); erra != nil {
+			err = fmt.Errorf("%v; In addidtion %v", err, erra)
+		}
+		return fmt.Errorf("failed to apply YAML of DaemonSet: %v", err)
 	} else {
 		hsh.HostSensorPort = ds.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
 		hsh.DaemonSet = ds
@@ -168,17 +179,23 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 	}
 }
 
-func (hsh *HostSensorHandler) TearDown() error {
-	// remove the namespace
-	gracePeriod := int64(15)
-	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.GetNamespace()).Delete(hsh.k8sObj.Context, hsh.DaemonSet.Name, metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod}); err != nil {
-		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
-	}
-	if err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Delete(hsh.k8sObj.Context, hsh.GetNamespace(),
-		metav1.DeleteOptions{GracePeriodSeconds: &gracePeriod}); err != nil {
+func (hsh *HostSensorHandler) tearDownNamesapce(namespace string) error {
+
+	if err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Delete(hsh.k8sObj.Context, namespace, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor namespace: %v", err)
 	}
-	// TODO: wait for termination
+	return nil
+}
+
+func (hsh *HostSensorHandler) TearDown() error {
+	namespace := hsh.GetNamespace()
+	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.GetNamespace()).Delete(hsh.k8sObj.Context, hsh.DaemonSet.Name, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
+		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
+	}
+	if err := hsh.tearDownNamesapce(namespace); err != nil {
+		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
+	}
+	// TODO: wait for termination? may take up to 120 seconds!!!
 
 	return nil
 }

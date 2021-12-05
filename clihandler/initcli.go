@@ -114,17 +114,16 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 		cautils.ErrorDisplay(errMsg)
 	} else if len(scanInfo.IncludeNamespaces) == 0 && interfaces.hostSensorHandler.GetNamespace() != "" {
 		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, interfaces.hostSensorHandler)
-	}
-
-	defer func() {
-		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			errMsg := "failed to tear down host sensor"
-			if scanInfo.VerboseMode {
-				errMsg = fmt.Sprintf("%s: %v", errMsg, err)
+		defer func() {
+			if err := interfaces.hostSensorHandler.TearDown(); err != nil {
+				errMsg := "failed to tear down host sensor"
+				if scanInfo.VerboseMode {
+					errMsg = fmt.Sprintf("%s: %v", errMsg, err)
+				}
+				cautils.ErrorDisplay(errMsg)
 			}
-			cautils.ErrorDisplay(errMsg)
-		}
-	}()
+		}()
+	}
 
 	// set policy getter only after setting the customerGUID
 	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID())

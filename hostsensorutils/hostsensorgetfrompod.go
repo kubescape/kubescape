@@ -107,6 +107,10 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]HostSensorDataEnvelo
 }
 
 func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, error) {
+	res := make([]HostSensorDataEnvelope, 0)
+	if hsh.DaemonSet == nil {
+		return res, nil
+	}
 	cautils.ProgressTextDisplay("Accessing host sensor")
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
@@ -114,6 +118,7 @@ func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, erro
 	if err != nil {
 		return kcData, err
 	}
+	res = append(res, kcData...)
 	cautils.SuccessTextDisplay("Read host information from host sensor")
-	return kcData, nil
+	return res, nil
 }
