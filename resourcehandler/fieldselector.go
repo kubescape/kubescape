@@ -16,7 +16,7 @@ type EmptySelector struct {
 }
 
 func (es *EmptySelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
-	return []string{}
+	return []string{""} //
 }
 
 type ExcludeSelector struct {
