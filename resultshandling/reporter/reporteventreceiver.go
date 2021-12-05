@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
@@ -18,20 +19,25 @@ type IReport interface {
 	ActionSendReport(opaSessionObj *cautils.OPASessionObj) error
 	SetCustomerGUID(customerGUID string)
 	SetClusterName(clusterName string)
+	DisplayReportURL()
 }
 
 type ReportEventReceiver struct {
-	httpClient       *http.Client
-	clusterName      string
-	customerGUID     string
-	eventReceiverURL *url.URL
+	httpClient         *http.Client
+	clusterName        string
+	customerGUID       string
+	eventReceiverURL   *url.URL
+	token              string
+	customerAdminEMail string
 }
 
-func NewReportEventReceiver(customerGUID, clusterName string) *ReportEventReceiver {
+func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceiver {
 	return &ReportEventReceiver{
-		httpClient:   &http.Client{},
-		clusterName:  clusterName,
-		customerGUID: customerGUID,
+		httpClient:         &http.Client{},
+		clusterName:        tenantConfig.ClusterName,
+		customerGUID:       tenantConfig.CustomerGUID,
+		token:              tenantConfig.Token,
+		customerAdminEMail: tenantConfig.CustomerAdminEMail,
 	}
 }
 
@@ -113,17 +119,22 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 	return err
 }
 
-// func (report *ReportEventReceiver) send(postureReport *reporthandling.PostureReport) error {
-// 	report.initEventReceiverURL()
-// 	reqBody, err := json.Marshal(*postureReport)
-// 	if err != nil {
-// 		return fmt.Errorf("in 'Send' failed to json.Marshal, reason: %v", err)
-// 	}
-// 	host := hostToString(report.eventReceiverURL, postureReport.ReportID)
+func (report *ReportEventReceiver) DisplayReportURL() {
+	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: "
 
-// 	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
-// 	if err != nil {
-// 		return fmt.Errorf("%s, %v:%s", host, err, msg)
-// 	}
-// 	return err
-// }
+	u := url.URL{}
+	u.Scheme = "https"
+	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
+
+	if report.customerAdminEMail != "" {
+		cautils.InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
+		return
+	}
+	u.Path = "account/sign-up"
+	q := u.Query()
+	q.Add("invitationToken", report.token)
+	q.Add("customerGUID", report.customerGUID)
+
+	u.RawQuery = q.Encode()
+	cautils.InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
+}

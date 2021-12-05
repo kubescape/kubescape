@@ -134,14 +134,11 @@ var rabcCmd = &cobra.Command{
 			return err
 		}
 
-		clusterName := clusterConfig.GetClusterName()
-		customerGUID := clusterConfig.GetCustomerGUID()
-
 		// list RBAC
-		rbacObjects := NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, customerGUID, clusterName))
+		rbacObjects := NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName()))
 
 		// submit resources
-		r := reporter.NewReportEventReceiver(customerGUID, clusterName)
+		r := reporter.NewReportEventReceiver(clusterConfig.GetConfigObj())
 
 		submitInterfaces := cliinterfaces.SubmitInterfaces{
 			ClusterConfig: clusterConfig,

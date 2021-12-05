@@ -15,5 +15,5 @@ type ISubmitObjects interface {
 type SubmitInterfaces struct {
 	SubmitObjects ISubmitObjects
 	Reporter      reporter.IReport
-	ClusterConfig cautils.IClusterConfig
+	ClusterConfig cautils.ITenantConfig
 }

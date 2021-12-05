@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 
@@ -57,82 +56,89 @@ func (co *ConfigObj) Config() []byte {
 // ======================================================================================
 // =============================== interface ============================================
 // ======================================================================================
-type IClusterConfig interface {
-
+type ITenantConfig interface {
 	// set
-	SetConfig(customerGUID string) error
+	SetTenant() error
 
 	// getters
 	GetClusterName() string
 	GetCustomerGUID() string
 	GetConfigObj() *ConfigObj
-	GetK8sAPI() *k8sinterface.KubernetesApi
-	GetBackendAPI() getter.IBackend
-	GetDefaultNS() string
-	GenerateURL()
-}
+	// GetBackendAPI() getter.IBackend
+	// GenerateURL()
 
-// ClusterConfigSetup - Setup the desired cluster behavior regarding submittion to the Armo BE
-func ClusterConfigSetup(scanInfo *ScanInfo, k8s *k8sinterface.KubernetesApi, beAPI getter.IBackend) IClusterConfig {
-	/*
-
-		If "First run (local config not found)" -
-			Default - Do not send report (local)
-			Local - Do not send report
-			Submit - Create tenant & Submit report
-
-		If "Submitted but not signed up" -
-			Default	- Delete local config & Do not send report (local)
-			Local - Delete local config & Do not send report
-			Submit - Submit report
-
-		If "Signed up user" -
-			Default	- Submit report (submit)
-			Local - Do not send report
-			Submit - Submit report
-
-	*/
-	clusterConfig := NewClusterConfig(k8s, beAPI)
-	clusterConfig.LoadConfig()
-
-	if !IsSubmitted(clusterConfig) {
-		if scanInfo.Submit {
-			return clusterConfig // submit - Create tenant & Submit report
-		}
-		return NewEmptyConfig() // local/default - Do not send report
-	}
-	if !IsRegistered(clusterConfig) {
-		if scanInfo.Submit {
-			return clusterConfig // submit/default - Submit report
-		}
-		DeleteConfig(k8s)
-		return NewEmptyConfig() // local - Delete local config & Do not send report
-	}
-	if scanInfo.Local {
-		scanInfo.Submit = false
-		return NewEmptyConfig() // local - Do not send report
-	}
-	scanInfo.Submit = true
-	return clusterConfig // submit/default -  Submit report
+	IsConfigFound() bool
 }
 
 // ======================================================================================
-// ============================= Mock Config ============================================
+// ============================ Local Config ============================================
 // ======================================================================================
-type EmptyConfig struct {
+// Config when scanning YAML files or URL but not a Kubernetes cluster
+type LocalConfig struct {
+	backendAPI getter.IBackend
+	configObj  *ConfigObj
 }
 
-func NewEmptyConfig() *EmptyConfig                            { return &EmptyConfig{} }
-func (c *EmptyConfig) SetConfig(customerGUID string) error    { return nil }
-func (c *EmptyConfig) GetConfigObj() *ConfigObj               { return &ConfigObj{} }
-func (c *EmptyConfig) GetCustomerGUID() string                { return "" }
-func (c *EmptyConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return nil } // TODO: return mock obj
-func (c *EmptyConfig) GetDefaultNS() string                   { return k8sinterface.GetDefaultNamespace() }
-func (c *EmptyConfig) GetBackendAPI() getter.IBackend         { return nil } // TODO: return mock obj
-func (c *EmptyConfig) GetClusterName() string                 { return adoptClusterName(k8sinterface.GetClusterName()) }
-func (c *EmptyConfig) GenerateURL() {
-	message := fmt.Sprintf("\nYou can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s\n", getter.GetArmoAPIConnector().GetFrontendURL())
-	InfoTextDisplay(os.Stdout, fmt.Sprintf("\n%s\n", message))
+func NewLocalConfig(backendAPI getter.IBackend, customerGUID string) *LocalConfig {
+	var configObj *ConfigObj
+
+	lc := &LocalConfig{
+		backendAPI: backendAPI,
+		configObj:  &ConfigObj{},
+	}
+	// get from configMap
+	if existsConfigFile() { // get from file
+		configObj, _ = loadConfigFromFile()
+	} else {
+		configObj = &ConfigObj{}
+	}
+	if configObj != nil {
+		lc.configObj = configObj
+	}
+	if customerGUID != "" {
+		lc.configObj.CustomerGUID = customerGUID // override config customerGUID
+	}
+	if lc.configObj.CustomerGUID != "" {
+		if err := lc.SetTenant(); err != nil {
+			fmt.Println(err)
+		}
+	}
+
+	return lc
+}
+
+func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
+func (lc *LocalConfig) GetCustomerGUID() string  { return lc.configObj.CustomerGUID }
+func (lc *LocalConfig) GetClusterName() string   { return "" }
+func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
+func (lc *LocalConfig) SetTenant() error {
+	// ARMO tenant GUID
+	if err := getTenantConfigFromBE(lc.backendAPI, lc.configObj); err != nil {
+		return err
+	}
+	updateConfigFile(lc.configObj)
+	return nil
+
+}
+
+func getTenantConfigFromBE(backendAPI getter.IBackend, configObj *ConfigObj) error {
+
+	// get from armoBE
+	tenantResponse, err := backendAPI.GetCustomerGUID(configObj.CustomerGUID)
+	if err == nil && tenantResponse != nil {
+		if tenantResponse.AdminMail != "" { // registered tenant
+			configObj.CustomerAdminEMail = tenantResponse.AdminMail
+		} else { // new tenant
+			configObj.Token = tenantResponse.Token
+			configObj.CustomerGUID = tenantResponse.TenantID
+		}
+	} else {
+		if err != nil && !strings.Contains(err.Error(), "already exists") {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // ======================================================================================
@@ -146,118 +152,66 @@ type ClusterConfig struct {
 	configObj  *ConfigObj
 }
 
-func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend) *ClusterConfig {
-	return &ClusterConfig{
+func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, customerGUID string) *ClusterConfig {
+	defaultNS := k8sinterface.GetDefaultNamespace()
+	var configObj *ConfigObj
+	c := &ClusterConfig{
 		k8s:        k8s,
 		backendAPI: backendAPI,
 		configObj:  &ConfigObj{},
-		defaultNS:  k8sinterface.GetDefaultNamespace(),
-	}
-}
-
-func (c *ClusterConfig) GetConfigObj() *ConfigObj               { return c.configObj }
-func (c *ClusterConfig) GetK8sAPI() *k8sinterface.KubernetesApi { return c.k8s }
-func (c *ClusterConfig) GetDefaultNS() string                   { return c.defaultNS }
-func (c *ClusterConfig) GetBackendAPI() getter.IBackend         { return c.backendAPI }
-
-func (c *ClusterConfig) GenerateURL() {
-	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: "
-
-	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
-	if c.configObj == nil {
-		return
-	}
-	if c.configObj.CustomerAdminEMail != "" {
-		InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
-		return
-	}
-	u.Path = "account/sign-up"
-	q := u.Query()
-	q.Add("invitationToken", c.configObj.Token)
-	q.Add("customerGUID", c.configObj.CustomerGUID)
-
-	u.RawQuery = q.Encode()
-	InfoTextDisplay(os.Stdout, "\n\n"+message+u.String()+"\n\n")
-}
-
-func (c *ClusterConfig) GetCustomerGUID() string {
-	if c.configObj != nil {
-		return c.configObj.CustomerGUID
-	}
-	return ""
-}
-
-func (c *ClusterConfig) SetConfig(customerGUID string) error {
-	if c.configObj == nil {
-		c.configObj = &ConfigObj{}
+		defaultNS:  defaultNS,
 	}
 
-	// cluster name
-	if c.GetClusterName() == "" {
-		c.setClusterName(k8sinterface.GetClusterName())
+	// get from configMap
+	if existsConfigMap(k8s, defaultNS) {
+		configObj, _ = loadConfigFromConfigMap(k8s, defaultNS)
+	} else if existsConfigFile() { // get from file
+		configObj, _ = loadConfigFromFile()
 	}
-
-	// ARMO customer GUID
-	if customerGUID != "" && c.GetCustomerGUID() != customerGUID {
-		c.setCustomerGUID(customerGUID) // override config customerGUID
+	if configObj != nil {
+		c.configObj = configObj
 	}
-
-	customerGUID = c.GetCustomerGUID()
-
-	// get from armoBE
-	tenantResponse, err := c.backendAPI.GetCustomerGUID(customerGUID)
-	if err == nil && tenantResponse != nil {
-		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
-			c.setCustomerAdminEMail(tenantResponse.AdminMail)
-		} else {
-			c.setToken(tenantResponse.Token)
-			c.setCustomerGUID(tenantResponse.TenantID)
-		}
-	} else {
-		if err != nil && !strings.Contains(err.Error(), "already exists") {
-			return err
+	if customerGUID != "" {
+		c.configObj.CustomerGUID = customerGUID // override config customerGUID
+	}
+	if c.configObj.CustomerGUID != "" {
+		if err := c.SetTenant(); err != nil {
+			fmt.Println(err)
 		}
 	}
+	if c.configObj.ClusterName == "" {
+		c.configObj.ClusterName = adoptClusterName(k8sinterface.GetClusterName())
+	}
 
+	return c
+}
+
+func (c *ClusterConfig) GetConfigObj() *ConfigObj { return c.configObj }
+func (c *ClusterConfig) GetDefaultNS() string     { return c.defaultNS }
+func (c *ClusterConfig) GetCustomerGUID() string  { return c.configObj.CustomerGUID }
+func (c *ClusterConfig) IsConfigFound() bool {
+	return existsConfigFile() || existsConfigMap(c.k8s, c.defaultNS)
+}
+
+func (c *ClusterConfig) SetTenant() error {
+
+	// ARMO tenant GUID
+	if err := getTenantConfigFromBE(c.backendAPI, c.configObj); err != nil {
+		return err
+	}
 	// update/create config
-	if c.existsConfigMap() {
+	if existsConfigMap(c.k8s, c.defaultNS) {
 		c.updateConfigMap()
 	} else {
 		c.createConfigMap()
 	}
-	c.updateConfigFile()
-
+	updateConfigFile(c.configObj)
 	return nil
+
 }
 
-func (c *ClusterConfig) setToken(token string) {
-	c.configObj.Token = token
-}
-
-func (c *ClusterConfig) setCustomerAdminEMail(customerAdminEMail string) {
-	c.configObj.CustomerAdminEMail = customerAdminEMail
-}
-func (c *ClusterConfig) setCustomerGUID(customerGUID string) {
-	c.configObj.CustomerGUID = customerGUID
-}
-
-func (c *ClusterConfig) setClusterName(clusterName string) {
-	c.configObj.ClusterName = adoptClusterName(clusterName)
-}
 func (c *ClusterConfig) GetClusterName() string {
 	return c.configObj.ClusterName
-}
-func (c *ClusterConfig) LoadConfig() {
-	// get from configMap
-	if c.existsConfigMap() {
-		c.configObj, _ = c.loadConfigFromConfigMap()
-	} else if existsConfigFile() { // get from file
-		c.configObj, _ = loadConfigFromFile()
-	} else {
-		c.configObj = &ConfigObj{}
-	}
 }
 
 func (c *ClusterConfig) ToMapString() map[string]interface{} {
@@ -267,11 +221,8 @@ func (c *ClusterConfig) ToMapString() map[string]interface{} {
 	}
 	return m
 }
-func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
-	if c.k8s == nil {
-		return nil, nil
-	}
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+func loadConfigFromConfigMap(k8s *k8sinterface.KubernetesApi, ns string) (*ConfigObj, error) {
+	configMap, err := k8s.KubernetesClient.CoreV1().ConfigMaps(ns).Get(context.Background(), configMapName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -282,8 +233,8 @@ func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
 	return nil, nil
 }
 
-func (c *ClusterConfig) existsConfigMap() bool {
-	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+func existsConfigMap(k8s *k8sinterface.KubernetesApi, ns string) bool {
+	_, err := k8s.KubernetesClient.CoreV1().ConfigMaps(ns).Get(context.Background(), configMapName, metav1.GetOptions{})
 	// TODO - check if has customerGUID
 	return err == nil
 }
@@ -402,8 +353,8 @@ func (c *ClusterConfig) updateConfigMap() error {
 	return err
 }
 
-func (c *ClusterConfig) updateConfigFile() error {
-	if err := os.WriteFile(ConfigFileFullPath(), c.configObj.Config(), 0664); err != nil {
+func updateConfigFile(configObj *ConfigObj) error {
+	if err := os.WriteFile(ConfigFileFullPath(), configObj.Config(), 0664); err != nil {
 		return err
 	}
 	return nil
@@ -440,12 +391,12 @@ func readConfig(dat []byte) (*ConfigObj, error) {
 }
 
 // Check if the customer is submitted
-func IsSubmitted(clusterConfig *ClusterConfig) bool {
-	return clusterConfig.existsConfigMap() || existsConfigFile()
+func (clusterConfig *ClusterConfig) IsSubmitted() bool {
+	return existsConfigMap(clusterConfig.k8s, clusterConfig.defaultNS) || existsConfigFile()
 }
 
 // Check if the customer is registered
-func IsRegistered(clusterConfig *ClusterConfig) bool {
+func (clusterConfig *ClusterConfig) IsRegistered() bool {
 
 	// get from armoBE
 	tenantResponse, err := clusterConfig.backendAPI.GetCustomerGUID(clusterConfig.GetCustomerGUID())
@@ -457,8 +408,8 @@ func IsRegistered(clusterConfig *ClusterConfig) bool {
 	return false
 }
 
-func DeleteConfig(k8s *k8sinterface.KubernetesApi) error {
-	if err := DeleteConfigMap(k8s); err != nil {
+func (clusterConfig *ClusterConfig) DeleteConfig() error {
+	if err := DeleteConfigMap(clusterConfig.k8s); err != nil {
 		return err
 	}
 	if err := DeleteConfigFile(); err != nil {
