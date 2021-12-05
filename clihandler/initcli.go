@@ -2,6 +2,7 @@ package clihandler
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -9,6 +10,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
+	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
 	"github.com/armosec/kubescape/resourcehandler"
@@ -19,14 +21,37 @@ import (
 )
 
 type componentInterfaces struct {
-	tenantConfig    cautils.ITenantConfig
-	resourceHandler resourcehandler.IResourceHandler
-	report          reporter.IReport
-	printerHandler  printer.IPrinter
+	tenantConfig      cautils.ITenantConfig
+	resourceHandler   resourcehandler.IResourceHandler
+	report            reporter.IReport
+	printerHandler    printer.IPrinter
+	hostSensorHandler hostsensorutils.IHostSensor
+}
+
+func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
+
+	hasHostSensorControls := true
+	// we need to determined which controls needs host sensor
+	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
+		scanInfo.HostSensor.SetBool(askUserForHostSensor())
+	}
+	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
+		if err != nil {
+			glog.Errorf("failed to create host sensor: %v", err)
+			return &hostsensorutils.HostSensorHandlerMock{}
+		}
+		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.DaemonSet.Namespace)
+		return hostSensorHandler
+	} else {
+		fmt.Printf("Skipping nodes scanning\n")
+	}
+	return &hostsensorutils.HostSensorHandlerMock{}
 }
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var resourceHandler resourcehandler.IResourceHandler
+	var hostSensorHandler hostsensorutils.IHostSensor
 	var tenantConfig cautils.ITenantConfig
 
 	// scanning environment
@@ -34,27 +59,24 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	switch scanningTarget {
 	case cautils.ScanLocalFiles:
 		k8sinterface.ConnectedToCluster = false // DEPRECATED ?
-
-		scanInfo.Local = true // do not submit results when scanning YAML files
+		scanInfo.Local = true                   // do not submit results when scanning YAML files
 
 		// not scanning a cluster - use localConfig struct
 		tenantConfig = cautils.NewLocalConfig(getter.GetArmoAPIConnector(), scanInfo.Account)
 
 		// load resources from file
 		resourceHandler = resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
-
 	case cautils.ScanCluster:
 		k8s := k8sinterface.NewKubernetesApi() // initialize kubernetes api object
-
 		// pull k8s resources
 		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
 		// use clusterConfig struct
 		tenantConfig = cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
+    hostSensorHandler = initHostSensor(scanInfo, k8s)		
 	}
-
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(scanInfo, tenantConfig)
-
+  
 	v := cautils.NewIVersionCheckHandler()
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanningTarget))
 
@@ -63,12 +85,14 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	printerHandler.SetWriter(scanInfo.Output)
 
 	return componentInterfaces{
-		tenantConfig:    tenantConfig,
-		resourceHandler: resourceHandler,
-		report:          reportHandler,
-		printerHandler:  printerHandler,
+		tenantConfig:      tenantConfig,
+		resourceHandler:   resourceHandler,
+		report:            reportHandler,
+		printerHandler:    printerHandler,
+		hostSensorHandler: hostSensorHandler,
 	}
 }
+
 func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	cautils.ScanStartDisplay()
 
@@ -154,4 +178,21 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 	submitInterfaces.Reporter.DisplayReportURL()
 
 	return nil
+}
+
+func askUserForHostSensor() bool {
+	if ssss, err := os.Stdin.Stat(); err == nil {
+		// fmt.Printf("Found stdin type: %s\n", ssss.Mode().Type())
+		if ssss.Mode().Type()&(fs.ModeDevice|fs.ModeCharDevice) > 0 { //has TTY
+			fmt.Printf("Would you like to scan K8s nodes? [y/N]. This is required to collect valuable data for certain controls\n")
+			fmt.Printf("Use --enable-host-scan flag to suppress this message\n")
+			var b []byte = make([]byte, 1)
+			if n, err := os.Stdin.Read(b); err == nil {
+				if n > 0 && len(b) > 0 && (b[0] == 'y' || b[0] == 'Y') {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
