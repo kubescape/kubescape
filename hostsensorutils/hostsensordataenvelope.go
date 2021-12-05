@@ -8,7 +8,7 @@ import (
 )
 
 type HostSensorDataEnvelope struct {
-	schema.GroupVersionKind
+	schema.GroupVersionResource
 	NodeName string          `json:"nodeName"`
 	Data     json.RawMessage `json:"data"`
 }
@@ -22,7 +22,7 @@ func (hsde *HostSensorDataEnvelope) SetName(val string) {
 }
 
 func (hsde *HostSensorDataEnvelope) SetKind(val string) {
-	hsde.Kind = val
+	hsde.Resource = val
 
 }
 
@@ -43,7 +43,7 @@ func (hsde *HostSensorDataEnvelope) GetName() string {
 }
 
 func (hsde *HostSensorDataEnvelope) GetKind() string {
-	return hsde.Kind
+	return hsde.Resource
 }
 
 func (hsde *HostSensorDataEnvelope) GetApiVersion() string {

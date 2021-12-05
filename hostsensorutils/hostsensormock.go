@@ -14,3 +14,7 @@ func (hshm *HostSensorHandlerMock) TearDown() error {
 func (hshm *HostSensorHandlerMock) CollectResources() ([]HostSensorDataEnvelope, error) {
 	return []HostSensorDataEnvelope{}, nil
 }
+
+func (hshm *HostSensorHandlerMock) GetNamespace() string {
+	return ""
+}

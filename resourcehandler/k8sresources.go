@@ -47,7 +47,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 		return k8sResourcesMap, err
 	}
 
-	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects, let’s start!!!")
+	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
 	return k8sResourcesMap, nil
 }
 
