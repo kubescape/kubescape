@@ -77,6 +77,9 @@ func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
 	return false
 }
 
+// Checks that kubescape version is in range of use for this rule
+// In local build (BuildNumber = ""):
+// returns true only if rule doesn't have the "until" attribute
 func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
 	if from, ok := rule.Attributes["useFromKubescapeVersion"]; ok {
 		if cautils.BuildNumber != "" {

@@ -142,9 +142,12 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 	if err != nil {
 		return err
 	}
-
+	allresources, err := submitInterfaces.SubmitObjects.ListAllResources()
+	if err != nil {
+		return err
+	}
 	// report
-	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport}); err != nil {
+	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
 		return err
 	}
 	fmt.Printf("\nData has been submitted successfully")

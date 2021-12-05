@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	"github.com/armosec/kubescape/resultshandling/reporter"
@@ -43,6 +44,10 @@ func (resultsObject *ResultsObject) SetResourcesReport() (*reporthandling.Postur
 		CustomerGUID:         resultsObject.customerGUID,
 		ClusterName:          resultsObject.clusterName,
 	}, nil
+}
+
+func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinterface.IMetadata, error) {
+	return map[string]workloadinterface.IMetadata{}, nil
 }
 
 var resultsCmd = &cobra.Command{
