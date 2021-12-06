@@ -257,7 +257,7 @@ func (printer *PrettyPrinter) printFramework(frameworksNames []string) {
 	} else if len(frameworksNames) > 1 {
 		p := ""
 		for i := 0; i < len(frameworksNames)-1; i++ {
-			p += frameworksNames[i] + " ,"
+			p += frameworksNames[i] + ", "
 		}
 		p += frameworksNames[len(frameworksNames)-1]
 		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORKS\n", p))
