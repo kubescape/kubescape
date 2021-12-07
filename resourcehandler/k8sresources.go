@@ -32,23 +32,26 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+	allResources := map[string]workloadinterface.IMetadata{}
+
 	// get k8s resources
 	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
 
 	// build resources map
+	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResourcesMap := setResourceMap(frameworks)
 
 	// get namespace and labels from designator (ignore cluster labels)
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
 
 	// pull k8s recourses
-	if err := k8sHandler.pullResources(k8sResourcesMap, namespace, labels); err != nil {
-		return k8sResourcesMap, err
+	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
+		return k8sResourcesMap, allResources, err
 	}
 
 	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
-	return k8sResourcesMap, nil
+	return k8sResourcesMap, allResources, nil
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
@@ -59,7 +62,7 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 	}
 	return clusterAPIServerInfo
 }
-func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, namespace string, labels map[string]string) error {
+func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
 
 	var errs error
 	for groupResource := range *k8sResources {
@@ -73,10 +76,14 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 			} else {
 				errs = fmt.Errorf("%s\n%s", errs, err.Error())
 			}
-		} else {
-			// store result as []map[string]interface{}
-			(*k8sResources)[groupResource] = ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.FilterOutOwneredResources(result)))
+			continue
 		}
+		// store result as []map[string]interface{}
+		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.FilterOutOwneredResources(result)))
+		for i := range metaObjs {
+			allResources[metaObjs[i].GetID()] = metaObjs[i]
+		}
+		(*k8sResources)[groupResource] = workloadinterface.ListMetaIDs(metaObjs)
 	}
 	return errs
 }
