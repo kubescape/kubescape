@@ -39,7 +39,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandle
 		gracePeriod:        int64(15),
 	}
 	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
-	if nodeList, err := k8sObj.KubernetesClient.NodeV1().RuntimeClasses().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
+	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")
 		}
@@ -137,7 +137,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 		if time.Now().After(deadline) {
 			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceded", podsNum, len(nodesList.Items))
 		}
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return nil
 }
