@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 )
 
-func loadResourcesFromUrl(inputPatterns []string) ([]k8sinterface.IWorkload, error) {
+func loadResourcesFromUrl(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
 	urls := listUrls(inputPatterns)
 	if len(urls) == 0 {
 		return nil, nil
@@ -43,8 +43,8 @@ func listUrls(patterns []string) []string {
 	return urls
 }
 
-func downloadFiles(urls []string) ([]k8sinterface.IWorkload, []error) {
-	workloads := []k8sinterface.IWorkload{}
+func downloadFiles(urls []string) ([]workloadinterface.IMetadata, []error) {
+	workloads := []workloadinterface.IMetadata{}
 	errs := []error{}
 	for i := range urls {
 		f, err := downloadFile(urls[i])

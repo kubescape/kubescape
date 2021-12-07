@@ -11,6 +11,7 @@ func TestGetK8sResources(t *testing.T) {
 	// getK8sResources
 }
 func TestSetResourceMap(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
 	framework := reporthandling.MockFrameworkA()
 	k8sResources := setResourceMap([]reporthandling.Framework{*framework})
 	resources := k8sinterface.ResourceGroupToString("*", "v1", "Pod")

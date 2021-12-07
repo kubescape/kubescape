@@ -1,6 +1,7 @@
 package cliinterfaces
 
 import (
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -8,10 +9,11 @@ import (
 
 type ISubmitObjects interface {
 	SetResourcesReport() (*reporthandling.PostureReport, error)
+	ListAllResources() (map[string]workloadinterface.IMetadata, error)
 }
 
 type SubmitInterfaces struct {
 	SubmitObjects ISubmitObjects
 	Reporter      reporter.IReport
-	ClusterConfig cautils.IClusterConfig
+	ClusterConfig cautils.ITenantConfig
 }

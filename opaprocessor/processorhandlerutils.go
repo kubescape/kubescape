@@ -11,11 +11,10 @@ import (
 	resources "github.com/armosec/opa-utils/resources"
 
 	"github.com/golang/glog"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-func getKubernetesObjects(k8sResources *cautils.K8SResources, match []reporthandling.RuleMatchObjects) []map[string]interface{} {
-	k8sObjects := []map[string]interface{}{}
+func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+	k8sObjects := []workloadinterface.IMetadata{}
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
 			for _, version := range match[m].APIVersions {
@@ -24,15 +23,11 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, match []reporthand
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
 							if k8sObj == nil {
+								continue
 								// glog.Errorf("Resource '%s' is nil, probably failed to pull the resource", groupResource)
-							} else if v, k := k8sObj.([]map[string]interface{}); k {
-								k8sObjects = append(k8sObjects, v...)
-							} else if v, k := k8sObj.(map[string]interface{}); k {
-								k8sObjects = append(k8sObjects, v)
-							} else if v, k := k8sObj.([]unstructured.Unstructured); k {
-								k8sObjects = append(k8sObjects, k8sinterface.ConvertUnstructuredSliceToMap(v)...) //
-							} else {
-								glog.Errorf("In 'getKubernetesObjects' resource '%s' unknown type", groupResource)
+							}
+							for i := range k8sObj {
+								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
 						}
 					}
@@ -52,28 +47,6 @@ func getRuleDependencies() (map[string]string, error) {
 	return modules, nil
 }
 
-//editRuleResponses editing the responses -> removing duplications, clearing secret data, etc.
-func editRuleResponses(ruleResponses []reporthandling.RuleResponse) []reporthandling.RuleResponse {
-	lenRuleResponses := len(ruleResponses)
-	for i := 0; i < lenRuleResponses; i++ {
-		for j := range ruleResponses[i].AlertObject.K8SApiObjects {
-			w := workloadinterface.NewWorkloadObj(ruleResponses[i].AlertObject.K8SApiObjects[j])
-			if w == nil {
-				continue
-			}
-
-			cleanRuleResponses(w)
-			ruleResponses[i].AlertObject.K8SApiObjects[j] = w.GetWorkload()
-		}
-	}
-	return ruleResponses
-}
-func cleanRuleResponses(workload k8sinterface.IWorkload) {
-	if workload.GetKind() == "Secret" {
-		workload.RemoveSecretData()
-	}
-}
-
 func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
 	if annotations == nil {
 		return false
@@ -82,4 +55,68 @@ func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
 		return pkgcautils.StringToBool(s.(string))
 	}
 	return false
+}
+
+// Checks that kubescape version is in range of use for this rule
+// In local build (BuildNumber = ""):
+// returns true only if rule doesn't have the "until" attribute
+func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
+	if from, ok := rule.Attributes["useFromKubescapeVersion"]; ok {
+		if cautils.BuildNumber != "" {
+			if from.(string) > cautils.BuildNumber {
+				return false
+			}
+		}
+	}
+	if until, ok := rule.Attributes["useUntilKubescapeVersion"]; ok {
+		if cautils.BuildNumber != "" {
+			if until.(string) <= cautils.BuildNumber {
+				return false
+			}
+		} else {
+			return false
+		}
+	}
+	return true
+}
+
+func removeData(obj workloadinterface.IMetadata) {
+	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
+		return // remove data only from kubernetes objects
+	}
+	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+	switch workload.GetKind() {
+	case "Secret":
+		removeSecretData(workload)
+	case "ConfigMap":
+		removeConfigMapData(workload)
+	default:
+		removePodData(workload)
+	}
+}
+
+func removeConfigMapData(workload workloadinterface.IWorkload) {
+	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "data")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+
+}
+func removeSecretData(workload workloadinterface.IWorkload) {
+	workloadinterface.NewWorkloadObj(workload.GetObject()).RemoveSecretData()
+	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+}
+func removePodData(workload workloadinterface.IWorkload) {
+	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+
+	containers, err := workload.GetContainers()
+	if err != nil || len(containers) == 0 {
+		return
+	}
+	for i := range containers {
+		for j := range containers[i].Env {
+			containers[i].Env[j].Value = ""
+		}
+	}
+	workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
 }

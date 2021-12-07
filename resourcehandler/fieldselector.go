@@ -9,14 +9,14 @@ import (
 )
 
 type IFieldSelector interface {
-	GetNamespacesSelector(*schema.GroupVersionResource) string
+	GetNamespacesSelectors(*schema.GroupVersionResource) []string
 }
 
 type EmptySelector struct {
 }
 
-func (es *EmptySelector) GetNamespacesSelector(resource *schema.GroupVersionResource) string {
-	return ""
+func (es *EmptySelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
+	return []string{""} //
 }
 
 type ExcludeSelector struct {
@@ -34,28 +34,36 @@ type IncludeSelector struct {
 func NewIncludeSelector(ns string) *IncludeSelector {
 	return &IncludeSelector{namespace: ns}
 }
-func (es *ExcludeSelector) GetNamespacesSelector(resource *schema.GroupVersionResource) string {
-	return getNamespacesSelector(resource, es.namespace, "!=")
+func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
+	fieldSelectors := ""
+	for _, n := range strings.Split(es.namespace, ",") {
+		if n != "" {
+			fieldSelectors += getNamespacesSelector(resource, n, "!=") + ","
+		}
+	}
+	return []string{fieldSelectors}
+
 }
 
-func (is *IncludeSelector) GetNamespacesSelector(resource *schema.GroupVersionResource) string {
-	return getNamespacesSelector(resource, is.namespace, "==")
+func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
+	fieldSelectors := []string{}
+	for _, n := range strings.Split(is.namespace, ",") {
+		if n != "" {
+			fieldSelectors = append(fieldSelectors, getNamespacesSelector(resource, n, "=="))
+		}
+	}
+	return fieldSelectors
 }
 
 func getNamespacesSelector(resource *schema.GroupVersionResource, ns, operator string) string {
-	fieldSelectors := ""
 	fieldSelector := "metadata."
 	if resource.Resource == "namespaces" {
 		fieldSelector += "name"
-	} else if k8sinterface.IsNamespaceScope(resource.Group, resource.Resource) {
+	} else if k8sinterface.IsNamespaceScope(resource) {
 		fieldSelector += "namespace"
 	} else {
 		return ""
 	}
-	namespacesSlice := strings.Split(ns, ",")
-	for _, n := range namespacesSlice {
-		fieldSelectors += fmt.Sprintf("%s%s%s,", fieldSelector, operator, n)
-	}
-	return fieldSelectors
+	return fmt.Sprintf("%s%s%s", fieldSelector, operator, ns)
 
 }

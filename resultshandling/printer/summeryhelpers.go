@@ -1,75 +1,60 @@
 package printer
 
 import (
-	"fmt"
-
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
-func groupByNamespace(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
+func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
 		if status(&resources[i]) {
-			if r, ok := mapResources[resources[i].Namespace]; ok {
+			if isKindToBeGrouped(resources[i].resource.GetKind()) {
+				if r, ok := mapResources[resources[i].resource.GetKind()]; ok {
+					r = append(r, resources[i])
+					mapResources[resources[i].resource.GetKind()] = r
+				} else {
+					mapResources[resources[i].resource.GetKind()] = []WorkloadSummary{resources[i]}
+				}
+			} else if r, ok := mapResources[resources[i].resource.GetNamespace()]; ok {
 				r = append(r, resources[i])
-				mapResources[resources[i].Namespace] = r
+				mapResources[resources[i].resource.GetNamespace()] = r
 			} else {
-				mapResources[resources[i].Namespace] = []WorkloadSummary{resources[i]}
+				mapResources[resources[i].resource.GetNamespace()] = []WorkloadSummary{resources[i]}
 			}
 		}
 	}
 	return mapResources
 }
-func listResultSummary(ruleReports []reporthandling.RuleReport) []WorkloadSummary {
+
+func isKindToBeGrouped(kind string) bool {
+	if kind == "Group" || kind == "User" {
+		return true
+	}
+	return false
+}
+
+func listResultSummary(ruleReports []reporthandling.RuleReport, allResources map[string]workloadinterface.IMetadata) []WorkloadSummary {
 	workloadsSummary := []WorkloadSummary{}
-	track := map[string]bool{}
 
 	for c := range ruleReports {
-		for _, ruleReport := range ruleReports[c].RuleResponses {
-			resource, err := ruleResultSummary(ruleReport.AlertObject)
-			if err != nil {
-				fmt.Println(err.Error())
-				continue
-			}
-
-			// add resource only once
-			for i := range resource {
-				resource[i].Exception = ruleReport.Exception
-				if ok := track[resource[i].ToString()]; !ok {
-					track[resource[i].ToString()] = true
-					workloadsSummary = append(workloadsSummary, resource[i])
-				}
-			}
-		}
+		resourcesIDs := ruleReports[c].ListResourcesIDs()
+		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetFailedResources(), reporthandling.StatusFailed)...)
+		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetWarningResources(), reporthandling.StatusWarning)...)
+		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetPassedResources(), reporthandling.StatusPassed)...)
 	}
 	return workloadsSummary
 }
-func ruleResultSummary(obj reporthandling.AlertObject) ([]WorkloadSummary, error) {
-	resource := []WorkloadSummary{}
 
-	for i := range obj.K8SApiObjects {
-		r, err := newWorkloadSummary(obj.K8SApiObjects[i])
-		if err != nil {
-			return resource, err
-		}
+func newListWorkloadsSummary(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, status string) []WorkloadSummary {
+	workloadsSummary := []WorkloadSummary{}
 
-		resource = append(resource, *r)
+	for _, i := range resourcesIDs {
+		workloadsSummary = append(workloadsSummary, WorkloadSummary{
+			resource: allResources[i],
+			status:   status,
+		})
 	}
-
-	return resource, nil
-}
-
-func newWorkloadSummary(obj map[string]interface{}) (*WorkloadSummary, error) {
-	r := &WorkloadSummary{}
-
-	workload := workloadinterface.NewWorkloadObj(obj)
-	if workload == nil {
-		return r, fmt.Errorf("expecting k8s API object")
-	}
-	r.Kind = workload.GetKind()
-	r.Namespace = workload.GetNamespace()
-	r.Name = workload.GetName()
-	return r, nil
+	return workloadsSummary
 }

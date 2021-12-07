@@ -13,9 +13,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	frameworkExample = `
+  # Scan all frameworks and submit the results
+  kubescape scan --submit
+  
+  # Scan the NSA framework
+  kubescape scan framework nsa
+  
+  # Scan the NSA and MITRE framework
+  kubescape scan framework nsa,mitre
+  
+  # Scan kubernetes YAML manifest files
+  kubescape scan framework nsa *.yaml
+
+  # Scan and save the results in the JSON format
+  kubescape scan --format json --output results.json
+
+  # Save scan results in JSON format
+  kubescape scan --format json --output results.json
+
+  # Display all resources
+  kubescape scan --verbose
+`
+)
 var frameworkCmd = &cobra.Command{
-	Use:       fmt.Sprintf("framework <framework names list> [`<glob pattern>`/`-`] [flags]\nExamples:\n$ kubescape scan framework nsa [flags]\n$ kubescape scan framework mitre,nsa [flags]\n$ kubescape scan framework 'nsa, mitre' [flags]\nSupported frameworks: %s", getter.NativeFrameworks),
+	Use:       "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
 	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(getter.NativeFrameworks, ", ")),
+	Example:   frameworkExample,
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: getter.NativeFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
