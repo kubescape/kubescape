@@ -13,7 +13,7 @@ import (
 	"github.com/golang/glog"
 )
 
-func getKubernetesObjects(k8sResources *cautils.K8SResources, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
@@ -26,7 +26,9 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, match []reporthand
 								continue
 								// glog.Errorf("Resource '%s' is nil, probably failed to pull the resource", groupResource)
 							}
-							k8sObjects = append(k8sObjects, k8sObj...)
+							for i := range k8sObj {
+								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
+							}
 						}
 					}
 				}
@@ -43,28 +45,6 @@ func getRuleDependencies() (map[string]string, error) {
 		glog.Warningf("failed to load rule dependencies")
 	}
 	return modules, nil
-}
-
-//editRuleResponses editing the responses -> removing duplications, clearing secret data, etc.
-func editRuleResponses(ruleResponses []reporthandling.RuleResponse) []reporthandling.RuleResponse {
-	lenRuleResponses := len(ruleResponses)
-	for i := 0; i < lenRuleResponses; i++ {
-		for j := range ruleResponses[i].AlertObject.K8SApiObjects {
-			w := workloadinterface.NewWorkloadObj(ruleResponses[i].AlertObject.K8SApiObjects[j])
-			if w == nil {
-				continue
-			}
-
-			cleanRuleResponses(w)
-			ruleResponses[i].AlertObject.K8SApiObjects[j] = w.GetWorkload()
-		}
-	}
-	return ruleResponses
-}
-func cleanRuleResponses(workload k8sinterface.IWorkload) {
-	if workload.GetKind() == "Secret" {
-		workload.RemoveSecretData()
-	}
 }
 
 func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
@@ -107,36 +87,25 @@ func removeData(obj workloadinterface.IMetadata) {
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
 	switch workload.GetKind() {
 	case "Secret":
-		removeSecretData(obj)
+		removeSecretData(workload)
 	case "ConfigMap":
-		removeConfigMapData(obj)
+		removeConfigMapData(workload)
 	default:
-		removePodData(obj)
+		removePodData(workload)
 	}
 }
 
-func removeConfigMapData(obj workloadinterface.IMetadata) {
-	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
-		return // remove data only from kubernetes objects
-	}
-	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+func removeConfigMapData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "data")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 
 }
-func removeSecretData(obj workloadinterface.IMetadata) {
-	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
-		return // remove data only from kubernetes objects
-	}
-	workloadinterface.NewWorkloadObj(obj.GetObject()).RemoveSecretData()
-	workloadinterface.RemoveFromMap(obj.GetObject(), "metadata", "managedFields")
+func removeSecretData(workload workloadinterface.IWorkload) {
+	workloadinterface.NewWorkloadObj(workload.GetObject()).RemoveSecretData()
+	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 }
-func removePodData(obj workloadinterface.IMetadata) {
-	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
-		return // remove data only from kubernetes objects
-	}
-	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
+func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 
