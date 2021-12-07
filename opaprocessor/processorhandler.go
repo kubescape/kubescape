@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/opa-utils/exceptions"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/golang/glog"
 
@@ -167,7 +166,13 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 		return nil, fmt.Errorf("error getting aggregated k8sObjects: %s", err.Error())
 	}
 
-	ruleReport, err := opap.runOPAOnSingleRule(rule, workloadinterface.ListMetaToMap(inputResources))
+	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
+
+	if inputRawResources, err = opap.executePreRun(rule, inputRawResources); err != nil {
+		return nil, err
+	}
+
+	ruleReport, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData)
 	if err != nil {
 		// ruleReport.RuleStatus.Status = reporthandling.StatusFailed
 		ruleReport.RuleStatus.Status = "failure"
@@ -176,6 +181,8 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	} else {
 		ruleReport.RuleStatus.Status = reporthandling.StatusPassed
 	}
+
+	inputResources = workloadinterface.ListMapToMeta(inputRawResources)
 	ruleReport.ListInputKinds = workloadinterface.ListMetaIDs(inputResources)
 
 	// remove all data from responses, leave only the metadata
@@ -190,15 +197,16 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	return &ruleReport, err
 }
 
-func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
+func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string) (reporthandling.RuleReport, error) {
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
-		return opap.runRegoOnK8s(rule, k8sObjects)
+		return opap.runRegoOnK8s(rule, k8sObjects, getRuleData)
 	default:
 		return reporthandling.RuleReport{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
-func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) (reporthandling.RuleReport, error) {
+
+func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string) (reporthandling.RuleReport, error) {
 	var errs error
 	ruleReport := reporthandling.RuleReport{
 		Name: rule.Name,
@@ -209,7 +217,7 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjec
 	if err != nil {
 		return ruleReport, fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
 	}
-	modules[rule.Name] = rule.Rule
+	modules[rule.Name] = getRuleData(rule)
 	compiled, err := ast.CompileModules(modules)
 	if err != nil {
 		return ruleReport, fmt.Errorf("in 'runRegoOnSingleRule', failed to compile rule, name: %s, reason: %s", rule.Name, err.Error())
@@ -253,20 +261,14 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 	return results, nil
 }
 
-func (opap *OPAProcessor) updateResults() {
-	// remove data from all objects
-	for i := range opap.AllResources {
-		removeData(opap.AllResources[i])
+func (opap *OPAProcessor) executePreRun(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) ([]map[string]interface{}, error) {
+
+	if preRuleData(rule) == "" {
+		return k8sObjects, nil
 	}
-
-	for f := range opap.PostureReport.FrameworkReports {
-		// set exceptions
-		exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
-
-		// set counters
-		reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
-
-		// set default score
-		reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects, preRuleData)
+	if err != nil {
+		return nil, err
 	}
+	return ruleReport.GetFailedResources(), nil
 }

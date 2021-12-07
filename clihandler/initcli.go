@@ -53,6 +53,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	var tenantConfig cautils.ITenantConfig
 
 	hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
+
 	// scanning environment
 	scanningTarget := scanInfo.GetScanningEnvironment()
 	switch scanningTarget {
@@ -67,11 +68,12 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		resourceHandler = resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
 	case cautils.ScanCluster:
 		k8s := k8sinterface.NewKubernetesApi() // initialize kubernetes api object
+
 		// pull k8s resources
-		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo))
+		hostSensorHandler = initHostSensor(scanInfo, k8s)
+		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler)
 		// use clusterConfig struct
 		tenantConfig = cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
-		hostSensorHandler = initHostSensor(scanInfo, k8s)
 	}
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(scanInfo, tenantConfig)
@@ -131,7 +133,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	// cli handler setup
 	go func() {
 		// policy handler setup
-		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler, interfaces.hostSensorHandler)
+		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler)
 
 		if err := Scan(policyHandler, scanInfo); err != nil {
 			fmt.Println(err)
