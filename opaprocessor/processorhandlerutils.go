@@ -7,11 +7,30 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/opa-utils/exceptions"
 	"github.com/armosec/opa-utils/reporthandling"
 	resources "github.com/armosec/opa-utils/resources"
 
 	"github.com/golang/glog"
 )
+
+func (opap *OPAProcessor) updateResults() {
+	// remove data from all objects
+	for i := range opap.AllResources {
+		removeData(opap.AllResources[i])
+	}
+
+	for f := range opap.PostureReport.FrameworkReports {
+		// set exceptions
+		exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
+
+		// set counters
+		reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
+
+		// set default score
+		reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+	}
+}
 
 func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
@@ -119,4 +138,15 @@ func removePodData(workload workloadinterface.IWorkload) {
 		}
 	}
 	workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
+}
+
+func ruleData(rule *reporthandling.PolicyRule) string {
+	return rule.Rule
+}
+
+func preRuleData(rule *reporthandling.PolicyRule) string {
+	if len(rule.PreRun) > 0 {
+		return rule.PreRun[0]
+	}
+	return ""
 }
