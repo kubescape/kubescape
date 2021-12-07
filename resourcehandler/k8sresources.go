@@ -67,6 +67,7 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 			// Return error with usefeul info on how to configure credentials for getting cloud provider info
 			switch provider {
 			case "gke":
+				// gke returns link by default
 				return err
 			case "eks":
 				return fmt.Errorf("could not get descriptive information about eks cluster: %s. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
