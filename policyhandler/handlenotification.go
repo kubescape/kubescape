@@ -3,29 +3,24 @@ package policyhandler
 import (
 	"fmt"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // PolicyHandler -
 type PolicyHandler struct {
-	resourceHandler   resourcehandler.IResourceHandler
-	hostSensorHandler hostsensorutils.IHostSensor
+	resourceHandler resourcehandler.IResourceHandler
 	// we are listening on this chan in opaprocessor/processorhandler.go/ProcessRulesListenner func
 	processPolicy *chan *cautils.OPASessionObj
 	getters       *cautils.Getters
 }
 
 // CreatePolicyHandler Create ws-handler obj
-func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, resourceHandler resourcehandler.IResourceHandler, hostSensorHandler hostsensorutils.IHostSensor) *PolicyHandler {
+func NewPolicyHandler(processPolicy *chan *cautils.OPASessionObj, resourceHandler resourcehandler.IResourceHandler) *PolicyHandler {
 	return &PolicyHandler{
-		resourceHandler:   resourceHandler,
-		processPolicy:     processPolicy,
-		hostSensorHandler: hostSensorHandler,
+		resourceHandler: resourceHandler,
+		processPolicy:   processPolicy,
 	}
 }
 
@@ -40,47 +35,30 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 		return err
 	}
 
-	k8sResources, err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
+	err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
 	if err != nil {
 		return err
 	}
-	if k8sResources == nil || len(*k8sResources) == 0 {
+	if opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0 {
 		return fmt.Errorf("empty list of resources")
 	}
-	opaSessionObj.K8SResources = k8sResources
-	for i := range *k8sResources {
-		for resourceIdx := range (*k8sResources)[i] {
-			// TODO: add remove data function
-			opaSessionObj.AllResources[(*k8sResources)[i][resourceIdx].GetID()] = (*k8sResources)[i][resourceIdx]
-		}
-	}
+
 	// update channel
 	*policyHandler.processPolicy <- opaSessionObj
 	return nil
 }
 
-func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 
 	opaSessionObj.PostureReport.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
-	resourcesMap, err := policyHandler.resourceHandler.GetResources(opaSessionObj.Frameworks, &notification.Designators)
+	resourcesMap, allResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj.Frameworks, &notification.Designators)
 	if err != nil {
-		return resourcesMap, err
+		return err
 	}
-	hostResources, err := policyHandler.hostSensorHandler.CollectResources()
-	if err != nil {
-		return resourcesMap, err
-	}
-	for rscIdx := range hostResources {
-		groupResources := k8sinterface.ResourceGroupToString(hostResources[rscIdx].Group, hostResources[rscIdx].GetApiVersion(), hostResources[rscIdx].GetKind())
-		for _, groupResource := range groupResources {
-			grpReasorceList, ok := (*resourcesMap)[groupResource]
-			if !ok {
-				grpReasorceList = make([]workloadinterface.IMetadata, 0)
-			}
-			grpReasorceList = append(grpReasorceList, &hostResources[rscIdx])
-			(*resourcesMap)[groupResource] = grpReasorceList
-		}
-	}
+
+	opaSessionObj.K8SResources = resourcesMap
+	opaSessionObj.AllResources = allResources
+
 	cautils.SuccessTextDisplay("Let’s start!!!")
-	return resourcesMap, nil
+	return nil
 }

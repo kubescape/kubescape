@@ -42,10 +42,6 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 }
 
 func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
-	// Remove data before reporting
-	keepFields := []string{"kind", "apiVersion", "metadata"}
-	keepMetadataFields := []string{"name", "namespace", "labels"}
-	opaSessionObj.PostureReport.RemoveData(keepFields, keepMetadataFields)
 
 	if err := report.prepareReport(opaSessionObj.PostureReport, opaSessionObj.AllResources); err != nil {
 		return err

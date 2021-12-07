@@ -19,12 +19,18 @@ func TestProcess(t *testing.T) {
 
 	// set k8s
 	k8sResources := make(cautils.K8SResources)
-	k8sResources["/v1/pods"] = workloadinterface.ListMapToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.V1KubeSystemNamespaceMock().Items))
+	allResources := make(map[string]workloadinterface.IMetadata)
+	imetaObj := workloadinterface.ListMapToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.V1KubeSystemNamespaceMock().Items))
+	for i := range imetaObj {
+		allResources[imetaObj[i].GetID()] = imetaObj[i]
+	}
+	k8sResources["/v1/pods"] = workloadinterface.ListMetaIDs(imetaObj)
 
 	// set opaSessionObj
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opaSessionObj.Frameworks = []reporthandling.Framework{*reporthandling.MockFrameworkA()}
 	opaSessionObj.K8SResources = &k8sResources
+	opaSessionObj.AllResources = allResources
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())
 	opap.Process()

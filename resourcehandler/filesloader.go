@@ -43,13 +43,19 @@ func NewFileResourceHandler(inputPatterns []string) *FileResourceHandler {
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, error) {
+func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+
+	// build resources map
+	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
+	k8sResources := setResourceMap(frameworks)
+	allResources := map[string]workloadinterface.IMetadata{}
+
 	workloads := []workloadinterface.IMetadata{}
 
 	// load resource from local file system
 	w, err := loadResourcesFromFiles(fileHandler.inputPatterns)
 	if err != nil {
-		return nil, err
+		return nil, allResources, err
 	}
 	if w != nil {
 		workloads = append(workloads, w...)
@@ -58,31 +64,32 @@ func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling
 	// load resources from url
 	w, err = loadResourcesFromUrl(fileHandler.inputPatterns)
 	if err != nil {
-		return nil, err
+		return nil, allResources, err
 	}
 	if w != nil {
 		workloads = append(workloads, w...)
 	}
 
 	if len(workloads) == 0 {
-		return nil, fmt.Errorf("empty list of workloads - no workloads found")
+		return nil, allResources, fmt.Errorf("empty list of workloads - no workloads found")
 	}
 
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
-	allResources := mapResources(workloads)
-
-	// build resources map
-	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads>
-	k8sResources := setResourceMap(frameworks) // TODO - support designators
+	mappedResources := mapResources(workloads)
 
 	// save only relevant resources
-	for i := range allResources {
+	for i := range mappedResources {
 		if _, ok := (*k8sResources)[i]; ok {
-			(*k8sResources)[i] = allResources[i]
+			ids := []string{}
+			for j := range mappedResources[i] {
+				ids = append(ids, mappedResources[i][j].GetID())
+				allResources[mappedResources[i][j].GetID()] = mappedResources[i][j]
+			}
+			(*k8sResources)[i] = ids
 		}
 	}
 
-	return k8sResources, nil
+	return k8sResources, allResources, nil
 
 }
 
@@ -108,6 +115,7 @@ func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetada
 
 // build resources map
 func mapResources(workloads []workloadinterface.IMetadata) map[string][]workloadinterface.IMetadata {
+
 	allResources := map[string][]workloadinterface.IMetadata{}
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
@@ -125,10 +133,9 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 		}
 		resourceTriplets := k8sinterface.JoinResourceTriplets(groupVersionResource.Group, groupVersionResource.Version, groupVersionResource.Resource)
 		if r, ok := allResources[resourceTriplets]; ok {
-			r = append(r, workloads...)
-			allResources[resourceTriplets] = r
+			allResources[resourceTriplets] = append(r, workloads[i])
 		} else {
-			allResources[resourceTriplets] = workloads
+			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
 		}
 	}
 	return allResources

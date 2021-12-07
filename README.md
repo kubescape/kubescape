@@ -24,7 +24,7 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan framework nsa --submit
+kubescape scan --submit
 ```
 
 <img src="docs/summary.png">
