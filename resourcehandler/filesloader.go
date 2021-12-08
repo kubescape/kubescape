@@ -115,6 +115,7 @@ func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetada
 
 // build resources map
 func mapResources(workloads []workloadinterface.IMetadata) map[string][]workloadinterface.IMetadata {
+
 	allResources := map[string][]workloadinterface.IMetadata{}
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
@@ -132,10 +133,9 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 		}
 		resourceTriplets := k8sinterface.JoinResourceTriplets(groupVersionResource.Group, groupVersionResource.Version, groupVersionResource.Resource)
 		if r, ok := allResources[resourceTriplets]; ok {
-			r = append(r, workloads...)
-			allResources[resourceTriplets] = r
+			allResources[resourceTriplets] = append(r, workloads[i])
 		} else {
-			allResources[resourceTriplets] = workloads
+			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
 		}
 	}
 	return allResources

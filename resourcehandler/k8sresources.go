@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/armosec/k8s-interface/cloudsupport"
@@ -23,14 +24,16 @@ import (
 )
 
 type K8sResourceHandler struct {
-	k8s           *k8sinterface.KubernetesApi
-	fieldSelector IFieldSelector
+	k8s               *k8sinterface.KubernetesApi
+	hostSensorHandler hostsensorutils.IHostSensor
+	fieldSelector     IFieldSelector
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor) *K8sResourceHandler {
 	return &K8sResourceHandler{
-		k8s:           k8s,
-		fieldSelector: fieldSelector,
+		k8s:               k8s,
+		fieldSelector:     fieldSelector,
+		hostSensorHandler: hostSensorHandler,
 	}
 }
 
@@ -54,6 +57,10 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
 		cautils.WarningDisplay(os.Stdout, err.Error())
 	}
+	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
+		return k8sResourcesMap, allResources, err
+	}
+
 	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
 	return k8sResourcesMap, allResources, nil
 }
@@ -160,4 +167,24 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 		}
 	}
 	return workloads
+}
+
+func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
+	hostResources, err := k8sHandler.hostSensorHandler.CollectResources()
+	if err != nil {
+		return err
+	}
+	for rscIdx := range hostResources {
+		groupResources := k8sinterface.ResourceGroupToString(hostResources[rscIdx].Group, hostResources[rscIdx].GetApiVersion(), hostResources[rscIdx].GetKind())
+		for _, groupResource := range groupResources {
+			allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
+
+			grpResourceList, ok := (*resourcesMap)[groupResource]
+			if !ok {
+				grpResourceList = make([]string, 0)
+			}
+			(*resourcesMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
+		}
+	}
+	return nil
 }
