@@ -6,8 +6,8 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
-// K8SResources map[<api group>/<api version>/<resource>]<[]resource objects>
-type K8SResources map[string][]workloadinterface.IMetadata
+// K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
+type K8SResources map[string][]string
 
 type OPASessionObj struct {
 	K8SResources  *K8SResources                          // input k8s objects

@@ -41,7 +41,7 @@ func TestLoadFile(t *testing.T) {
 		t.Errorf("%v", err)
 	}
 }
-func TestLoadResources(t *testing.T) {
+func TestMapResources(t *testing.T) {
 	// policyHandler := &PolicyHandler{}
 	// k8sResources, err := policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
 	// files, _ := listFiles([]string{onlineBoutiquePath()})
