@@ -16,7 +16,7 @@ import (
 // controlCmd represents the control command
 var controlCmd = &cobra.Command{
 	Use:   "control <control names list>/<control ids list>.\nExamples:\n$ kubescape scan control C-0058,C-0057 [flags]\n$ kubescape scan contol C-0058 [flags]\n$ kubescape scan control 'privileged container,allowed hostpath' [flags]",
-	Short: fmt.Sprintf("The control you wish to use for scan. It must be present in at least one of the folloiwng frameworks: %s", getter.NativeFrameworks),
+	Short: fmt.Sprintf("The control you wish to use for scan. It must be present in at least one of the following frameworks: %s", getter.NativeFrameworks),
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			controls := strings.Split(args[0], ",")

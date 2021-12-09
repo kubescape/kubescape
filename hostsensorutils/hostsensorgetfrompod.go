@@ -84,6 +84,66 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]HostSens
 }
 
 // return list of
+func (hsh *HostSensorHandler) GetOpenPortsList() ([]HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	res, err := hsh.sendAllPodsHTTPGETRequest("/openedPorts")
+	for resIdx := range res {
+		res[resIdx].GroupVersionResource.Resource = "OpenPortsList"
+		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
+		res[resIdx].GroupVersionResource.Version = "v1beta0"
+	}
+	return res, err
+}
+
+// return list of
+func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	res, err := hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening")
+	for resIdx := range res {
+		res[resIdx].GroupVersionResource.Resource = "LinuxSecurityHardeningStatus"
+		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
+		res[resIdx].GroupVersionResource.Version = "v1beta0"
+	}
+	return res, err
+}
+
+// return list of
+func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine")
+	for resIdx := range res {
+		res[resIdx].GroupVersionResource.Resource = "KubeletCommandLine"
+		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
+		res[resIdx].GroupVersionResource.Version = "v1beta0"
+	}
+	return res, err
+}
+
+// return list of
+func (hsh *HostSensorHandler) GetKernelVersion() ([]HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	res, err := hsh.sendAllPodsHTTPGETRequest("/kernelVersion")
+	for resIdx := range res {
+		res[resIdx].GroupVersionResource.Resource = "KernelVersion"
+		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
+		res[resIdx].GroupVersionResource.Version = "v1beta0"
+	}
+	return res, err
+}
+
+// return list of
+func (hsh *HostSensorHandler) GetOsReleaseFile() ([]HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	res, err := hsh.sendAllPodsHTTPGETRequest("/osRelease")
+	for resIdx := range res {
+		res[resIdx].GroupVersionResource.Resource = "OsReleaseFile"
+		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
+		res[resIdx].GroupVersionResource.Version = "v1beta0"
+	}
+	return res, err
+}
+
+// return list of
 func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations")
@@ -119,6 +179,37 @@ func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, erro
 		return kcData, err
 	}
 	res = append(res, kcData...)
+	//
+	kcData, err = hsh.GetKubeletCommandLine()
+	if err != nil {
+		return kcData, err
+	}
+	res = append(res, kcData...)
+	//
+	kcData, err = hsh.GetOsReleaseFile()
+	if err != nil {
+		return kcData, err
+	}
+	res = append(res, kcData...)
+	//
+	kcData, err = hsh.GetKernelVersion()
+	if err != nil {
+		return kcData, err
+	}
+	res = append(res, kcData...)
+	//
+	kcData, err = hsh.GetLinuxSecurityHardeningStatus()
+	if err != nil {
+		return kcData, err
+	}
+	res = append(res, kcData...)
+	//
+	kcData, err = hsh.GetOpenPortsList()
+	if err != nil {
+		return kcData, err
+	}
+	res = append(res, kcData...)
+	// finish
 	cautils.SuccessTextDisplay("Read host information from host sensor")
 	return res, nil
 }
