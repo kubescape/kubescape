@@ -80,14 +80,19 @@ func (v *VersionCheckHandlerMock) CheckLatestVersion(versionData *VersionCheckRe
 }
 
 func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckRequest) error {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("failed to get latest version")
+		}
+	}()
 
 	latestVersion, err := v.getLatestVersion(versionData)
 	if err != nil || latestVersion == nil {
-		return fmt.Errorf("failed to get latest version: %v", err)
+		return fmt.Errorf("failed to get latest version")
 	}
 
 	if latestVersion.ClientUpdate != "" {
-		if BuildNumber != "" {
+		if BuildNumber != "" && BuildNumber < latestVersion.ClientUpdate {
 			fmt.Println(warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
 		}
 	}

@@ -2,6 +2,7 @@ package clihandler
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -76,25 +77,45 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	}
 }
 
+// setPolicyGetter set the policy getter - local file/github release/ArmoAPI
 func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
 	if len(scanInfo.UseFrom) > 0 {
-		//load from file
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
 	} else {
 		if customerGUID == "" || !scanInfo.FrameworkScan {
-			scanInfo.PolicyGetter = getter.NewDownloadReleasedPolicy() // download policy from github release
+			setDownloadReleasedPolicy(scanInfo)
 		} else {
-			g := getter.GetArmoAPIConnector() // download policy from ARMO backend
-			g.SetCustomerGUID(customerGUID)
-			scanInfo.PolicyGetter = g
-			if scanInfo.ScanAll {
-				frameworks, err := g.ListCustomFrameworks(customerGUID)
-				if err != nil {
-					glog.Error("failed to get custom frameworks") // handle error
-					return
-				}
-				scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
-			}
+			setGetArmoAPIConnector(scanInfo, customerGUID)
 		}
 	}
+}
+
+func setDownloadReleasedPolicy(scanInfo *cautils.ScanInfo) {
+	g := getter.NewDownloadReleasedPolicy()    // download policy from github release
+	if err := g.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
+		cautils.WarningDisplay(os.Stdout, "Warning: failed to get policies from github release, loading policies from cache\n")
+		scanInfo.PolicyGetter = getter.NewLoadPolicy(getDefaultFrameworksPaths())
+	} else {
+		scanInfo.PolicyGetter = g
+	}
+}
+func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {
+	g := getter.GetArmoAPIConnector() // download policy from ARMO backend
+	g.SetCustomerGUID(customerGUID)
+	scanInfo.PolicyGetter = g
+	if scanInfo.ScanAll {
+		frameworks, err := g.ListCustomFrameworks(customerGUID)
+		if err != nil {
+			glog.Error("failed to get custom frameworks") // handle error
+			return
+		}
+		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
+	}
+}
+func getDefaultFrameworksPaths() []string {
+	fwPaths := []string{}
+	for i := range getter.NativeFrameworks {
+		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]))
+	}
+	return fwPaths
 }
