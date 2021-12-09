@@ -44,6 +44,9 @@ func policyIdentifierNames(pi []reporthandling.PolicyIdentifier) string {
 			policiesNames += ","
 		}
 	}
+	if policiesNames == "" {
+		policiesNames = "all"
+	}
 	return policiesNames
 }
 
