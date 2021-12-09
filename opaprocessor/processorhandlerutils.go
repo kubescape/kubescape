@@ -144,9 +144,6 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 	return rule.Rule
 }
 
-func preRuleData(rule *reporthandling.PolicyRule) string {
-	if len(rule.PreRun) > 0 {
-		return rule.PreRun[0]
-	}
-	return ""
+func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
+	return rule.ResourceEnumerator
 }

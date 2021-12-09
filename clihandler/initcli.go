@@ -18,6 +18,7 @@ import (
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/golang/glog"
 )
 
@@ -69,11 +70,14 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	case cautils.ScanCluster:
 		k8s := k8sinterface.NewKubernetesApi() // initialize kubernetes api object
 
-		// pull k8s resources
-		hostSensorHandler = initHostSensor(scanInfo, k8s)
-		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler)
 		// use clusterConfig struct
 		tenantConfig = cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
+
+		// pull k8s resources
+		hostSensorHandler = initHostSensor(scanInfo, k8s)
+		rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, tenantConfig.GetCustomerGUID(), tenantConfig.GetClusterName()))
+		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects)
+
 	}
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(scanInfo, tenantConfig)
