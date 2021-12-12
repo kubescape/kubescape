@@ -3,7 +3,6 @@ package printer
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
@@ -38,14 +37,30 @@ func (printer *PrometheusPrinter) printResources(allResources map[string]workloa
 
 }
 func (printer *PrometheusPrinter) printDetails(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, frameworkName, controlName, status string) {
-	fmt.Fprintf(printer.writer, "# Number of resources found as part of %s control \"%s\"\nkubescape_resources_found_count{framework=\"%s\",control=\"%s\"} %d\n", status, controlName, frameworkName, controlName, len(resourcesIDs))
+	objs := make(map[string]map[string]map[string]int)
 	for _, resourceID := range resourcesIDs {
 		resource := allResources[resourceID]
-		fmt.Fprintf(printer.writer, "# %s object from \"%s\" control \"%s\"\n", strings.Title(status), frameworkName, controlName)
-		if resource.GetNamespace() != "" {
-			fmt.Fprintf(printer.writer, "kubescape_object_%s_count{framework=\"%s\",control=\"%s\",namespace=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", status, frameworkName, controlName, resource.GetNamespace(), resource.GetName(), fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind()), 1)
-		} else {
-			fmt.Fprintf(printer.writer, "kubescape_object_%s_count{framework=\"%s\",control=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", status, frameworkName, controlName, resource.GetName(), fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind()), 1)
+
+		gvk := fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind())
+
+		if objs[gvk] == nil {
+			objs[gvk] = make(map[string]map[string]int)
+		}
+		if objs[gvk][resource.GetNamespace()] == nil {
+			objs[gvk][resource.GetNamespace()] = make(map[string]int)
+		}
+		objs[gvk][resource.GetNamespace()][resource.GetName()]++
+	}
+	for gvk, namespaces := range objs {
+		for namespace, names := range namespaces {
+			for name, value := range names {
+				fmt.Fprintf(printer.writer, "# Failed object from \"%s\" control \"%s\"\n", frameworkName, controlName)
+				if namespace != "" {
+					fmt.Fprintf(printer.writer, "kubescape_object_failed_count{framework=\"%s\",control=\"%s\",namespace=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", frameworkName, controlName, namespace, name, gvk, value)
+				} else {
+					fmt.Fprintf(printer.writer, "kubescape_object_failed_count{framework=\"%s\",control=\"%s\",name=\"%s\",groupVersionKind=\"%s\"} %d\n", frameworkName, controlName, name, gvk, value)
+				}
+			}
 		}
 	}
 }
@@ -56,6 +71,13 @@ func (printer *PrometheusPrinter) printReports(allResources map[string]workloadi
 			if controlReport.GetNumberOfResources() == 0 {
 				continue // the control did not test any resources
 			}
+			if controlReport.Passed() {
+				continue // control passed, do not print results
+			}
+			fmt.Fprintf(printer.writer, "# Number of resources found as part of %s control %s\nkubescape_resources_found_count{framework=\"%s\",control=\"%s\"} %d\n", frameworkReport.Name, controlReport.Name, frameworkReport.Name, controlReport.Name, controlReport.GetNumberOfResources())
+			fmt.Fprintf(printer.writer, "# Number of resources excluded as part of %s control %s\nkubescape_resources_excluded_count{framework=\"%s\",control=\"%s\"} %d\n", frameworkReport.Name, controlReport.Name, frameworkReport.Name, controlReport.Name, controlReport.GetNumberOfWarningResources())
+			fmt.Fprintf(printer.writer, "# Number of resources failed as part of %s control %s\nkubescape_resources_failed_count{framework=\"%s\",control=\"%s\"} %d\n", frameworkReport.Name, controlReport.Name, frameworkReport.Name, controlReport.Name, controlReport.GetNumberOfFailedResources())
+
 			printer.printResources(allResources, controlReport.ListResourcesIDs(), frameworkReport.Name, controlReport.Name)
 		}
 	}

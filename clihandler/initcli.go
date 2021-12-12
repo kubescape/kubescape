@@ -20,6 +20,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/golang/glog"
+	"github.com/mattn/go-isatty"
 )
 
 type componentInterfaces struct {
@@ -205,6 +206,11 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 }
 
 func askUserForHostSensor() bool {
+	return false
+
+	if !isatty.IsTerminal(os.Stdin.Fd()) {
+		return false
+	}
 	if ssss, err := os.Stdin.Stat(); err == nil {
 		// fmt.Printf("Found stdin type: %s\n", ssss.Mode().Type())
 		if ssss.Mode().Type()&(fs.ModeDevice|fs.ModeCharDevice) > 0 { //has TTY
