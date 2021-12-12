@@ -24,7 +24,7 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan framework nsa --submit
+kubescape scan --submit
 ```
 
 <img src="docs/summary.png">
@@ -91,7 +91,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `-e`/`--exclude-namespaces` | Scan all namespaces       | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces                                                                                                                                                                                                               |                                              |
 | `--include-namespaces`      | Scan all namespaces       | Scan specific namespaces                                                                                                                            |                                              |
 | `-s`/`--silent`             | Display progress messages | Silent progress messages                                                                                                                                                                                                                                                                                             |                                              |
-| `-t`/`--fail-threshold`     | `0` (do not fail)         | fail command (return exit code 1) if result is below threshold                                                                                                                                                                                                                                                         | `0` -> `100`                                 |
+| `-t`/`--fail-threshold`     | `0` (do not fail)         | fail command (return exit code 1) if result is below threshold                                                                                                                                                                                                                                                       | `0` -> `100`                                 |
 | `-f`/`--format`             | `pretty-printer`          | Output format                                                                                                                                                                                                                                                                                                        | `pretty-printer`/`json`/`junit`/`prometheus` |
 | `-o`/`--output`             | print to stdout           | Save scan result in file                                                                                                                                                                                                                                                                                             |                                              |
 | `--use-from`                |                           | Load local framework object from specified path. If not used will download latest                                                                                                                                                                                                                                    |                                              |
@@ -100,6 +100,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
 | `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
 | `--account`                 |                           | Armo portal account ID. Default will load account ID from configMap or config file                                                                                                                                                                                                                                   |                                              |
+| `--verbose`                 | `false`                   | Display all of the input resources and not only failed resources                                                                                                                                                                                                                                                     | `true`/`false`                               |
 
 
 ## Usage & Examples
@@ -141,6 +142,11 @@ kubescape scan framework nsa *.yaml
 #### Scan kubernetes manifest files from a public github repository 
 ```
 kubescape scan framework nsa https://github.com/armosec/kubescape
+```
+
+#### Display all scanned resources (including the resources who passed) 
+```
+kubescape scan framework nsa --verbose
 ```
 
 #### Output in `json` format

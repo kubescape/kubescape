@@ -35,22 +35,30 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 		return err
 	}
 
-	k8sResources, err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
+	err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
 	if err != nil {
 		return err
 	}
-	if k8sResources == nil || len(*k8sResources) == 0 {
+	if opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0 {
 		return fmt.Errorf("empty list of resources")
 	}
-	opaSessionObj.K8SResources = k8sResources
 
 	// update channel
 	*policyHandler.processPolicy <- opaSessionObj
 	return nil
 }
 
-func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, error) {
+func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 
 	opaSessionObj.PostureReport.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
-	return policyHandler.resourceHandler.GetResources(opaSessionObj.Frameworks, &notification.Designators)
+	resourcesMap, allResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj.Frameworks, &notification.Designators)
+	if err != nil {
+		return err
+	}
+
+	opaSessionObj.K8SResources = resourcesMap
+	opaSessionObj.AllResources = allResources
+
+	cautils.SuccessTextDisplay("Let’s start!!!")
+	return nil
 }

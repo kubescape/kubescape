@@ -37,18 +37,25 @@ type FileResourceHandler struct {
 }
 
 func NewFileResourceHandler(inputPatterns []string) *FileResourceHandler {
+	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
 		inputPatterns: inputPatterns,
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, error) {
-	workloads := []k8sinterface.IWorkload{}
+func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+
+	// build resources map
+	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
+	k8sResources := setResourceMap(frameworks)
+	allResources := map[string]workloadinterface.IMetadata{}
+
+	workloads := []workloadinterface.IMetadata{}
 
 	// load resource from local file system
 	w, err := loadResourcesFromFiles(fileHandler.inputPatterns)
 	if err != nil {
-		return nil, err
+		return nil, allResources, err
 	}
 	if w != nil {
 		workloads = append(workloads, w...)
@@ -57,31 +64,32 @@ func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling
 	// load resources from url
 	w, err = loadResourcesFromUrl(fileHandler.inputPatterns)
 	if err != nil {
-		return nil, err
+		return nil, allResources, err
 	}
 	if w != nil {
 		workloads = append(workloads, w...)
 	}
 
 	if len(workloads) == 0 {
-		return nil, fmt.Errorf("empty list of workloads - no workloads found")
+		return nil, allResources, fmt.Errorf("empty list of workloads - no workloads found")
 	}
 
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
-	allResources := mapResources(workloads)
-
-	// build resources map
-	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads>
-	k8sResources := setResourceMap(frameworks) // TODO - support designators
+	mappedResources := mapResources(workloads)
 
 	// save only relevant resources
-	for i := range allResources {
+	for i := range mappedResources {
 		if _, ok := (*k8sResources)[i]; ok {
-			(*k8sResources)[i] = allResources[i]
+			ids := []string{}
+			for j := range mappedResources[i] {
+				ids = append(ids, mappedResources[i][j].GetID())
+				allResources[mappedResources[i][j].GetID()] = mappedResources[i][j]
+			}
+			(*k8sResources)[i] = ids
 		}
 	}
 
-	return k8sResources, nil
+	return k8sResources, allResources, nil
 
 }
 
@@ -89,7 +97,7 @@ func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info 
 	return nil
 }
 
-func loadResourcesFromFiles(inputPatterns []string) ([]k8sinterface.IWorkload, error) {
+func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
 	files, errs := listFiles(inputPatterns)
 	if len(errs) > 0 {
 		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
@@ -106,32 +114,36 @@ func loadResourcesFromFiles(inputPatterns []string) ([]k8sinterface.IWorkload, e
 }
 
 // build resources map
-func mapResources(workloads []k8sinterface.IWorkload) map[string][]map[string]interface{} {
-	allResources := map[string][]map[string]interface{}{}
+func mapResources(workloads []workloadinterface.IMetadata) map[string][]workloadinterface.IMetadata {
+
+	allResources := map[string][]workloadinterface.IMetadata{}
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
 		if err != nil {
 			// TODO - print warning
 			continue
 		}
-		if groupVersionResource.Group != workloads[i].GetGroup() || groupVersionResource.Version != workloads[i].GetVersion() {
-			// TODO - print warning
-			continue
+
+		if workloadinterface.IsTypeWorkload(workloads[i].GetObject()) {
+			w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
+			if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
+				// TODO - print warning
+				continue
+			}
 		}
 		resourceTriplets := k8sinterface.JoinResourceTriplets(groupVersionResource.Group, groupVersionResource.Version, groupVersionResource.Resource)
 		if r, ok := allResources[resourceTriplets]; ok {
-			r = append(r, workloads[i].GetWorkload())
-			allResources[resourceTriplets] = r
+			allResources[resourceTriplets] = append(r, workloads[i])
 		} else {
-			allResources[resourceTriplets] = []map[string]interface{}{workloads[i].GetWorkload()}
+			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
 		}
 	}
 	return allResources
 
 }
 
-func loadFiles(filePaths []string) ([]k8sinterface.IWorkload, []error) {
-	workloads := []k8sinterface.IWorkload{}
+func loadFiles(filePaths []string) ([]workloadinterface.IMetadata, []error) {
+	workloads := []workloadinterface.IMetadata{}
 	errs := []error{}
 	for i := range filePaths {
 		f, err := loadFile(filePaths[i])
@@ -151,7 +163,7 @@ func loadFiles(filePaths []string) ([]k8sinterface.IWorkload, []error) {
 func loadFile(filePath string) ([]byte, error) {
 	return os.ReadFile(filePath)
 }
-func readFile(fileContent []byte, fileFromat FileFormat) ([]k8sinterface.IWorkload, []error) {
+func readFile(fileContent []byte, fileFromat FileFormat) ([]workloadinterface.IMetadata, []error) {
 
 	switch fileFromat {
 	case YAML_FILE_FORMAT:
@@ -185,12 +197,12 @@ func listFiles(patterns []string) ([]string, []error) {
 	return files, errs
 }
 
-func readYamlFile(yamlFile []byte) ([]k8sinterface.IWorkload, []error) {
+func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
 	errs := []error{}
 
 	r := bytes.NewReader(yamlFile)
 	dec := yaml.NewDecoder(r)
-	yamlObjs := []k8sinterface.IWorkload{}
+	yamlObjs := []workloadinterface.IMetadata{}
 
 	var t interface{}
 	for dec.Decode(&t) == nil {
@@ -199,7 +211,9 @@ func readYamlFile(yamlFile []byte) ([]k8sinterface.IWorkload, []error) {
 			continue
 		}
 		if obj, ok := j.(map[string]interface{}); ok {
-			yamlObjs = append(yamlObjs, workloadinterface.NewWorkloadObj(obj))
+			if o := workloadinterface.NewObject(obj); o != nil {
+				yamlObjs = append(yamlObjs, o)
+			}
 		} else {
 			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
 		}
@@ -208,8 +222,8 @@ func readYamlFile(yamlFile []byte) ([]k8sinterface.IWorkload, []error) {
 	return yamlObjs, errs
 }
 
-func readJsonFile(jsonFile []byte) ([]k8sinterface.IWorkload, []error) {
-	workloads := []k8sinterface.IWorkload{}
+func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, []error) {
+	workloads := []workloadinterface.IMetadata{}
 	var jsonObj interface{}
 	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
 		return workloads, []error{err}
@@ -219,11 +233,13 @@ func readJsonFile(jsonFile []byte) ([]k8sinterface.IWorkload, []error) {
 
 	return workloads, nil
 }
-func convertJsonToWorkload(jsonObj interface{}, workloads *[]k8sinterface.IWorkload) {
+func convertJsonToWorkload(jsonObj interface{}, workloads *[]workloadinterface.IMetadata) {
 
 	switch x := jsonObj.(type) {
 	case map[string]interface{}:
-		(*workloads) = append(*workloads, workloadinterface.NewWorkloadObj(x))
+		if o := workloadinterface.NewObject(x); o != nil {
+			(*workloads) = append(*workloads, o)
+		}
 	case []interface{}:
 		for i := range x {
 			convertJsonToWorkload(x[i], workloads)

@@ -3,11 +3,13 @@ package reporter
 import (
 	"net/url"
 
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/gofrs/uuid"
 )
 
-func (report *ReportEventReceiver) initEventReceiverURL() *url.URL {
+func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj := url.URL{}
 
 	urlObj.Scheme = "https"
@@ -19,7 +21,7 @@ func (report *ReportEventReceiver) initEventReceiverURL() *url.URL {
 
 	urlObj.RawQuery = q.Encode()
 
-	return &urlObj
+	report.eventReceiverURL = &urlObj
 }
 
 func hostToString(host *url.URL, reportID string) string {
@@ -27,4 +29,19 @@ func hostToString(host *url.URL, reportID string) string {
 	q.Add("reportID", reportID) // TODO - do we add the reportID?
 	host.RawQuery = q.Encode()
 	return host.String()
+}
+
+func setPaginationReport(postureReport *reporthandling.PostureReport) *reporthandling.PostureReport {
+	return &reporthandling.PostureReport{
+		CustomerGUID:         postureReport.CustomerGUID,
+		ClusterName:          postureReport.ClusterName,
+		ReportID:             postureReport.ReportID,
+		ReportGenerationTime: postureReport.ReportGenerationTime,
+	}
+}
+func iMetaToResource(obj workloadinterface.IMetadata) *reporthandling.Resource {
+	return &reporthandling.Resource{
+		ResourceID: obj.GetID(),
+		Object:     obj.GetObject(),
+	}
 }

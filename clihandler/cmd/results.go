@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	"github.com/armosec/kubescape/resultshandling/reporter"
@@ -45,6 +46,10 @@ func (resultsObject *ResultsObject) SetResourcesReport() (*reporthandling.Postur
 	}, nil
 }
 
+func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinterface.IMetadata, error) {
+	return map[string]workloadinterface.IMetadata{}, nil
+}
+
 var resultsCmd = &cobra.Command{
 	Use:   "results <json file>\nExample:\n$ kubescape submit results path/to/results.json",
 	Short: "Submit a pre scanned results file. The file must be in json format",
@@ -62,13 +67,10 @@ var resultsCmd = &cobra.Command{
 			return err
 		}
 
-		clusterName := clusterConfig.GetClusterName()
-		customerGUID := clusterConfig.GetCustomerGUID()
-
-		resultsObjects := NewResultsObject(customerGUID, clusterName, args[0])
+		resultsObjects := NewResultsObject(clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName(), args[0])
 
 		// submit resources
-		r := reporter.NewReportEventReceiver(customerGUID, clusterName)
+		r := reporter.NewReportEventReceiver(clusterConfig.GetConfigObj())
 
 		submitInterfaces := cliinterfaces.SubmitInterfaces{
 			ClusterConfig: clusterConfig,

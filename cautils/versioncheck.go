@@ -14,11 +14,16 @@ const SKIP_VERSION_CHECK = "KUBESCAPE_SKIP_UPDATE_CHECK"
 
 var BuildNumber string
 
+const UnknownBuildNumber = "unknown"
+
 type IVersionCheckHandler interface {
 	CheckLatestVersion(*VersionCheckRequest) error
 }
 
 func NewIVersionCheckHandler() IVersionCheckHandler {
+	if BuildNumber == "" {
+		WarningDisplay(os.Stdout, "Warning: unknown build number, this might affect your scan results. Please make sure you are updated to latest version.\n")
+	}
 	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && pkgutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
 	}
@@ -58,7 +63,7 @@ func NewVersionCheckHandler() *VersionCheckHandler {
 }
 func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanningTarget string) *VersionCheckRequest {
 	if buildNumber == "" {
-		buildNumber = "unknown"
+		buildNumber = UnknownBuildNumber
 	}
 	return &VersionCheckRequest{
 		Client:           "kubescape",
@@ -75,14 +80,21 @@ func (v *VersionCheckHandlerMock) CheckLatestVersion(versionData *VersionCheckRe
 }
 
 func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckRequest) error {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("failed to get latest version")
+		}
+	}()
 
 	latestVersion, err := v.getLatestVersion(versionData)
 	if err != nil || latestVersion == nil {
-		return fmt.Errorf("failed to get latest version: %v", err)
+		return fmt.Errorf("failed to get latest version")
 	}
 
 	if latestVersion.ClientUpdate != "" {
-		fmt.Println(warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
+		if BuildNumber != "" && BuildNumber < latestVersion.ClientUpdate {
+			fmt.Println(warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
+		}
 	}
 
 	// TODO - Enable after supporting framework version

@@ -4,9 +4,9 @@ go 1.17
 
 require (
 	github.com/armosec/armoapi-go v0.0.23
-	github.com/armosec/k8s-interface v0.0.8
-	github.com/armosec/opa-utils v0.0.42
-	github.com/armosec/rbac-utils v0.0.1
+	github.com/armosec/k8s-interface v0.0.32
+	github.com/armosec/opa-utils v0.0.62
+	github.com/armosec/rbac-utils v0.0.8
 	github.com/armosec/utils-go v0.0.3
 	github.com/briandowns/spinner v1.16.0
 	github.com/enescakir/emoji v1.0.0
@@ -18,10 +18,12 @@ require (
 	github.com/open-policy-agent/opa v0.33.1
 	github.com/satori/go.uuid v1.2.0
 	github.com/spf13/cobra v1.2.1
+	github.com/stretchr/testify v1.7.0
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.22.2
 	k8s.io/apimachinery v0.22.2
 	k8s.io/client-go v0.22.2
+	sigs.k8s.io/yaml v1.2.0
 )
 
 require (
@@ -58,8 +60,9 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
-	github.com/opencontainers/image-spec v1.0.1 // indirect
+	github.com/opencontainers/image-spec v1.0.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/pquerna/cachecontrol v0.1.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20200313005456-10cdbea86bc0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
@@ -86,5 +89,4 @@ require (
 	k8s.io/utils v0.0.0-20210819203725-bdf08cb9a70a // indirect
 	sigs.k8s.io/controller-runtime v0.10.2 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.1.2 // indirect
-	sigs.k8s.io/yaml v1.2.0 // indirect
 )

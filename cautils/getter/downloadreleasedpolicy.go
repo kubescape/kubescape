@@ -18,7 +18,7 @@ type DownloadReleasedPolicy struct {
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
-		gs: gitregostore.InitDefaultGitRegoStore(-1),
+		gs: gitregostore.NewDefaultGitRegoStore(-1),
 	}
 }
 
@@ -39,6 +39,10 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Fr
 		return nil, err
 	}
 	return framework, err
+}
+
+func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
+	return drp.gs.SetRegoObjects()
 }
 
 func isNativeFramework(framework string) bool {
