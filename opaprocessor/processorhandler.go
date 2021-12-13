@@ -168,10 +168,6 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
 
-	if inputRawResources, err = opap.executePreRun(rule, inputRawResources); err != nil {
-		return nil, err
-	}
-
 	ruleReport, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData)
 	if err != nil {
 		// ruleReport.RuleStatus.Status = reporthandling.StatusFailed
@@ -182,7 +178,12 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 		ruleReport.RuleStatus.Status = reporthandling.StatusPassed
 	}
 
-	inputResources = workloadinterface.ListMapToMeta(inputRawResources)
+	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
+	enumeratedData, err := opap.enumerateData(rule, inputRawResources)
+	if err != nil {
+		return nil, err
+	}
+	inputResources = workloadinterface.ListMapToMeta(enumeratedData)
 	ruleReport.ListInputKinds = workloadinterface.ListMetaIDs(inputResources)
 
 	// remove all data from responses, leave only the metadata
@@ -194,6 +195,16 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
+	failedResources := workloadinterface.ListMapToMeta(ruleReport.GetFailedResources())
+	warningResources := workloadinterface.ListMapToMeta(ruleReport.GetWarnignResources())
+
+	for i := range failedResources {
+		opap.AllResources[failedResources[i].GetID()] = failedResources[i]
+	}
+
+	for i := range warningResources {
+		opap.AllResources[warningResources[i].GetID()] = warningResources[i]
+	}
 	return &ruleReport, err
 }
 
@@ -261,12 +272,12 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 	return results, nil
 }
 
-func (opap *OPAProcessor) executePreRun(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) ([]map[string]interface{}, error) {
+func (opap *OPAProcessor) enumerateData(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) ([]map[string]interface{}, error) {
 
-	if preRuleData(rule) == "" {
+	if ruleEnumeratorData(rule) == "" {
 		return k8sObjects, nil
 	}
-	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects, preRuleData)
+	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects, ruleEnumeratorData)
 	if err != nil {
 		return nil, err
 	}

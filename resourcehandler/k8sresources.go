@@ -27,13 +27,15 @@ type K8sResourceHandler struct {
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	fieldSelector     IFieldSelector
+	rbacObjectsAPI    *cautils.RBACObjects
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects) *K8sResourceHandler {
 	return &K8sResourceHandler{
 		k8s:               k8s,
 		fieldSelector:     fieldSelector,
 		hostSensorHandler: hostSensorHandler,
+		rbacObjectsAPI:    rbacObjects,
 	}
 }
 
@@ -59,6 +61,10 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	}
 	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
 		return k8sResourcesMap, allResources, err
+	}
+
+	if err := k8sHandler.collectRbacResources(allResources); err != nil {
+		fmt.Println("failed to collect rbac resources")
 	}
 
 	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
@@ -185,6 +191,20 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 			}
 			(*resourcesMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 		}
+	}
+	return nil
+}
+
+func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
+	if k8sHandler.rbacObjectsAPI == nil {
+		return nil
+	}
+	allRbacResources, err := k8sHandler.rbacObjectsAPI.ListAllResources()
+	if err != nil {
+		return err
+	}
+	for k, v := range allRbacResources {
+		allResources[k] = v
 	}
 	return nil
 }

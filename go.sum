@@ -89,10 +89,10 @@ github.com/armosec/armoapi-go v0.0.23/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9
 github.com/armosec/k8s-interface v0.0.8/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
 github.com/armosec/k8s-interface v0.0.19/go.mod h1:0ztwEWLez2lpMMKHbs0DoZV64S0YIA4s72vCs9iAAiE=
 github.com/armosec/k8s-interface v0.0.26/go.mod h1:vHxGWqD/uh6+GQb9Sqv7OGMs+Rvc2dsFVc0XtgRh1ZU=
-github.com/armosec/k8s-interface v0.0.32 h1:dvSDRTXVZWrHyWOgu1QDrd4M2De4KYClrnB/k5Dq5fk=
-github.com/armosec/k8s-interface v0.0.32/go.mod h1:vHxGWqD/uh6+GQb9Sqv7OGMs+Rvc2dsFVc0XtgRh1ZU=
-github.com/armosec/opa-utils v0.0.61 h1:qIjsiv6BdSE7r+8k6FZtn0ZllYiai7Iyd8rl5YI4qPU=
-github.com/armosec/opa-utils v0.0.61/go.mod h1:P63qZDPG3vjPtSQqwx2N4Nfm8VaboDul7R7kmnUvvWc=
+github.com/armosec/k8s-interface v0.0.35 h1:8kfQT7MxNMPb5HL3Sv3PriI4eVQzogECbBzckso/HkA=
+github.com/armosec/k8s-interface v0.0.35/go.mod h1:vHxGWqD/uh6+GQb9Sqv7OGMs+Rvc2dsFVc0XtgRh1ZU=
+github.com/armosec/opa-utils v0.0.62 h1:C/VN1HUDoa0BX2CTSqgjuKEIlb/rkIwGY2/UlvfS154=
+github.com/armosec/opa-utils v0.0.62/go.mod h1:P63qZDPG3vjPtSQqwx2N4Nfm8VaboDul7R7kmnUvvWc=
 github.com/armosec/rbac-utils v0.0.1/go.mod h1:pQ8CBiij8kSKV7aeZm9FMvtZN28VgA7LZcYyTWimq40=
 github.com/armosec/rbac-utils v0.0.8 h1:Hpr2p9F3Elp9NxbDAZiMlNUcQOdfyu9rWFE2fM2nNGw=
 github.com/armosec/rbac-utils v0.0.8/go.mod h1:fmLZDgT5ILNo5gzR19boIIn7TOpfWh2pIgprxLrYN/g=

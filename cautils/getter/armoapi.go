@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/opa-utils/gitregostore"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/golang/glog"
 )
@@ -26,7 +25,7 @@ var (
 
 	armoDevERURL = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
-	armoDevFEURL = "armoui.eudev3.cyberarmorsoft.com"
+	armoDevFEURL = "armoui-dev.eudev3.cyberarmorsoft.com"
 )
 
 // Armo API for downloading policies
@@ -36,7 +35,6 @@ type ArmoAPI struct {
 	erURL        string
 	feURL        string
 	customerGUID string
-	gs           *gitregostore.GitRegoStore
 }
 
 var globalArmoAPIConnecctor *ArmoAPI
@@ -85,7 +83,6 @@ func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL string) *ArmoAPI {
 func newArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
-		gs:         gitregostore.InitDefaultGitRegoStore(-1),
 	}
 }
 func (armoAPI *ArmoAPI) SetCustomerGUID(customerGUID string) {
@@ -116,17 +113,7 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, er
 }
 
 func (armoAPI *ArmoAPI) GetControl(policyName string) (*reporthandling.Control, error) {
-	var control *reporthandling.Control
-	var err error
-	if strings.HasPrefix(policyName, "C-") || strings.HasPrefix(policyName, "c-") {
-		control, err = armoAPI.gs.GetOPAControlByID(policyName)
-	} else {
-		control, err = armoAPI.gs.GetOPAControlByName(policyName)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return control, nil
+	return nil, fmt.Errorf("control api is not public")
 }
 
 func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
