@@ -51,10 +51,12 @@ func newListWorkloadsSummary(allResources map[string]workloadinterface.IMetadata
 	workloadsSummary := []WorkloadSummary{}
 
 	for _, i := range resourcesIDs {
-		workloadsSummary = append(workloadsSummary, WorkloadSummary{
-			resource: allResources[i],
-			status:   status,
-		})
+		if r, ok := allResources[i]; ok {
+			workloadsSummary = append(workloadsSummary, WorkloadSummary{
+				resource: r,
+				status:   status,
+			})
+		}
 	}
 	return workloadsSummary
 }
