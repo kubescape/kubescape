@@ -195,6 +195,16 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
+	failedResources := workloadinterface.ListMapToMeta(ruleReport.GetFailedResources())
+	warningResources := workloadinterface.ListMapToMeta(ruleReport.GetWarnignResources())
+
+	for i := range failedResources {
+		opap.AllResources[failedResources[i].GetID()] = failedResources[i]
+	}
+
+	for i := range warningResources {
+		opap.AllResources[warningResources[i].GetID()] = warningResources[i]
+	}
 	return &ruleReport, err
 }
 
