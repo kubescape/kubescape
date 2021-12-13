@@ -25,7 +25,7 @@ var (
 
 	armoDevERURL = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
-	armoDevFEURL = "armoui.eudev3.cyberarmorsoft.com"
+	armoDevFEURL = "armoui-dev.eudev3.cyberarmorsoft.com"
 )
 
 // Armo API for downloading policies
