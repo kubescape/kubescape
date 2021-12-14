@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -56,12 +57,12 @@ func (hsh *HostSensorHandler) ForwardToPod(podName, path string) ([]byte, error)
 
 // sendAllPodsHTTPGETRequest fills the raw byte response in the envelope and the node name, but not the GroupVersionKind
 // so the caller is responsible to convert the raw data to some structured data and add the GroupVersionKind details
-func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]objectsenvelopes.HostSensorDataEnvelope, error) {
 	podList, err := hsh.getPodList()
 	if err != nil {
 		return nil, fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
 	}
-	res := make([]HostSensorDataEnvelope, 0, len(podList))
+	res := make([]objectsenvelopes.HostSensorDataEnvelope, 0, len(podList))
 	resLock := sync.Mutex{}
 	wg := sync.WaitGroup{}
 	wg.Add(len(podList))
@@ -74,7 +75,7 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]HostSens
 			} else {
 				resLock.Lock()
 				defer resLock.Unlock()
-				res = append(res, HostSensorDataEnvelope{NodeName: podList[podName], Data: resBytes})
+				res = append(res, objectsenvelopes.HostSensorDataEnvelope{NodeName: podList[podName], Data: resBytes})
 			}
 
 		}(podName, path)
@@ -84,7 +85,7 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]HostSens
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetOpenPortsList() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetOpenPortsList() ([]objectsenvelopes.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/openedPorts")
 	for resIdx := range res {
@@ -96,7 +97,7 @@ func (hsh *HostSensorHandler) GetOpenPortsList() ([]HostSensorDataEnvelope, erro
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]objectsenvelopes.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening")
 	for resIdx := range res {
@@ -108,7 +109,7 @@ func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]HostSensorDat
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]objectsenvelopes.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine")
 	for resIdx := range res {
@@ -120,7 +121,7 @@ func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]HostSensorDataEnvelope,
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetKernelVersion() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKernelVersion() ([]objectsenvelopes.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/kernelVersion")
 	for resIdx := range res {
@@ -132,7 +133,7 @@ func (hsh *HostSensorHandler) GetKernelVersion() ([]HostSensorDataEnvelope, erro
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetOsReleaseFile() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetOsReleaseFile() ([]objectsenvelopes.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/osRelease")
 	for resIdx := range res {
@@ -144,7 +145,7 @@ func (hsh *HostSensorHandler) GetOsReleaseFile() ([]HostSensorDataEnvelope, erro
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]objectsenvelopes.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations")
 	for resIdx := range res {
@@ -166,8 +167,8 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]HostSensorDataEnvelo
 	return res, err
 }
 
-func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, error) {
-	res := make([]HostSensorDataEnvelope, 0)
+func (hsh *HostSensorHandler) CollectResources() ([]objectsenvelopes.HostSensorDataEnvelope, error) {
+	res := make([]objectsenvelopes.HostSensorDataEnvelope, 0)
 	if hsh.DaemonSet == nil {
 		return res, nil
 	}

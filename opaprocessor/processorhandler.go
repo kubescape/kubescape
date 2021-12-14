@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/golang/glog"
 
@@ -183,20 +184,20 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	if err != nil {
 		return nil, err
 	}
-	inputResources = workloadinterface.ListMapToMeta(enumeratedData)
+	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 	ruleReport.ListInputKinds = workloadinterface.ListMetaIDs(inputResources)
 
 	for i := range inputResources {
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
-	failedResources := workloadinterface.ListMapToMeta(ruleReport.GetFailedResources())
+	failedResources := objectsenvelopes.ListMapToMeta(ruleReport.GetFailedResources())
 	for i := range failedResources {
 		if r, ok := opap.AllResources[failedResources[i].GetID()]; !ok {
 			opap.AllResources[failedResources[i].GetID()] = r
 		}
 	}
-	warningResources := workloadinterface.ListMapToMeta(ruleReport.GetWarnignResources())
+	warningResources := objectsenvelopes.ListMapToMeta(ruleReport.GetWarnignResources())
 	for i := range warningResources {
 		if r, ok := opap.AllResources[warningResources[i].GetID()]; !ok {
 			opap.AllResources[warningResources[i].GetID()] = r
