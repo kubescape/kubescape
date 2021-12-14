@@ -3,6 +3,7 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/hostsensorutils"
@@ -74,6 +75,7 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 	}
 	return clusterAPIServerInfo
 }
+
 func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
 
 	var errs error
@@ -82,11 +84,13 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels)
 		if err != nil {
-			// handle error
-			if errs == nil {
-				errs = err
-			} else {
-				errs = fmt.Errorf("%s\n%s", errs, err.Error())
+			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
+				// handle error
+				if errs == nil {
+					errs = err
+				} else {
+					errs = fmt.Errorf("%s\n%s", errs, err.Error())
+				}
 			}
 			continue
 		}
