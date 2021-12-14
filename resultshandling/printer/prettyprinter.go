@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/enescakir/emoji"
 	"github.com/olekukonko/tablewriter"
@@ -178,9 +179,8 @@ func (printer *PrettyPrinter) printGroupedResource(indent string, ns string, rsc
 
 func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	relatedStr := ""
-	w := workload.resource.GetObject()
-	if workloadinterface.IsTypeRegoResponseVector(w) {
-		relatedObjects := workloadinterface.NewRegoResponseVectorObject(w).GetRelatedObjects()
+	if workload.resource.GetObjectType() == workloadinterface.TypeWorkloadObject {
+		relatedObjects := objectsenvelopes.NewRegoResponseVectorObject(workload.resource.GetObject()).GetRelatedObjects()
 		for i, related := range relatedObjects {
 			if ns := related.GetNamespace(); i == 0 && ns != "" {
 				relatedStr += fmt.Sprintf("Namespace - %s, ", ns)
