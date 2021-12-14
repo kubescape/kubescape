@@ -65,7 +65,7 @@ func TestRemoveData(t *testing.T) {
 	c, _ := workload.GetContainers()
 	for i := range c {
 		for _, e := range c[i].Env {
-			assert.Equal(t, "", e.Value)
+			assert.Equal(t, "XXXXXX", e.Value)
 		}
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/hostsensorutils"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 
 	"github.com/armosec/k8s-interface/cloudsupport"
@@ -189,7 +190,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterface.IMetadata {
 	workloads := []workloadinterface.IMetadata{}
 	for i := range resourceMap {
-		if w := workloadinterface.NewObject(resourceMap[i]); w != nil {
+		if w := objectsenvelopes.NewObject(resourceMap[i]); w != nil {
 			workloads = append(workloads, w)
 		}
 	}
