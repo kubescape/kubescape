@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/hostsensorutils"
@@ -130,11 +131,13 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels)
 		if err != nil {
-			// handle error
-			if errs == nil {
-				errs = err
-			} else {
-				errs = fmt.Errorf("%s\n%s", errs, err.Error())
+			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
+				// handle error
+				if errs == nil {
+					errs = err
+				} else {
+					errs = fmt.Errorf("%s\n%s", errs, err.Error())
+				}
 			}
 			continue
 		}
