@@ -186,25 +186,28 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	inputResources = workloadinterface.ListMapToMeta(enumeratedData)
 	ruleReport.ListInputKinds = workloadinterface.ListMetaIDs(inputResources)
 
-	// remove all data from responses, leave only the metadata
-	keepFields := []string{"kind", "apiVersion", "metadata"}
-	keepMetadataFields := []string{"name", "namespace", "labels"}
-	ruleReport.RemoveData(keepFields, keepMetadataFields)
-
 	for i := range inputResources {
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
 	failedResources := workloadinterface.ListMapToMeta(ruleReport.GetFailedResources())
-	warningResources := workloadinterface.ListMapToMeta(ruleReport.GetWarnignResources())
-
 	for i := range failedResources {
-		opap.AllResources[failedResources[i].GetID()] = failedResources[i]
+		if r, ok := opap.AllResources[failedResources[i].GetID()]; !ok {
+			opap.AllResources[failedResources[i].GetID()] = r
+		}
+	}
+	warningResources := workloadinterface.ListMapToMeta(ruleReport.GetWarnignResources())
+	for i := range warningResources {
+		if r, ok := opap.AllResources[warningResources[i].GetID()]; !ok {
+			opap.AllResources[warningResources[i].GetID()] = r
+		}
 	}
 
-	for i := range warningResources {
-		opap.AllResources[warningResources[i].GetID()] = warningResources[i]
-	}
+	// remove all data from responses, leave only the metadata
+	keepFields := []string{"kind", "apiVersion", "metadata"}
+	keepMetadataFields := []string{"name", "namespace", "labels"}
+	ruleReport.RemoveData(keepFields, keepMetadataFields)
+
 	return &ruleReport, err
 }
 
