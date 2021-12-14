@@ -165,7 +165,11 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	if err != nil {
 		return nil, fmt.Errorf("error getting aggregated k8sObjects: %s", err.Error())
 	}
-
+	inputCloudResources, err := reporthandling.RegoResourcesAggregator(rule, getKubernetesObjects(opap.K8SResources, opap.AllResources, rule.DynamicMatch))
+	inputResources = append(inputResources, inputCloudResources...)
+	if err != nil {
+		return nil, fmt.Errorf("error getting aggregated k8sObjects: %s", err.Error())
+	}
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
 
 	ruleReport, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData)
