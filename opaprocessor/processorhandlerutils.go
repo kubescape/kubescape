@@ -116,13 +116,26 @@ func removeData(obj workloadinterface.IMetadata) {
 
 func removeConfigMapData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
-	workloadinterface.RemoveFromMap(workload.GetObject(), "data")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
-
+	overrideSensitiveData(workload)
 }
+
+func overrideSensitiveData(workload workloadinterface.IWorkload) {
+	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
+	if ok {
+		data, ok := dataInterface.(map[string]interface{})
+		if ok {
+			for key := range data {
+				workloadinterface.SetInMap(workload.GetObject(), []string{"data"}, key, "XXXXXX")
+			}
+		}
+	}
+}
+
 func removeSecretData(workload workloadinterface.IWorkload) {
-	workloadinterface.NewWorkloadObj(workload.GetObject()).RemoveSecretData()
+	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+	overrideSensitiveData(workload)
 }
 func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
@@ -134,7 +147,7 @@ func removePodData(workload workloadinterface.IWorkload) {
 	}
 	for i := range containers {
 		for j := range containers[i].Env {
-			containers[i].Env[j].Value = ""
+			containers[i].Env[j].Value = "XXXXXX"
 		}
 	}
 	workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)

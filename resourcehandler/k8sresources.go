@@ -3,13 +3,12 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
-	"os"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/opa-utils/reporthandling"
 
-	"github.com/armosec/k8s-interface/cloudsupport"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 
@@ -56,9 +55,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
 		return k8sResourcesMap, allResources, err
 	}
-	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
-		cautils.WarningDisplay(os.Stdout, err.Error())
-	}
 	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
 		return k8sResourcesMap, allResources, err
 	}
@@ -69,30 +65,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 
 	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
 	return k8sResourcesMap, allResources, nil
-}
-
-func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *cautils.K8SResources) error {
-	if cloudsupport.IsRunningInCloudProvider() {
-		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider()
-		if err != nil {
-			cluster := k8sinterface.GetCurrentContext().Cluster
-			provider := cloudsupport.GetCloudProvider(cluster)
-			// Return error with usefeul info on how to configure credentials for getting cloud provider info
-			switch provider {
-			case "gke":
-				// gke returns link by default
-				return err
-			case "eks":
-				return fmt.Errorf("could not get descriptive information about eks cluster: %s. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
-			}
-			return err
-		}
-
-		allResources[wl.GetID()] = wl
-		(*k8sResourcesMap)[fmt.Sprintf("%s/%s/%s", wl.GetApiVersion(), wl.GetNamespace(), wl.GetKind())] = []string{wl.GetID()}
-	}
-	return nil
-
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
@@ -112,11 +84,13 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels)
 		if err != nil {
-			// handle error
-			if errs == nil {
-				errs = err
-			} else {
-				errs = fmt.Errorf("%s\n%s", errs, err.Error())
+			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
+				// handle error
+				if errs == nil {
+					errs = err
+				} else {
+					errs = fmt.Errorf("%s\n%s", errs, err.Error())
+				}
 			}
 			continue
 		}
