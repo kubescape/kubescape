@@ -18,7 +18,7 @@ type PrettyPrinter struct {
 	summary            Summary
 	verboseMode        bool
 	sortedControlNames []string
-	frameworkSummary   ControlSummary
+	frameworkSummary   ResultSummary
 }
 
 func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
@@ -35,15 +35,20 @@ func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 	allResources := []string{}
 	frameworkNames := []string{}
 
+	var overallRiskScore float32 = 0
 	for _, frameworkReport := range opaSessionObj.PostureReport.FrameworkReports {
 		frameworkNames = append(frameworkNames, frameworkReport.Name)
 		failedResources = reporthandling.GetUniqueResourcesIDs(append(failedResources, frameworkReport.ListResourcesIDs().GetFailedResources()...))
 		warningResources = reporthandling.GetUniqueResourcesIDs(append(warningResources, frameworkReport.ListResourcesIDs().GetWarningResources()...))
 		allResources = reporthandling.GetUniqueResourcesIDs(append(allResources, frameworkReport.ListResourcesIDs().GetAllResources()...))
 		printer.summarySetup(frameworkReport, opaSessionObj.AllResources)
+		overallRiskScore += frameworkReport.Score
 	}
 
-	printer.frameworkSummary = ControlSummary{
+	overallRiskScore /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
+
+	printer.frameworkSummary = ResultSummary{
+		RiskScore:      overallRiskScore,
 		TotalResources: len(allResources),
 		TotalFailed:    len(failedResources),
 		TotalWarning:   len(warningResources),
@@ -73,7 +78,10 @@ func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, al
 		if printer.verboseMode {
 			passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
 		}
-		printer.summary[cr.Name] = ControlSummary{
+
+		//controlSummary
+		printer.summary[cr.Name] = ResultSummary{
+			RiskScore:         cr.Score,
 			TotalResources:    cr.GetNumberOfResources(),
 			TotalFailed:       cr.GetNumberOfFailedResources(),
 			TotalWarning:      cr.GetNumberOfWarningResources(),
@@ -100,7 +108,7 @@ func (printer *PrettyPrinter) printResults() {
 	}
 }
 
-func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *ControlSummary) {
+func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *ResultSummary) {
 	cautils.SimpleDisplay(printer.writer, "Summary - ")
 	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed-controlSummary.TotalWarning)
 	cautils.WarningDisplay(printer.writer, "Excluded:%v   ", controlSummary.TotalWarning)
@@ -113,7 +121,7 @@ func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *C
 
 }
 
-func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ControlSummary) {
+func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ResultSummary) {
 	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
 	if controlSummary.TotalResources == 0 {
 		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
@@ -128,7 +136,7 @@ func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *Con
 	cautils.DescriptionDisplay(printer.writer, "Description: %s\n", controlSummary.Description)
 
 }
-func (printer *PrettyPrinter) printResources(controlSummary *ControlSummary) {
+func (printer *PrettyPrinter) printResources(controlSummary *ResultSummary) {
 
 	if len(controlSummary.FailedWorkloads) > 0 {
 		cautils.FailureDisplay(printer.writer, "Failed:\n")
@@ -194,11 +202,11 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	return relatedStr
 }
 
-func generateRow(control string, cs ControlSummary) []string {
+func generateRow(control string, cs ResultSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)
 	if cs.TotalResources != 0 {
-		row = append(row, fmt.Sprintf("%d%s", percentage(cs.TotalResources, cs.TotalFailed), "%"))
+		row = append(row, fmt.Sprintf("%.2f%s", cs.RiskScore, "%"))
 	} else {
 		row = append(row, EmptyPercentage)
 	}
@@ -206,7 +214,7 @@ func generateRow(control string, cs ControlSummary) []string {
 }
 
 func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% success"}
+	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
 }
 
 func percentage(big, small int) int {
@@ -218,18 +226,16 @@ func percentage(big, small int) int {
 	}
 	return int(float64(float64(big-small)/float64(big)) * 100)
 }
-func generateFooter(numControlers, sumFailed, sumWarning, sumTotal int) []string {
+
+func generateFooter(printer *PrettyPrinter) []string {
 	// Control name | # failed resources | all resources | % success
 	row := []string{}
 	row = append(row, "Resource Summary") //fmt.Sprintf(""%d", numControlers"))
-	row = append(row, fmt.Sprintf("%d", sumFailed))
-	row = append(row, fmt.Sprintf("%d", sumWarning))
-	row = append(row, fmt.Sprintf("%d", sumTotal))
-	if sumTotal != 0 {
-		row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
-	} else {
-		row = append(row, EmptyPercentage)
-	}
+	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalFailed))
+	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalWarning))
+	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalResources))
+	row = append(row, fmt.Sprintf("%.2f%s", printer.frameworkSummary.RiskScore, "%"))
+
 	return row
 }
 func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string) {
@@ -247,7 +253,10 @@ func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string) {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
 	}
-	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarning, printer.frameworkSummary.TotalResources))
+
+	summaryTable.SetFooter(generateFooter(printer))
+
+	// summaryTable.SetFooter(generateFooter())
 	summaryTable.Render()
 }
 
