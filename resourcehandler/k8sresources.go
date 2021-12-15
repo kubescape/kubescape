@@ -82,11 +82,11 @@ func mock(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *
 	wl := cloudsupport.NewDescriptiveInfoFromCloudProvider(mockmap)
 	wl.SetGroup("cloudvendordata.armo.cloud")
 	wl.SetNamespace("v1beta0")
-	wl.SetKind("description")
+	wl.SetKind("ClusterDescription")
 	wl.SetProvider("gke")
 
 	allResources[wl.GetID()] = wl
-	(*k8sResourcesMap)[fmt.Sprintf("%s/%s/%ss", wl.GetApiVersion(), wl.GetNamespace(), wl.GetKind())] = []string{wl.GetID()}
+	(*k8sResourcesMap)[fmt.Sprintf("%s/%s/%ss", wl.GetApiVersion(), wl.GetNamespace(), strings.ToLower(wl.GetKind()))] = []string{wl.GetID()}
 
 	return nil
 
@@ -106,7 +106,6 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 			}
 			return err
 		}
-		fmt.Print(wl)
 		allResources[wl.GetID()] = wl
 		// k8sResourcesMap[<ID>] = workload
 		(*k8sResourcesMap)[fmt.Sprintf("%s/%s/%ss", wl.GetApiVersion(), wl.GetNamespace(), wl.GetKind())] = []string{wl.GetID()}

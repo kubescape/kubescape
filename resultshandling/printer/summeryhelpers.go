@@ -29,7 +29,7 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 }
 
 func isKindToBeGrouped(kind string) bool {
-	if kind == "Group" || kind == "User" || kind == "description" || kind == "CloudProvider" {
+	if kind == "Group" || kind == "User" || kind == "CloudProvider" || kind == "ClusterDescription" {
 		return true
 	}
 	return false
