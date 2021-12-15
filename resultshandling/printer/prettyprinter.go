@@ -158,6 +158,9 @@ func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]Workl
 	if rsc, ok := workloads["Group"]; ok {
 		printer.printGroupedResource(indent, "Group", rsc)
 	}
+	if rsc, ok := workloads["description"]; ok {
+		printer.printGroupedResource(indent, "CloudProvider", rsc)
+	}
 }
 
 func (printer *PrettyPrinter) printGroupedResource(indent string, ns string, rsc []WorkloadSummary) {
