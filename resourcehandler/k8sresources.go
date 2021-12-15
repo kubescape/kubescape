@@ -2,7 +2,6 @@ package resourcehandler
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -74,22 +73,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	return k8sResourcesMap, allResources, nil
 }
 
-func mock(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *cautils.K8SResources) error {
-	mockdata := ""
-	var mockmap (map[string]interface{})
-	json.Unmarshal([]byte(mockdata), &mockmap)
-	wl := cloudsupport.NewDescriptiveInfoFromCloudProvider(mockmap)
-	wl.SetGroup("cloudvendordata.armo.cloud")
-	wl.SetNamespace("v1beta0")
-	wl.SetKind("ClusterDescription")
-	wl.SetProvider("gke")
-
-	allResources[wl.GetID()] = wl
-	(*k8sResourcesMap)[fmt.Sprintf("%s/%s/%ss", wl.GetApiVersion(), wl.GetNamespace(), strings.ToLower(wl.GetKind()))] = []string{wl.GetID()}
-
-	return nil
-
-}
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *cautils.K8SResources) error {
 	if cloudsupport.IsRunningInCloudProvider() {
 		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider()
@@ -102,6 +85,8 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 				return fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
 			case "eks":
 				return fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
+			case "aks":
+				return fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
 			}
 			return err
 		}
