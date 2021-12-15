@@ -108,7 +108,7 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 		}
 		allResources[wl.GetID()] = wl
 		// k8sResourcesMap[<ID>] = workload
-		(*k8sResourcesMap)[fmt.Sprintf("%s/%s/%ss", wl.GetApiVersion(), wl.GetNamespace(), wl.GetKind())] = []string{wl.GetID()}
+		(*k8sResourcesMap)[fmt.Sprintf("%s/%s/%ss", wl.GetApiVersion(), wl.GetNamespace(), strings.ToLower(wl.GetKind()))] = []string{wl.GetID()}
 	}
 	return nil
 
