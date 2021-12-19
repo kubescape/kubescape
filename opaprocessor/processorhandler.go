@@ -8,6 +8,8 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/score"
+
 	"github.com/golang/glog"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -66,7 +68,8 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 
 		// update score
 		// opap.updateScore()
-
+		scoreutil := score.NewScore(opaSessionObj.AllResources)
+		scoreutil.Calculate(opaSessionObj.PostureReport.FrameworkReports)
 		// report
 		*opaHandler.reportResults <- opaSessionObj
 	}

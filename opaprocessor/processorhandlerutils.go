@@ -28,7 +28,7 @@ func (opap *OPAProcessor) updateResults() {
 		reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
 
 		// set default score
-		reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+		// reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
 	}
 }
 
