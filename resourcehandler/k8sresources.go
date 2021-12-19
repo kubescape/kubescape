@@ -3,6 +3,7 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
@@ -10,6 +11,7 @@ import (
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 
+	"github.com/armosec/k8s-interface/cloudsupport"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 
@@ -61,7 +63,10 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
-		fmt.Println("failed to collect rbac resources")
+		cautils.WarningDisplay(os.Stdout, "Warning: failed to collect rbac resources\n")
+	}
+	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
+		cautils.WarningDisplay(os.Stdout, fmt.Sprintf("Warning: %v\n", err.Error()))
 	}
 
 	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
@@ -156,16 +161,15 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 		return err
 	}
 	for rscIdx := range hostResources {
-		groupResources := k8sinterface.ResourceGroupToString(hostResources[rscIdx].Group, hostResources[rscIdx].GetApiVersion(), hostResources[rscIdx].GetKind())
-		for _, groupResource := range groupResources {
-			allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
+		group, version := getGroupNVersion(hostResources[rscIdx].GetApiVersion())
+		groupResource := k8sinterface.JoinResourceTriplets(group, version, hostResources[rscIdx].GetKind())
+		allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
 
-			grpResourceList, ok := (*resourcesMap)[groupResource]
-			if !ok {
-				grpResourceList = make([]string, 0)
-			}
-			(*resourcesMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
+		grpResourceList, ok := (*resourcesMap)[groupResource]
+		if !ok {
+			grpResourceList = make([]string, 0)
 		}
+		(*resourcesMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 	}
 	return nil
 }
@@ -182,4 +186,28 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 		allResources[k] = v
 	}
 	return nil
+}
+
+func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *cautils.K8SResources) error {
+	if cloudsupport.IsRunningInCloudProvider() {
+		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider()
+		if err != nil {
+			cluster := k8sinterface.GetCurrentContext().Cluster
+			provider := cloudsupport.GetCloudProvider(cluster)
+			// Return error with useful info on how to configure credentials for getting cloud provider info
+			switch provider {
+			case "gke":
+				return fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
+			case "eks":
+				return fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
+			case "aks":
+				return fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
+			}
+			return err
+		}
+		allResources[wl.GetID()] = wl
+		(*k8sResourcesMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+	}
+	return nil
+
 }

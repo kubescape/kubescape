@@ -1,6 +1,8 @@
 package resourcehandler
 
 import (
+	"strings"
+
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
 
@@ -65,4 +67,16 @@ func insertK8sResources(k8sResources map[string]map[string]map[string]interface{
 			}
 		}
 	}
+}
+
+func getGroupNVersion(apiVersion string) (string, string) {
+	gv := strings.Split(apiVersion, "/")
+	group, version := "", ""
+	if len(gv) >= 1 {
+		group = gv[0]
+	}
+	if len(gv) >= 2 {
+		version = gv[1]
+	}
+	return group, version
 }
