@@ -6,9 +6,7 @@ import (
 	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/opaprocessor"
@@ -18,8 +16,6 @@ import (
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/rbac-utils/rbacscanner"
-	"github.com/golang/glog"
 	"github.com/mattn/go-isatty"
 )
 
@@ -31,60 +27,24 @@ type componentInterfaces struct {
 	hostSensorHandler hostsensorutils.IHostSensor
 }
 
-func initHostSensor(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
-
-	hasHostSensorControls := true
-	// we need to determined which controls needs host sensor
-	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
-		scanInfo.HostSensor.SetBool(askUserForHostSensor())
-	}
-	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
-		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
-		if err != nil {
-			glog.Errorf("failed to create host sensor: %v", err)
-			return &hostsensorutils.HostSensorHandlerMock{}
-		}
-		return hostSensorHandler
-	}
-	return &hostsensorutils.HostSensorHandlerMock{}
-}
-
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
-	var resourceHandler resourcehandler.IResourceHandler
-	var hostSensorHandler hostsensorutils.IHostSensor
-	var tenantConfig cautils.ITenantConfig
 
-	hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
+	k8s := getKubernetesApi(scanInfo)
 
-	// scanning environment
-	scanningTarget := scanInfo.GetScanningEnvironment()
-	switch scanningTarget {
-	case cautils.ScanLocalFiles:
-		k8sinterface.ConnectedToCluster = false // DEPRECATED ?
-		scanInfo.Local = true                   // do not submit results when scanning YAML files
+	tenantConfig := getTenantConfig(scanInfo, k8s)
 
-		// not scanning a cluster - use localConfig struct
-		tenantConfig = cautils.NewLocalConfig(getter.GetArmoAPIConnector(), scanInfo.Account)
+	// Set submit behavior AFTER loading tenant config
+	setSubmitBehavior(scanInfo, tenantConfig)
 
-		// load resources from file
-		resourceHandler = resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
-	case cautils.ScanCluster:
-		k8s := k8sinterface.NewKubernetesApi() // initialize kubernetes api object
+	hostSensorHandler := getHostSensorHandler(scanInfo, k8s)
 
-		// use clusterConfig struct
-		tenantConfig = cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
+	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler)
 
-		// pull k8s resources
-		hostSensorHandler = initHostSensor(scanInfo, k8s)
-		rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, tenantConfig.GetCustomerGUID(), tenantConfig.GetClusterName()))
-		resourceHandler = resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects)
-
-	}
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(scanInfo, tenantConfig)
+	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
 
 	v := cautils.NewIVersionCheckHandler()
-	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanningTarget))
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
 
 	// setup printer
 	printerHandler := printer.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)

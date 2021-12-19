@@ -4,25 +4,70 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/golang/glog"
 )
 
-func getReporter(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) reporter.IReport {
-	setSubmitBehavior(scanInfo, tenantConfig)
-
-	if !scanInfo.Submit {
-		return reporter.NewReportMock()
+func getKubernetesApi(scanInfo *cautils.ScanInfo) *k8sinterface.KubernetesApi {
+	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+		return nil
 	}
-	if !scanInfo.FrameworkScan {
-		return reporter.NewReportMock()
+	return k8sinterface.NewKubernetesApi()
+}
+func getTenantConfig(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), scanInfo.Account)
 	}
+	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
+}
 
-	return reporter.NewReportEventReceiver(tenantConfig.GetConfigObj())
+func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
+	if submit {
+		return cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, tenantConfig.GetCustomerGUID(), tenantConfig.GetClusterName()))
+	}
+	return nil
+}
+
+func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IReport {
+	if submit {
+		return reporter.NewReportEventReceiver(tenantConfig.GetConfigObj())
+
+	}
+	return reporter.NewReportMock()
+}
+func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
+	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
+	}
+	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
+	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects)
+}
+
+func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
+	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+		return &hostsensorutils.HostSensorHandlerMock{}
+	}
+	hasHostSensorControls := true
+	// we need to determined which controls needs host sensor
+	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
+		scanInfo.HostSensor.SetBool(askUserForHostSensor())
+	}
+	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
+		if err != nil {
+			glog.Errorf("failed to create host sensor: %v", err)
+			return &hostsensorutils.HostSensorHandlerMock{}
+		}
+		return hostSensorHandler
+	}
+	return &hostsensorutils.HostSensorHandlerMock{}
 }
 
 func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector {
@@ -64,6 +109,18 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 			Default/Submit - Submit report
 
 	*/
+
+	// do not submit control scanning
+	if !scanInfo.FrameworkScan {
+		scanInfo.Submit = false
+		return
+	}
+
+	// do not submit yaml/url scanning
+	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+		scanInfo.Submit = false
+		return
+	}
 
 	if tenantConfig.IsConfigFound() { // config found in cache (submitted)
 		if !scanInfo.Local {
