@@ -32,6 +32,13 @@ func (opap *OPAProcessor) updateResults() {
 	}
 }
 
+func getAllSupportedObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
+	k8sObjects := []workloadinterface.IMetadata{}
+	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
+	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.DynamicMatch)...)
+	return k8sObjects
+}
+
 func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 	for m := range match {
