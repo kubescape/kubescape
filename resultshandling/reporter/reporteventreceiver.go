@@ -126,7 +126,7 @@ func (report *ReportEventReceiver) DisplayReportURL() {
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
 	if report.customerAdminEMail != "" {
-		cautils.InfoTextDisplay(os.Stdout, fmt.Sprintf("\n\n%s %s/risk/%s\n\n", message, u.String(), report.clusterName))
+		cautils.InfoTextDisplay(os.Stdout, fmt.Sprintf("\n\n%s %s/risk/%s\n(Account: %s)\n\n", message, u.String(), report.clusterName, report.customerGUID))
 		return
 	}
 	u.Path = "account/sign-up"
