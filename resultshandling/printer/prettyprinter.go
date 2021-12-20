@@ -81,6 +81,7 @@ func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, al
 
 		//controlSummary
 		printer.summary[cr.Name] = ResultSummary{
+			ID:                cr.ControlID,
 			RiskScore:         cr.Score,
 			TotalResources:    cr.GetNumberOfResources(),
 			TotalFailed:       cr.GetNumberOfFailedResources(),
@@ -121,8 +122,11 @@ func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *R
 
 }
 
+func getControlURL(controlID string) string {
+	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", controlID)
+}
 func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ResultSummary) {
-	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
+	cautils.InfoDisplay(printer.writer, "[control: %s - %s] ", controlName, getControlURL(controlSummary.ID))
 	if controlSummary.TotalResources == 0 {
 		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed != 0 {
