@@ -47,6 +47,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	// get k8s resources
 	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
 
+	cautils.StartSpinner()
+
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResourcesMap := setResourceMap(frameworks)
@@ -68,6 +70,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
 		cautils.WarningDisplay(os.Stdout, fmt.Sprintf("Warning: %v\n", err.Error()))
 	}
+
+	cautils.StopSpinner()
 
 	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
 	return k8sResourcesMap, allResources, nil

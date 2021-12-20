@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
@@ -121,10 +122,6 @@ func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *R
 	cautils.DescriptionDisplay(printer.writer, "\n")
 
 }
-
-func getControlURL(controlID string) string {
-	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", controlID)
-}
 func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ResultSummary) {
 	cautils.InfoDisplay(printer.writer, "[control: %s - %s] ", controlName, getControlURL(controlSummary.ID))
 	if controlSummary.TotalResources == 0 {
@@ -159,71 +156,24 @@ func (printer *PrettyPrinter) printResources(controlSummary *ResultSummary) {
 
 func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := INDENT
-	for ns, rsc := range workloads {
-		if !isKindToBeGrouped(ns) {
-			printer.printGroupedResource(indent, ns, rsc)
-		}
-	}
-	if rsc, ok := workloads["User"]; ok {
-		printer.printGroupedResource(indent, "User", rsc)
-	}
-	if rsc, ok := workloads["Group"]; ok {
-		printer.printGroupedResource(indent, "Group", rsc)
+	for title, rsc := range workloads {
+		printer.printGroupedResource(indent, title, rsc)
 	}
 }
 
-// func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
-// 	indent := INDENT
-// 	for ns, rsc := range workloads {
-// 		printer.printGroupedResource(indent, ns, rsc)
-// 	}
-// 	// for ns, rsc := range workloads {
-// 	// 	if !isKindToBeGrouped(ns) {
-// 	// 	}
-// 	// }
-// 	// if rsc, ok := workloads["User"]; ok {
-// 	// 	printer.printGroupedResource(indent, "User", rsc)
-// 	// }
-// 	// if rsc, ok := workloads["Group"]; ok {
-// 	// 	printer.printGroupedResource(indent, "Group", rsc)
-// 	// }
-// }
-
-func (printer *PrettyPrinter) printGroupedResource(indent string, ns string, rsc []WorkloadSummary) {
+func (printer *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
 	preIndent := indent
-	if isKindToBeGrouped(ns) {
-		cautils.SimpleDisplay(printer.writer, "%s%ss\n", indent, ns)
-	} else if ns != "" {
-		cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
-	}
-	preIndent2 := indent
-	for r := range rsc {
+	if title != "" {
+		cautils.SimpleDisplay(printer.writer, "%s%s\n", indent, title)
 		indent += indent
+	}
+
+	for r := range rsc {
 		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
 		cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
-		indent = preIndent2
 	}
 	indent = preIndent
 }
-
-// func (printer *PrettyPrinter) printGroupedResource(indent string, ns string, rsc []WorkloadSummary) {
-// 	preIndent := indent
-
-// 	cautils.SimpleDisplay(printer.writer, "%s%s %s\n", indent, rsc[0].groupBy, ns)
-// 	// if isKindToBeGrouped(ns) {
-// 	// 	cautils.SimpleDisplay(printer.writer, "%s%ss\n", indent, ns)
-// 	// } else if ns != "" {
-// 	// 	cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
-// 	// }
-// 	preIndent2 := indent
-// 	for r := range rsc {
-// 		indent += indent
-// 		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
-// 		cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
-// 		indent = preIndent2
-// 	}
-// 	indent = preIndent
-// }
 
 func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	relatedStr := ""
@@ -324,4 +274,8 @@ func getWriter(outputFile string) *os.File {
 	}
 	return os.Stdout
 
+}
+
+func getControlURL(controlID string) string {
+	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
 }

@@ -107,7 +107,7 @@ func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
 }
 
 func removeData(obj workloadinterface.IMetadata) {
-	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
+	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
 		return // remove data only from kubernetes objects
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())

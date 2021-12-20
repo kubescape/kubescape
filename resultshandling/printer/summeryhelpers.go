@@ -1,7 +1,9 @@
 package printer
 
 import (
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -9,19 +11,40 @@ import (
 func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
 	mapResources := make(map[string][]WorkloadSummary)
 	for i := range resources {
-		if status(&resources[i]) {
-			if isKindToBeGrouped(resources[i].resource.GetKind()) {
-				if r, ok := mapResources[resources[i].resource.GetKind()]; ok {
-					r = append(r, resources[i])
-					mapResources[resources[i].resource.GetKind()] = r
-				} else {
-					mapResources[resources[i].resource.GetKind()] = []WorkloadSummary{resources[i]}
-				}
-			} else if r, ok := mapResources[resources[i].resource.GetNamespace()]; ok {
+		if !status(&resources[i]) {
+			continue
+		}
+		t := resources[i].resource.GetObjectType()
+		if t == objectsenvelopes.TypeRegoResponseVectorObject && !isKindToBeGrouped(resources[i].resource.GetKind()) {
+			t = workloadinterface.TypeWorkloadObject
+		}
+		switch t { // TODO - find a better way to defind the groups
+		case workloadinterface.TypeWorkloadObject:
+			ns := ""
+			if resources[i].resource.GetNamespace() != "" {
+				ns = "Namescape " + resources[i].resource.GetNamespace()
+			}
+			if r, ok := mapResources[ns]; ok {
 				r = append(r, resources[i])
-				mapResources[resources[i].resource.GetNamespace()] = r
+				mapResources[ns] = r
 			} else {
-				mapResources[resources[i].resource.GetNamespace()] = []WorkloadSummary{resources[i]}
+				mapResources[ns] = []WorkloadSummary{resources[i]}
+			}
+		case objectsenvelopes.TypeRegoResponseVectorObject:
+			group := resources[i].resource.GetKind() + "s"
+			if r, ok := mapResources[group]; ok {
+				r = append(r, resources[i])
+				mapResources[group] = r
+			} else {
+				mapResources[group] = []WorkloadSummary{resources[i]}
+			}
+		default:
+			group, _ := k8sinterface.SplitApiVersion(resources[i].resource.GetApiVersion())
+			if r, ok := mapResources[group]; ok {
+				r = append(r, resources[i])
+				mapResources[group] = r
+			} else {
+				mapResources[group] = []WorkloadSummary{resources[i]}
 			}
 		}
 	}

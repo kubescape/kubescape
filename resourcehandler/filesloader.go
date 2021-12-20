@@ -125,7 +125,7 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 			continue
 		}
 
-		if workloadinterface.IsTypeWorkload(workloads[i].GetObject()) {
+		if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
 			w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
 			if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
 				// TODO - print warning
