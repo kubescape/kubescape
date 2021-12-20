@@ -61,6 +61,9 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandling.P
 	report.initEventReceiverURL()
 	host := hostToString(report.eventReceiverURL, postureReport.ReportID)
 
+	cautils.StartSpinner()
+	defer cautils.StopSpinner()
+
 	// send framework results
 	if err := report.sendReport(host, postureReport); err != nil {
 		return err

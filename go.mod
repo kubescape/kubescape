@@ -8,7 +8,7 @@ require (
 	github.com/armosec/opa-utils v0.0.68
 	github.com/armosec/rbac-utils v0.0.9
 	github.com/armosec/utils-go v0.0.3
-	github.com/briandowns/spinner v1.16.0
+	github.com/briandowns/spinner v1.18.0
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
 	github.com/gofrs/uuid v4.1.0+incompatible
