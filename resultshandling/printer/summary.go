@@ -14,6 +14,7 @@ func NewSummary() Summary {
 }
 
 type ResultSummary struct {
+	ID                string
 	RiskScore         float32
 	TotalResources    int
 	TotalFailed       int
