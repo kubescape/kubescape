@@ -173,7 +173,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
 	jsonStr, _ := json.Marshal(inputRawResources)
-	fmt.Println(jsonStr)
+	fmt.Println(string(jsonStr))
 
 	ruleReport, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData)
 	if err != nil {
