@@ -8,7 +8,6 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
 
@@ -123,7 +122,7 @@ func (hsh *HostSensorHandler) GetOsReleaseFile() ([]hostsensor.HostSensorDataEnv
 // return list of
 func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "") // empty kind, will be overridden
+	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfigurations") // empty kind, will be overridden
 	for resIdx := range res {
 		jsonBytes, err := yaml.YAMLToJSON(res[resIdx].Data)
 		if err != nil {
@@ -131,14 +130,6 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSenso
 			continue
 		}
 		res[resIdx].SetData(jsonBytes)
-
-		kindDet := metav1.TypeMeta{}
-		if err = json.Unmarshal(jsonBytes, &kindDet); err != nil {
-			fmt.Printf("In GetKubeletConfigurations failed to Unmarshal GroupVersionKind: %v;\n%v", err, jsonBytes)
-			continue
-		}
-		res[resIdx].SetKind(kindDet.Kind)
-		res[resIdx].SetApiVersion(k8sinterface.JoinGroupVersion(kindDet.GroupVersionKind().Group, kindDet.GroupVersionKind().Version))
 	}
 	return res, err
 }
