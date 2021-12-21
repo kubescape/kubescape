@@ -59,7 +59,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 		return k8sResourcesMap, allResources, err
 	}
 	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
-		return k8sResourcesMap, allResources, err
+		cautils.WarningDisplay(os.Stdout, "Warning: failed to collect host sensor resources\n")
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {

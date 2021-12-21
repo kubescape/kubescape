@@ -3,6 +3,7 @@ package hostsensorutils
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -80,13 +81,6 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 				hostSensorDataEnvelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
 				hostSensorDataEnvelope.SetKind(requestKind)
 				hostSensorDataEnvelope.SetName(podList[podName])
-				if requestKind == "KubeletCommandLine" {
-					data := map[string]interface{}{"fullCommand": string(resBytes)}
-					resBytesMarshal, err := json.Marshal(data)
-					if err == nil {
-						resBytes = resBytesMarshal
-					}
-				}
 				hostSensorDataEnvelope.SetData(resBytes)
 				res = append(res, hostSensorDataEnvelope)
 			}
@@ -112,7 +106,41 @@ func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.Ho
 // return list of KubeletCommandLine
 func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", "KubeletCommandLine")
+	resps, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", "KubeletCommandLine")
+	if err != nil {
+		return resps, err
+	}
+	for resp := range resps {
+		data := makeCmdLineMap(string(resps[resp].Data))
+		resBytesMarshal, err := json.Marshal(data)
+		// TODO catch error
+		if err == nil {
+			resps[resp].Data = json.RawMessage(resBytesMarshal)
+		}
+	}
+
+	return resps, nil
+
+}
+
+func makeCmdLineMap(fullCommand string) map[string]interface{} {
+
+	commands := strings.Split(fullCommand, " ")
+	if len(commands) < 1 {
+		return nil
+	}
+	command := commands[0]
+	var cmdMap = make(map[string]interface{})
+	cmdMap["command"] = command
+	for _, cmd := range commands {
+		splitted := strings.Split(cmd, "=")
+		if len(splitted) == 2 {
+			if strings.HasPrefix(splitted[0], "--") {
+				cmdMap[splitted[0][2:]] = splitted[1]
+			}
+		}
+	}
+	return cmdMap
 }
 
 // return list of
