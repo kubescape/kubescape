@@ -59,6 +59,5 @@ func (policyHandler *PolicyHandler) getResources(notification *reporthandling.Po
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
 
-	cautils.SuccessTextDisplay("Let’s start!!!")
 	return nil
 }

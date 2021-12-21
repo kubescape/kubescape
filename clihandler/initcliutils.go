@@ -70,7 +70,6 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	}
 	return &hostsensorutils.HostSensorHandlerMock{}
 }
-
 func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector {
 	if scanInfo.IncludeNamespaces != "" {
 		return resourcehandler.NewIncludeSelector(scanInfo.IncludeNamespaces)

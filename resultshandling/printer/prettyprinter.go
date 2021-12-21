@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
@@ -81,6 +82,7 @@ func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, al
 
 		//controlSummary
 		printer.summary[cr.Name] = ResultSummary{
+			ID:                cr.ControlID,
 			RiskScore:         cr.Score,
 			TotalResources:    cr.GetNumberOfResources(),
 			TotalFailed:       cr.GetNumberOfFailedResources(),
@@ -120,11 +122,10 @@ func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *R
 	cautils.DescriptionDisplay(printer.writer, "\n")
 
 }
-
 func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ResultSummary) {
-	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
+	cautils.InfoDisplay(printer.writer, "[control: %s - %s] ", controlName, getControlURL(controlSummary.ID))
 	if controlSummary.TotalResources == 0 {
-		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
+		cautils.InfoDisplay(printer.writer, "skipped %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed != 0 {
 		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
 	} else if controlSummary.TotalWarning != 0 {
@@ -155,32 +156,21 @@ func (printer *PrettyPrinter) printResources(controlSummary *ResultSummary) {
 
 func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := INDENT
-	for ns, rsc := range workloads {
-		if !isKindToBeGrouped(ns) {
-			printer.printGroupedResource(indent, ns, rsc)
-		}
-	}
-	if rsc, ok := workloads["User"]; ok {
-		printer.printGroupedResource(indent, "User", rsc)
-	}
-	if rsc, ok := workloads["Group"]; ok {
-		printer.printGroupedResource(indent, "Group", rsc)
+	for title, rsc := range workloads {
+		printer.printGroupedResource(indent, title, rsc)
 	}
 }
 
-func (printer *PrettyPrinter) printGroupedResource(indent string, ns string, rsc []WorkloadSummary) {
+func (printer *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
 	preIndent := indent
-	if isKindToBeGrouped(ns) {
-		cautils.SimpleDisplay(printer.writer, "%s%ss\n", indent, ns)
-	} else if ns != "" {
-		cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
-	}
-	preIndent2 := indent
-	for r := range rsc {
+	if title != "" {
+		cautils.SimpleDisplay(printer.writer, "%s%s\n", indent, title)
 		indent += indent
+	}
+
+	for r := range rsc {
 		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
 		cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
-		indent = preIndent2
 	}
 	indent = preIndent
 }
@@ -206,25 +196,15 @@ func generateRow(control string, cs ResultSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)
 	if cs.TotalResources != 0 {
-		row = append(row, fmt.Sprintf("%.2f%s", cs.RiskScore, "%"))
+		row = append(row, fmt.Sprintf("%d", int(cs.RiskScore))+"%")
 	} else {
-		row = append(row, EmptyPercentage)
+		row = append(row, "skipped")
 	}
 	return row
 }
 
 func generateHeader() []string {
 	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
-}
-
-func percentage(big, small int) int {
-	if big == 0 {
-		if small == 0 {
-			return 100
-		}
-		return 0
-	}
-	return int(float64(float64(big-small)/float64(big)) * 100)
 }
 
 func generateFooter(printer *PrettyPrinter) []string {
@@ -294,4 +274,8 @@ func getWriter(outputFile string) *os.File {
 	}
 	return os.Stdout
 
+}
+
+func getControlURL(controlID string) string {
+	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
 }
