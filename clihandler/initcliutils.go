@@ -61,7 +61,7 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	}
 	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
-		if err != nil {
+		if err != nil || hostSensorHandler == nil {
 			glog.Errorf("failed to create host sensor: %v", err)
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
@@ -69,7 +69,6 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	}
 	return &hostsensorutils.HostSensorHandlerMock{}
 }
-
 func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector {
 	if scanInfo.IncludeNamespaces != "" {
 		return resourcehandler.NewIncludeSelector(scanInfo.IncludeNamespaces)

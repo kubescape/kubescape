@@ -37,6 +37,18 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	setSubmitBehavior(scanInfo, tenantConfig)
 
 	hostSensorHandler := getHostSensorHandler(scanInfo, k8s)
+	if err := hostSensorHandler.Init(); err != nil {
+		errMsg := "failed to init host sensor"
+		if scanInfo.VerboseMode {
+			errMsg = fmt.Sprintf("%s: %v", errMsg, err)
+		}
+		cautils.ErrorDisplay(errMsg)
+		hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
+	}
+	// excluding hostsensor namespace
+	if len(scanInfo.IncludeNamespaces) == 0 && hostSensorHandler.GetNamespace() != "" {
+		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.GetNamespace())
+	}
 
 	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler)
 
@@ -73,27 +85,18 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
 	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
 
-	if err := interfaces.hostSensorHandler.Init(); err != nil {
-		errMsg := "failed to init host sensor"
-		if scanInfo.VerboseMode {
-			errMsg = fmt.Sprintf("%s: %v", errMsg, err)
-		}
-		cautils.ErrorDisplay(errMsg)
-	} else if len(scanInfo.IncludeNamespaces) == 0 && interfaces.hostSensorHandler.GetNamespace() != "" {
-		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, interfaces.hostSensorHandler)
-		defer func() {
-			if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-				errMsg := "failed to tear down host sensor"
-				if scanInfo.VerboseMode {
-					errMsg = fmt.Sprintf("%s: %v", errMsg, err)
-				}
-				cautils.ErrorDisplay(errMsg)
-			}
-		}()
-	}
-
 	// set policy getter only after setting the customerGUID
 	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID())
+
+	defer func() {
+		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
+			errMsg := "failed to tear down host sensor"
+			if scanInfo.VerboseMode {
+				errMsg = fmt.Sprintf("%s: %v", errMsg, err)
+			}
+			cautils.ErrorDisplay(errMsg)
+		}
+	}()
 
 	// cli handler setup
 	go func() {
