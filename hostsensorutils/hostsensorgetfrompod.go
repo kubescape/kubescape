@@ -80,6 +80,13 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 				hostSensorDataEnvelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
 				hostSensorDataEnvelope.SetKind(requestKind)
 				hostSensorDataEnvelope.SetName(podList[podName])
+				if requestKind == "KubeletCommandLine" {
+					data := map[string]interface{}{"fullCommand": string(resBytes)}
+					resBytesMarshal, err := json.Marshal(data)
+					if err == nil {
+						resBytes = resBytesMarshal
+					}
+				}
 				hostSensorDataEnvelope.SetData(resBytes)
 				res = append(res, hostSensorDataEnvelope)
 			}
