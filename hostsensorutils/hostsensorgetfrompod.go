@@ -157,7 +157,7 @@ func (hsh *HostSensorHandler) GetOsReleaseFile() ([]hostsensor.HostSensorDataEnv
 // return list of
 func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfigurations") // empty kind, will be overridden
+	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
 	for resIdx := range res {
 		jsonBytes, err := yaml.YAMLToJSON(res[resIdx].Data)
 		if err != nil {

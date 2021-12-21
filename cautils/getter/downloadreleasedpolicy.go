@@ -18,7 +18,7 @@ type DownloadReleasedPolicy struct {
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
-		gs: gitregostore.NewDefaultGitRegoStore(-1),
+		gs: gitregostore.InitGitRegoStore("https://api.github.com/repos", "armosec", "regolibrary", "git/trees", "", "dev", -1),
 	}
 }
 

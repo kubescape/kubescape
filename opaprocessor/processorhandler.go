@@ -171,7 +171,6 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	}
 
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
-
 	ruleReport, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData)
 	if err != nil {
 		// ruleReport.RuleStatus.Status = reporthandling.StatusFailed
