@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -171,6 +172,9 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporth
 	}
 
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
+	jsonStr, _ := json.Marshal(inputRawResources)
+	fmt.Println(jsonStr)
+
 	ruleReport, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData)
 	if err != nil {
 		// ruleReport.RuleStatus.Status = reporthandling.StatusFailed
