@@ -121,9 +121,8 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	// print report url
 	interfaces.report.DisplayReportURL()
 
-	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
-	if score < adjustedFailThreshold {
-		return fmt.Errorf("Scan score is below threshold")
+	if score >= float32(scanInfo.FailThreshold) {
+		return fmt.Errorf("scan risk-score %.2f is above permitted threshold %d", score, scanInfo.FailThreshold)
 	}
 
 	return nil

@@ -25,7 +25,7 @@ func (prometheusPrinter *PrometheusPrinter) SetWriter(outputFile string) {
 }
 
 func (prometheusPrinter *PrometheusPrinter) Score(score float32) {
-	fmt.Printf("\n# Overall score out of 100\nkubescape_score %f\n", score*100)
+	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", int(score))
 }
 
 func (printer *PrometheusPrinter) printResources(allResources map[string]workloadinterface.IMetadata, resourcesIDs *reporthandling.ResourcesIDs, frameworkName, controlName string) {
