@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/enescakir/emoji"
 	"github.com/olekukonko/tablewriter"
@@ -17,7 +19,7 @@ type PrettyPrinter struct {
 	summary            Summary
 	verboseMode        bool
 	sortedControlNames []string
-	frameworkSummary   ControlSummary
+	frameworkSummary   ResultSummary
 }
 
 func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
@@ -33,23 +35,30 @@ func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 	warningResources := []string{}
 	allResources := []string{}
 	frameworkNames := []string{}
+	frameworkScores := []float32{}
 
+	var overallRiskScore float32 = 0
 	for _, frameworkReport := range opaSessionObj.PostureReport.FrameworkReports {
 		frameworkNames = append(frameworkNames, frameworkReport.Name)
+		frameworkScores = append(frameworkScores, frameworkReport.Score)
 		failedResources = reporthandling.GetUniqueResourcesIDs(append(failedResources, frameworkReport.ListResourcesIDs().GetFailedResources()...))
 		warningResources = reporthandling.GetUniqueResourcesIDs(append(warningResources, frameworkReport.ListResourcesIDs().GetWarningResources()...))
 		allResources = reporthandling.GetUniqueResourcesIDs(append(allResources, frameworkReport.ListResourcesIDs().GetAllResources()...))
 		printer.summarySetup(frameworkReport, opaSessionObj.AllResources)
+		overallRiskScore += frameworkReport.Score
 	}
 
-	printer.frameworkSummary = ControlSummary{
+	overallRiskScore /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
+
+	printer.frameworkSummary = ResultSummary{
+		RiskScore:      overallRiskScore,
 		TotalResources: len(allResources),
 		TotalFailed:    len(failedResources),
 		TotalWarning:   len(warningResources),
 	}
 
 	printer.printResults()
-	printer.printSummaryTable(frameworkNames)
+	printer.printSummaryTable(frameworkNames, frameworkScores)
 
 }
 
@@ -72,7 +81,11 @@ func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, al
 		if printer.verboseMode {
 			passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
 		}
-		printer.summary[cr.Name] = ControlSummary{
+
+		//controlSummary
+		printer.summary[cr.Name] = ResultSummary{
+			ID:                cr.ControlID,
+			RiskScore:         cr.Score,
 			TotalResources:    cr.GetNumberOfResources(),
 			TotalFailed:       cr.GetNumberOfFailedResources(),
 			TotalWarning:      cr.GetNumberOfWarningResources(),
@@ -99,7 +112,7 @@ func (printer *PrettyPrinter) printResults() {
 	}
 }
 
-func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *ControlSummary) {
+func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *ResultSummary) {
 	cautils.SimpleDisplay(printer.writer, "Summary - ")
 	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed-controlSummary.TotalWarning)
 	cautils.WarningDisplay(printer.writer, "Excluded:%v   ", controlSummary.TotalWarning)
@@ -111,11 +124,10 @@ func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *C
 	cautils.DescriptionDisplay(printer.writer, "\n")
 
 }
-
-func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ControlSummary) {
-	cautils.InfoDisplay(printer.writer, "[control: %s] ", controlName)
+func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ResultSummary) {
+	cautils.InfoDisplay(printer.writer, "[control: %s - %s] ", controlName, getControlURL(controlSummary.ID))
 	if controlSummary.TotalResources == 0 {
-		cautils.InfoDisplay(printer.writer, "resources not found %v\n", emoji.ConfusedFace)
+		cautils.InfoDisplay(printer.writer, "skipped %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed != 0 {
 		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
 	} else if controlSummary.TotalWarning != 0 {
@@ -127,7 +139,7 @@ func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *Con
 	cautils.DescriptionDisplay(printer.writer, "Description: %s\n", controlSummary.Description)
 
 }
-func (printer *PrettyPrinter) printResources(controlSummary *ControlSummary) {
+func (printer *PrettyPrinter) printResources(controlSummary *ResultSummary) {
 
 	if len(controlSummary.FailedWorkloads) > 0 {
 		cautils.FailureDisplay(printer.writer, "Failed:\n")
@@ -146,41 +158,29 @@ func (printer *PrettyPrinter) printResources(controlSummary *ControlSummary) {
 
 func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := INDENT
-	for ns, rsc := range workloads {
-		if !isKindToBeGrouped(ns) {
-			printer.printGroupedResource(indent, ns, rsc)
-		}
-	}
-	if rsc, ok := workloads["User"]; ok {
-		printer.printGroupedResource(indent, "User", rsc)
-	}
-	if rsc, ok := workloads["Group"]; ok {
-		printer.printGroupedResource(indent, "Group", rsc)
+	for title, rsc := range workloads {
+		printer.printGroupedResource(indent, title, rsc)
 	}
 }
 
-func (printer *PrettyPrinter) printGroupedResource(indent string, ns string, rsc []WorkloadSummary) {
+func (printer *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
 	preIndent := indent
-	if isKindToBeGrouped(ns) {
-		cautils.SimpleDisplay(printer.writer, "%s%ss\n", indent, ns)
-	} else if ns != "" {
-		cautils.SimpleDisplay(printer.writer, "%sNamespace %s\n", indent, ns)
-	}
-	preIndent2 := indent
-	for r := range rsc {
+	if title != "" {
+		cautils.SimpleDisplay(printer.writer, "%s%s\n", indent, title)
 		indent += indent
+	}
+
+	for r := range rsc {
 		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
 		cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
-		indent = preIndent2
 	}
 	indent = preIndent
 }
 
 func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	relatedStr := ""
-	w := workload.resource.GetObject()
-	if workloadinterface.IsTypeRegoResponseVector(w) {
-		relatedObjects := workloadinterface.NewRegoResponseVectorObject(w).GetRelatedObjects()
+	if workload.resource.GetObjectType() == workloadinterface.TypeWorkloadObject {
+		relatedObjects := objectsenvelopes.NewRegoResponseVectorObject(workload.resource.GetObject()).GetRelatedObjects()
 		for i, related := range relatedObjects {
 			if ns := related.GetNamespace(); i == 0 && ns != "" {
 				relatedStr += fmt.Sprintf("Namespace - %s, ", ns)
@@ -194,47 +194,35 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	return relatedStr
 }
 
-func generateRow(control string, cs ControlSummary) []string {
+func generateRow(control string, cs ResultSummary) []string {
 	row := []string{control}
 	row = append(row, cs.ToSlice()...)
 	if cs.TotalResources != 0 {
-		row = append(row, fmt.Sprintf("%d%s", percentage(cs.TotalResources, cs.TotalFailed), "%"))
+		row = append(row, fmt.Sprintf("%d", int(cs.RiskScore))+"%")
 	} else {
-		row = append(row, EmptyPercentage)
+		row = append(row, "skipped")
 	}
 	return row
 }
 
 func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% success"}
+	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
 }
 
-func percentage(big, small int) int {
-	if big == 0 {
-		if small == 0 {
-			return 100
-		}
-		return 0
-	}
-	return int(float64(float64(big-small)/float64(big)) * 100)
-}
-func generateFooter(numControlers, sumFailed, sumWarning, sumTotal int) []string {
+func generateFooter(printer *PrettyPrinter) []string {
 	// Control name | # failed resources | all resources | % success
 	row := []string{}
 	row = append(row, "Resource Summary") //fmt.Sprintf(""%d", numControlers"))
-	row = append(row, fmt.Sprintf("%d", sumFailed))
-	row = append(row, fmt.Sprintf("%d", sumWarning))
-	row = append(row, fmt.Sprintf("%d", sumTotal))
-	if sumTotal != 0 {
-		row = append(row, fmt.Sprintf("%d%s", percentage(sumTotal, sumFailed), "%"))
-	} else {
-		row = append(row, EmptyPercentage)
-	}
+	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalFailed))
+	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalWarning))
+	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalResources))
+	row = append(row, fmt.Sprintf("%.2f%s", printer.frameworkSummary.RiskScore, "%"))
+
 	return row
 }
-func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string) {
+func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string, frameworkScores []float32) {
 	// For control scan framework will be nil
-	printer.printFramework(frameworksNames)
+	printer.printFramework(frameworksNames, frameworkScores)
 
 	summaryTable := tablewriter.NewWriter(printer.writer)
 	summaryTable.SetAutoWrapText(false)
@@ -247,20 +235,23 @@ func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string) {
 		controlSummary := printer.summary[printer.sortedControlNames[i]]
 		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
 	}
-	summaryTable.SetFooter(generateFooter(len(printer.summary), printer.frameworkSummary.TotalFailed, printer.frameworkSummary.TotalWarning, printer.frameworkSummary.TotalResources))
+
+	summaryTable.SetFooter(generateFooter(printer))
+
+	// summaryTable.SetFooter(generateFooter())
 	summaryTable.Render()
 }
 
-func (printer *PrettyPrinter) printFramework(frameworksNames []string) {
+func (printer *PrettyPrinter) printFramework(frameworksNames []string, frameworkScores []float32) {
 	if len(frameworksNames) == 1 {
-		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORK\n", frameworksNames[0]))
+		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworksNames[0]))
 	} else if len(frameworksNames) > 1 {
-		p := ""
+		p := "FRAMEWORKS: "
 		for i := 0; i < len(frameworksNames)-1; i++ {
-			p += frameworksNames[i] + ", "
+			p += fmt.Sprintf("%s (risk: %.2f), ", frameworksNames[i], frameworkScores[i])
 		}
-		p += frameworksNames[len(frameworksNames)-1]
-		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORKS\n", p))
+		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworksNames[len(frameworksNames)-1], frameworkScores[len(frameworkScores)-1])
+		cautils.InfoTextDisplay(printer.writer, p)
 	}
 }
 
@@ -285,4 +276,8 @@ func getWriter(outputFile string) *os.File {
 	}
 	return os.Stdout
 
+}
+
+func getControlURL(controlID string) string {
+	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
 }

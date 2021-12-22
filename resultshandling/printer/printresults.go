@@ -6,8 +6,6 @@ import (
 
 var INDENT = "   "
 
-const EmptyPercentage = "NaN"
-
 const (
 	PrettyFormat      string = "pretty-printer"
 	JsonFormat        string = "json"

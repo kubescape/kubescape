@@ -7,13 +7,15 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
-type Summary map[string]ControlSummary
+type Summary map[string]ResultSummary
 
 func NewSummary() Summary {
-	return make(map[string]ControlSummary)
+	return make(map[string]ResultSummary)
 }
 
-type ControlSummary struct {
+type ResultSummary struct {
+	ID                string
+	RiskScore         float32
 	TotalResources    int
 	TotalFailed       int
 	TotalWarning      int
@@ -31,7 +33,7 @@ type WorkloadSummary struct {
 	status   string
 }
 
-func (controlSummary *ControlSummary) ToSlice() []string {
+func (controlSummary *ResultSummary) ToSlice() []string {
 	s := []string{}
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalFailed))
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalWarning))

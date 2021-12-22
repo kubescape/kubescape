@@ -201,5 +201,8 @@ func (hsh *HostSensorHandler) TearDown() error {
 }
 
 func (hsh *HostSensorHandler) GetNamespace() string {
+	if hsh.DaemonSet == nil {
+		return ""
+	}
 	return hsh.DaemonSet.Namespace
 }

@@ -28,8 +28,15 @@ func (opap *OPAProcessor) updateResults() {
 		reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
 
 		// set default score
-		reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+		// reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
 	}
+}
+
+func getAllSupportedObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
+	k8sObjects := []workloadinterface.IMetadata{}
+	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
+	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.DynamicMatch)...)
+	return k8sObjects
 }
 
 func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
@@ -100,7 +107,7 @@ func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
 }
 
 func removeData(obj workloadinterface.IMetadata) {
-	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
+	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
 		return // remove data only from kubernetes objects
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
@@ -116,13 +123,26 @@ func removeData(obj workloadinterface.IMetadata) {
 
 func removeConfigMapData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
-	workloadinterface.RemoveFromMap(workload.GetObject(), "data")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
-
+	overrideSensitiveData(workload)
 }
+
+func overrideSensitiveData(workload workloadinterface.IWorkload) {
+	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
+	if ok {
+		data, ok := dataInterface.(map[string]interface{})
+		if ok {
+			for key := range data {
+				workloadinterface.SetInMap(workload.GetObject(), []string{"data"}, key, "XXXXXX")
+			}
+		}
+	}
+}
+
 func removeSecretData(workload workloadinterface.IWorkload) {
-	workloadinterface.NewWorkloadObj(workload.GetObject()).RemoveSecretData()
+	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+	overrideSensitiveData(workload)
 }
 func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
@@ -134,7 +154,7 @@ func removePodData(workload workloadinterface.IWorkload) {
 	}
 	for i := range containers {
 		for j := range containers[i].Env {
-			containers[i].Env[j].Value = ""
+			containers[i].Env[j].Value = "XXXXXX"
 		}
 	}
 	workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 
 	"gopkg.in/yaml.v2"
@@ -124,7 +125,7 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 			continue
 		}
 
-		if workloadinterface.IsTypeWorkload(workloads[i].GetObject()) {
+		if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
 			w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
 			if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
 				// TODO - print warning
@@ -211,7 +212,7 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
 			continue
 		}
 		if obj, ok := j.(map[string]interface{}); ok {
-			if o := workloadinterface.NewObject(obj); o != nil {
+			if o := objectsenvelopes.NewObject(obj); o != nil {
 				yamlObjs = append(yamlObjs, o)
 			}
 		} else {
@@ -237,7 +238,7 @@ func convertJsonToWorkload(jsonObj interface{}, workloads *[]workloadinterface.I
 
 	switch x := jsonObj.(type) {
 	case map[string]interface{}:
-		if o := workloadinterface.NewObject(x); o != nil {
+		if o := objectsenvelopes.NewObject(x); o != nil {
 			(*workloads) = append(*workloads, o)
 		}
 	case []interface{}:
