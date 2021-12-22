@@ -67,9 +67,9 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opap.updateResults()
 
 		// update score
-		// opap.updateScore()
 		scoreutil := score.NewScore(opaSessionObj.AllResources)
 		scoreutil.Calculate(opaSessionObj.PostureReport.FrameworkReports)
+
 		// report
 		*opaHandler.reportResults <- opaSessionObj
 	}
