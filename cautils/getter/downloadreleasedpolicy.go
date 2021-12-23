@@ -41,7 +41,19 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Fr
 	return framework, err
 }
 
+func (drp *DownloadReleasedPolicy) GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error) {
+	defaultConfigInputs, err := drp.gs.GetDefaultConfigInputs()
+	if err != nil {
+		return nil, err
+	}
+	return defaultConfigInputs.Settings.PostureControlInputs, err
+}
+
 func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
+	fwNames, err := drp.gs.GetOPAFrameworksNamesList()
+	if len(fwNames) != 0 && err == nil {
+		return nil
+	}
 	return drp.gs.SetRegoObjects()
 }
 
