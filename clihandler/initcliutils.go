@@ -151,7 +151,7 @@ func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadRe
 // setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
 func setConfigInputsGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
 	if len(scanInfo.ControlsInputs) > 0 {
-		scanInfo.PolicyGetter = getter.NewLoadPolicy([]string{scanInfo.ControlsInputs})
+		scanInfo.Getters.ControlsInputsGetter = getter.NewLoadPolicy([]string{scanInfo.ControlsInputs})
 	} else {
 		if customerGUID != "" {
 			scanInfo.Getters.ControlsInputsGetter = getter.GetArmoAPIConnector()
