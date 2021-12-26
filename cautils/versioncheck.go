@@ -22,7 +22,7 @@ type IVersionCheckHandler interface {
 
 func NewIVersionCheckHandler() IVersionCheckHandler {
 	if BuildNumber == "" {
-		WarningDisplay(os.Stdout, "Warning: unknown build number, this might affect your scan results. Please make sure you are updated to latest version.\n")
+		WarningDisplay(os.Stderr, "Warning: unknown build number, this might affect your scan results. Please make sure you are updated to latest version.\n")
 	}
 	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && pkgutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
