@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/opaprocessor"
@@ -85,8 +86,10 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
 	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
 
+	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
 	// set policy getter only after setting the customerGUID
-	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID())
+	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
+	setConfigInputsGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
 
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
@@ -121,9 +124,8 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	// print report url
 	interfaces.report.DisplayReportURL()
 
-	adjustedFailThreshold := float32(scanInfo.FailThreshold) / 100
-	if score < adjustedFailThreshold {
-		return fmt.Errorf("Scan score is below threshold")
+	if score >= float32(scanInfo.FailThreshold) {
+		return fmt.Errorf("scan risk-score %.2f is above permitted threshold %d", score, scanInfo.FailThreshold)
 	}
 
 	return nil

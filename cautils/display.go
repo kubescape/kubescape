@@ -51,7 +51,7 @@ func ErrorDisplay(str string) {
 	if IsSilent() {
 		return
 	}
-	SuccessDisplay(os.Stderr, "[Error] ")
+	FailureDisplay(os.Stderr, "[Error] ")
 	SimpleDisplay(os.Stderr, fmt.Sprintf("%s\n", str))
 
 }

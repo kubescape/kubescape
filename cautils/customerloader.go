@@ -180,7 +180,9 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		}
 	}
 	if c.configObj.ClusterName == "" {
-		c.configObj.ClusterName = adoptClusterName(k8sinterface.GetClusterName())
+		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetClusterName())
+	} else { // override the cluster name if it has unwanted characters
+		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
 
 	return c
@@ -425,6 +427,6 @@ func DeleteConfigFile() error {
 	return os.Remove(ConfigFileFullPath())
 }
 
-func adoptClusterName(clusterName string) string {
+func AdoptClusterName(clusterName string) string {
 	return strings.ReplaceAll(clusterName, "/", "-")
 }
