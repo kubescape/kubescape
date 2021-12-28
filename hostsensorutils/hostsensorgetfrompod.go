@@ -3,7 +3,6 @@ package hostsensorutils
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -110,7 +109,8 @@ func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDa
 		return resps, err
 	}
 	for resp := range resps {
-		data := makeCmdLineMap(string(resps[resp].Data))
+		var data = make(map[string]interface{})
+		data["fullCommand"] = string(resps[resp].Data)
 		resBytesMarshal, err := json.Marshal(data)
 		// TODO catch error
 		if err == nil {
@@ -120,26 +120,6 @@ func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDa
 
 	return resps, nil
 
-}
-
-func makeCmdLineMap(fullCommand string) map[string]interface{} {
-
-	commands := strings.Split(fullCommand, " ")
-	if len(commands) < 1 {
-		return nil
-	}
-	command := commands[0]
-	var cmdMap = make(map[string]interface{})
-	cmdMap["command"] = command
-	for _, cmd := range commands {
-		splitted := strings.Split(cmd, "=")
-		if len(splitted) == 2 {
-			if strings.HasPrefix(splitted[0], "--") {
-				cmdMap[splitted[0][2:]] = splitted[1]
-			}
-		}
-	}
-	return cmdMap
 }
 
 // return list of
