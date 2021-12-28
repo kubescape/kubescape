@@ -35,10 +35,12 @@ func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 	warningResources := []string{}
 	allResources := []string{}
 	frameworkNames := []string{}
+	frameworkScores := []float32{}
 
 	var overallRiskScore float32 = 0
 	for _, frameworkReport := range opaSessionObj.PostureReport.FrameworkReports {
 		frameworkNames = append(frameworkNames, frameworkReport.Name)
+		frameworkScores = append(frameworkScores, frameworkReport.Score)
 		failedResources = reporthandling.GetUniqueResourcesIDs(append(failedResources, frameworkReport.ListResourcesIDs().GetFailedResources()...))
 		warningResources = reporthandling.GetUniqueResourcesIDs(append(warningResources, frameworkReport.ListResourcesIDs().GetWarningResources()...))
 		allResources = reporthandling.GetUniqueResourcesIDs(append(allResources, frameworkReport.ListResourcesIDs().GetAllResources()...))
@@ -56,7 +58,7 @@ func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 	}
 
 	printer.printResults()
-	printer.printSummaryTable(frameworkNames)
+	printer.printSummaryTable(frameworkNames, frameworkScores)
 
 }
 
@@ -218,9 +220,9 @@ func generateFooter(printer *PrettyPrinter) []string {
 
 	return row
 }
-func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string) {
+func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string, frameworkScores []float32) {
 	// For control scan framework will be nil
-	printer.printFramework(frameworksNames)
+	printer.printFramework(frameworksNames, frameworkScores)
 
 	summaryTable := tablewriter.NewWriter(printer.writer)
 	summaryTable.SetAutoWrapText(false)
@@ -240,16 +242,16 @@ func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string) {
 	summaryTable.Render()
 }
 
-func (printer *PrettyPrinter) printFramework(frameworksNames []string) {
+func (printer *PrettyPrinter) printFramework(frameworksNames []string, frameworkScores []float32) {
 	if len(frameworksNames) == 1 {
-		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORK\n", frameworksNames[0]))
+		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworksNames[0]))
 	} else if len(frameworksNames) > 1 {
-		p := ""
+		p := "FRAMEWORKS: "
 		for i := 0; i < len(frameworksNames)-1; i++ {
-			p += frameworksNames[i] + ", "
+			p += fmt.Sprintf("%s (risk: %.2f), ", frameworksNames[i], frameworkScores[i])
 		}
-		p += frameworksNames[len(frameworksNames)-1]
-		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("%s FRAMEWORKS\n", p))
+		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworksNames[len(frameworksNames)-1], frameworkScores[len(frameworkScores)-1])
+		cautils.InfoTextDisplay(printer.writer, p)
 	}
 }
 

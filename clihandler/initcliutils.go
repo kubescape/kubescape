@@ -38,7 +38,6 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IReport {
 	if submit {
 		return reporter.NewReportEventReceiver(tenantConfig.GetConfigObj())
-
 	}
 	return reporter.NewReportMock()
 }
@@ -138,25 +137,40 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 }
 
 // setPolicyGetter set the policy getter - local file/github release/ArmoAPI
-func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
+func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
 	if len(scanInfo.UseFrom) > 0 {
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
 	} else {
 		if customerGUID == "" || !scanInfo.FrameworkScan {
-			setDownloadReleasedPolicy(scanInfo)
+			setDownloadReleasedPolicy(scanInfo, downloadReleasedPolicy)
 		} else {
 			setGetArmoAPIConnector(scanInfo, customerGUID)
 		}
 	}
 }
 
-func setDownloadReleasedPolicy(scanInfo *cautils.ScanInfo) {
-	g := getter.NewDownloadReleasedPolicy()    // download policy from github release
-	if err := g.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
+// setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
+func setConfigInputsGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
+	if len(scanInfo.ControlsInputs) > 0 {
+		scanInfo.Getters.ControlsInputsGetter = getter.NewLoadPolicy([]string{scanInfo.ControlsInputs})
+	} else {
+		if customerGUID != "" {
+			scanInfo.Getters.ControlsInputsGetter = getter.GetArmoAPIConnector()
+		} else {
+			if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
+				cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
+			}
+			scanInfo.Getters.ControlsInputsGetter = downloadReleasedPolicy
+		}
+	}
+}
+
+func setDownloadReleasedPolicy(scanInfo *cautils.ScanInfo, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
 		cautils.WarningDisplay(os.Stderr, "Warning: failed to get policies from github release, loading policies from cache\n")
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(getDefaultFrameworksPaths())
 	} else {
-		scanInfo.PolicyGetter = g
+		scanInfo.PolicyGetter = downloadReleasedPolicy
 	}
 }
 func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {

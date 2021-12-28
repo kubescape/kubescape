@@ -26,5 +26,5 @@ func (reportMock *ReportMock) SetClusterName(clusterName string) {
 
 func (reportMock *ReportMock) DisplayReportURL() {
 	message := fmt.Sprintf("\nYou can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here: https://%s/cli-signup \n", getter.GetArmoAPIConnector().GetFrontendURL())
-	cautils.InfoTextDisplay(os.Stdout, fmt.Sprintf("\n%s\n", message))
+	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", message))
 }

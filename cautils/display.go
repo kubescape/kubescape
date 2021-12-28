@@ -35,15 +35,15 @@ func ScanStartDisplay() {
 	if IsSilent() {
 		return
 	}
-	InfoDisplay(os.Stdout, "ARMO security scanner starting\n")
+	InfoDisplay(os.Stderr, "ARMO security scanner starting\n")
 }
 
 func SuccessTextDisplay(str string) {
 	if IsSilent() {
 		return
 	}
-	SuccessDisplay(os.Stdout, "[success] ")
-	SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n", str))
+	SuccessDisplay(os.Stderr, "[success] ")
+	SimpleDisplay(os.Stderr, fmt.Sprintf("%s\n", str))
 
 }
 
@@ -51,8 +51,8 @@ func ErrorDisplay(str string) {
 	if IsSilent() {
 		return
 	}
-	SuccessDisplay(os.Stdout, "[Error] ")
-	SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n", str))
+	FailureDisplay(os.Stderr, "[Error] ")
+	SimpleDisplay(os.Stderr, fmt.Sprintf("%s\n", str))
 
 }
 
@@ -60,8 +60,8 @@ func ProgressTextDisplay(str string) {
 	if IsSilent() {
 		return
 	}
-	InfoDisplay(os.Stdout, "[progress] ")
-	SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n", str))
+	InfoDisplay(os.Stderr, "[progress] ")
+	SimpleDisplay(os.Stderr, fmt.Sprintf("%s\n", str))
 
 }
 func StartSpinner() {
