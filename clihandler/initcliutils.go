@@ -57,11 +57,12 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	// we need to determined which controls needs host sensor
 	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
 		scanInfo.HostSensor.SetBool(askUserForHostSensor())
+		cautils.WarningDisplay(os.Stderr, "Warning: Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag\n")
 	}
 	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
-		if err != nil || hostSensorHandler == nil {
-			glog.Errorf("failed to create host sensor: %v", err)
+		if err != nil {
+			cautils.WarningDisplay(os.Stderr, fmt.Sprintf("Warning: failed to create host sensor: %v\n", err.Error()))
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
 		return hostSensorHandler

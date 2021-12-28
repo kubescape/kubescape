@@ -61,14 +61,14 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 		return k8sResourcesMap, allResources, err
 	}
 	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
-		return k8sResourcesMap, allResources, err
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect host sensor resources\n")
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
-		cautils.WarningDisplay(os.Stdout, "Warning: failed to collect rbac resources\n")
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect rbac resources\n")
 	}
 	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
-		cautils.WarningDisplay(os.Stdout, fmt.Sprintf("Warning: %v\n", err.Error()))
+		cautils.WarningDisplay(os.Stderr, fmt.Sprintf("Warning: %v\n", err.Error()))
 	}
 
 	cautils.StopSpinner()
