@@ -58,12 +58,12 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	// we need to determined which controls needs host sensor
 	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
 		scanInfo.HostSensor.SetBool(askUserForHostSensor())
-		cautils.WarningDisplay(os.Stdout, "Warning: K8S nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag\n")
+		cautils.WarningDisplay(os.Stderr, "Warning: Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag\n")
 	}
 	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
 		if err != nil {
-			cautils.WarningDisplay(os.Stdout, fmt.Sprintf("Warning: failed to create host sensor: %v\n", err.Error()))
+			cautils.WarningDisplay(os.Stderr, fmt.Sprintf("Warning: failed to create host sensor: %v\n", err.Error()))
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
 		return hostSensorHandler
@@ -153,7 +153,7 @@ func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string) {
 func setDownloadReleasedPolicy(scanInfo *cautils.ScanInfo) {
 	g := getter.NewDownloadReleasedPolicy()    // download policy from github release
 	if err := g.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
-		cautils.WarningDisplay(os.Stdout, "Warning: failed to get policies from github release, loading policies from cache\n")
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to get policies from github release, loading policies from cache\n")
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(getDefaultFrameworksPaths())
 	} else {
 		scanInfo.PolicyGetter = g
