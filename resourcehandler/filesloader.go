@@ -213,7 +213,11 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
 		}
 		if obj, ok := j.(map[string]interface{}); ok {
 			if o := objectsenvelopes.NewObject(obj); o != nil {
-				yamlObjs = append(yamlObjs, o)
+				if o.GetKind() == "List" {
+					yamlObjs = append(yamlObjs, handleListObject(o)...)
+				} else {
+					yamlObjs = append(yamlObjs, o)
+				}
 			}
 		} else {
 			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
@@ -302,4 +306,21 @@ func getFileFormat(filePath string) FileFormat {
 	} else {
 		return FileFormat(filePath)
 	}
+}
+
+// handleListObject handle a List manifest
+func handleListObject(obj workloadinterface.IMetadata) []workloadinterface.IMetadata {
+	yamlObjs := []workloadinterface.IMetadata{}
+	if i, ok := workloadinterface.InspectMap(obj.GetObject(), "items"); ok && i != nil {
+		if items, ok := i.([]interface{}); ok && items != nil {
+			for item := range items {
+				if m, ok := items[item].(map[string]interface{}); ok && m != nil {
+					if o := objectsenvelopes.NewObject(m); o != nil {
+						yamlObjs = append(yamlObjs, o)
+					}
+				}
+			}
+		}
+	}
+	return yamlObjs
 }
