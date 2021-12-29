@@ -1,6 +1,8 @@
 package resultshandling
 
 import (
+	"fmt"
+
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
@@ -27,10 +29,16 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 
 	resultsHandler.printerObj.ActionPrint(opaSessionObj)
 
-	resultsHandler.reporterObj.ActionSendReport(opaSessionObj)
+	if err := resultsHandler.reporterObj.ActionSendReport(opaSessionObj); err != nil {
+		fmt.Println(err)
+	}
 
 	// TODO - get score from table
-	score := CalculatePostureScore(opaSessionObj.PostureReport)
+	var score float32 = 0
+	for i := range opaSessionObj.PostureReport.FrameworkReports {
+		score += opaSessionObj.PostureReport.FrameworkReports[i].Score
+	}
+	score /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
 	resultsHandler.printerObj.Score(score)
 
 	return score
@@ -38,19 +46,12 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 
 // CalculatePostureScore calculate final score
 func CalculatePostureScore(postureReport *reporthandling.PostureReport) float32 {
-	lowestScore := float32(100)
+	failedResources := []string{}
+	allResources := []string{}
 	for _, frameworkReport := range postureReport.FrameworkReports {
-		totalFailed := frameworkReport.GetNumberOfFailedResources()
-		totalResources := frameworkReport.GetNumberOfResources()
-
-		frameworkScore := float32(0)
-		if float32(totalResources) > 0 {
-			frameworkScore = (float32(totalResources) - float32(totalFailed)) / float32(totalResources)
-		}
-		if lowestScore > frameworkScore {
-			lowestScore = frameworkScore
-		}
+		failedResources = reporthandling.GetUniqueResourcesIDs(append(failedResources, frameworkReport.ListResourcesIDs().GetFailedResources()...))
+		allResources = reporthandling.GetUniqueResourcesIDs(append(allResources, frameworkReport.ListResourcesIDs().GetAllResources()...))
 	}
 
-	return lowestScore
+	return (float32(len(allResources)) - float32(len(failedResources))) / float32(len(allResources))
 }

@@ -22,7 +22,7 @@ func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
 }
 
 func (junitPrinter *JunitPrinter) Score(score float32) {
-	fmt.Printf("\nFinal score: %d", int(score*100))
+	fmt.Printf("\nOverall risk-score (0- Excellent, 100- All failed): %d\n", int(score))
 }
 
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
@@ -103,7 +103,7 @@ func convertPostureReportToJunitResult(postureResult *reporthandling.PostureRepo
 			testCase := JUnitTestCase{}
 			testCase.Name = controlReports.Name
 			testCase.Classname = "Kubescape"
-			testCase.Time = "0"
+			testCase.Time = postureResult.ReportGenerationTime.String()
 			if 0 < len(controlReports.RuleReports[0].RuleResponses) {
 
 				testCase.Resources = controlReports.GetNumberOfResources()

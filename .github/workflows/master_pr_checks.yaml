@@ -31,8 +31,9 @@ jobs:
           CGO_ENABLED: 0
         run: python3 --version && python3 build.py
 
-      - name: Upload build artifacts 
-        uses: actions/upload-artifact@v2
-        with:
-          name: kubescape-${{ matrix.os }}
-          path: build/${{ matrix.os }}/kubescape 
+      - name: Smoke Testing
+        env:
+          RELEASE: v1.0.${{ github.run_number }} 
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
+        

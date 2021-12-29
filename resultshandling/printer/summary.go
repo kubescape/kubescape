@@ -3,50 +3,52 @@ package printer
 import (
 	"fmt"
 
-	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/opa-utils/reporthandling"
 )
 
-type Summary map[string]ControlSummary
+type Summary map[string]ResultSummary
 
 func NewSummary() Summary {
-	return make(map[string]ControlSummary)
+	return make(map[string]ResultSummary)
 }
 
-type ControlSummary struct {
+type ResultSummary struct {
+	ID                string
+	RiskScore         float32
 	TotalResources    int
 	TotalFailed       int
-	TotalWarnign      int
+	TotalWarning      int
 	Description       string
 	Remediation       string
+	Framework         []string
 	ListInputKinds    []string
 	FailedWorkloads   map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
 	ExcludedWorkloads map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
+	PassedWorkloads   map[string][]WorkloadSummary // <namespace>:[<WorkloadSummary>]
 }
 
 type WorkloadSummary struct {
-	Kind      string
-	Name      string
-	Namespace string
-	Group     string
-	Exception *armotypes.PostureExceptionPolicy
+	resource workloadinterface.IMetadata
+	status   string
 }
 
-func (controlSummary *ControlSummary) ToSlice() []string {
+func (controlSummary *ResultSummary) ToSlice() []string {
 	s := []string{}
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalFailed))
-	s = append(s, fmt.Sprintf("%d", controlSummary.TotalWarnign))
+	s = append(s, fmt.Sprintf("%d", controlSummary.TotalWarning))
 	s = append(s, fmt.Sprintf("%d", controlSummary.TotalResources))
 	return s
 }
 
-func (workloadSummary *WorkloadSummary) ToString() string {
-	return fmt.Sprintf("/%s/%s/%s/%s", workloadSummary.Group, workloadSummary.Namespace, workloadSummary.Kind, workloadSummary.Name)
-}
-
 func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {
-	return workloadSummary.Exception == nil
+	return workloadSummary.status == reporthandling.StatusFailed
 }
 
 func workloadSummaryExclude(workloadSummary *WorkloadSummary) bool {
-	return workloadSummary.Exception != nil && workloadSummary.Exception.IsAlertOnly()
+	return workloadSummary.status == reporthandling.StatusWarning
+}
+
+func workloadSummaryPassed(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.status == reporthandling.StatusPassed
 }

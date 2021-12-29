@@ -2,90 +2,71 @@ package policyhandler
 
 import (
 	"fmt"
-	"strings"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
-func (policyHandler *PolicyHandler) GetPoliciesFromBackend(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
-	var errs error
+func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification, policiesAndResources *cautils.OPASessionObj) error {
+	cautils.ProgressTextDisplay("Downloading/Loading policy definitions")
+
+	frameworks, err := policyHandler.getScanPolicies(notification)
+	if err != nil {
+		return err
+	}
+	if len(frameworks) == 0 {
+		return fmt.Errorf("failed to download policies, please ARMO team for more information")
+	}
+
+	policiesAndResources.Frameworks = frameworks
+
+	// get exceptions
+	exceptionPolicies, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.CustomerGUID, cautils.ClusterName)
+	if err == nil {
+		policiesAndResources.Exceptions = exceptionPolicies
+	}
+
+	// get account configuration
+	controlsInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(cautils.CustomerGUID, cautils.ClusterName)
+	if err == nil {
+		policiesAndResources.RegoInputData.PostureControlInputs = controlsInputs
+	}
+
+	cautils.SuccessTextDisplay("Downloaded/Loaded policy")
+	return nil
+}
+
+func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, error) {
 	frameworks := []reporthandling.Framework{}
-	exceptionPolicies := []armotypes.PostureExceptionPolicy{}
-	// Get - cacli opa get
-	for _, rule := range notification.Rules {
-		switch rule.Kind {
-		case reporthandling.KindFramework:
-			receivedFramework, recExceptionPolicies, err := policyHandler.getFrameworkPolicies(rule.Name)
+
+	switch getScanKind(notification) {
+	case reporthandling.KindFramework: // Download frameworks
+		for _, rule := range notification.Rules {
+			receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(rule.Name)
+			if err != nil {
+				return frameworks, policyDownloadError(err)
+			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
-				if recExceptionPolicies != nil {
-					exceptionPolicies = append(exceptionPolicies, recExceptionPolicies...)
-				}
-			} else if err != nil {
-				if strings.Contains(err.Error(), "unsupported protocol scheme") {
-					err = fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag")
-				}
-				return nil, nil, fmt.Errorf("kind: %v, name: %s, error: %s", rule.Kind, rule.Name, err.Error())
 			}
-		case reporthandling.KindControl:
-			receivedControls, recExceptionPolicies, err := policyHandler.getControl(rule.Name)
-			if receivedControls != nil {
-				f := reporthandling.Framework{
-					Controls: receivedControls,
-				}
-				frameworks = append(frameworks, f)
-				if recExceptionPolicies != nil {
-					exceptionPolicies = append(exceptionPolicies, recExceptionPolicies...)
-				}
-			} else if err != nil {
-				if strings.Contains(err.Error(), "unsupported protocol scheme") {
-					err = fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag")
-				}
-				return nil, nil, fmt.Errorf("error: %s", err.Error())
-			}
-			// TODO: add case for control from file
-		default:
-			err := fmt.Errorf("missing rule kind, expected: %s", reporthandling.KindFramework)
-			errs = fmt.Errorf("%s", err.Error())
 		}
+	case reporthandling.KindControl: // Download controls
+		f := reporthandling.Framework{}
+		var receivedControl *reporthandling.Control
+		var err error
+		for _, rule := range notification.Rules {
+			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(rule.Name)
+			if err != nil {
+				return frameworks, policyDownloadError(err)
+			}
+			if receivedControl != nil {
+				f.Controls = append(f.Controls, *receivedControl)
+			}
+		}
+		frameworks = append(frameworks, f)
+		// TODO: add case for control from file
+	default:
+		return frameworks, fmt.Errorf("unknown policy kind")
 	}
-	return frameworks, exceptionPolicies, errs
-}
-
-func (policyHandler *PolicyHandler) getFrameworkPolicies(policyName string) (*reporthandling.Framework, []armotypes.PostureExceptionPolicy, error) {
-	receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(policyName)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	receivedException, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.CustomerGUID, cautils.ClusterName)
-	if err != nil {
-		return receivedFramework, nil, err
-	}
-
-	return receivedFramework, receivedException, nil
-}
-
-// Get control by name
-func (policyHandler *PolicyHandler) getControl(policyName string) ([]reporthandling.Control, []armotypes.PostureExceptionPolicy, error) {
-
-	controls := []reporthandling.Control{}
-
-	control, err := policyHandler.getters.PolicyGetter.GetControl(policyName)
-	if err != nil {
-		return nil, nil, err
-	}
-	if control == nil {
-		return nil, nil, fmt.Errorf("control not found")
-	}
-	controls = append(controls, *control)
-
-	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.CustomerGUID, cautils.ClusterName)
-	if err != nil {
-		return controls, nil, err
-	}
-
-	return controls, exceptions, nil
+	return frameworks, nil
 }

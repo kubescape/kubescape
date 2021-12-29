@@ -2,18 +2,18 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/clihandler"
 	"github.com/spf13/cobra"
 )
 
 var downloadInfo cautils.DownloadInfo
 
 var downloadCmd = &cobra.Command{
-	Use:   fmt.Sprintf("download framework/control <framework-name>/<control-name> [flags]\nSupported frameworks: %s", clihandler.ValidFrameworks),
+	Use:   fmt.Sprintf("download framework/control <framework-name>/<control-name> [flags]\nSupported frameworks: %s", getter.NativeFrameworks),
 	Short: "Download framework/control",
 	Long:  ``,
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -26,36 +26,10 @@ var downloadCmd = &cobra.Command{
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if strings.EqualFold(args[0], "framework") {
-			downloadInfo.FrameworkName = strings.ToLower(args[1])
-			g := getter.NewDownloadReleasedPolicy()
-			if downloadInfo.Path == "" {
-				downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName + ".json")
-			}
-			frameworks, err := g.GetFramework(downloadInfo.FrameworkName)
-			if err != nil {
-				return err
-			}
-			err = getter.SaveFrameworkInFile(frameworks, downloadInfo.Path)
-			if err != nil {
-				return err
-			}
-		} else if strings.EqualFold(args[0], "control") {
-			downloadInfo.ControlName = strings.ToLower(args[1])
-			g := getter.NewDownloadReleasedPolicy()
-			if downloadInfo.Path == "" {
-				downloadInfo.Path = getter.GetDefaultPath(downloadInfo.ControlName + ".json")
-			}
-			controls, err := g.GetControl(downloadInfo.ControlName)
-			if err != nil {
-				return err
-			}
-			err = getter.SaveControlInFile(controls, downloadInfo.Path)
-			if err != nil {
-				return err
-			}
+		if err := download(args); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			os.Exit(1)
 		}
-
 		return nil
 	},
 }
@@ -64,4 +38,58 @@ func init() {
 	rootCmd.AddCommand(downloadCmd)
 	downloadInfo = cautils.DownloadInfo{}
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If specified, will store save to `~/.kubescape/<framework name>.json`")
+}
+
+func download(args []string) error {
+	switch strings.ToLower(args[0]) {
+	case "framework":
+		return downloadFramework(args[1])
+	case "control":
+		return downloadControl(args[1])
+	// case "exceptions":
+	// case "artifacts":
+	default:
+		return fmt.Errorf("unknown command to download")
+	}
+}
+
+func downloadFramework(frameworkName string) error {
+	downloadInfo.FrameworkName = strings.ToLower(frameworkName)
+	g := getter.NewDownloadReleasedPolicy()
+	if err := g.SetRegoObjects(); err != nil {
+		return err
+	}
+
+	if downloadInfo.Path == "" {
+		downloadInfo.Path = getter.GetDefaultPath(downloadInfo.FrameworkName + ".json")
+	}
+	frameworks, err := g.GetFramework(downloadInfo.FrameworkName)
+	if err != nil {
+		return err
+	}
+	err = getter.SaveFrameworkInFile(frameworks, downloadInfo.Path)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func downloadControl(controlName string) error {
+	downloadInfo.ControlName = strings.ToLower(controlName)
+	g := getter.NewDownloadReleasedPolicy()
+	if err := g.SetRegoObjects(); err != nil {
+		return err
+	}
+	if downloadInfo.Path == "" {
+		downloadInfo.Path = getter.GetDefaultPath(downloadInfo.ControlName + ".json")
+	}
+	controls, err := g.GetControl(downloadInfo.ControlName)
+	if err != nil {
+		return err
+	}
+	err = getter.SaveControlInFile(controls, downloadInfo.Path)
+	if err != nil {
+		return err
+	}
+	return nil
 }

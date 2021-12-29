@@ -6,12 +6,11 @@ import (
 
 var INDENT = "   "
 
-const EmptyPercentage = "NaN"
-
 const (
-	PrettyFormat       string = "pretty-printer"
-	JsonFormat         string = "json"
-	JunitResultPrinter string = "junit"
+	PrettyFormat      string = "pretty-printer"
+	JsonFormat        string = "json"
+	JunitResultFormat string = "junit"
+	PrometheusFormat  string = "prometheus"
 )
 
 type IPrinter interface {
@@ -20,13 +19,15 @@ type IPrinter interface {
 	Score(score float32)
 }
 
-func GetPrinter(printFormat string) IPrinter {
+func GetPrinter(printFormat string, verboseMode bool) IPrinter {
 	switch printFormat {
 	case JsonFormat:
 		return NewJsonPrinter()
-	case JunitResultPrinter:
+	case JunitResultFormat:
 		return NewJunitPrinter()
+	case PrometheusFormat:
+		return NewPrometheusPrinter(verboseMode)
 	default:
-		return NewPrettyPrinter()
+		return NewPrettyPrinter(verboseMode)
 	}
 }

@@ -13,7 +13,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 | --- | --- | --- | --- |
 | `-e`/`--exclude-namespaces` | Scan all namespaces | Namespaces to exclude from scanning. Recommended to exclude `kube-system` and `kube-public` namespaces |
 | `-s`/`--silent` | Display progress messages | Silent progress messages |
-| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result bellow threshold| `0` -> `100` |
+| `-t`/`--fail-threshold` | `0` (do not fail) | fail command (return exit code 1) if result is below threshold| `0` -> `100` |
 | `-f`/`--format` | `pretty-printer` | Output format | `pretty-printer`/`json`/`junit` | 
 | `-o`/`--output` | print to stdout | Save scan result in file |
 | `--use-from` | | Load local framework object from specified path. If not used will download latest |
@@ -25,7 +25,7 @@ kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
  
 ### Examples
 
-* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/News-Features/Feature-Stories/Article-View/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
+* Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
 ```
 kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
 ```
@@ -85,5 +85,3 @@ kubescape scan framework nsa --use-from nsa.json
 ```
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
-
-

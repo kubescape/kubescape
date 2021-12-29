@@ -11,26 +11,22 @@ import (
 // ======================================== DownloadReleasedPolicy =======================================================
 // =======================================================================================================================
 
-// Download released version
+// Use gitregostore to get policies from github release
 type DownloadReleasedPolicy struct {
 	gs *gitregostore.GitRegoStore
 }
 
 func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	return &DownloadReleasedPolicy{
-		gs: gitregostore.InitDefaultGitRegoStore(-1),
+		gs: gitregostore.NewDefaultGitRegoStore(-1),
 	}
 }
 
-// Return control per name/id using ARMO api
 func (drp *DownloadReleasedPolicy) GetControl(policyName string) (*reporthandling.Control, error) {
 	var control *reporthandling.Control
 	var err error
-	if strings.HasPrefix(policyName, "C-") || strings.HasPrefix(policyName, "c-") {
-		control, err = drp.gs.GetOPAControlByID(policyName)
-	} else {
-		control, err = drp.gs.GetOPAControlByName(policyName)
-	}
+
+	control, err = drp.gs.GetOPAControl(policyName)
 	if err != nil {
 		return nil, err
 	}
@@ -43,4 +39,21 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Fr
 		return nil, err
 	}
 	return framework, err
+}
+
+func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
+	return drp.gs.SetRegoObjects()
+}
+
+func isNativeFramework(framework string) bool {
+	return contains(NativeFrameworks, framework)
+}
+
+func contains(s []string, str string) bool {
+	for _, v := range s {
+		if strings.EqualFold(v, str) {
+			return true
+		}
+	}
+	return false
 }

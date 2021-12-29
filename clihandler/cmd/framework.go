@@ -7,78 +7,111 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/opa-utils/reporthandling"
-
 	"github.com/spf13/cobra"
 )
 
-var frameworkCmd = &cobra.Command{
+var (
+	frameworkExample = `
+  # Scan all frameworks and submit the results
+  kubescape scan --submit
+  
+  # Scan the NSA framework
+  kubescape scan framework nsa
+  
+  # Scan the NSA and MITRE framework
+  kubescape scan framework nsa,mitre
+  
+  # Scan kubernetes YAML manifest files
+  kubescape scan framework nsa *.yaml
 
-	Use:       fmt.Sprintf("framework <framework name> [`<glob pattern>`/`-`] [flags]\nSupported frameworks: %s", clihandler.ValidFrameworks),
-	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(clihandler.SupportedFrameworks, ", ")),
+  # Scan and save the results in the JSON format
+  kubescape scan --format json --output results.json
+
+  # Save scan results in JSON format
+  kubescape scan --format json --output results.json
+
+  # Display all resources
+  kubescape scan --verbose
+`
+)
+var frameworkCmd = &cobra.Command{
+	Use:       "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
+	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(getter.NativeFrameworks, ", ")),
+	Example:   frameworkExample,
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
-	ValidArgs: clihandler.SupportedFrameworks,
+	ValidArgs: getter.NativeFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) < 1 && !(cmd.Flags().Lookup("use-from").Changed) {
-			return fmt.Errorf("requires at least one argument")
-		} else if len(args) > 0 {
-			if !isValidFramework(strings.ToLower(args[0])) {
-				return fmt.Errorf(fmt.Sprintf("supported frameworks: %s", strings.Join(clihandler.SupportedFrameworks, ", ")))
+		if len(args) > 0 {
+			frameworks := strings.Split(args[0], ",")
+			if len(frameworks) > 1 {
+				if frameworks[1] == "" {
+					return fmt.Errorf("usage: <framework-0>,<framework-1>")
+				}
 			}
+		} else {
+			return fmt.Errorf("requires at least one framework name")
 		}
 		return nil
 	},
 	RunE: func(cmd *cobra.Command, args []string) error {
-		scanInfo.PolicyIdentifier = reporthandling.PolicyIdentifier{}
-		scanInfo.PolicyIdentifier.Kind = reporthandling.KindFramework
 		flagValidationFramework()
-		if !(cmd.Flags().Lookup("use-from").Changed) {
-			scanInfo.PolicyIdentifier.Name = strings.ToLower(args[0])
-		}
-		if len(args) > 0 {
-			if len(args[1:]) == 0 || args[1] != "-" {
-				scanInfo.InputPatterns = args[1:]
-			} else { // store stout to file
-				tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
-				if err != nil {
-					return err
-				}
-				defer os.Remove(tempFile.Name())
+		var frameworks []string
 
-				if _, err := io.Copy(tempFile, os.Stdin); err != nil {
-					return err
+		if len(args) == 0 { // scan all frameworks
+			frameworks = getter.NativeFrameworks
+			scanInfo.ScanAll = true
+		} else {
+			// Read frameworks from input args
+			frameworks = strings.Split(args[0], ",")
+
+			if len(args) > 1 {
+				if len(args[1:]) == 0 || args[1] != "-" {
+					scanInfo.InputPatterns = args[1:]
+				} else { // store stdin to file - do NOT move to separate function !!
+					tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
+					if err != nil {
+						return err
+					}
+					defer os.Remove(tempFile.Name())
+
+					if _, err := io.Copy(tempFile, os.Stdin); err != nil {
+						return err
+					}
+					scanInfo.InputPatterns = []string{tempFile.Name()}
 				}
-				scanInfo.InputPatterns = []string{tempFile.Name()}
 			}
 		}
+		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
+
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
-		err := clihandler.CliSetup(&scanInfo)
+		err := clihandler.ScanCliSetup(&scanInfo)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
 			os.Exit(1)
 		}
 		return nil
 	},
 }
 
-func isValidFramework(framework string) bool {
-	return cautils.StringInSlice(clihandler.SupportedFrameworks, framework) != cautils.ValueNotFound
-}
-
 func init() {
 	scanCmd.AddCommand(frameworkCmd)
 	scanInfo = cautils.ScanInfo{}
 	scanInfo.FrameworkScan = true
-	frameworkCmd.Flags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
-	frameworkCmd.Flags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to Armo backend. Use this flag if you ran with the '--submit' flag in the past and you do not want to submit your current scan results")
-	frameworkCmd.Flags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
-
 }
 
-func flagValidationFramework() {
+// func SetScanForFirstFramework(frameworks []string) []reporthandling.PolicyIdentifier {
+// 	newPolicy := reporthandling.PolicyIdentifier{}
+// 	newPolicy.Kind = reporthandling.KindFramework
+// 	newPolicy.Name = frameworks[0]
+// 	scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
+// 	return scanInfo.PolicyIdentifier
+// }
 
+func flagValidationFramework() {
 	if scanInfo.Submit && scanInfo.Local {
 		fmt.Println("You can use `keep-local` or `submit`, but not both")
 		os.Exit(1)

@@ -41,7 +41,7 @@ def main():
 
     # Set some variables
     packageName = getPackageName()
-    buildUrl = "github.com/armosec/kubescape/clihandler/cmd.BuildNumber"
+    buildUrl = "github.com/armosec/kubescape/cautils.BuildNumber"
     releaseVersion = os.getenv("RELEASE")
     ArmoBEServer = os.getenv("ArmoBEServer")
     ArmoERServer = os.getenv("ArmoERServer")
@@ -60,9 +60,6 @@ def main():
     status = subprocess.call(["go", "build", "-o", "%s/%s" % (buildDir, packageName), "-ldflags" ,ldflags])
     checkStatus(status, "Failed to build kubescape")
     
-    test_cli_prints(buildDir,packageName)
-
-
     sha1 = hashlib.sha1()
     with open(buildDir + "/" + packageName, "rb") as kube:
         sha1.update(kube.read())
@@ -70,13 +67,7 @@ def main():
             kube_sha.write(sha1.hexdigest())
 
     print("Build Done")
-
-def test_cli_prints(buildDir,packageName):
-    bin_cli = os.path.abspath(os.path.join(buildDir,packageName))
-
-    print(f"testing CLI prints on {bin_cli}")
-    status = str(subprocess.check_output([bin_cli, "-h"]))
-    assert "download" in status, "download is missing: " + status    
-
+ 
+ 
 if __name__ == "__main__":
     main()

@@ -54,6 +54,6 @@ echo -e "\033[0m"
 $KUBESCAPE_EXEC version
 echo
 
-echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan framework nsa"
+echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan --submit"
 
 echo -e "\033[0m"
