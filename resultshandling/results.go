@@ -123,8 +123,6 @@ func (resultsHandler *ResultsHandler) reportV2ToV1(opaSessionObj *cautils.OPASes
 				}
 			}
 
-			// rulev1.ListInputKinds
-
 		}
 		fwv1.ControlReports = append(fwv1.ControlReports, crv1)
 

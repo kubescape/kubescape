@@ -42,6 +42,7 @@ func NewOPASessionObjMock() *OPASessionObj {
 		K8SResources:    nil,
 		AllResources:    make(map[string]workloadinterface.IMetadata),
 		ResourcesResult: make(map[string]resourcesresults.Result),
+		Report:          &reporthandlingv2.PostureReport{},
 		PostureReport: &reporthandling.PostureReport{
 			ClusterName:  "",
 			CustomerGUID: "",
