@@ -30,11 +30,13 @@ func TestProcess(t *testing.T) {
 	// set opaSessionObj
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opaSessionObj.Frameworks = []reporthandling.Framework{*reporthandling.MockFrameworkA()}
+	policies := ConvertFrameworksToPolicies(opaSessionObj.Frameworks, "")
+
 	opaSessionObj.K8SResources = &k8sResources
 	opaSessionObj.AllResources = allResources
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())
-	opap.Process()
+	opap.Process(policies)
 	opap.updateResults()
 	for _, f := range opap.PostureReport.FrameworkReports {
 		for _, c := range f.ControlReports {
