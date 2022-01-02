@@ -13,15 +13,19 @@ func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version 
 	return policies
 }
 
-// initializeReport initialize the summary details for the report object
-func initializeSummaryDetails(summaryDetails *reportsummary.SummaryDetails, frameworks []reporthandling.Framework) {
-
+// ConvertFrameworksToSummaryDetails initialize the summary details for the report object
+func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDetails, frameworks []reporthandling.Framework) {
+	if summaryDetails.Controls == nil {
+		summaryDetails.Controls = make(map[string]reportsummary.ControlSummary)
+	}
 	for i := range frameworks {
 		controls := map[string]reportsummary.ControlSummary{}
 		for j := range frameworks[i].Controls {
 			id := frameworks[i].Controls[j].ControlID
 			c := reportsummary.ControlSummary{
-				Name: frameworks[i].Controls[j].Name,
+				Name:        frameworks[i].Controls[j].Name,
+				Description: frameworks[i].Controls[j].Description,
+				Remediation: frameworks[i].Controls[j].Remediation,
 			}
 			controls[frameworks[i].Controls[j].ControlID] = c
 			summaryDetails.Controls[id] = c
@@ -32,5 +36,4 @@ func initializeSummaryDetails(summaryDetails *reportsummary.SummaryDetails, fram
 		})
 	}
 
-	// opap.Report.GenerateSummary()
 }

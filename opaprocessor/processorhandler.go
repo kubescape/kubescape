@@ -59,7 +59,7 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opaSessionObj := <-*opaHandler.processedPolicy
 		opap := NewOPAProcessor(opaSessionObj, opaHandler.regoDependenciesData)
 
-		initializeSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks)
+		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks)
 
 		policies := ConvertFrameworksToPolicies(opap.Frameworks, cautils.BuildNumber)
 
@@ -125,9 +125,6 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 
 	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
 
-	controlResult := resourcesresults.ResourceAssociatedControl{}
-	controlResult.SetID(control.ControlID)
-
 	// ruleResults := make(map[string][]resourcesresults.ResourceAssociatedRule)
 	for i := range control.Rules {
 		resourceAssociatedRule, err := opap.processRule(&control.Rules[i])
@@ -138,6 +135,11 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 		// append failed rules to controls
 		if len(resourceAssociatedRule) != 0 {
 			for resourceID, ruleResponse := range resourceAssociatedRule {
+
+				controlResult := resourcesresults.ResourceAssociatedControl{}
+				controlResult.SetID(control.ControlID)
+				controlResult.SetName(control.Name)
+
 				if _, ok := resourcesAssociatedControl[resourceID]; ok {
 					controlResult.ResourceAssociatedRules = resourcesAssociatedControl[resourceID].ResourceAssociatedRules
 				}
@@ -156,13 +158,12 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 
 	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
 
-	ruleResult := resourcesresults.ResourceAssociatedRule{}
-	ruleResult.SetName(rule.Name)
-	ruleResult.ControlConfigurations = postureControlInputs
-
 	inputResources, err := reporthandling.RegoResourcesAggregator(rule, getAllSupportedObjects(opap.K8SResources, opap.AllResources, rule))
 	if err != nil {
 		return nil, fmt.Errorf("error getting aggregated k8sObjects: %s", err.Error())
+	}
+	if len(inputResources) == 0 {
+		return nil, nil // no resources found for testing
 	}
 
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
@@ -176,6 +177,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 	for i := range inputResources {
 		resources[inputResources[i].GetID()] = nil
+		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
 	ruleResponses, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData, postureControlInputs)
@@ -183,9 +185,16 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 		// TODO - Handle error
 		glog.Error(err)
 	} else {
+
 		// ruleResponse to ruleResult
 		for i := range ruleResponses {
-			ruleResult.FailedPaths = ruleResponses[i].FailedPaths
+			ruleResult := resourcesresults.ResourceAssociatedRule{}
+			ruleResult.SetName(rule.Name)
+			ruleResult.ControlConfigurations = postureControlInputs
+
+			for j := range ruleResponses[i].FailedPaths {
+				ruleResult.Paths = append(ruleResult.Paths, resourcesresults.Path{FailedPath: ruleResponses[i].FailedPaths[j]})
+			}
 			failedResources := objectsenvelopes.ListMapToMeta(ruleResponses[i].GetFailedResources())
 			for j := range failedResources {
 				resources[failedResources[j].GetID()] = &ruleResult

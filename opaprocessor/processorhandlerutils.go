@@ -14,6 +14,11 @@ import (
 )
 
 // updateResults update the results objects and report objects. This is a critical function - DO NOT CHANGE
+/*
+	- remove sensible data
+	- adding exceptions
+	- summarize results
+*/
 func (opap *OPAProcessor) updateResults() {
 
 	// remove data from all objects

@@ -15,7 +15,9 @@ func NewPolicies() *Policies {
 
 func (policies *Policies) Set(frameworks []reporthandling.Framework, version string) {
 	for i := range frameworks {
-		policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
+		if frameworks[i].Name != "" {
+			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
+		}
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}
 			for r := range frameworks[i].Controls[j].Rules {

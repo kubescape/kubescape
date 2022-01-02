@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 func TestConvertFrameworksToPolicies(t *testing.T) {
@@ -15,4 +16,14 @@ func TestConvertFrameworksToPolicies(t *testing.T) {
 	policies := ConvertFrameworksToPolicies([]reporthandling.Framework{*fw0, *fw1}, "")
 	assert.Equal(t, 2, len(policies.Frameworks))
 	assert.Equal(t, 3, len(policies.Controls))
+}
+func TestInitializeSummaryDetails(t *testing.T) {
+	fw0 := mocks.MockFramework_0006_0013()
+	fw1 := mocks.MockFramework_0044()
+
+	summaryDetails := reportsummary.SummaryDetails{}
+	frameworks := []reporthandling.Framework{*fw0, *fw1}
+	ConvertFrameworksToSummaryDetails(&summaryDetails, frameworks)
+	assert.Equal(t, 2, len(summaryDetails.Frameworks))
+	assert.Equal(t, 3, len(summaryDetails.Controls))
 }
