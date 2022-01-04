@@ -77,7 +77,6 @@ type Getters struct {
 func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setUseExceptions()
-	scanInfo.setAccountConfig()
 	scanInfo.setOutputFile()
 
 }
@@ -91,14 +90,6 @@ func (scanInfo *ScanInfo) setUseExceptions() {
 	}
 }
 
-func (scanInfo *ScanInfo) setAccountConfig() {
-	if scanInfo.ControlsInputs != "" {
-		// load account config from file
-		scanInfo.ControlsInputsGetter = getter.NewLoadPolicy([]string{scanInfo.ControlsInputs})
-	} else {
-		scanInfo.ControlsInputsGetter = getter.GetArmoAPIConnector()
-	}
-}
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		for _, policy := range scanInfo.PolicyIdentifier {

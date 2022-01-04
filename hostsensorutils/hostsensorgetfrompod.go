@@ -104,7 +104,22 @@ func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.Ho
 // return list of KubeletCommandLine
 func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", "KubeletCommandLine")
+	resps, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", "KubeletCommandLine")
+	if err != nil {
+		return resps, err
+	}
+	for resp := range resps {
+		var data = make(map[string]interface{})
+		data["fullCommand"] = string(resps[resp].Data)
+		resBytesMarshal, err := json.Marshal(data)
+		// TODO catch error
+		if err == nil {
+			resps[resp].Data = json.RawMessage(resBytesMarshal)
+		}
+	}
+
+	return resps, nil
+
 }
 
 // return list of
@@ -122,7 +137,7 @@ func (hsh *HostSensorHandler) GetOsReleaseFile() ([]hostsensor.HostSensorDataEnv
 // return list of
 func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfigurations") // empty kind, will be overridden
+	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
 	for resIdx := range res {
 		jsonBytes, err := yaml.YAMLToJSON(res[resIdx].Data)
 		if err != nil {

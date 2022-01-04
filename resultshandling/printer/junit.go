@@ -22,7 +22,7 @@ func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
 }
 
 func (junitPrinter *JunitPrinter) Score(score float32) {
-	fmt.Printf("\nOverall risk-score (0- Excellent, 100- All failed): %d\n", int(score))
+	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", int(score))
 }
 
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {

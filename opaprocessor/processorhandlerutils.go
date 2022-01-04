@@ -41,6 +41,7 @@ func getAllSupportedObjects(k8sResources *cautils.K8SResources, allResources map
 
 func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
+
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
 			for _, version := range match[m].APIVersions {
@@ -62,9 +63,33 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 		}
 	}
 
-	return k8sObjects
+	return filterOutChildResources(k8sObjects, match)
 }
 
+// filterOutChildResources filter out child resources if the parent resource is in the list
+func filterOutChildResources(objects []workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+	response := []workloadinterface.IMetadata{}
+	owners := []string{}
+	for m := range match {
+		for i := range match[m].Resources {
+			owners = append(owners, match[m].Resources[i])
+		}
+	}
+	for i := range objects {
+		if !k8sinterface.IsTypeWorkload(objects[i].GetObject()) {
+			response = append(response, objects[i])
+			continue
+		}
+		w := workloadinterface.NewWorkloadObj(objects[i].GetObject())
+		ownerReferences, err := w.GetOwnerReferences()
+		if err != nil || len(ownerReferences) == 0 {
+			response = append(response, w)
+		} else if !k8sinterface.IsStringInSlice(owners, ownerReferences[0].Kind) {
+			response = append(response, w)
+		}
+	}
+	return response
+}
 func getRuleDependencies() (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {
