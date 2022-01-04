@@ -8,6 +8,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/open-policy-agent/opa/storage"
 
@@ -176,7 +177,11 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 	}
 	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 	for i := range inputResources {
-		resources[inputResources[i].GetID()] = nil
+		resources[inputResources[i].GetID()] = &resourcesresults.ResourceAssociatedRule{
+			Name:                  rule.Name,
+			ControlConfigurations: postureControlInputs,
+			Status:                apis.StatusPassed,
+		}
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
@@ -185,19 +190,19 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 		// TODO - Handle error
 		glog.Error(err)
 	} else {
-
 		// ruleResponse to ruleResult
 		for i := range ruleResponses {
-			ruleResult := resourcesresults.ResourceAssociatedRule{}
-			ruleResult.SetName(rule.Name)
-			ruleResult.ControlConfigurations = postureControlInputs
-
-			for j := range ruleResponses[i].FailedPaths {
-				ruleResult.Paths = append(ruleResult.Paths, resourcesresults.Path{FailedPath: ruleResponses[i].FailedPaths[j]})
-			}
 			failedResources := objectsenvelopes.ListMapToMeta(ruleResponses[i].GetFailedResources())
 			for j := range failedResources {
-				resources[failedResources[j].GetID()] = &ruleResult
+				ruleResult := &resourcesresults.ResourceAssociatedRule{}
+				if r, k := resources[failedResources[j].GetID()]; k {
+					ruleResult = r
+				}
+				ruleResult.Status = apis.StatusFailed
+				for j := range ruleResponses[i].FailedPaths {
+					ruleResult.Paths = append(ruleResult.Paths, resourcesresults.Path{FailedPath: ruleResponses[i].FailedPaths[j]})
+				}
+				resources[failedResources[j].GetID()] = ruleResult
 			}
 		}
 	}

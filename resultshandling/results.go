@@ -30,7 +30,7 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 
 	opaSessionObj := <-*resultsHandler.opaSessionObj
 
-	resultsHandler.reportV2ToV1(opaSessionObj)
+	reportV2ToV1(opaSessionObj)
 
 	resultsHandler.printerObj.ActionPrint(opaSessionObj)
 
@@ -61,7 +61,7 @@ func CalculatePostureScore(postureReport *reporthandling.PostureReport) float32 
 	return (float32(len(allResources)) - float32(len(failedResources))) / float32(len(allResources))
 }
 
-func (resultsHandler *ResultsHandler) reportV2ToV1(opaSessionObj *cautils.OPASessionObj) {
+func reportV2ToV1(opaSessionObj *cautils.OPASessionObj) {
 
 	opaSessionObj.PostureReport.ReportID = opaSessionObj.Report.ReportID
 	opaSessionObj.PostureReport.CustomerGUID = opaSessionObj.Report.CustomerGUID
@@ -75,9 +75,6 @@ func (resultsHandler *ResultsHandler) reportV2ToV1(opaSessionObj *cautils.OPASes
 			fwv1 := reporthandling.FrameworkReport{}
 			fwv1.Name = fwv2.GetName()
 			fwv1.Score = fwv2.GetScore()
-			fwv1.WarningResources = fwv2.NumberOf().Excluded()
-			fwv1.FailedResources = fwv2.NumberOf().Failed()
-			fwv1.TotalResources = fwv2.NumberOf().All()
 
 			fwv1.ControlReports = append(fwv1.ControlReports, controlReportV2ToV1(opaSessionObj, fwv2.GetName(), fwv2.Controls)...)
 			frameworks = append(frameworks, fwv1)
@@ -87,9 +84,6 @@ func (resultsHandler *ResultsHandler) reportV2ToV1(opaSessionObj *cautils.OPASes
 		fwv1 := reporthandling.FrameworkReport{}
 		fwv1.Name = ""
 		fwv1.Score = 0
-		fwv1.WarningResources = opaSessionObj.Report.SummaryDetails.NumberOf().Excluded()
-		fwv1.FailedResources = opaSessionObj.Report.SummaryDetails.NumberOf().Failed()
-		fwv1.TotalResources = opaSessionObj.Report.SummaryDetails.NumberOf().All()
 
 		fwv1.ControlReports = append(fwv1.ControlReports, controlReportV2ToV1(opaSessionObj, "", opaSessionObj.Report.SummaryDetails.Controls)...)
 		frameworks = append(frameworks, fwv1)
@@ -97,17 +91,14 @@ func (resultsHandler *ResultsHandler) reportV2ToV1(opaSessionObj *cautils.OPASes
 
 	for f := range frameworks {
 		// // set exceptions
-		// exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
+		// exceptions.SetFrameworkExceptions(frameworks, opap.Exceptions, cautils.ClusterName)
 
-		// // set counters
-		// reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
+		// set counters
+		reporthandling.SetUniqueResourcesCounter(&frameworks[f])
 
 		// set default score
 		reporthandling.SetDefaultScore(&frameworks[f])
 	}
-
-	// vv, _ := json.Marshal(frameworks)
-	// fmt.Printf("\n\n\n\n%s\n\n\n\n", vv)
 
 	// update score
 	scoreutil := score.NewScore(opaSessionObj.AllResources)
@@ -137,14 +128,13 @@ func (resultsHandler *ResultsHandler) reportV2ToV1(opaSessionObj *cautils.OPASes
 
 func controlReportV2ToV1(opaSessionObj *cautils.OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
 	controlRepors := []reporthandling.ControlReport{}
-	for _, crv2 := range controls {
+	for controlID, crv2 := range controls {
 		crv1 := reporthandling.ControlReport{}
-		crv1.ControlID = crv2.GetID()
+		crv1.ControlID = controlID
+		crv1.BaseScore = crv2.ScoreFactor
 		crv1.Name = crv2.GetName()
+
 		crv1.Score = crv2.GetScore()
-		crv1.WarningResources = crv2.NumberOf().Excluded()
-		crv1.FailedResources = crv2.NumberOf().Failed()
-		crv1.TotalResources = crv2.NumberOf().All()
 
 		// TODO - add fields
 		crv1.Description = crv2.Description
@@ -153,43 +143,47 @@ func controlReportV2ToV1(opaSessionObj *cautils.OPASessionObj, frameworkName str
 		rulesv1 := map[string]reporthandling.RuleReport{} // ruleName: rules
 
 		for _, resourceID := range crv2.List().All() {
-			if resource, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
-				for _, rulev2 := range resource.ListRules() {
+			if result, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
 
+				for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
 					// add to rule
 					if _, ok := rulesv1[rulev2.GetName()]; !ok {
-						rulesv1[rulev2.GetName()] = reporthandling.RuleReport{}
+						rulesv1[rulev2.GetName()] = reporthandling.RuleReport{
+							Name: rulev2.GetName(),
+						}
 					}
+				}
+			}
+		}
+
+		for _, resourceID := range crv2.List().All() {
+			if result, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
+				for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
+
 					rulev1 := rulesv1[rulev2.GetName()]
-					rulev1.Name = rulev2.GetName()
+					status := rulev2.GetStatus(&v1.Filters{FrameworkNames: []string{frameworkName}})
 
-					// rule response
-					ruleResponse := reporthandling.RuleResponse{}
-					ruleResponse.Rulename = rulev2.GetName()
-					for i := range rulev2.Paths {
-						ruleResponse.FailedPaths = append(ruleResponse.FailedPaths, rulev2.Paths[i].FailedPath)
-					}
-					ruleResponse.RuleStatus = string(rulev2.GetStatus(&v1.Filters{FrameworkNames: []string{frameworkName}}).Status())
-					if len(rulev2.Exception) > 0 {
-						ruleResponse.Exception = &rulev2.Exception[0]
-					}
+					if status.IsFailed() || status.IsExcluded() {
 
-					if fullRessource, ok := opaSessionObj.AllResources[resourceID]; ok {
-						ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, fullRessource.GetObject())
-					}
+						// rule response
+						ruleResponse := reporthandling.RuleResponse{}
+						ruleResponse.Rulename = rulev2.GetName()
+						for i := range rulev2.Paths {
+							ruleResponse.FailedPaths = append(ruleResponse.FailedPaths, rulev2.Paths[i].FailedPath)
+						}
+						ruleResponse.RuleStatus = string(status.Status())
+						if len(rulev2.Exception) > 0 {
+							ruleResponse.Exception = &rulev2.Exception[0]
+						}
 
-					rulev1.ResourceUniqueCounter.TotalResources++
-					if rulev2.GetStatus(&v1.Filters{FrameworkNames: []string{frameworkName}}).IsFailed() {
-						rulev1.ResourceUniqueCounter.FailedResources++
-					} else if rulev2.GetStatus(&v1.Filters{FrameworkNames: []string{frameworkName}}).IsExcluded() {
-						rulev1.ResourceUniqueCounter.WarningResources++
-					} else {
-						rulev1.ResourceUniqueCounter.TotalResources++
+						if fullRessource, ok := opaSessionObj.AllResources[resourceID]; ok {
+							ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, fullRessource.GetObject())
+						}
+						rulev1.RuleResponses = append(rulev1.RuleResponses, ruleResponse)
+
 					}
 
-					rulev1.RuleResponses = append(rulev1.RuleResponses, ruleResponse)
 					rulev1.ListInputKinds = append(rulev1.ListInputKinds, resourceID)
-
 					rulesv1[rulev2.GetName()] = rulev1
 				}
 			}

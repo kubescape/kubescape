@@ -24,6 +24,8 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 			id := frameworks[i].Controls[j].ControlID
 			c := reportsummary.ControlSummary{
 				Name:        frameworks[i].Controls[j].Name,
+				ControlID:   id,
+				ScoreFactor: frameworks[i].Controls[j].BaseScore,
 				Description: frameworks[i].Controls[j].Description,
 				Remediation: frameworks[i].Controls[j].Remediation,
 			}
