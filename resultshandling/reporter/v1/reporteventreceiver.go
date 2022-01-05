@@ -1,4 +1,4 @@
-package reporter
+package v1
 
 import (
 	"encoding/json"
@@ -11,16 +11,10 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
+	uuid "github.com/satori/go.uuid"
 )
 
 const MAX_REPORT_SIZE = 2097152 // 2 MB
-
-type IReport interface {
-	ActionSendReport(opaSessionObj *cautils.OPASessionObj) error
-	SetCustomerGUID(customerGUID string)
-	SetClusterName(clusterName string)
-	DisplayReportURL()
-}
 
 type ReportEventReceiver struct {
 	httpClient         *http.Client
@@ -46,6 +40,9 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	if report.customerGUID == "" || report.clusterName == "" {
 		return fmt.Errorf("missing accout ID or cluster name. AccountID: '%s', Cluster name: '%s'", report.customerGUID, report.clusterName)
 	}
+	opaSessionObj.PostureReport.ReportID = uuid.NewV4().String()
+	opaSessionObj.PostureReport.CustomerGUID = report.clusterName
+	opaSessionObj.PostureReport.ClusterName = report.customerGUID
 
 	if err := report.prepareReport(opaSessionObj.PostureReport, opaSessionObj.AllResources); err != nil {
 		return err

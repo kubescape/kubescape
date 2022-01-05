@@ -32,10 +32,12 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 			controls[frameworks[i].Controls[j].ControlID] = c
 			summaryDetails.Controls[id] = c
 		}
-		summaryDetails.Frameworks = append(summaryDetails.Frameworks, reportsummary.FrameworkSummary{
-			Name:     frameworks[i].Name,
-			Controls: controls,
-		})
+		if frameworks[i].Name != "" {
+			summaryDetails.Frameworks = append(summaryDetails.Frameworks, reportsummary.FrameworkSummary{
+				Name:     frameworks[i].Name,
+				Controls: controls,
+			})
+		}
 	}
 
 }

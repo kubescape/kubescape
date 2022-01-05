@@ -5,6 +5,11 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/armosec/kubescape/resultshandling/printer"
+	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
+
+	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -14,7 +19,6 @@ import (
 	"github.com/armosec/kubescape/policyhandler"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling"
-	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/mattn/go-isatty"
@@ -60,7 +64,8 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
 
 	// setup printer
-	printerHandler := printer.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	// printerHandler = printerv2.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	return componentInterfaces{

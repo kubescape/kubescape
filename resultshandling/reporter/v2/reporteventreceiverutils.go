@@ -1,4 +1,4 @@
-package reporter
+package v2
 
 import (
 	"net/url"
@@ -6,6 +6,7 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/gofrs/uuid"
 )
 
@@ -31,8 +32,8 @@ func hostToString(host *url.URL, reportID string) string {
 	return host.String()
 }
 
-func setPaginationReport(postureReport *reporthandling.PostureReport) *reporthandling.PostureReport {
-	return &reporthandling.PostureReport{
+func setSubReport(postureReport *reporthandlingv2.PostureReport) *reporthandlingv2.PostureReport {
+	return &reporthandlingv2.PostureReport{
 		CustomerGUID:         postureReport.CustomerGUID,
 		ClusterName:          postureReport.ClusterName,
 		ReportID:             postureReport.ReportID,

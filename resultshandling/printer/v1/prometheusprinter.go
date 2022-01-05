@@ -1,4 +1,4 @@
-package printer
+package v1
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -21,11 +22,15 @@ func NewPrometheusPrinter(verboseMode bool) *PrometheusPrinter {
 }
 
 func (prometheusPrinter *PrometheusPrinter) SetWriter(outputFile string) {
-	prometheusPrinter.writer = getWriter(outputFile)
+	prometheusPrinter.writer = printer.GetWriter(outputFile)
 }
 
 func (prometheusPrinter *PrometheusPrinter) Score(score float32) {
 	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", int(score))
+}
+
+func (prometheusPrinter *PrometheusPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
+	reportV2ToV1(opaSessionObj)
 }
 
 func (printer *PrometheusPrinter) printResources(allResources map[string]workloadinterface.IMetadata, resourcesIDs *reporthandling.ResourcesIDs, frameworkName, controlName string) {

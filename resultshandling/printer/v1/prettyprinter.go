@@ -1,4 +1,4 @@
-package printer
+package v1
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/enescakir/emoji"
@@ -29,7 +30,7 @@ func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
 	}
 }
 
-func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	// score := calculatePostureScore(opaSessionObj.PostureReport)
 	failedResources := []string{}
 	warningResources := []string{}
@@ -44,32 +45,35 @@ func (printer *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 		failedResources = reporthandling.GetUniqueResourcesIDs(append(failedResources, frameworkReport.ListResourcesIDs().GetFailedResources()...))
 		warningResources = reporthandling.GetUniqueResourcesIDs(append(warningResources, frameworkReport.ListResourcesIDs().GetWarningResources()...))
 		allResources = reporthandling.GetUniqueResourcesIDs(append(allResources, frameworkReport.ListResourcesIDs().GetAllResources()...))
-		printer.summarySetup(frameworkReport, opaSessionObj.AllResources)
+		prettyPrinter.summarySetup(frameworkReport, opaSessionObj.AllResources)
 		overallRiskScore += frameworkReport.Score
 	}
 
 	overallRiskScore /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
 
-	printer.frameworkSummary = ResultSummary{
+	prettyPrinter.frameworkSummary = ResultSummary{
 		RiskScore:      overallRiskScore,
 		TotalResources: len(allResources),
 		TotalFailed:    len(failedResources),
 		TotalWarning:   len(warningResources),
 	}
 
-	printer.printResults()
-	printer.printSummaryTable(frameworkNames, frameworkScores)
+	prettyPrinter.printResults()
+	prettyPrinter.printSummaryTable(frameworkNames, frameworkScores)
 
 }
 
-func (printer *PrettyPrinter) SetWriter(outputFile string) {
-	printer.writer = getWriter(outputFile)
+func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
+	prettyPrinter.writer = printer.GetWriter(outputFile)
 }
 
-func (printer *PrettyPrinter) Score(score float32) {
+func (prettyPrinter *PrettyPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
+	reportV2ToV1(opaSessionObj)
+}
+func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 
-func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, allResources map[string]workloadinterface.IMetadata) {
+func (prettyPrinter *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, allResources map[string]workloadinterface.IMetadata) {
 
 	for _, cr := range fr.ControlReports {
 		if len(cr.RuleReports) == 0 {
@@ -78,12 +82,12 @@ func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, al
 		workloadsSummary := listResultSummary(cr.RuleReports, allResources)
 
 		var passedWorkloads map[string][]WorkloadSummary
-		if printer.verboseMode {
+		if prettyPrinter.verboseMode {
 			passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
 		}
 
 		//controlSummary
-		printer.summary[cr.Name] = ResultSummary{
+		prettyPrinter.summary[cr.Name] = ResultSummary{
 			ID:                cr.ControlID,
 			RiskScore:         cr.Score,
 			TotalResources:    cr.GetNumberOfResources(),
@@ -98,81 +102,81 @@ func (printer *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, al
 		}
 
 	}
-	printer.sortedControlNames = printer.getSortedControlsNames()
+	prettyPrinter.sortedControlNames = prettyPrinter.getSortedControlsNames()
 }
-func (printer *PrettyPrinter) printResults() {
-	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummary := printer.summary[printer.sortedControlNames[i]]
-		printer.printTitle(printer.sortedControlNames[i], &controlSummary)
-		printer.printResources(&controlSummary)
-		if printer.summary[printer.sortedControlNames[i]].TotalResources > 0 {
-			printer.printSummary(printer.sortedControlNames[i], &controlSummary)
+func (prettyPrinter *PrettyPrinter) printResults() {
+	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
+		controlSummary := prettyPrinter.summary[prettyPrinter.sortedControlNames[i]]
+		prettyPrinter.printTitle(prettyPrinter.sortedControlNames[i], &controlSummary)
+		prettyPrinter.printResources(&controlSummary)
+		if prettyPrinter.summary[prettyPrinter.sortedControlNames[i]].TotalResources > 0 {
+			prettyPrinter.printSummary(prettyPrinter.sortedControlNames[i], &controlSummary)
 		}
 
 	}
 }
 
-func (printer *PrettyPrinter) printSummary(controlName string, controlSummary *ResultSummary) {
-	cautils.SimpleDisplay(printer.writer, "Summary - ")
-	cautils.SuccessDisplay(printer.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed-controlSummary.TotalWarning)
-	cautils.WarningDisplay(printer.writer, "Excluded:%v   ", controlSummary.TotalWarning)
-	cautils.FailureDisplay(printer.writer, "Failed:%v   ", controlSummary.TotalFailed)
-	cautils.InfoDisplay(printer.writer, "Total:%v\n", controlSummary.TotalResources)
+func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSummary *ResultSummary) {
+	cautils.SimpleDisplay(prettyPrinter.writer, "Summary - ")
+	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", controlSummary.TotalResources-controlSummary.TotalFailed-controlSummary.TotalWarning)
+	cautils.WarningDisplay(prettyPrinter.writer, "Excluded:%v   ", controlSummary.TotalWarning)
+	cautils.FailureDisplay(prettyPrinter.writer, "Failed:%v   ", controlSummary.TotalFailed)
+	cautils.InfoDisplay(prettyPrinter.writer, "Total:%v\n", controlSummary.TotalResources)
 	if controlSummary.TotalFailed > 0 {
-		cautils.DescriptionDisplay(printer.writer, "Remediation: %v\n", controlSummary.Remediation)
+		cautils.DescriptionDisplay(prettyPrinter.writer, "Remediation: %v\n", controlSummary.Remediation)
 	}
-	cautils.DescriptionDisplay(printer.writer, "\n")
+	cautils.DescriptionDisplay(prettyPrinter.writer, "\n")
 
 }
-func (printer *PrettyPrinter) printTitle(controlName string, controlSummary *ResultSummary) {
-	cautils.InfoDisplay(printer.writer, "[control: %s - %s] ", controlName, getControlURL(controlSummary.ID))
+func (prettyPrinter *PrettyPrinter) printTitle(controlName string, controlSummary *ResultSummary) {
+	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlName, getControlURL(controlSummary.ID))
 	if controlSummary.TotalResources == 0 {
-		cautils.InfoDisplay(printer.writer, "skipped %v\n", emoji.ConfusedFace)
+		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
 	} else if controlSummary.TotalFailed != 0 {
-		cautils.FailureDisplay(printer.writer, "failed %v\n", emoji.SadButRelievedFace)
+		cautils.FailureDisplay(prettyPrinter.writer, "failed %v\n", emoji.SadButRelievedFace)
 	} else if controlSummary.TotalWarning != 0 {
-		cautils.WarningDisplay(printer.writer, "excluded %v\n", emoji.NeutralFace)
+		cautils.WarningDisplay(prettyPrinter.writer, "excluded %v\n", emoji.NeutralFace)
 	} else {
-		cautils.SuccessDisplay(printer.writer, "passed %v\n", emoji.ThumbsUp)
+		cautils.SuccessDisplay(prettyPrinter.writer, "passed %v\n", emoji.ThumbsUp)
 	}
 
-	cautils.DescriptionDisplay(printer.writer, "Description: %s\n", controlSummary.Description)
+	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.Description)
 
 }
-func (printer *PrettyPrinter) printResources(controlSummary *ResultSummary) {
+func (prettyPrinter *PrettyPrinter) printResources(controlSummary *ResultSummary) {
 
 	if len(controlSummary.FailedWorkloads) > 0 {
-		cautils.FailureDisplay(printer.writer, "Failed:\n")
-		printer.printGroupedResources(controlSummary.FailedWorkloads)
+		cautils.FailureDisplay(prettyPrinter.writer, "Failed:\n")
+		prettyPrinter.printGroupedResources(controlSummary.FailedWorkloads)
 	}
 	if len(controlSummary.ExcludedWorkloads) > 0 {
-		cautils.WarningDisplay(printer.writer, "Excluded:\n")
-		printer.printGroupedResources(controlSummary.ExcludedWorkloads)
+		cautils.WarningDisplay(prettyPrinter.writer, "Excluded:\n")
+		prettyPrinter.printGroupedResources(controlSummary.ExcludedWorkloads)
 	}
 	if len(controlSummary.PassedWorkloads) > 0 {
-		cautils.SuccessDisplay(printer.writer, "Passed:\n")
-		printer.printGroupedResources(controlSummary.PassedWorkloads)
+		cautils.SuccessDisplay(prettyPrinter.writer, "Passed:\n")
+		prettyPrinter.printGroupedResources(controlSummary.PassedWorkloads)
 	}
 
 }
 
-func (printer *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
+func (prettyPrinter *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := INDENT
 	for title, rsc := range workloads {
-		printer.printGroupedResource(indent, title, rsc)
+		prettyPrinter.printGroupedResource(indent, title, rsc)
 	}
 }
 
-func (printer *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
+func (prettyPrinter *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
 	preIndent := indent
 	if title != "" {
-		cautils.SimpleDisplay(printer.writer, "%s%s\n", indent, title)
+		cautils.SimpleDisplay(prettyPrinter.writer, "%s%s\n", indent, title)
 		indent += indent
 	}
 
 	for r := range rsc {
 		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
-		cautils.SimpleDisplay(printer.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
+		cautils.SimpleDisplay(prettyPrinter.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
 	}
 	indent = preIndent
 }
@@ -209,75 +213,60 @@ func generateHeader() []string {
 	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
 }
 
-func generateFooter(printer *PrettyPrinter) []string {
+func generateFooter(prettyPrinter *PrettyPrinter) []string {
 	// Control name | # failed resources | all resources | % success
 	row := []string{}
 	row = append(row, "Resource Summary") //fmt.Sprintf(""%d", numControlers"))
-	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalFailed))
-	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalWarning))
-	row = append(row, fmt.Sprintf("%d", printer.frameworkSummary.TotalResources))
-	row = append(row, fmt.Sprintf("%.2f%s", printer.frameworkSummary.RiskScore, "%"))
+	row = append(row, fmt.Sprintf("%d", prettyPrinter.frameworkSummary.TotalFailed))
+	row = append(row, fmt.Sprintf("%d", prettyPrinter.frameworkSummary.TotalWarning))
+	row = append(row, fmt.Sprintf("%d", prettyPrinter.frameworkSummary.TotalResources))
+	row = append(row, fmt.Sprintf("%.2f%s", prettyPrinter.frameworkSummary.RiskScore, "%"))
 
 	return row
 }
-func (printer *PrettyPrinter) printSummaryTable(frameworksNames []string, frameworkScores []float32) {
+func (prettyPrinter *PrettyPrinter) printSummaryTable(frameworksNames []string, frameworkScores []float32) {
 	// For control scan framework will be nil
-	printer.printFramework(frameworksNames, frameworkScores)
+	prettyPrinter.printFramework(frameworksNames, frameworkScores)
 
-	summaryTable := tablewriter.NewWriter(printer.writer)
+	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
 	summaryTable.SetHeaderLine(true)
 	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
 	summaryTable.SetColumnAlignment(alignments)
 
-	for i := 0; i < len(printer.sortedControlNames); i++ {
-		controlSummary := printer.summary[printer.sortedControlNames[i]]
-		summaryTable.Append(generateRow(printer.sortedControlNames[i], controlSummary))
+	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
+		controlSummary := prettyPrinter.summary[prettyPrinter.sortedControlNames[i]]
+		summaryTable.Append(generateRow(prettyPrinter.sortedControlNames[i], controlSummary))
 	}
 
-	summaryTable.SetFooter(generateFooter(printer))
+	summaryTable.SetFooter(generateFooter(prettyPrinter))
 
 	// summaryTable.SetFooter(generateFooter())
 	summaryTable.Render()
 }
 
-func (printer *PrettyPrinter) printFramework(frameworksNames []string, frameworkScores []float32) {
+func (prettyPrinter *PrettyPrinter) printFramework(frameworksNames []string, frameworkScores []float32) {
 	if len(frameworksNames) == 1 {
-		cautils.InfoTextDisplay(printer.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworksNames[0]))
+		cautils.InfoTextDisplay(prettyPrinter.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworksNames[0]))
 	} else if len(frameworksNames) > 1 {
 		p := "FRAMEWORKS: "
 		for i := 0; i < len(frameworksNames)-1; i++ {
 			p += fmt.Sprintf("%s (risk: %.2f), ", frameworksNames[i], frameworkScores[i])
 		}
 		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworksNames[len(frameworksNames)-1], frameworkScores[len(frameworkScores)-1])
-		cautils.InfoTextDisplay(printer.writer, p)
+		cautils.InfoTextDisplay(prettyPrinter.writer, p)
 	}
 }
 
-func (printer *PrettyPrinter) getSortedControlsNames() []string {
-	controlNames := make([]string, 0, len(printer.summary))
-	for k := range printer.summary {
+func (prettyPrinter *PrettyPrinter) getSortedControlsNames() []string {
+	controlNames := make([]string, 0, len(prettyPrinter.summary))
+	for k := range prettyPrinter.summary {
 		controlNames = append(controlNames, k)
 	}
 	sort.Strings(controlNames)
 	return controlNames
 }
-
-func getWriter(outputFile string) *os.File {
-	os.Remove(outputFile)
-	if outputFile != "" {
-		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Println("failed to open file for writing, reason: ", err.Error())
-			return os.Stdout
-		}
-		return f
-	}
-	return os.Stdout
-
-}
-
 func getControlURL(controlID string) string {
 	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
 }

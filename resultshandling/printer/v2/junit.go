@@ -1,4 +1,4 @@
-package printer
+package v2
 
 import (
 	"encoding/xml"
@@ -6,7 +6,8 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/kubescape/resultshandling/printer"
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
 type JunitPrinter struct {
@@ -18,15 +19,19 @@ func NewJunitPrinter() *JunitPrinter {
 }
 
 func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
-	junitPrinter.writer = getWriter(outputFile)
+	junitPrinter.writer = printer.GetWriter(outputFile)
 }
 
 func (junitPrinter *JunitPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", int(score))
 }
 
+func (junitPrinter *JunitPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
+	finalizeReport(opaSessionObj)
+}
+
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
+	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.Report)
 	if err != nil {
 		fmt.Println("Failed to convert posture report object!")
 		os.Exit(1)
@@ -89,33 +94,33 @@ type JUnitFailure struct {
 	Contents string `xml:",chardata"`
 }
 
-func convertPostureReportToJunitResult(postureResult *reporthandling.PostureReport) (*JUnitTestSuites, error) {
+func convertPostureReportToJunitResult(postureResult *reporthandlingv2.PostureReport) (*JUnitTestSuites, error) {
 	juResult := JUnitTestSuites{XMLName: xml.Name{Local: "Kubescape scan results"}}
-	for _, framework := range postureResult.FrameworkReports {
+	for _, framework := range postureResult.ListFrameworks().All() {
 		suite := JUnitTestSuite{
-			Name:      framework.Name,
-			Resources: framework.GetNumberOfResources(),
-			Excluded:  framework.GetNumberOfWarningResources(),
-			Failed:    framework.GetNumberOfFailedResources(),
+			Name:      framework.GetName(),
+			Resources: framework.NumberOfResources().All(),
+			Excluded:  framework.NumberOfResources().Excluded(),
+			Failed:    framework.NumberOfResources().Failed(),
 		}
-		for _, controlReports := range framework.ControlReports {
+		for _, controlReports := range postureResult.ListControls().All() {
 			suite.Tests = suite.Tests + 1
 			testCase := JUnitTestCase{}
-			testCase.Name = controlReports.Name
+			testCase.Name = controlReports.GetName()
 			testCase.Classname = "Kubescape"
 			testCase.Time = postureResult.ReportGenerationTime.String()
-			if 0 < len(controlReports.RuleReports[0].RuleResponses) {
+			// if 0 < len(controlReports.RuleReports[0].RuleResponses) {
 
-				testCase.Resources = controlReports.GetNumberOfResources()
-				testCase.Excluded = controlReports.GetNumberOfWarningResources()
-				testCase.Failed = controlReports.GetNumberOfFailedResources()
-				failure := JUnitFailure{}
-				failure.Message = fmt.Sprintf("%d resources failed", testCase.Failed)
-				for _, ruleResponses := range controlReports.RuleReports[0].RuleResponses {
-					failure.Contents = fmt.Sprintf("%s\n%s", failure.Contents, ruleResponses.AlertMessage)
-				}
-				testCase.Failure = &failure
-			}
+			// 	testCase.Resources = controlReports.NumberOfResources().All()
+			// 	testCase.Excluded = controlReports.NumberOfResources().Excluded()
+			// 	testCase.Failed = controlReports.NumberOfResources().Failed()
+			// 	failure := JUnitFailure{}
+			// 	failure.Message = fmt.Sprintf("%d resources failed", testCase.Failed)
+			// 	for _, ruleResponses := range controlReports.RuleReports[0].RuleResponses {
+			// 		failure.Contents = fmt.Sprintf("%s\n%s", failure.Contents, ruleResponses.AlertMessage)
+			// 	}
+			// 	testCase.Failure = &failure
+			// }
 			suite.TestCases = append(suite.TestCases, testCase)
 		}
 		juResult.Suites = append(juResult.Suites, suite)

@@ -20,7 +20,6 @@ import (
 	"github.com/armosec/opa-utils/resources"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
-	uuid "github.com/satori/go.uuid"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -102,7 +101,6 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 		}
 	}
 
-	opap.Report.ReportID = uuid.NewV4().String()
 	opap.Report.ReportGenerationTime = time.Now().UTC()
 
 	cautils.StopSpinner()
@@ -131,6 +129,7 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 		resourceAssociatedRule, err := opap.processRule(&control.Rules[i])
 		if err != nil {
 			appendError(&errs, err)
+			continue
 		}
 
 		// append failed rules to controls

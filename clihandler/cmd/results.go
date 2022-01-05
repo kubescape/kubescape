@@ -10,7 +10,7 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
-	"github.com/armosec/kubescape/resultshandling/reporter"
+	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	"github.com/armosec/opa-utils/reporthandling"
 	uuid "github.com/satori/go.uuid"
 	"github.com/spf13/cobra"
@@ -70,7 +70,7 @@ var resultsCmd = &cobra.Command{
 		resultsObjects := NewResultsObject(clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName(), args[0])
 
 		// submit resources
-		r := reporter.NewReportEventReceiver(clusterConfig.GetConfigObj())
+		r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())
 
 		submitInterfaces := cliinterfaces.SubmitInterfaces{
 			ClusterConfig: clusterConfig,
