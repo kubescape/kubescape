@@ -105,7 +105,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 			continue
 		}
 		// store result as []map[string]interface{}
-		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.FilterOutOwneredResources(result)))
+		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
 		for i := range metaObjs {
 			allResources[metaObjs[i].GetID()] = metaObjs[i]
 		}
