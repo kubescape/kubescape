@@ -21,11 +21,11 @@ func getKubernetesApi(scanInfo *cautils.ScanInfo) *k8sinterface.KubernetesApi {
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
-	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), scanInfo.Account)
+func getTenantConfig(Account string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+	if !k8sinterface.IsConnectedToCluster() {
+		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), Account)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
+	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), Account)
 }
 
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
@@ -142,7 +142,7 @@ func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadRe
 		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
 	} else {
 		if customerGUID == "" || !scanInfo.FrameworkScan {
-			setDownloadReleasedPolicy(scanInfo, downloadReleasedPolicy)
+			scanInfo.PolicyGetter = getDownloadReleasedPolicy(downloadReleasedPolicy)
 		} else {
 			setGetArmoAPIConnector(scanInfo, customerGUID)
 		}
@@ -150,29 +150,30 @@ func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadRe
 }
 
 // setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
-func setConfigInputsGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
-	if len(scanInfo.ControlsInputs) > 0 {
-		scanInfo.Getters.ControlsInputsGetter = getter.NewLoadPolicy([]string{scanInfo.ControlsInputs})
+func getConfigInputsGetter(ControlsInputs string, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
+	if len(ControlsInputs) > 0 {
+		return getter.NewLoadPolicy([]string{ControlsInputs})
 	} else {
 		if customerGUID != "" {
-			scanInfo.Getters.ControlsInputsGetter = getter.GetArmoAPIConnector()
+			return getter.GetArmoAPIConnector()
 		} else {
 			if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
 				cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
 			}
-			scanInfo.Getters.ControlsInputsGetter = downloadReleasedPolicy
+			return downloadReleasedPolicy
 		}
 	}
 }
 
-func setDownloadReleasedPolicy(scanInfo *cautils.ScanInfo, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
+func getDownloadReleasedPolicy(downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
 		cautils.WarningDisplay(os.Stderr, "Warning: failed to get policies from github release, loading policies from cache\n")
-		scanInfo.PolicyGetter = getter.NewLoadPolicy(getDefaultFrameworksPaths())
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
 	} else {
-		scanInfo.PolicyGetter = downloadReleasedPolicy
+		return downloadReleasedPolicy
 	}
 }
+
 func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {
 	g := getter.GetArmoAPIConnector() // download policy from ARMO backend
 	g.SetCustomerGUID(customerGUID)

@@ -32,7 +32,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	k8s := getKubernetesApi(scanInfo)
 
-	tenantConfig := getTenantConfig(scanInfo, k8s)
+	tenantConfig := getTenantConfig(scanInfo.Account, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -89,7 +89,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
 	// set policy getter only after setting the customerGUID
 	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
-	setConfigInputsGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
+	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
 
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
