@@ -44,7 +44,7 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
 
 	if report.customerGUID == "" || report.clusterName == "" {
-		return fmt.Errorf("missing accout ID or cluster name. AccountID: '%s', Cluster name: '%s'", report.customerGUID, report.clusterName)
+		return fmt.Errorf("missing account ID or cluster name. AccountID: '%s', Cluster name: '%s'", report.customerGUID, report.clusterName)
 	}
 
 	if err := report.prepareReport(opaSessionObj.PostureReport, opaSessionObj.AllResources); err != nil {
