@@ -36,14 +36,14 @@ func (armoAPI *ArmoAPI) getListFrameworkURL() string {
 
 	return u.String()
 }
-func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) string {
+func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/armoPostureExceptions"
 
 	q := u.Query()
-	q.Add("customerGUID", customerGUID)
+	q.Add("customerGUID", armoAPI.customerGUID)
 	// if clusterName != "" { // TODO - fix customer name support in Armo BE
 	// 	q.Add("clusterName", clusterName)
 	// }
@@ -52,14 +52,14 @@ func (armoAPI *ArmoAPI) getExceptionsURL(customerGUID, clusterName string) strin
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getAccountConfig(customerGUID, clusterName string) string {
+func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/armoCustomerConfiguration"
 
 	q := u.Query()
-	q.Add("customerGUID", customerGUID)
+	q.Add("customerGUID", armoAPI.customerGUID)
 	if clusterName != "" { // TODO - fix customer name support in Armo BE
 		q.Add("clusterName", clusterName)
 	}

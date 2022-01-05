@@ -21,13 +21,13 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 	policiesAndResources.Frameworks = frameworks
 
 	// get exceptions
-	exceptionPolicies, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.CustomerGUID, cautils.ClusterName)
+	exceptionPolicies, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.ClusterName)
 	if err == nil {
 		policiesAndResources.Exceptions = exceptionPolicies
 	}
 
 	// get account configuration
-	controlsInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(cautils.CustomerGUID, cautils.ClusterName)
+	controlsInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(cautils.ClusterName)
 	if err == nil {
 		policiesAndResources.RegoInputData.PostureControlInputs = controlsInputs
 	}

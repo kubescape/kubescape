@@ -34,9 +34,9 @@ type componentInterfaces struct {
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
-	k8s := getKubernetesApi(scanInfo)
+	k8s := getKubernetesApi()
 
-	tenantConfig := getTenantConfig(scanInfo, k8s)
+	tenantConfig := getTenantConfig(scanInfo.Account, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -92,10 +92,15 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
 
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
-	// set policy getter only after setting the customerGUID
-	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
-	setConfigInputsGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
 
+	// set policy getter only after setting the customerGUID
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetCustomerGUID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
+	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
+
+	// TODO - list supported frameworks/controls
+
+	//
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
 			errMsg := "failed to tear down host sensor"

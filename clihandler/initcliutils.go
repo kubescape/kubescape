@@ -13,21 +13,29 @@ import (
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
-	"github.com/golang/glog"
 	// reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 )
 
-func getKubernetesApi(scanInfo *cautils.ScanInfo) *k8sinterface.KubernetesApi {
-	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+func getKubernetesApi() *k8sinterface.KubernetesApi {
+	if !k8sinterface.IsConnectedToCluster() {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
-	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), scanInfo.Account)
+func getTenantConfig(Account string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+	if !k8sinterface.IsConnectedToCluster() {
+		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), Account)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account)
+	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), Account)
+}
+
+func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
+	if useExceptions != "" {
+		// load exceptions from file
+		return getter.NewLoadPolicy([]string{useExceptions})
+	} else {
+		return getter.GetArmoAPIConnector()
+	}
 }
 
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
@@ -139,55 +147,64 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 }
 
 // setPolicyGetter set the policy getter - local file/github release/ArmoAPI
-func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
-	if len(scanInfo.UseFrom) > 0 {
-		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
-	} else {
-		if customerGUID == "" || !scanInfo.FrameworkScan {
-			setDownloadReleasedPolicy(scanInfo, downloadReleasedPolicy)
-		} else {
-			setGetArmoAPIConnector(scanInfo, customerGUID)
-		}
+func getPolicyGetter(loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+	if len(loadPoliciesFromFile) > 0 {
+		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
+	if accountID != "" && frameworkScope {
+		g := getter.GetArmoAPIConnector() // download policy from ARMO backend
+		g.SetCustomerGUID(accountID)
+		return g
+	}
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	return getDownloadReleasedPolicy(downloadReleasedPolicy)
+
 }
+
+// func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {
+// 	g := getter.GetArmoAPIConnector() // download policy from ARMO backend
+// 	g.SetCustomerGUID(customerGUID)
+// 	scanInfo.PolicyGetter = g
+// 	if scanInfo.ScanAll {
+// 		frameworks, err := g.ListCustomFrameworks(customerGUID)
+// 		if err != nil {
+// 			glog.Error("failed to get custom frameworks") // handle error
+// 			return
+// 		}
+// 		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
+// 	}
+// }
 
 // setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
-func setConfigInputsGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
-	if len(scanInfo.ControlsInputs) > 0 {
-		scanInfo.Getters.ControlsInputsGetter = getter.NewLoadPolicy([]string{scanInfo.ControlsInputs})
+func getConfigInputsGetter(ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
+	if len(ControlsInputs) > 0 {
+		return getter.NewLoadPolicy([]string{ControlsInputs})
+	}
+	if accountID != "" {
+		g := getter.GetArmoAPIConnector() // download config from ARMO backend
+		g.SetCustomerGUID(accountID)
+		return g
+	}
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
+	}
+	return downloadReleasedPolicy
+}
+
+func getDownloadReleasedPolicy(downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to get policies from github release, loading policies from cache\n")
+		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
 	} else {
-		if customerGUID != "" {
-			scanInfo.Getters.ControlsInputsGetter = getter.GetArmoAPIConnector()
-		} else {
-			if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
-				cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
-			}
-			scanInfo.Getters.ControlsInputsGetter = downloadReleasedPolicy
-		}
+		return downloadReleasedPolicy
 	}
 }
 
-func setDownloadReleasedPolicy(scanInfo *cautils.ScanInfo, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
-	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to get policies from github release, loading policies from cache\n")
-		scanInfo.PolicyGetter = getter.NewLoadPolicy(getDefaultFrameworksPaths())
-	} else {
-		scanInfo.PolicyGetter = downloadReleasedPolicy
-	}
-}
-func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {
-	g := getter.GetArmoAPIConnector() // download policy from ARMO backend
-	g.SetCustomerGUID(customerGUID)
-	scanInfo.PolicyGetter = g
-	if scanInfo.ScanAll {
-		frameworks, err := g.ListCustomFrameworks(customerGUID)
-		if err != nil {
-			glog.Error("failed to get custom frameworks") // handle error
-			return
-		}
-		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
-	}
-}
 func getDefaultFrameworksPaths() []string {
 	fwPaths := []string{}
 	for i := range getter.NativeFrameworks {

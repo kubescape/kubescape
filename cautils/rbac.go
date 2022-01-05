@@ -43,11 +43,18 @@ func (rbacObjects *RBACObjects) ListAllResources() (map[string]workloadinterface
 func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.RbacObjects) (map[string]workloadinterface.IMetadata, error) {
 	allresources := map[string]workloadinterface.IMetadata{}
 	// wrap rbac aggregated objects in IMetadata and add to allresources
+	// TODO - DEPRECATE SA2WLIDmap
 	SA2WLIDmapIMeta, err := rbacutils.SA2WLIDmapIMetadataWrapper(resources.SA2WLIDmap)
 	if err != nil {
 		return nil, err
 	}
 	allresources[SA2WLIDmapIMeta.GetID()] = SA2WLIDmapIMeta
+
+	SAID2WLIDmapIMeta, err := rbacutils.SAID2WLIDmapIMetadataWrapper(resources.SAID2WLIDmap)
+	if err != nil {
+		return nil, err
+	}
+	allresources[SAID2WLIDmapIMeta.GetID()] = SAID2WLIDmapIMeta
 
 	// convert rbac k8s resources to IMetadata and add to allresources
 	for _, cr := range resources.ClusterRoles.Items {

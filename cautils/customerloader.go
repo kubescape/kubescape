@@ -104,10 +104,11 @@ func NewLocalConfig(backendAPI getter.IBackend, customerGUID string) *LocalConfi
 	return lc
 }
 
-func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
-func (lc *LocalConfig) GetCustomerGUID() string  { return lc.configObj.CustomerGUID }
-func (lc *LocalConfig) GetClusterName() string   { return "" }
-func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
+func (lc *LocalConfig) GetConfigObj() *ConfigObj            { return lc.configObj }
+func (lc *LocalConfig) GetCustomerGUID() string             { return lc.configObj.CustomerGUID }
+func (lc *LocalConfig) SetCustomerGUID(customerGUID string) { lc.configObj.CustomerGUID = customerGUID }
+func (lc *LocalConfig) GetClusterName() string              { return "" }
+func (lc *LocalConfig) IsConfigFound() bool                 { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 	// ARMO tenant GUID
 	if err := getTenantConfigFromBE(lc.backendAPI, lc.configObj); err != nil {
@@ -121,7 +122,8 @@ func (lc *LocalConfig) SetTenant() error {
 func getTenantConfigFromBE(backendAPI getter.IBackend, configObj *ConfigObj) error {
 
 	// get from armoBE
-	tenantResponse, err := backendAPI.GetCustomerGUID(configObj.CustomerGUID)
+	backendAPI.SetCustomerGUID(configObj.CustomerGUID)
+	tenantResponse, err := backendAPI.GetCustomerGUID()
 	if err == nil && tenantResponse != nil {
 		if tenantResponse.AdminMail != "" { // registered tenant
 			configObj.CustomerAdminEMail = tenantResponse.AdminMail
@@ -197,9 +199,10 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	return c
 }
 
-func (c *ClusterConfig) GetConfigObj() *ConfigObj { return c.configObj }
-func (c *ClusterConfig) GetDefaultNS() string     { return c.configMapNamespace }
-func (c *ClusterConfig) GetCustomerGUID() string  { return c.configObj.CustomerGUID }
+func (c *ClusterConfig) GetConfigObj() *ConfigObj            { return c.configObj }
+func (c *ClusterConfig) GetDefaultNS() string                { return c.configMapNamespace }
+func (c *ClusterConfig) GetCustomerGUID() string             { return c.configObj.CustomerGUID }
+func (c *ClusterConfig) SetCustomerGUID(customerGUID string) { c.configObj.CustomerGUID = customerGUID }
 func (c *ClusterConfig) IsConfigFound() bool {
 	return existsConfigFile() || c.existsConfigMap()
 }
@@ -410,7 +413,8 @@ func (clusterConfig *ClusterConfig) IsSubmitted() bool {
 func (clusterConfig *ClusterConfig) IsRegistered() bool {
 
 	// get from armoBE
-	tenantResponse, err := clusterConfig.backendAPI.GetCustomerGUID(clusterConfig.GetCustomerGUID())
+	clusterConfig.backendAPI.SetCustomerGUID(clusterConfig.GetCustomerGUID())
+	tenantResponse, err := clusterConfig.backendAPI.GetCustomerGUID()
 	if err == nil && tenantResponse != nil {
 		if tenantResponse.AdminMail != "" { // this customer already belongs to some user
 			return true

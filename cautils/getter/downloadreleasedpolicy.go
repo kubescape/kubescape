@@ -41,7 +41,20 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Fr
 	return framework, err
 }
 
-func (drp *DownloadReleasedPolicy) GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error) {
+func (drp *DownloadReleasedPolicy) ListFrameworks() ([]string, error) {
+	return drp.gs.GetOPAFrameworksNamesList()
+}
+
+func (drp *DownloadReleasedPolicy) ListControls(listType ListType) ([]string, error) {
+	switch listType {
+	case ListID:
+		return drp.gs.GetOPAControlsIDsList()
+	default:
+		return drp.gs.GetOPAControlsNamesList()
+	}
+}
+
+func (drp *DownloadReleasedPolicy) GetControlsInputs(clusterName string) (map[string][]string, error) {
 	defaultConfigInputs, err := drp.gs.GetDefaultConfigInputs()
 	if err != nil {
 		return nil, err
