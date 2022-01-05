@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var NativeFrameworks = []string{"nsa", "mitre", "armobest"}
+var NativeFrameworks = []string{"nsa", "mitre", "armobest", "devopsbest"}
 
 func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	u := url.URL{}

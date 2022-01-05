@@ -14,10 +14,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-const (
-	configMapName  = "kubescape"
-	configFileName = "config"
-)
+const configFileName = "config"
 
 func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName + ".json") }
 
@@ -145,26 +142,38 @@ func getTenantConfigFromBE(backendAPI getter.IBackend, configObj *ConfigObj) err
 // ========================== Cluster Config ============================================
 // ======================================================================================
 
+// ClusterConfig configuration of specific cluster
+/*
+
+Supported environments variables:
+KS_DEFAULT_CONFIGMAP_NAME  // name of configmap, if not set default is 'kubescape'
+KS_DEFAULT_CONFIGMAP_NAMESPACE   // configmap namespace, if not set default is 'default'
+
+TODO - supprot:
+KS_ACCOUNT // Account ID
+KS_CACHE // path to cached files
+*/
 type ClusterConfig struct {
-	k8s        *k8sinterface.KubernetesApi
-	defaultNS  string
-	backendAPI getter.IBackend
-	configObj  *ConfigObj
+	k8s                *k8sinterface.KubernetesApi
+	configMapName      string
+	configMapNamespace string
+	backendAPI         getter.IBackend
+	configObj          *ConfigObj
 }
 
 func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, customerGUID string) *ClusterConfig {
-	defaultNS := k8sinterface.GetDefaultNamespace()
 	var configObj *ConfigObj
 	c := &ClusterConfig{
-		k8s:        k8s,
-		backendAPI: backendAPI,
-		configObj:  &ConfigObj{},
-		defaultNS:  defaultNS,
+		k8s:                k8s,
+		backendAPI:         backendAPI,
+		configObj:          &ConfigObj{},
+		configMapName:      getConfigMapName(),
+		configMapNamespace: getConfigMapNamespace(),
 	}
 
 	// get from configMap
-	if existsConfigMap(k8s, defaultNS) {
-		configObj, _ = loadConfigFromConfigMap(k8s, defaultNS)
+	if c.existsConfigMap() {
+		configObj, _ = c.loadConfigFromConfigMap()
 	} else if existsConfigFile() { // get from file
 		configObj, _ = loadConfigFromFile()
 	}
@@ -189,10 +198,10 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 }
 
 func (c *ClusterConfig) GetConfigObj() *ConfigObj { return c.configObj }
-func (c *ClusterConfig) GetDefaultNS() string     { return c.defaultNS }
+func (c *ClusterConfig) GetDefaultNS() string     { return c.configMapNamespace }
 func (c *ClusterConfig) GetCustomerGUID() string  { return c.configObj.CustomerGUID }
 func (c *ClusterConfig) IsConfigFound() bool {
-	return existsConfigFile() || existsConfigMap(c.k8s, c.defaultNS)
+	return existsConfigFile() || c.existsConfigMap()
 }
 
 func (c *ClusterConfig) SetTenant() error {
@@ -202,7 +211,7 @@ func (c *ClusterConfig) SetTenant() error {
 		return err
 	}
 	// update/create config
-	if existsConfigMap(c.k8s, c.defaultNS) {
+	if c.existsConfigMap() {
 		c.updateConfigMap()
 	} else {
 		c.createConfigMap()
@@ -223,8 +232,8 @@ func (c *ClusterConfig) ToMapString() map[string]interface{} {
 	}
 	return m
 }
-func loadConfigFromConfigMap(k8s *k8sinterface.KubernetesApi, ns string) (*ConfigObj, error) {
-	configMap, err := k8s.KubernetesClient.CoreV1().ConfigMaps(ns).Get(context.Background(), configMapName, metav1.GetOptions{})
+func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -235,15 +244,15 @@ func loadConfigFromConfigMap(k8s *k8sinterface.KubernetesApi, ns string) (*Confi
 	return nil, nil
 }
 
-func existsConfigMap(k8s *k8sinterface.KubernetesApi, ns string) bool {
-	_, err := k8s.KubernetesClient.CoreV1().ConfigMaps(ns).Get(context.Background(), configMapName, metav1.GetOptions{})
+func (c *ClusterConfig) existsConfigMap() bool {
+	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 	// TODO - check if has customerGUID
 	return err == nil
 }
 
 func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
 
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 
 	if err != nil {
 		return "", err
@@ -295,11 +304,11 @@ func SetKeyValueInConfigJson(key string, value string) error {
 
 func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
 
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 	if err != nil {
 		configMap = &corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
-				Name: configMapName,
+				Name: c.configMapName,
 			},
 		}
 	}
@@ -311,9 +320,9 @@ func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
 	configMap.Data[key] = value
 
 	if err != nil {
-		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Create(context.Background(), configMap, metav1.CreateOptions{})
+		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Create(context.Background(), configMap, metav1.CreateOptions{})
 	} else {
-		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(configMap.Namespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
+		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
 	}
 
 	return err
@@ -330,12 +339,12 @@ func (c *ClusterConfig) createConfigMap() error {
 	}
 	configMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: configMapName,
+			Name: c.configMapName,
 		},
 	}
 	c.updateConfigData(configMap)
 
-	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Create(context.Background(), configMap, metav1.CreateOptions{})
+	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Create(context.Background(), configMap, metav1.CreateOptions{})
 	return err
 }
 
@@ -343,7 +352,7 @@ func (c *ClusterConfig) updateConfigMap() error {
 	if c.k8s == nil {
 		return nil
 	}
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.defaultNS).Get(context.Background(), configMapName, metav1.GetOptions{})
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 
 	if err != nil {
 		return err
@@ -351,7 +360,7 @@ func (c *ClusterConfig) updateConfigMap() error {
 
 	c.updateConfigData(configMap)
 
-	_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(configMap.Namespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
+	_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
 	return err
 }
 
@@ -394,7 +403,7 @@ func readConfig(dat []byte) (*ConfigObj, error) {
 
 // Check if the customer is submitted
 func (clusterConfig *ClusterConfig) IsSubmitted() bool {
-	return existsConfigMap(clusterConfig.k8s, clusterConfig.defaultNS) || existsConfigFile()
+	return clusterConfig.existsConfigMap() || existsConfigFile()
 }
 
 // Check if the customer is registered
@@ -411,7 +420,7 @@ func (clusterConfig *ClusterConfig) IsRegistered() bool {
 }
 
 func (clusterConfig *ClusterConfig) DeleteConfig() error {
-	if err := DeleteConfigMap(clusterConfig.k8s); err != nil {
+	if err := clusterConfig.DeleteConfigMap(); err != nil {
 		return err
 	}
 	if err := DeleteConfigFile(); err != nil {
@@ -419,8 +428,8 @@ func (clusterConfig *ClusterConfig) DeleteConfig() error {
 	}
 	return nil
 }
-func DeleteConfigMap(k8s *k8sinterface.KubernetesApi) error {
-	return k8s.KubernetesClient.CoreV1().ConfigMaps(k8sinterface.GetDefaultNamespace()).Delete(context.Background(), configMapName, metav1.DeleteOptions{})
+func (clusterConfig *ClusterConfig) DeleteConfigMap() error {
+	return clusterConfig.k8s.KubernetesClient.CoreV1().ConfigMaps(clusterConfig.configMapNamespace).Delete(context.Background(), clusterConfig.configMapName, metav1.DeleteOptions{})
 }
 
 func DeleteConfigFile() error {
@@ -429,4 +438,18 @@ func DeleteConfigFile() error {
 
 func AdoptClusterName(clusterName string) string {
 	return strings.ReplaceAll(clusterName, "/", "-")
+}
+
+func getConfigMapName() string {
+	if n := os.Getenv("KS_DEFAULT_CONFIGMAP_NAME"); n != "" {
+		return n
+	}
+	return "kubescape"
+}
+
+func getConfigMapNamespace() string {
+	if n := os.Getenv("KS_DEFAULT_CONFIGMAP_NAMESPACE"); n != "" {
+		return n
+	}
+	return "default"
 }
