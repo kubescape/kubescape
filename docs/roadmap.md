@@ -2,14 +2,16 @@
 
 
 ## Proposals
-* (Container registry integration)[/docs/proposals/container-image-vulnerability-adaptor.md]
+* [Container registry integration](/docs/proposals/container-image-vulnerability-adaptor.md)
 
 ## Planed features
 * Image vulnerablity scanning based controls 
 * Assited remidiation (telling where/what to fix)
 * Git integration for pull requests
 * Integration with container registries
-* Customer controls and regos
+* Custom controls and regos
+* API server configuration validation
+* Kubelet configuration validation 
 
 ## Completed features
 * Integration with Prometheus
