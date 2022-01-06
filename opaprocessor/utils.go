@@ -14,7 +14,7 @@ func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version 
 }
 
 // ConvertFrameworksToSummaryDetails initialize the summary details for the report object
-func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDetails, frameworks []reporthandling.Framework) {
+func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDetails, frameworks []reporthandling.Framework, policies *cautils.Policies) {
 	if summaryDetails.Controls == nil {
 		summaryDetails.Controls = make(map[string]reportsummary.ControlSummary)
 	}
@@ -22,17 +22,19 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 		controls := map[string]reportsummary.ControlSummary{}
 		for j := range frameworks[i].Controls {
 			id := frameworks[i].Controls[j].ControlID
-			c := reportsummary.ControlSummary{
-				Name:        frameworks[i].Controls[j].Name,
-				ControlID:   id,
-				ScoreFactor: frameworks[i].Controls[j].BaseScore,
-				Description: frameworks[i].Controls[j].Description,
-				Remediation: frameworks[i].Controls[j].Remediation,
+			if _, ok := policies.Controls[id]; ok {
+				c := reportsummary.ControlSummary{
+					Name:        frameworks[i].Controls[j].Name,
+					ControlID:   id,
+					ScoreFactor: frameworks[i].Controls[j].BaseScore,
+					Description: frameworks[i].Controls[j].Description,
+					Remediation: frameworks[i].Controls[j].Remediation,
+				}
+				controls[frameworks[i].Controls[j].ControlID] = c
+				summaryDetails.Controls[id] = c
 			}
-			controls[frameworks[i].Controls[j].ControlID] = c
-			summaryDetails.Controls[id] = c
 		}
-		if frameworks[i].Name != "" {
+		if cautils.StringInSlice(policies.Frameworks, frameworks[i].Name) != cautils.ValueNotFound {
 			summaryDetails.Frameworks = append(summaryDetails.Frameworks, reportsummary.FrameworkSummary{
 				Name:     frameworks[i].Name,
 				Controls: controls,

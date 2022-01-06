@@ -23,7 +23,8 @@ func TestInitializeSummaryDetails(t *testing.T) {
 
 	summaryDetails := reportsummary.SummaryDetails{}
 	frameworks := []reporthandling.Framework{*fw0, *fw1}
-	ConvertFrameworksToSummaryDetails(&summaryDetails, frameworks)
+	policies := ConvertFrameworksToPolicies([]reporthandling.Framework{*fw0, *fw1}, "")
+	ConvertFrameworksToSummaryDetails(&summaryDetails, frameworks, policies)
 	assert.Equal(t, 2, len(summaryDetails.Frameworks))
 	assert.Equal(t, 3, len(summaryDetails.Controls))
 }

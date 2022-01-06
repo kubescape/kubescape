@@ -76,9 +76,9 @@ func (prettyPrinter *PrettyPrinter) Score(score float32) {
 func (prettyPrinter *PrettyPrinter) summarySetup(fr reporthandling.FrameworkReport, allResources map[string]workloadinterface.IMetadata) {
 
 	for _, cr := range fr.ControlReports {
-		if len(cr.RuleReports) == 0 {
-			continue
-		}
+		// if len(cr.RuleReports) == 0 {
+		// 	continue
+		// }
 		workloadsSummary := listResultSummary(cr.RuleReports, allResources)
 
 		var passedWorkloads map[string][]WorkloadSummary
@@ -248,7 +248,9 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(frameworksNames []string, 
 
 func (prettyPrinter *PrettyPrinter) printFramework(frameworksNames []string, frameworkScores []float32) {
 	if len(frameworksNames) == 1 {
-		cautils.InfoTextDisplay(prettyPrinter.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworksNames[0]))
+		if frameworksNames[0] != "" {
+			cautils.InfoTextDisplay(prettyPrinter.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworksNames[0]))
+		}
 	} else if len(frameworksNames) > 1 {
 		p := "FRAMEWORKS: "
 		for i := 0; i < len(frameworksNames)-1; i++ {

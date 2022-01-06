@@ -25,8 +25,10 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
-			frameworks[i].Controls[j].Rules = compatibleRules
-			policies.Controls[frameworks[i].Controls[j].ControlID] = frameworks[i].Controls[j]
+			if len(compatibleRules) > 0 {
+				frameworks[i].Controls[j].Rules = compatibleRules
+				policies.Controls[frameworks[i].Controls[j].ControlID] = frameworks[i].Controls[j]
+			}
 		}
 	}
 }
