@@ -39,7 +39,7 @@ var (
 )
 var frameworkCmd = &cobra.Command{
 	Use:       "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
-	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(getter.NativeFrameworks, ", ")),
+	Short:     "The framework you wish to use. Run 'kubescape list frameworks' for the list of supported frameworks",
 	Example:   frameworkExample,
 	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	ValidArgs: getter.NativeFrameworks,

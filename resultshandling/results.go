@@ -27,6 +27,7 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 
 	opaSessionObj := <-*resultsHandler.opaSessionObj
 
+	resultsHandler.printerObj.FinalizeData(opaSessionObj)
 	resultsHandler.printerObj.ActionPrint(opaSessionObj)
 
 	if err := resultsHandler.reporterObj.ActionSendReport(opaSessionObj); err != nil {

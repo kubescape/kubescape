@@ -1,7 +1,8 @@
 package cautils
 
 type DownloadInfo struct {
-	Path          string
-	FrameworkName string
-	ControlName   string
+	Path    string
+	Target  string
+	Name    string
+	Account string
 }

@@ -1,4 +1,4 @@
-package printer
+package v1
 
 import (
 	"encoding/json"
@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/resultshandling/printer"
 )
 
 type JsonPrinter struct {
@@ -17,7 +18,7 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jsonPrinter *JsonPrinter) SetWriter(outputFile string) {
-	jsonPrinter.writer = getWriter(outputFile)
+	jsonPrinter.writer = printer.GetWriter(outputFile)
 }
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
@@ -39,4 +40,7 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 		os.Exit(1)
 	}
 	jsonPrinter.writer.Write(postureReportStr)
+}
+func (jsonPrinter *JsonPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
+	reportV2ToV1(opaSessionObj)
 }

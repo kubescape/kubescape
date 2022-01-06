@@ -10,13 +10,14 @@ import (
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling/reporter"
+	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
-	"github.com/golang/glog"
+	// reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 )
 
-func getKubernetesApi(scanInfo *cautils.ScanInfo) *k8sinterface.KubernetesApi {
-	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+func getKubernetesApi() *k8sinterface.KubernetesApi {
+	if !k8sinterface.IsConnectedToCluster() {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
@@ -28,6 +29,15 @@ func getTenantConfig(Account string, k8s *k8sinterface.KubernetesApi) cautils.IT
 	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), Account)
 }
 
+func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
+	if useExceptions != "" {
+		// load exceptions from file
+		return getter.NewLoadPolicy([]string{useExceptions})
+	} else {
+		return getter.GetArmoAPIConnector()
+	}
+}
+
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
 	if submit {
 		return cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, tenantConfig.GetCustomerGUID(), tenantConfig.GetClusterName()))
@@ -37,9 +47,9 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 
 func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IReport {
 	if submit {
-		return reporter.NewReportEventReceiver(tenantConfig.GetConfigObj())
+		return reporterv1.NewReportEventReceiver(tenantConfig.GetConfigObj())
 	}
-	return reporter.NewReportMock()
+	return reporterv1.NewReportMock()
 }
 func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
 	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
@@ -137,32 +147,53 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 }
 
 // setPolicyGetter set the policy getter - local file/github release/ArmoAPI
-func setPolicyGetter(scanInfo *cautils.ScanInfo, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) {
-	if len(scanInfo.UseFrom) > 0 {
-		scanInfo.PolicyGetter = getter.NewLoadPolicy(scanInfo.UseFrom)
-	} else {
-		if customerGUID == "" || !scanInfo.FrameworkScan {
-			scanInfo.PolicyGetter = getDownloadReleasedPolicy(downloadReleasedPolicy)
-		} else {
-			setGetArmoAPIConnector(scanInfo, customerGUID)
-		}
+func getPolicyGetter(loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+	if len(loadPoliciesFromFile) > 0 {
+		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
+	if accountID != "" && frameworkScope {
+		g := getter.GetArmoAPIConnector() // download policy from ARMO backend
+		g.SetCustomerGUID(accountID)
+		return g
+	}
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	return getDownloadReleasedPolicy(downloadReleasedPolicy)
+
 }
 
+// func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {
+// 	g := getter.GetArmoAPIConnector() // download policy from ARMO backend
+// 	g.SetCustomerGUID(customerGUID)
+// 	scanInfo.PolicyGetter = g
+// 	if scanInfo.ScanAll {
+// 		frameworks, err := g.ListCustomFrameworks(customerGUID)
+// 		if err != nil {
+// 			glog.Error("failed to get custom frameworks") // handle error
+// 			return
+// 		}
+// 		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
+// 	}
+// }
+
 // setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
-func getConfigInputsGetter(ControlsInputs string, customerGUID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
+func getConfigInputsGetter(ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
-	} else {
-		if customerGUID != "" {
-			return getter.GetArmoAPIConnector()
-		} else {
-			if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
-				cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
-			}
-			return downloadReleasedPolicy
-		}
 	}
+	if accountID != "" {
+		g := getter.GetArmoAPIConnector() // download config from ARMO backend
+		g.SetCustomerGUID(accountID)
+		return g
+	}
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
+	}
+	return downloadReleasedPolicy
 }
 
 func getDownloadReleasedPolicy(downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
@@ -174,19 +205,6 @@ func getDownloadReleasedPolicy(downloadReleasedPolicy *getter.DownloadReleasedPo
 	}
 }
 
-func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {
-	g := getter.GetArmoAPIConnector() // download policy from ARMO backend
-	g.SetCustomerGUID(customerGUID)
-	scanInfo.PolicyGetter = g
-	if scanInfo.ScanAll {
-		frameworks, err := g.ListCustomFrameworks(customerGUID)
-		if err != nil {
-			glog.Error("failed to get custom frameworks") // handle error
-			return
-		}
-		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
-	}
-}
 func getDefaultFrameworksPaths() []string {
 	fwPaths := []string{}
 	for i := range getter.NativeFrameworks {

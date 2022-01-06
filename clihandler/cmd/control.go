@@ -13,10 +13,27 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	controlExample = `
+  # Scan the 'privileged container' control
+  kubescape scan control 'privileged container'
+	
+  # Scan list of controls separated with a comma
+  kubescape scan control 'privileged container,allowed hostpath'
+  
+  # Scan list of controls using the control ID separated with a comma
+  kubescape scan control C-0058,C-0057
+  
+  Control documentation:
+  https://hub.armo.cloud/docs/controls
+`
+)
+
 // controlCmd represents the control command
 var controlCmd = &cobra.Command{
-	Use:   "control <control names list>/<control ids list>.\nExamples:\n$ kubescape scan control C-0058,C-0057 [flags]\n$ kubescape scan contol C-0058 [flags]\n$ kubescape scan control 'privileged container,allowed hostpath' [flags]",
-	Short: fmt.Sprintf("The control you wish to use for scan. It must be present in at least one of the following frameworks: %s", getter.NativeFrameworks),
+	Use:     "control <control names list>/<control ids list>",
+	Short:   "The controls you wish to use. Run 'kubescape list controls' for the list of supported controls",
+	Example: controlExample,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			controls := strings.Split(args[0], ",")

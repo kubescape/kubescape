@@ -76,18 +76,8 @@ type Getters struct {
 
 func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
-	scanInfo.setUseExceptions()
 	scanInfo.setOutputFile()
 
-}
-
-func (scanInfo *ScanInfo) setUseExceptions() {
-	if scanInfo.UseExceptions != "" {
-		// load exceptions from file
-		scanInfo.ExceptionsGetter = getter.NewLoadPolicy([]string{scanInfo.UseExceptions})
-	} else {
-		scanInfo.ExceptionsGetter = getter.GetArmoAPIConnector()
-	}
 }
 
 func (scanInfo *ScanInfo) setUseFrom() {

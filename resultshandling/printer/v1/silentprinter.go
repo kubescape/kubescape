@@ -1,4 +1,4 @@
-package printer
+package v1
 
 import (
 	"github.com/armosec/kubescape/cautils"
