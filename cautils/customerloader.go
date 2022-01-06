@@ -176,7 +176,8 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	// get from configMap
 	if c.existsConfigMap() {
 		configObj, _ = c.loadConfigFromConfigMap()
-	} else if existsConfigFile() { // get from file
+	}
+	if configObj == nil && existsConfigFile() { // get from file
 		configObj, _ = loadConfigFromFile()
 	}
 	if configObj != nil {
@@ -399,9 +400,10 @@ func readConfig(dat []byte) (*ConfigObj, error) {
 		return nil, nil
 	}
 	configObj := &ConfigObj{}
-	err := json.Unmarshal(dat, configObj)
-
-	return configObj, err
+	if err := json.Unmarshal(dat, configObj); err != nil {
+		return nil, err
+	}
+	return configObj, nil
 }
 
 // Check if the customer is submitted

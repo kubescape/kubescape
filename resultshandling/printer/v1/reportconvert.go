@@ -5,7 +5,6 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/armosec/opa-utils/score"
 )
 
@@ -90,11 +89,17 @@ func controlReportV2ToV1(opaSessionObj *cautils.OPASessionObj, frameworkName str
 		crv1.Description = crv2.Description
 		crv1.Remediation = crv2.Remediation
 
-		rulesv1 := initializeRuleList(&crv2, opaSessionObj.ResourcesResult)
+		rulesv1 := map[string]reporthandling.RuleReport{}
 
-		for _, resourceID := range crv2.List().All() {
+		for _, resourceID := range crv2.ListResourcesIDs().All() {
 			if result, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
 				for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
+
+					if _, ok := rulesv1[rulev2.GetName()]; !ok {
+						rulesv1[rulev2.GetName()] = reporthandling.RuleReport{
+							Name: rulev2.GetName(),
+						}
+					}
 
 					rulev1 := rulesv1[rulev2.GetName()]
 					status := rulev2.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}})
@@ -132,22 +137,4 @@ func controlReportV2ToV1(opaSessionObj *cautils.OPASessionObj, frameworkName str
 		controlRepors = append(controlRepors, crv1)
 	}
 	return controlRepors
-}
-
-func initializeRuleList(crv2 *reportsummary.ControlSummary, resourcesResult map[string]resourcesresults.Result) map[string]reporthandling.RuleReport {
-	rulesv1 := map[string]reporthandling.RuleReport{} // ruleName: rules
-
-	for _, resourceID := range crv2.List().All() {
-		if result, ok := resourcesResult[resourceID]; ok {
-			for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
-				// add to rule
-				if _, ok := rulesv1[rulev2.GetName()]; !ok {
-					rulesv1[rulev2.GetName()] = reporthandling.RuleReport{
-						Name: rulev2.GetName(),
-					}
-				}
-			}
-		}
-	}
-	return rulesv1
 }
