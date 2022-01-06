@@ -99,6 +99,9 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
 
 	// TODO - list supported frameworks/controls
+	if scanInfo.ScanAll {
+		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.Getters.PolicyGetter), reporthandling.KindFramework)
+	}
 
 	//
 	defer func() {

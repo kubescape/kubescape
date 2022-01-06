@@ -212,3 +212,11 @@ func getDefaultFrameworksPaths() []string {
 	}
 	return fwPaths
 }
+
+func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
+	fw, err := policyGetter.ListFrameworks()
+	if err != nil {
+		fw = getDefaultFrameworksPaths()
+	}
+	return fw
+}
