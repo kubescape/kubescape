@@ -13,6 +13,7 @@ const ListName ListType = "name"
 
 type IPolicyGetter interface {
 	GetFramework(name string) (*reporthandling.Framework, error)
+	GetFrameworks() ([]reporthandling.Framework, error)
 	GetControl(name string) (*reporthandling.Control, error)
 
 	ListFrameworks() ([]string, error)
