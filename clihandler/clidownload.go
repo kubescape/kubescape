@@ -2,7 +2,6 @@ package clihandler
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -26,10 +25,9 @@ func DownloadSupportCommands() []string {
 func CliDownload(downloadInfo *cautils.DownloadInfo) error {
 	if f, ok := downloadFunc[downloadInfo.Target]; ok {
 		if err := f(downloadInfo); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			return err
 		}
-		fmt.Println(fmt.Sprintf("'%s' downloaded successfully and saved at: '%s'", downloadInfo.Target, downloadInfo.Path))
+		fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, downloadInfo.Path)
 		return nil
 	}
 	return fmt.Errorf("unknown command to download")
@@ -95,7 +93,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 
 func downloadControl(downloadInfo *cautils.DownloadInfo) error {
 	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi()) // change k8sinterface
-	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), true, nil)
+	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), false, nil)
 
 	if downloadInfo.Name == "" {
 		// TODO - support
