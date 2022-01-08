@@ -54,6 +54,9 @@ Want to contribute? Want to discuss something? Have an issue?
 
 # Options and examples
 
+## Playground
+* [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
+
 ## Tutorials
 
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
