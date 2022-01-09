@@ -100,7 +100,7 @@ func (armoAPI *ArmoAPI) GetReportReceiverURL() string {
 func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name), nil)
 	if err != nil {
-		return nil, err
+		return nil, nil
 	}
 
 	framework := &reporthandling.Framework{}
