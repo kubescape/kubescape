@@ -41,6 +41,14 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Fr
 	return framework, err
 }
 
+func (drp *DownloadReleasedPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
+	frameworks, err := drp.gs.GetOPAFrameworks()
+	if err != nil {
+		return nil, err
+	}
+	return frameworks, err
+}
+
 func (drp *DownloadReleasedPolicy) ListFrameworks() ([]string, error) {
 	return drp.gs.GetOPAFrameworksNamesList()
 }

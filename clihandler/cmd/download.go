@@ -19,7 +19,7 @@ var downloadCmd = &cobra.Command{
 	Args: func(cmd *cobra.Command, args []string) error {
 		supported := strings.Join(clihandler.DownloadSupportCommands(), ",")
 		if len(args) < 1 {
-			return fmt.Errorf("policy type requeued, supported: %v", supported)
+			return fmt.Errorf("policy type required, supported: %v", supported)
 		}
 		if cautils.StringInSlice(clihandler.DownloadSupportCommands(), args[0]) == cautils.ValueNotFound {
 			return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
@@ -43,7 +43,7 @@ func init() {
 	// cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(downloadCmd)
-	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If specified, will store save to `~/.kubescape/<policy name>.json`")
+	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 
 }

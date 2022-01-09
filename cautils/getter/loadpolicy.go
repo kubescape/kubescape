@@ -78,6 +78,12 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 	return framework, err
 }
 
+func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
+	frameworks := []reporthandling.Framework{}
+	var err error
+	return frameworks, err
+}
+
 func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	// TODO - Support
 	return []string{}, fmt.Errorf("loading frameworks list from file is not supported")

@@ -112,6 +112,21 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, er
 	return framework, err
 }
 
+func (armoAPI *ArmoAPI) GetFrameworks() ([]reporthandling.Framework, error) {
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
+	if err != nil {
+		return nil, nil
+	}
+
+	frameworks := []reporthandling.Framework{}
+	if err = JSONDecoder(respStr).Decode(&frameworks); err != nil {
+		return nil, err
+	}
+	// SaveInFile(framework, GetDefaultPath(name+".json"))
+
+	return frameworks, err
+}
+
 func (armoAPI *ArmoAPI) GetControl(policyName string) (*reporthandling.Control, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
