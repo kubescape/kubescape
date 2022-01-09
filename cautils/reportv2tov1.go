@@ -1,14 +1,16 @@
-package v1
+package cautils
 
 import (
-	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
 	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/armosec/opa-utils/score"
 )
 
-func reportV2ToV1(opaSessionObj *cautils.OPASessionObj) {
+func ReportV2ToV1(opaSessionObj *OPASessionObj) {
+	if len(opaSessionObj.PostureReport.FrameworkReports) > 0 {
+		return // report already converted
+	}
 
 	opaSessionObj.PostureReport.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
 
@@ -33,9 +35,9 @@ func reportV2ToV1(opaSessionObj *cautils.OPASessionObj) {
 		frameworks = append(frameworks, fwv1)
 	}
 
-	// remove unused data
-	opaSessionObj.Report = nil
-	opaSessionObj.ResourcesResult = nil
+	// // remove unused data
+	// opaSessionObj.Report = nil
+	// opaSessionObj.ResourcesResult = nil
 
 	// setup counters and score
 	for f := range frameworks {
@@ -75,7 +77,7 @@ func reportV2ToV1(opaSessionObj *cautils.OPASessionObj) {
 	// }
 }
 
-func controlReportV2ToV1(opaSessionObj *cautils.OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
+func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
 	controlRepors := []reporthandling.ControlReport{}
 	for controlID, crv2 := range controls {
 		crv1 := reporthandling.ControlReport{}

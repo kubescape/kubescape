@@ -1,4 +1,4 @@
-package v2
+package resourcemapping
 
 import (
 	"encoding/json"
@@ -37,5 +37,5 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 }
 
 func (jsonPrinter *JsonPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
-	finalizeReport(opaSessionObj)
+	// finalizeReport(opaSessionObj)
 }

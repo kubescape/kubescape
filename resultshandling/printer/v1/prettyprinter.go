@@ -31,6 +31,8 @@ func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	cautils.ReportV2ToV1(opaSessionObj)
+
 	// score := calculatePostureScore(opaSessionObj.PostureReport)
 	failedResources := []string{}
 	warningResources := []string{}
@@ -67,9 +69,6 @@ func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
 	prettyPrinter.writer = printer.GetWriter(outputFile)
 }
 
-func (prettyPrinter *PrettyPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
-	reportV2ToV1(opaSessionObj)
-}
 func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 

@@ -26,11 +26,9 @@ func (junitPrinter *JunitPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", int(score))
 }
 
-func (junitPrinter *JunitPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
-	reportV2ToV1(opaSessionObj)
-}
-
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	cautils.ReportV2ToV1(opaSessionObj)
+
 	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.PostureReport)
 	if err != nil {
 		fmt.Println("Failed to convert posture report object!")

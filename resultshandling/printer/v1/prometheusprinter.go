@@ -29,10 +29,6 @@ func (prometheusPrinter *PrometheusPrinter) Score(score float32) {
 	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", int(score))
 }
 
-func (prometheusPrinter *PrometheusPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
-	reportV2ToV1(opaSessionObj)
-}
-
 func (printer *PrometheusPrinter) printResources(allResources map[string]workloadinterface.IMetadata, resourcesIDs *reporthandling.ResourcesIDs, frameworkName, controlName string) {
 	printer.printDetails(allResources, resourcesIDs.GetFailedResources(), frameworkName, controlName, "failed")
 	printer.printDetails(allResources, resourcesIDs.GetWarningResources(), frameworkName, controlName, "excluded")
@@ -90,6 +86,8 @@ func (printer *PrometheusPrinter) printReports(allResources map[string]workloadi
 }
 
 func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	cautils.ReportV2ToV1(opaSessionObj)
+
 	err := printer.printReports(opaSessionObj.AllResources, opaSessionObj.PostureReport.FrameworkReports)
 	if err != nil {
 		fmt.Println(err)
