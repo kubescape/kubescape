@@ -2,7 +2,6 @@ package clihandler
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -28,13 +27,19 @@ func DownloadSupportCommands() []string {
 }
 
 func CliDownload(downloadInfo *cautils.DownloadInfo) error {
-	if f, ok := downloadFunc[downloadInfo.Target]; ok {
-		setPathandFilename(downloadInfo)
+	setPathandFilename(downloadInfo)
+	if err := downloadArtifact(downloadInfo, downloadFunc); err != nil {
+		return err
+	}
+	return nil
+}
+
+func downloadArtifact(downloadInfo *cautils.DownloadInfo, downloadArtifactFunc map[string]func(*cautils.DownloadInfo) error) error {
+	if f, ok := downloadArtifactFunc[downloadInfo.Target]; ok {
 		if err := f(downloadInfo); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			return err
 		}
-		fmt.Printf("'%s' downloaded successfully and saved at: '%s/%s'\n", downloadInfo.Target, downloadInfo.Path, downloadInfo.FileName)
+		fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 		return nil
 	}
 	return fmt.Errorf("unknown command to download")
@@ -55,14 +60,16 @@ func setPathandFilename(downloadInfo *cautils.DownloadInfo) {
 }
 
 func downloadArtifacts(downloadInfo *cautils.DownloadInfo) error {
-	if err := downloadFramework(downloadInfo); err != nil {
-		return err
+	downloadInfo.FileName = ""
+	var artifacts = map[string]func(*cautils.DownloadInfo) error{
+		"controls-inputs": downloadConfigInputs,
+		"exceptions":      downloadExceptions,
+		"framework":       downloadFramework,
 	}
-	if err := downloadConfigInputs(downloadInfo); err != nil {
-		return err
-	}
-	if err := downloadExceptions(downloadInfo); err != nil {
-		return err
+	for artifact := range artifacts {
+		if err := downloadArtifact(&cautils.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
+			fmt.Printf("error downloading %s, error: %s", artifact, err)
+		}
 	}
 	return nil
 }
@@ -74,12 +81,11 @@ func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
-	filename := downloadInfo.FileName
-	if filename == "" {
-		filename = fmt.Sprintf("%s.json", "controls-inputs")
+	if downloadInfo.FileName == "" {
+		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
 	// save in file
-	err = getter.SaveInFile(controlInputs, filepath.Join(downloadInfo.Path, filename))
+	err = getter.SaveInFile(controlInputs, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 	if err != nil {
 		return err
 	}
@@ -97,12 +103,11 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 			return err
 		}
 	}
-	filename := downloadInfo.FileName
-	if filename == "" {
-		filename = fmt.Sprintf("%s.json", "exceptions")
+	if downloadInfo.FileName == "" {
+		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
 	// save in file
-	err = getter.SaveInFile(exceptions, filepath.Join(downloadInfo.Path, filename))
+	err = getter.SaveInFile(exceptions, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 	if err != nil {
 		return err
 	}
@@ -115,27 +120,28 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 
 	if downloadInfo.Name == "" {
 		// if framework name not specified - download all frameworks
+		downloadInfo.Target = "frameworks"
+		downloadInfo.FileName = fmt.Sprintf("%s.json", "<framework.Name>")
 		frameworks, err := g.GetFrameworks()
 		if err != nil {
 			return err
 		}
 		for _, fw := range frameworks {
-			err = getter.SaveInFile(fw, getter.GetDefaultPath(strings.ToLower(fw.Name)+".json"))
+			err = getter.SaveInFile(fw, filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name)+".json")))
 			if err != nil {
 				return err
 			}
 		}
 		// return fmt.Errorf("missing framework name")
 	} else {
-		filename := downloadInfo.FileName
-		if filename == "" {
-			filename = fmt.Sprintf("%s.json", "controls-inputs")
+		if downloadInfo.FileName == "" {
+			downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Name)
 		}
 		framework, err := g.GetFramework(downloadInfo.Name)
 		if err != nil {
 			return err
 		}
-		err = getter.SaveInFile(framework, filepath.Join(downloadInfo.Path, filename))
+		err = getter.SaveInFile(framework, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 		if err != nil {
 			return err
 		}
