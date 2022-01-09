@@ -122,10 +122,17 @@ func (prettyPrinter *PrettyPrinter) printGroupedResource(indent string, title st
 		indent += indent
 	}
 
+	resources := []string{}
 	for r := range rsc {
-		relatedObjectsStr := generateRelatedObjectsStr(rsc[r])
-		cautils.SimpleDisplay(prettyPrinter.writer, fmt.Sprintf("%s%s - %s %s\n", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
+		relatedObjectsStr := generateRelatedObjectsStr(rsc[r]) // TODO -
+		resources = append(resources, fmt.Sprintf("%s%s - %s %s", indent, rsc[r].resource.GetKind(), rsc[r].resource.GetName(), relatedObjectsStr))
 	}
+
+	sort.Strings(resources)
+	for i := range resources {
+		cautils.SimpleDisplay(prettyPrinter.writer, resources[i]+"\n")
+	}
+
 	indent = preIndent
 }
 

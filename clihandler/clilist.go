@@ -41,14 +41,14 @@ func CliList(listPolicies *cautils.ListPolicies) error {
 }
 
 func listFrameworks(listPolicies *cautils.ListPolicies) ([]string, error) {
-	tenant := getTenantConfig(listPolicies.Account, getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
 	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), true, nil)
 
 	return listFrameworksNames(g), nil
 }
 
 func listControls(listPolicies *cautils.ListPolicies) ([]string, error) {
-	tenant := getTenantConfig(listPolicies.Account, getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
 	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), false, nil)
 	l := getter.ListName
 	if listPolicies.ListIDs {

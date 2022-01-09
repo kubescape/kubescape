@@ -76,7 +76,7 @@ type LocalConfig struct {
 	configObj  *ConfigObj
 }
 
-func NewLocalConfig(backendAPI getter.IBackend, customerGUID string) *LocalConfig {
+func NewLocalConfig(backendAPI getter.IBackend, customerGUID, clusterName string) *LocalConfig {
 	var configObj *ConfigObj
 
 	lc := &LocalConfig{
@@ -95,6 +95,9 @@ func NewLocalConfig(backendAPI getter.IBackend, customerGUID string) *LocalConfi
 	if customerGUID != "" {
 		lc.configObj.CustomerGUID = customerGUID // override config customerGUID
 	}
+	if clusterName != "" {
+		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
+	}
 	if lc.configObj.CustomerGUID != "" {
 		if err := lc.SetTenant(); err != nil {
 			fmt.Println(err)
@@ -107,7 +110,7 @@ func NewLocalConfig(backendAPI getter.IBackend, customerGUID string) *LocalConfi
 func (lc *LocalConfig) GetConfigObj() *ConfigObj            { return lc.configObj }
 func (lc *LocalConfig) GetCustomerGUID() string             { return lc.configObj.CustomerGUID }
 func (lc *LocalConfig) SetCustomerGUID(customerGUID string) { lc.configObj.CustomerGUID = customerGUID }
-func (lc *LocalConfig) GetClusterName() string              { return "" }
+func (lc *LocalConfig) GetClusterName() string              { return lc.configObj.ClusterName }
 func (lc *LocalConfig) IsConfigFound() bool                 { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 	// ARMO tenant GUID
@@ -163,7 +166,7 @@ type ClusterConfig struct {
 	configObj          *ConfigObj
 }
 
-func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, customerGUID string) *ClusterConfig {
+func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, customerGUID, clusterName string) *ClusterConfig {
 	var configObj *ConfigObj
 	c := &ClusterConfig{
 		k8s:                k8s,
@@ -185,6 +188,9 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	}
 	if customerGUID != "" {
 		c.configObj.CustomerGUID = customerGUID // override config customerGUID
+	}
+	if clusterName != "" {
+		c.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 	if c.configObj.CustomerGUID != "" {
 		if err := c.SetTenant(); err != nil {

@@ -1,6 +1,8 @@
 package v2
 
 import (
+	"strings"
+
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -40,4 +42,22 @@ func finalizeResources(resources []reporthandlingv2.Resource, allResources map[s
 		}
 		index++
 	}
+}
+
+func maskID(id string) string {
+	sep := "-"
+	splitted := strings.Split(id, sep)
+	if len(splitted) != 5 {
+		return ""
+	}
+	str := splitted[0][:4]
+	splitted[0] = splitted[0][4:]
+	for i := range splitted {
+		for j := 0; j < len(splitted[i]); j++ {
+			str += "X"
+		}
+		str += sep
+	}
+
+	return strings.TrimSuffix(str, sep)
 }

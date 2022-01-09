@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/spf13/cobra"
 )
@@ -33,8 +34,15 @@ var scanCmd = &cobra.Command{
 	},
 }
 
+func frameworkInitConfig() {
+	k8sinterface.SetClusterContextName(scanInfo.ClusterName)
+}
+
 func init() {
+	cobra.OnInitialize(frameworkInitConfig)
+
 	rootCmd.AddCommand(scanCmd)
+	rootCmd.PersistentFlags().StringVarP(&scanInfo.ClusterName, "cluster", "", "", "Cluster name. Default will use the current-context")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. Recommended: kube-system,kube-public")

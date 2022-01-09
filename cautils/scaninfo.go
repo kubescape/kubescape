@@ -64,6 +64,7 @@ type ScanInfo struct {
 	HostSensor         BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
 	Local              bool        // Do not submit results
 	Account            string      // account ID
+	ClusterName        string      // cluster name
 	FrameworkScan      bool        // false if scanning control
 	ScanAll            bool        // true if scan all frameworks
 }

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
 
@@ -34,9 +35,16 @@ type componentInterfaces struct {
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
-	k8s := getKubernetesApi()
+	var k8s *k8sinterface.KubernetesApi
+	if scanInfo.GetScanningEnvironment() == cautils.ScanCluster {
+		k8s = getKubernetesApi()
+		if k8s == nil {
+			fmt.Println("Failed connecting to Kubernetes cluster")
+			os.Exit(1)
+		}
+	}
 
-	tenantConfig := getTenantConfig(scanInfo.Account, k8s)
+	tenantConfig := getTenantConfig(scanInfo.Account, scanInfo.ClusterName, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)

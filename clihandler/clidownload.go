@@ -34,7 +34,7 @@ func CliDownload(downloadInfo *cautils.DownloadInfo) error {
 }
 
 func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi()) // change k8sinterface
 	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetCustomerGUID(), nil)
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetClusterName())
 	if err != nil {
@@ -52,7 +52,7 @@ func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 }
 
 func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi()) // change k8sinterface
 	exceptionsGetter := getExceptionsGetter("")
 	exceptions, err := exceptionsGetter.GetExceptions(tenant.GetClusterName())
 	if err != nil {
@@ -70,7 +70,7 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 }
 
 func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi()) // change k8sinterface
 	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), true, nil)
 
 	if downloadInfo.Name == "" {
@@ -92,7 +92,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 }
 
 func downloadControl(downloadInfo *cautils.DownloadInfo) error {
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi()) // change k8sinterface
 	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), false, nil)
 
 	if downloadInfo.Name == "" {
