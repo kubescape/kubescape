@@ -16,17 +16,18 @@ import (
 	// reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 )
 
+// getKubernetesApi
 func getKubernetesApi() *k8sinterface.KubernetesApi {
 	if !k8sinterface.IsConnectedToCluster() {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(Account string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
-	if !k8sinterface.IsConnectedToCluster() {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), Account)
+func getTenantConfig(Account, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
+		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), Account, clusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), Account)
+	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), Account, clusterName)
 }
 
 func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
@@ -51,8 +52,9 @@ func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IRepo
 	}
 	return reporterv1.NewReportMock()
 }
+
 func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
-	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
 		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
 	}
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
@@ -60,9 +62,10 @@ func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenant
 }
 
 func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
-	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
+	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
 		return &hostsensorutils.HostSensorHandlerMock{}
 	}
+
 	hasHostSensorControls := true
 	// we need to determined which controls needs host sensor
 	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
@@ -121,12 +124,6 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 	// do not submit control scanning
 	if !scanInfo.FrameworkScan {
-		scanInfo.Submit = false
-		return
-	}
-
-	// do not submit yaml/url scanning
-	if scanInfo.GetScanningEnvironment() == cautils.ScanLocalFiles {
 		scanInfo.Submit = false
 		return
 	}
@@ -211,4 +208,12 @@ func getDefaultFrameworksPaths() []string {
 		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]))
 	}
 	return fwPaths
+}
+
+func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
+	fw, err := policyGetter.ListFrameworks()
+	if err != nil {
+		fw = getDefaultFrameworksPaths()
+	}
+	return fw
 }

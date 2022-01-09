@@ -1,4 +1,4 @@
-package v2
+package resourcemapping
 
 import (
 	"fmt"
@@ -89,7 +89,7 @@ func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
 }
 
 func (prettyPrinter *PrettyPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
-	finalizeReport(opaSessionObj)
+	// finalizeReport(opaSessionObj)
 }
 func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }

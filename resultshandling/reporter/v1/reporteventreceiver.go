@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
@@ -23,6 +24,7 @@ type ReportEventReceiver struct {
 	eventReceiverURL   *url.URL
 	token              string
 	customerAdminEMail string
+	message            string
 }
 
 func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceiver {
@@ -36,16 +38,24 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 }
 
 func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
+	cautils.ReportV2ToV1(opaSessionObj)
 
-	if report.customerGUID == "" || report.clusterName == "" {
-		return fmt.Errorf("missing account ID or cluster name. AccountID: '%s', Cluster name: '%s'", report.customerGUID, report.clusterName)
+	if report.customerGUID == "" {
+		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
+		return nil
 	}
+	if report.clusterName == "" {
+		report.message = "WARNING: Failed to publish results. Reason: Unknown cluster name. Run kubescape with the '--cluster <cluster name>' flag"
+		return nil
+	}
+
 	opaSessionObj.PostureReport.ReportID = uuid.NewV4().String()
 	opaSessionObj.PostureReport.CustomerGUID = report.clusterName
 	opaSessionObj.PostureReport.ClusterName = report.customerGUID
 
 	if err := report.prepareReport(opaSessionObj.PostureReport, opaSessionObj.AllResources); err != nil {
-		return err
+		report.message = err.Error()
+		return nil
 	}
 	return nil
 }
@@ -74,6 +84,8 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandling.P
 	if err := report.sendResources(host, postureReport, allResources); err != nil {
 		return err
 	}
+	report.generateMessage()
+
 	return nil
 }
 
@@ -119,7 +131,7 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 	return err
 }
 
-func (report *ReportEventReceiver) DisplayReportURL() {
+func (report *ReportEventReceiver) generateMessage() {
 	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here:"
 
 	u := url.URL{}
@@ -127,7 +139,7 @@ func (report *ReportEventReceiver) DisplayReportURL() {
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
 	if report.customerAdminEMail != "" {
-		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s %s/risk/%s\n(Account: %s)\n\n", message, u.String(), report.clusterName, report.customerGUID))
+		report.message = fmt.Sprintf("%s %s/risk/%s\n(Account: %s)", message, u.String(), report.clusterName, maskID(report.customerGUID))
 		return
 	}
 	u.Path = "account/sign-up"
@@ -136,5 +148,27 @@ func (report *ReportEventReceiver) DisplayReportURL() {
 	q.Add("customerGUID", report.customerGUID)
 
 	u.RawQuery = q.Encode()
-	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s %s\n\n", message, u.String()))
+	report.message = fmt.Sprintf("%s %s", message, u.String())
+}
+
+func (report *ReportEventReceiver) DisplayReportURL() {
+	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+}
+
+func maskID(id string) string {
+	sep := "-"
+	splitted := strings.Split(id, sep)
+	if len(splitted) != 5 {
+		return ""
+	}
+	str := splitted[0][:4]
+	splitted[0] = splitted[0][4:]
+	for i := range splitted {
+		for j := 0; j < len(splitted[i]); j++ {
+			str += "X"
+		}
+		str += sep
+	}
+
+	return strings.TrimSuffix(str, sep)
 }

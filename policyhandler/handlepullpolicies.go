@@ -2,6 +2,7 @@ package policyhandler
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -15,7 +16,7 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 		return err
 	}
 	if len(frameworks) == 0 {
-		return fmt.Errorf("failed to download policies, please ARMO team for more information")
+		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(notification.Rules), ","))
 	}
 
 	policiesAndResources.Frameworks = frameworks
@@ -69,4 +70,12 @@ func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling
 		return frameworks, fmt.Errorf("unknown policy kind")
 	}
 	return frameworks, nil
+}
+
+func policyIdentifierToSlice(rules []reporthandling.PolicyIdentifier) []string {
+	s := []string{}
+	for i := range rules {
+		s = append(s, fmt.Sprintf("%s: %s", rules[i].Kind, rules[i].Name))
+	}
+	return s
 }

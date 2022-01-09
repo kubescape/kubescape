@@ -20,9 +20,6 @@ type IPrinter interface {
 	ActionPrint(opaSessionObj *cautils.OPASessionObj)
 	SetWriter(outputFile string)
 	Score(score float32)
-
-	// FinalizeData convert 'opaSessionObj' data to be ready for printing/reporting
-	FinalizeData(opaSessionObj *cautils.OPASessionObj)
 }
 
 func GetWriter(outputFile string) *os.File {

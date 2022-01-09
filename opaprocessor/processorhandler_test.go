@@ -71,7 +71,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj.Frameworks = frameworks
 
 	policies := ConvertFrameworksToPolicies(opaSessionObj.Frameworks, "")
-	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Frameworks)
+	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Frameworks, policies)
 
 	opaSessionObj.K8SResources = &k8sResources
 	opaSessionObj.AllResources[deployment.GetID()] = deployment

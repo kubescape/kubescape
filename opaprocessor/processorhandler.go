@@ -59,9 +59,9 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opaSessionObj := <-*opaHandler.processedPolicy
 		opap := NewOPAProcessor(opaSessionObj, opaHandler.regoDependenciesData)
 
-		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks)
-
 		policies := ConvertFrameworksToPolicies(opap.Frameworks, cautils.BuildNumber)
+
+		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks, policies)
 
 		// process
 		if err := opap.Process(policies); err != nil {
@@ -197,6 +197,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 				if r, k := resources[failedResources[j].GetID()]; k {
 					ruleResult = r
 				}
+
 				ruleResult.Status = apis.StatusFailed
 				for j := range ruleResponses[i].FailedPaths {
 					ruleResult.Paths = append(ruleResult.Paths, resourcesresults.Path{FailedPath: ruleResponses[i].FailedPaths[j]})

@@ -2,8 +2,10 @@ package clihandler
 
 import (
 	"fmt"
+
 	"path/filepath"
 	"strings"
+
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
@@ -75,7 +77,7 @@ func downloadArtifacts(downloadInfo *cautils.DownloadInfo) error {
 }
 
 func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi())
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetCustomerGUID(), nil)
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetClusterName())
 	if err != nil {
@@ -94,7 +96,7 @@ func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 
 func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 	var err error
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi())
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 	exceptionsGetter := getExceptionsGetter("")
 	exceptions := []armotypes.PostureExceptionPolicy{}
 	if tenant.GetCustomerGUID() != "" {
@@ -115,7 +117,8 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 }
 
 func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi())
+
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), true, nil)
 
 	if downloadInfo.Name == "" {
@@ -150,8 +153,9 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 }
 
 func downloadControl(downloadInfo *cautils.DownloadInfo) error {
-	tenant := getTenantConfig(downloadInfo.Account, getKubernetesApi())
-	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), true, nil)
+
+	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
+	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), false, nil)
 
 	if downloadInfo.Name == "" {
 		// TODO - support

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"
@@ -16,13 +15,15 @@ import (
 var (
 	controlExample = `
   # Scan the 'privileged container' control
-  kubescape scan control 'privileged container'
+  kubescape scan control "privileged container"
 	
   # Scan list of controls separated with a comma
-  kubescape scan control 'privileged container,allowed hostpath'
+  kubescape scan control "privileged container","allowed hostpath"
   
   # Scan list of controls using the control ID separated with a comma
   kubescape scan control C-0058,C-0057
+  
+  Run 'kubescape list controls' for the list of supported controls
   
   Control documentation:
   https://hub.armo.cloud/docs/controls
@@ -52,7 +53,7 @@ var controlCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 
 		if len(args) == 0 {
-			scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, reporthandling.KindFramework)
+			// scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, reporthandling.KindFramework)
 			scanInfo.ScanAll = true
 		} else { // expected control or list of control sepparated by ","
 

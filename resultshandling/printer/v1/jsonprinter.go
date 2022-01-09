@@ -26,6 +26,8 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	cautils.ReportV2ToV1(opaSessionObj)
+
 	var postureReportStr []byte
 	var err error
 
@@ -40,7 +42,4 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 		os.Exit(1)
 	}
 	jsonPrinter.writer.Write(postureReportStr)
-}
-func (jsonPrinter *JsonPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
-	reportV2ToV1(opaSessionObj)
 }
