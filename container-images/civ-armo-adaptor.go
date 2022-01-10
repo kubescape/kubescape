@@ -20,12 +20,18 @@ type FeLoginResponse struct {
 	Expires      string `json:"expires"`
 }
 
+type ArmoBeConfiguration struct {
+	BackendUrl string `json:"backend"`
+	AuthUrl    string `json:"authUrl"`
+}
+
 type ArmoCivAdaptor struct {
 	registry  string
 	accountId string
 	clientId  string
 	accessKey string
 	feToken   FeLoginResponse
+	armoUrls  ArmoBeConfiguration
 }
 
 func CreateArmoAdaptor(registry string, credentials map[string]string) (*ArmoCivAdaptor, error) {
@@ -42,16 +48,44 @@ func CreateArmoAdaptor(registry string, credentials map[string]string) (*ArmoCiv
 	if accessKey, ok = credentials["accessKey"]; !ok {
 		return nil, fmt.Errorf("Define accessKey in credentials")
 	}
-	return &ArmoCivAdaptor{registry: registry, accountId: accountId, clientId: clientId, accessKey: accessKey}, nil
+	armoCivAdaptor := ArmoCivAdaptor{registry: registry, accountId: accountId, clientId: clientId, accessKey: accessKey}
+	err := armoCivAdaptor.initializeUrls()
+	if err != nil {
+		return nil, err
+	}
+	return &armoCivAdaptor, nil
 }
 
-func (armoCivAdaptor ArmoCivAdaptor) Login() error {
+func (armoCivAdaptor *ArmoCivAdaptor) initializeUrls() error {
+	configUrl := fmt.Sprintf("https://%s/assets/configs/config.json", armoCivAdaptor.registry)
+	resp, err := http.Get(configUrl)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("cannot retrieve backend config file %s: status %d", configUrl, resp.StatusCode)
+	}
+	body, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	err = json.Unmarshal(body, &armoCivAdaptor.armoUrls)
+	if err != nil {
+		return err
+	}
+	return nil
+
+}
+
+func (armoCivAdaptor *ArmoCivAdaptor) Login() error {
 	feLoginData := FeLoginData{ClientId: armoCivAdaptor.clientId, Secret: armoCivAdaptor.accessKey}
 	body, _ := json.Marshal(feLoginData)
 
-	resp, err := http.Post("https://eggauth.eudev3.cyberarmorsoft.com/frontegg/identity/resources/auth/v1/api-token", "application/json", bytes.NewBuffer(body))
+	authApiTokenEndpoint := fmt.Sprintf("%s/frontegg/identity/resources/auth/v1/api-token", armoCivAdaptor.armoUrls.AuthUrl)
+	resp, err := http.Post(authApiTokenEndpoint, "application/json", bytes.NewBuffer(body))
 	if err != nil {
-		panic(err)
+		return err
 	}
 	defer resp.Body.Close()
 
@@ -62,6 +96,7 @@ func (armoCivAdaptor ArmoCivAdaptor) Login() error {
 		}
 		var feLoginResponse FeLoginResponse
 		err = json.Unmarshal(body, &feLoginResponse)
+		armoCivAdaptor.feToken = feLoginResponse
 		//fmt.Printf("Token: %s\n", feLoginResponse.Token)
 		//fmt.Printf("Body: %s\n", string(body))
 		if err != nil {
