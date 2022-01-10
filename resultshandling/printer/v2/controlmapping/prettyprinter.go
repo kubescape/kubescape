@@ -57,6 +57,9 @@ func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.Control
 }
 
 func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSummary reportsummary.IControlSummary) {
+	if controlSummary.GetStatus().IsSkipped() {
+		return
+	}
 	cautils.SimpleDisplay(prettyPrinter.writer, "Summary - ")
 	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", controlSummary.NumberOfResources().Passed())
 	cautils.WarningDisplay(prettyPrinter.writer, "Excluded:%v   ", controlSummary.NumberOfResources().Excluded())
