@@ -164,7 +164,7 @@ func (armoCivAdaptor *ArmoCivAdaptor) Login() error {
 
 func (armoCivAdaptor *ArmoCivAdaptor) GetImageVulnerabilties(imageID *ContainerImageIdentifier) (*ContainerImageVulnerability, error) {
 	filter := []map[string]string{{"imageTag": imageID.Tag}}
-	pageSize := 100
+	pageSize := 1
 	pageNumber := 1
 	request := V2ListRequest{PageSize: &pageSize, PageNum: &pageNumber, InnerFilters: filter, OrderBy: "timestamp:desc"}
 	requestBody, _ := json.Marshal(request)
