@@ -1,6 +1,8 @@
 package containerimages
 
-import "time"
+import (
+	"time"
+)
 
 type ContainerImageIdentifier struct {
 	Registry   string
@@ -16,9 +18,29 @@ type ContainerImageScanStatus struct {
 	LastScanDate    time.Time
 }
 
-type ContainerImageVulnerability struct {
-	ImageID ContainerImageIdentifier
-	// TBD
+type FixedIn struct {
+	Name    string `json:"name"`
+	ImgTag  string `json:"imageTag"`
+	Version string `json:"version"`
+}
+type Vulnerability struct {
+	Name               string      `json:"name"`
+	RelatedPackageName string      `json:"packageName"`
+	PackageVersion     string      `json:"packageVersion"`
+	Link               string      `json:"link"`
+	Description        string      `json:"description"`
+	Severity           string      `json:"severity"`
+	Metadata           interface{} `json:"metadata"`
+	Fixes              []FixedIn   `json:"fixedIn"`
+	Relevancy          string      `json:"relevant"` // use the related enum
+	UrgentCount        int         `json:"urgent"`
+	NeglectedCount     int         `json:"neglected"`
+	HealthStatus       string      `json:"healthStatus"`
+}
+
+type ContainerImageVulnerabilityReport struct {
+	ImageID         ContainerImageIdentifier
+	Vulnerabilities []Vulnerability
 }
 
 type ContainerImageInformation struct {
@@ -37,7 +59,7 @@ type IContainerImageVulnerabilityAdaptor interface {
 
 	GetImagesScanStatus(imageIDs []ContainerImageIdentifier) ([]ContainerImageScanStatus, error)
 
-	GetImagesVulnerabilties(imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerability, error)
+	GetImagesVulnerabilties(imageIDs []ContainerImageIdentifier) ([]ContainerImageVulnerabilityReport, error)
 
 	GetImagesInformation(imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error)
 }
