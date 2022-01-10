@@ -1,7 +1,11 @@
 package cautils
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
 	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils/getter"
@@ -9,8 +13,10 @@ import (
 )
 
 const (
-	ScanCluster    string = "cluster"
-	ScanLocalFiles string = "yaml"
+	ScanCluster                string = "cluster"
+	ScanLocalFiles             string = "yaml"
+	localControlInputsFilename string = "controls-inputs.json"
+	localExceptionsFilename    string = "exceptions.json"
 )
 
 type BoolPtrFlag struct {
@@ -52,6 +58,7 @@ type ScanInfo struct {
 	ControlsInputs     string      // Load file with inputs for controls
 	UseFrom            []string    // Load framework from local file (instead of download). Use when running offline
 	UseDefault         bool        // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom   string      // Load artifacts from local path. Use when running offline
 	VerboseMode        bool        // Display all of the input resources and not only failed resources
 	Format             string      // Format results (table, json, junit ...)
 	Output             string      // Store results in an output file, Output file name
@@ -78,7 +85,36 @@ type Getters struct {
 func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setOutputFile()
+	scanInfo.setUseArtifactsFrom()
+}
 
+func (scanInfo *ScanInfo) setUseArtifactsFrom() {
+	// UseArtifactsFrom must be a path without a filename
+	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
+	if dir == "" {
+		scanInfo.UseArtifactsFrom = file
+	} else {
+		scanInfo.UseArtifactsFrom = dir
+	}
+	// set frameworks files
+	files, err := ioutil.ReadDir(scanInfo.UseArtifactsFrom)
+	if err != nil {
+		log.Fatal(err)
+	}
+	framework := &reporthandling.Framework{}
+	for _, f := range files {
+		filePath := filepath.Join(scanInfo.UseArtifactsFrom, f.Name())
+		file, err := os.ReadFile(filePath)
+		if err == nil {
+			if err := json.Unmarshal(file, framework); err == nil {
+				scanInfo.UseFrom = append(scanInfo.UseFrom, filepath.Join(scanInfo.UseArtifactsFrom, f.Name()))
+			}
+		}
+	}
+	// set config-inputs file
+	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, localControlInputsFilename)
+	// set exceptions
+	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, localExceptionsFilename)
 }
 
 func (scanInfo *ScanInfo) setUseFrom() {

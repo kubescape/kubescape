@@ -85,8 +85,19 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 }
 
 func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
-	// TODO - Support
-	return []string{}, fmt.Errorf("loading frameworks list from file is not supported")
+	fwNames := []string{}
+	framework := &reporthandling.Framework{}
+	for _, f := range lp.filePaths {
+		file, err := os.ReadFile(f)
+		if err == nil {
+			if err := json.Unmarshal(file, framework); err == nil {
+				if !contains(fwNames, framework.Name) {
+					fwNames = append(fwNames, framework.Name)
+				}
+			}
+		}
+	}
+	return fwNames, nil
 }
 
 func (lp *LoadPolicy) ListControls(listType ListType) ([]string, error) {
@@ -114,7 +125,7 @@ func (lp *LoadPolicy) GetControlsInputs(clusterName string) (map[string][]string
 		return nil, err
 	}
 
-	if err = json.Unmarshal(f, &accountConfig); err == nil {
+	if err = json.Unmarshal(f, &accountConfig.Settings.PostureControlInputs); err == nil {
 		return accountConfig.Settings.PostureControlInputs, nil
 	}
 	return nil, err
