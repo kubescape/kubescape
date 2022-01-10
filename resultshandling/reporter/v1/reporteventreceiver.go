@@ -50,8 +50,8 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	}
 
 	opaSessionObj.PostureReport.ReportID = uuid.NewV4().String()
-	opaSessionObj.PostureReport.CustomerGUID = report.clusterName
-	opaSessionObj.PostureReport.ClusterName = report.customerGUID
+	opaSessionObj.PostureReport.CustomerGUID = report.customerGUID
+	opaSessionObj.PostureReport.ClusterName = report.clusterName
 
 	if err := report.prepareReport(opaSessionObj.PostureReport, opaSessionObj.AllResources); err != nil {
 		report.message = err.Error()
@@ -124,11 +124,13 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 	if err != nil {
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
 	}
+	// fmt.Printf("\n\n%s\n\n", reqBody)
+
 	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
 	if err != nil {
 		return fmt.Errorf("%s, %v:%s", host, err, msg)
 	}
-	return err
+	return nil
 }
 
 func (report *ReportEventReceiver) generateMessage() {

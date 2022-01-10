@@ -201,6 +201,7 @@ func removeSecretData(workload workloadinterface.IWorkload) {
 func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
 	containers, err := workload.GetContainers()
 	if err != nil || len(containers) == 0 {
