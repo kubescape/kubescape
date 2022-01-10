@@ -12,10 +12,36 @@ import (
 
 var downloadInfo = cautils.DownloadInfo{}
 
+var (
+	downloadExample = `
+  # Download all artifacts and save them in the default path (~/.kubescape)
+  kubescape download artifacts
+  
+  # Download all artifacts and save them in /tmp path
+  kubescape download artifacts --output /tmp
+  
+  # Download the NSA framework. Run 'kubescape list frameworks' for all frameworks names
+  kubescape download frameworks nsa
+
+  # Download the "Allowed hostPath" control. Run 'kubescape list controls' for all controls names
+  kubescape download control "Allowed hostPath"
+
+  # Download the "C-0001" control. Run 'kubescape list controls --id' for all controls ids
+  kubescape download control C-0001
+
+  # Download the configured exceptions
+  kubescape download exceptions 
+
+  # Download the configured controls-inputs 
+  kubescape download controls-inputs 
+
+`
+)
 var downloadCmd = &cobra.Command{
-	Use:   "download <policy> <policy name>",
-	Short: fmt.Sprintf("Download %s", strings.Join(clihandler.DownloadSupportCommands(), "/")),
-	Long:  ``,
+	Use:     "download <policy> <policy name>",
+	Short:   fmt.Sprintf("Download %s", strings.Join(clihandler.DownloadSupportCommands(), ",")),
+	Long:    ``,
+	Example: downloadExample,
 	Args: func(cmd *cobra.Command, args []string) error {
 		supported := strings.Join(clihandler.DownloadSupportCommands(), ",")
 		if len(args) < 1 {

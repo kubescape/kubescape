@@ -21,7 +21,7 @@ var (
   # List all supported controls names
   kubescape list controls
 
-  # List all supported controls id's
+  # List all supported controls ids
   kubescape list controls --id 
   
   Control documentation:
