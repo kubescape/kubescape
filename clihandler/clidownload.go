@@ -2,10 +2,8 @@ package clihandler
 
 import (
 	"fmt"
-
 	"path/filepath"
 	"strings"
-
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
@@ -41,7 +39,6 @@ func downloadArtifact(downloadInfo *cautils.DownloadInfo, downloadArtifactFunc m
 		if err := f(downloadInfo); err != nil {
 			return err
 		}
-		fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 		return nil
 	}
 	return fmt.Errorf("unknown command to download")
@@ -91,6 +88,7 @@ func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
+	fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 	return nil
 }
 
@@ -113,6 +111,7 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
+	fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 	return nil
 }
 
@@ -123,8 +122,6 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 
 	if downloadInfo.Name == "" {
 		// if framework name not specified - download all frameworks
-		downloadInfo.Target = "frameworks"
-		downloadInfo.FileName = fmt.Sprintf("%s.json", "<framework.Name>")
 		frameworks, err := g.GetFrameworks()
 		if err != nil {
 			return err
@@ -134,6 +131,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 			if err != nil {
 				return err
 			}
+			fmt.Printf("'%s': '%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, fw.Name, filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name)+".json")))
 		}
 		// return fmt.Errorf("missing framework name")
 	} else {
@@ -148,6 +146,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 		if err != nil {
 			return err
 		}
+		fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 	}
 	return nil
 }
@@ -161,17 +160,17 @@ func downloadControl(downloadInfo *cautils.DownloadInfo) error {
 		// TODO - support
 		return fmt.Errorf("missing control name")
 	}
-	filename := downloadInfo.FileName
-	if filename == "" {
-		filename = fmt.Sprintf("%s.json", "controls-inputs")
+	if downloadInfo.FileName == "" {
+		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Name)
 	}
 	controls, err := g.GetControl(downloadInfo.Name)
 	if err != nil {
 		return err
 	}
-	err = getter.SaveInFile(controls, filepath.Join(downloadInfo.Path, filename))
+	err = getter.SaveInFile(controls, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 	if err != nil {
 		return err
 	}
+	fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
 	return nil
 }
