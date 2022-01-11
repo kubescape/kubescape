@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -66,6 +67,7 @@ type ScanInfo struct {
 	Account            string      // account ID
 	FrameworkScan      bool        // false if scanning control
 	ScanAll            bool        // true if scan all frameworks
+	ClusterName        string
 }
 
 type Getters struct {
@@ -78,7 +80,12 @@ func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setUseExceptions()
 	scanInfo.setOutputFile()
+	scanInfo.setClusterContextName()
 
+}
+
+func (scanInfo *ScanInfo) setClusterContextName() {
+	k8sinterface.SetClusterContextName(scanInfo.ClusterName)
 }
 
 func (scanInfo *ScanInfo) setUseExceptions() {
