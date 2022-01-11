@@ -54,6 +54,9 @@ Want to contribute? Want to discuss something? Have an issue?
 
 # Options and examples
 
+## Playground
+* [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
+
 ## Tutorials
 
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
@@ -319,3 +322,9 @@ The tools retrieves Kubernetes objects from the API server and runs a set of [re
 The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
+
+## Thanks to all the contributors ❤️
+<a href = "https://github.com/armosec/kubescape/graphs/contributors">
+  <img src = "https://contrib.rocks/image?repo=armosec/kubescape"/>
+</a>
+
