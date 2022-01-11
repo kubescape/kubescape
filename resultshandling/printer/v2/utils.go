@@ -3,8 +3,8 @@ package v2
 import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
 // finalizeV2Report finalize the results objects by copying data from map to lists
@@ -16,7 +16,7 @@ func finalizeReport(opaSessionObj *cautils.OPASessionObj) {
 	}
 
 	if len(opaSessionObj.Report.Resources) == 0 {
-		opaSessionObj.Report.Resources = make([]reporthandlingv2.Resource, len(opaSessionObj.AllResources))
+		opaSessionObj.Report.Resources = make([]reporthandling.Resource, len(opaSessionObj.AllResources))
 		finalizeResources(opaSessionObj.Report.Resources, opaSessionObj.AllResources)
 		opaSessionObj.AllResources = nil
 	}
@@ -30,10 +30,10 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 	}
 }
 
-func finalizeResources(resources []reporthandlingv2.Resource, allResources map[string]workloadinterface.IMetadata) {
+func finalizeResources(resources []reporthandling.Resource, allResources map[string]workloadinterface.IMetadata) {
 	index := 0
 	for resourceID := range allResources {
-		resources[index] = reporthandlingv2.Resource{
+		resources[index] = reporthandling.Resource{
 			ResourceID: resourceID,
 			Object:     allResources[resourceID],
 		}

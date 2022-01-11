@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	uuid "github.com/satori/go.uuid"
 
+	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
@@ -87,12 +88,12 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2
 	if err := report.sendResources(host, postureReport, &reportCounter); err != nil {
 		return err
 	}
-	reportCounter++
+	// reportCounter++
 
-	// send framework results
-	if err := report.sendSummary(host, postureReport, &reportCounter); err != nil {
-		return err
-	}
+	// // send framework results
+	// if err := report.sendSummary(host, postureReport, &reportCounter); err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
@@ -116,7 +117,7 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 			*reportCounter++
 
 			// delete resources
-			splittedPostureReport.Resources = []reporthandlingv2.Resource{}
+			splittedPostureReport.Resources = []reporthandling.Resource{}
 
 			// restart counter
 			counter = 0
@@ -126,7 +127,7 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		splittedPostureReport.Resources = append(splittedPostureReport.Resources, v)
 	}
 
-	return report.sendReport(host, splittedPostureReport, *reportCounter, false)
+	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
 }
 
 func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int) error {
@@ -168,6 +169,10 @@ func (report *ReportEventReceiver) sendSummary(host string, postureReport *repor
 	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
 }
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
+		ReportNumber: counter,
+		IsLastReport: isLastReport,
+	}
 	reqBody, err := json.Marshal(postureReport)
 	if err != nil {
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)

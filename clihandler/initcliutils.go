@@ -11,9 +11,9 @@ import (
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
+	reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
-	// reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 )
 
 // getKubernetesApi
@@ -48,7 +48,8 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 
 func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IReport {
 	if submit {
-		return reporterv1.NewReportEventReceiver(tenantConfig.GetConfigObj())
+		// return reporterv1.NewReportEventReceiver(tenantConfig.GetConfigObj())
+		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj())
 	}
 	return reporterv1.NewReportMock()
 }
