@@ -36,10 +36,12 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 func finalizeResources(resources []reporthandling.Resource, allResources map[string]workloadinterface.IMetadata) {
 	index := 0
 	for resourceID := range allResources {
-		resources[index] = reporthandling.Resource{
-			ResourceID: resourceID,
-			Object:     allResources[resourceID],
+		if obj, ok := allResources[resourceID]; ok {
+			r := *reporthandling.NewResource(obj.GetObject())
+			r.ResourceID = resourceID
+			resources[index] = r
 		}
+
 		index++
 	}
 }

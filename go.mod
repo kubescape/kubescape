@@ -5,8 +5,8 @@ go 1.17
 require (
 	github.com/armosec/armoapi-go v0.0.41
 	github.com/armosec/k8s-interface v0.0.54
-	github.com/armosec/opa-utils v0.0.95
-	github.com/armosec/rbac-utils v0.0.11
+	github.com/armosec/opa-utils v0.0.97
+	github.com/armosec/rbac-utils v0.0.12
 	github.com/armosec/utils-go v0.0.3
 	github.com/briandowns/spinner v1.18.0
 	github.com/enescakir/emoji v1.0.0

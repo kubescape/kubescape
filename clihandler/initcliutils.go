@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
+
 	reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"

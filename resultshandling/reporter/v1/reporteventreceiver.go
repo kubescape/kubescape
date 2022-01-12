@@ -45,7 +45,7 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown cluster name. Run kubescape with the '--cluster <cluster name>' flag"
+		report.message = "WARNING: Failed to publish results. Reason: Unknown cluster name. Run kubescape with the '--kube-context <cluster name>' flag"
 		return nil
 	}
 
