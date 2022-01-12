@@ -1,6 +1,7 @@
 package hostsensorutils
 
 import (
+	_ "embed"
 	"fmt"
 	"io"
 	"strings"
@@ -16,6 +17,11 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	appsapplyv1 "k8s.io/client-go/applyconfigurations/apps/v1"
 	coreapplyv1 "k8s.io/client-go/applyconfigurations/core/v1"
+)
+
+var (
+	//go:embed hostsensor.yaml
+	hostSensorYAML string
 )
 
 type HostSensorHandler struct {
