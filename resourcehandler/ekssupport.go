@@ -58,7 +58,19 @@ func NewEKSProviderContext() *EKSProviderContext {
 }
 
 func (eksProviderContext *EKSProviderContext) getKubeClusterName() string {
-	return eksProviderContext.getKubeCluster()
+	cluster := k8sinterface.GetCurrentContext().Cluster
+	var splittedCluster []string
+	if cluster != "" {
+		splittedCluster = strings.Split(cluster, ".")
+		if len(splittedCluster) > 1 {
+			return splittedCluster[0]
+		}
+	}
+	splittedCluster = strings.Split(k8sinterface.GetClusterName(), ".")
+	if len(splittedCluster) > 1 {
+		return splittedCluster[0]
+	}
+	return ""
 }
 
 func (eksProviderContext *EKSProviderContext) getKubeCluster() string {
