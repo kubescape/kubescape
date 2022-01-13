@@ -78,27 +78,21 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2
 
 	reportCounter := 0
 
-	// send results
-	if err := report.sendResults(host, postureReport, &reportCounter); err != nil {
+	// send resources
+	if err := report.sendResources(host, postureReport, &reportCounter, false); err != nil {
 		return err
 	}
 	reportCounter++
 
-	// send resources
-	if err := report.sendResources(host, postureReport, &reportCounter); err != nil {
+	// send results
+	if err := report.sendResults(host, postureReport, &reportCounter, true); err != nil {
 		return err
 	}
-	// reportCounter++
-
-	// // send framework results
-	// if err := report.sendSummary(host, postureReport, &reportCounter); err != nil {
-	// 	return err
-	// }
 
 	return nil
 }
 
-func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int) error {
+func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
 	splittedPostureReport := setSubReport(postureReport)
 	counter := 0
 
@@ -127,10 +121,10 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		splittedPostureReport.Resources = append(splittedPostureReport.Resources, v)
 	}
 
-	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
+	return report.sendReport(host, splittedPostureReport, *reportCounter, isLastReport)
 }
 
-func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int) error {
+func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
 	splittedPostureReport := setSubReport(postureReport)
 	counter := 0
 
@@ -159,15 +153,9 @@ func (report *ReportEventReceiver) sendResults(host string, postureReport *repor
 		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
 	}
 
-	return report.sendReport(host, splittedPostureReport, *reportCounter, false)
+	return report.sendReport(host, splittedPostureReport, *reportCounter, isLastReport)
 }
 
-func (report *ReportEventReceiver) sendSummary(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int) error {
-	splittedPostureReport := setSubReport(postureReport)
-	splittedPostureReport.SummaryDetails = postureReport.SummaryDetails
-
-	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
-}
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
 		ReportNumber: counter,
