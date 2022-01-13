@@ -24,7 +24,7 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan --submit
+kubescape scan --submit --enable-host-scan
 ```
 
 <img src="docs/summary.png">
@@ -267,7 +267,7 @@ go build -o kubescape .
 
 3. Run
 ```
-./kubescape scan framework nsa
+./kubescape scan --submit --enable-host-scan
 ```
 
 4. Enjoy :zany_face:
