@@ -82,12 +82,12 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2
 	if err := report.sendResources(host, postureReport, &reportCounter, false); err != nil {
 		return err
 	}
-	reportCounter++
+	// reportCounter++
 
-	// send results
-	if err := report.sendResults(host, postureReport, &reportCounter, true); err != nil {
-		return err
-	}
+	// // send results
+	// if err := report.sendResults(host, postureReport, &reportCounter, true); err != nil {
+	// 	return err
+	// }
 
 	return nil
 }
@@ -112,6 +112,7 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 
 			// delete resources
 			splittedPostureReport.Resources = []reporthandling.Resource{}
+			splittedPostureReport.Results = []resourcesresults.Result{}
 
 			// restart counter
 			counter = 0
@@ -120,13 +121,6 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		counter += len(r)
 		splittedPostureReport.Resources = append(splittedPostureReport.Resources, v)
 	}
-
-	return report.sendReport(host, splittedPostureReport, *reportCounter, isLastReport)
-}
-
-func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
-	splittedPostureReport := setSubReport(postureReport)
-	counter := 0
 
 	for _, v := range postureReport.Results {
 		r, err := json.Marshal(v)
@@ -144,6 +138,7 @@ func (report *ReportEventReceiver) sendResults(host string, postureReport *repor
 
 			// delete results
 			splittedPostureReport.Results = []resourcesresults.Result{}
+			splittedPostureReport.Resources = []reporthandling.Resource{}
 
 			// restart counter
 			counter = 0
@@ -153,8 +148,40 @@ func (report *ReportEventReceiver) sendResults(host string, postureReport *repor
 		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
 	}
 
-	return report.sendReport(host, splittedPostureReport, *reportCounter, isLastReport)
+	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
 }
+
+// func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
+// 	splittedPostureReport := setSubReport(postureReport)
+// 	counter := 0
+
+// 	for _, v := range postureReport.Results {
+// 		r, err := json.Marshal(v)
+// 		if err != nil {
+// 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
+// 		}
+
+// 		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
+
+// 			// send report
+// 			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
+// 				return err
+// 			}
+// 			*reportCounter++
+
+// 			// delete results
+// 			splittedPostureReport.Results = []resourcesresults.Result{}
+
+// 			// restart counter
+// 			counter = 0
+// 		}
+
+// 		counter += len(r)
+// 		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
+// 	}
+
+// 	return report.sendReport(host, splittedPostureReport, *reportCounter, isLastReport)
+// }
 
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
