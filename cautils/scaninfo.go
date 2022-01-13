@@ -64,10 +64,9 @@ type ScanInfo struct {
 	HostSensor         BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
 	Local              bool        // Do not submit results
 	Account            string      // account ID
-	// ClusterName        string      // cluster name
-	KubeContext   string // context name
-	FrameworkScan bool   // false if scanning control
-	ScanAll       bool   // true if scan all frameworks
+	KubeContext        string      // context name
+	FrameworkScan      bool        // false if scanning control
+	ScanAll            bool        // true if scan all frameworks
 }
 
 type Getters struct {
@@ -79,7 +78,15 @@ type Getters struct {
 func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setOutputFile()
+}
 
+func (scanInfo *ScanInfo) setUseExceptions() {
+	if scanInfo.UseExceptions != "" {
+		// load exceptions from file
+		scanInfo.ExceptionsGetter = getter.NewLoadPolicy([]string{scanInfo.UseExceptions})
+	} else {
+		scanInfo.ExceptionsGetter = getter.GetArmoAPIConnector()
+	}
 }
 
 func (scanInfo *ScanInfo) setUseFrom() {
