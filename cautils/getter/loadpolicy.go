@@ -78,7 +78,23 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 	return framework, err
 }
 
-func (lp *LoadPolicy) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
+	frameworks := []reporthandling.Framework{}
+	var err error
+	return frameworks, err
+}
+
+func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
+	// TODO - Support
+	return []string{}, fmt.Errorf("loading frameworks list from file is not supported")
+}
+
+func (lp *LoadPolicy) ListControls(listType ListType) ([]string, error) {
+	// TODO - Support
+	return []string{}, fmt.Errorf("loading controls list from file is not supported")
+}
+
+func (lp *LoadPolicy) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	filePath := lp.filePath()
 	exception := []armotypes.PostureExceptionPolicy{}
 	f, err := os.ReadFile(filePath)
@@ -90,7 +106,7 @@ func (lp *LoadPolicy) GetExceptions(customerGUID, clusterName string) ([]armotyp
 	return exception, err
 }
 
-func (lp *LoadPolicy) GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error) {
+func (lp *LoadPolicy) GetControlsInputs(clusterName string) (map[string][]string, error) {
 	filePath := lp.filePath()
 	accountConfig := &armotypes.CustomerConfig{}
 	f, err := os.ReadFile(filePath)

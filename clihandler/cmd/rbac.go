@@ -8,7 +8,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
-	"github.com/armosec/kubescape/resultshandling/reporter"
+	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +32,7 @@ var rabcCmd = &cobra.Command{
 		rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName()))
 
 		// submit resources
-		r := reporter.NewReportEventReceiver(clusterConfig.GetConfigObj())
+		r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())
 
 		submitInterfaces := cliinterfaces.SubmitInterfaces{
 			ClusterConfig: clusterConfig,

@@ -5,6 +5,12 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/kubescape/resultshandling/printer"
+	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
+
+	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -14,7 +20,6 @@ import (
 	"github.com/armosec/kubescape/policyhandler"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling"
-	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/mattn/go-isatty"
@@ -30,9 +35,16 @@ type componentInterfaces struct {
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
-	k8s := getKubernetesApi(scanInfo)
+	var k8s *k8sinterface.KubernetesApi
+	if scanInfo.GetScanningEnvironment() == cautils.ScanCluster {
+		k8s = getKubernetesApi()
+		if k8s == nil {
+			fmt.Println("Failed connecting to Kubernetes cluster")
+			os.Exit(1)
+		}
+	}
 
-	tenantConfig := getTenantConfig(scanInfo, k8s)
+	tenantConfig := getTenantConfig(scanInfo.Account, scanInfo.KubeContext, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -60,7 +72,8 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
 
 	// setup printer
-	printerHandler := printer.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	// printerHandler = printerv2.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	return componentInterfaces{
@@ -87,10 +100,18 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
 
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
-	// set policy getter only after setting the customerGUID
-	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
-	setConfigInputsGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
 
+	// set policy getter only after setting the customerGUID
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetCustomerGUID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
+	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
+
+	// TODO - list supported frameworks/controls
+	if scanInfo.ScanAll {
+		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.Getters.PolicyGetter), reporthandling.KindFramework)
+	}
+
+	//
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
 			errMsg := "failed to tear down host sensor"

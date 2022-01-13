@@ -35,11 +35,13 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 
 	// TODO - get score from table
 	var score float32 = 0
-	for i := range opaSessionObj.PostureReport.FrameworkReports {
-		score += opaSessionObj.PostureReport.FrameworkReports[i].Score
+	if opaSessionObj.PostureReport != nil {
+		for i := range opaSessionObj.PostureReport.FrameworkReports {
+			score += opaSessionObj.PostureReport.FrameworkReports[i].Score
+		}
+		score /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
+		resultsHandler.printerObj.Score(score)
 	}
-	score /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
-	resultsHandler.printerObj.Score(score)
 
 	return score
 }

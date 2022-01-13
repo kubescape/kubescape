@@ -1,4 +1,4 @@
-package printer
+package v1
 
 import (
 	"fmt"
@@ -6,6 +6,7 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -21,7 +22,7 @@ func NewPrometheusPrinter(verboseMode bool) *PrometheusPrinter {
 }
 
 func (prometheusPrinter *PrometheusPrinter) SetWriter(outputFile string) {
-	prometheusPrinter.writer = getWriter(outputFile)
+	prometheusPrinter.writer = printer.GetWriter(outputFile)
 }
 
 func (prometheusPrinter *PrometheusPrinter) Score(score float32) {
@@ -85,6 +86,8 @@ func (printer *PrometheusPrinter) printReports(allResources map[string]workloadi
 }
 
 func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	cautils.ReportV2ToV1(opaSessionObj)
+
 	err := printer.printReports(opaSessionObj.AllResources, opaSessionObj.PostureReport.FrameworkReports)
 	if err != nil {
 		fmt.Println(err)
