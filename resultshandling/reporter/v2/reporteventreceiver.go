@@ -128,7 +128,7 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
 		}
 
-		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
+		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Results) > 0 {
 
 			// send report
 			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
