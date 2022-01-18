@@ -35,12 +35,7 @@ func init() {
 	flag.CommandLine.StringVar(&armoBEURLs, "environment", "", envFlagUsage)
 	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "environment", "", envFlagUsage)
 	rootCmd.PersistentFlags().MarkHidden("environment")
-	cobra.OnInitialize(initConfig)
 
-}
-
-// initConfig reads in config file and ENV variables if set.
-func initConfig() {
 }
 
 func InitArmoBEConnector() {

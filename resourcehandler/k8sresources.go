@@ -193,11 +193,21 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 }
 
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *cautils.K8SResources) error {
-	if cloudsupport.IsRunningInCloudProvider() {
-		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider()
+	cloudProvider := initCloudProvider()
+	cluster := cloudProvider.getKubeCluster()
+	clusterName := cloudProvider.getKubeClusterName()
+	provider := getCloudProvider()
+	region, err := cloudProvider.getRegion(cluster, provider)
+	if err != nil {
+		return err
+	}
+	project, err := cloudProvider.getProject(cluster, provider)
+	if err != nil {
+		return err
+	}
+	if provider != "" {
+		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
 		if err != nil {
-			cluster := k8sinterface.GetCurrentContext().Cluster
-			provider := cloudsupport.GetCloudProvider(cluster)
 			// Return error with useful info on how to configure credentials for getting cloud provider info
 			switch provider {
 			case "gke":

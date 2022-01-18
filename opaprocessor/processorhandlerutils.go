@@ -7,29 +7,58 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/exceptions"
 	"github.com/armosec/opa-utils/reporthandling"
 	resources "github.com/armosec/opa-utils/resources"
 
 	"github.com/golang/glog"
 )
 
+// updateResults update the results objects and report objects. This is a critical function - DO NOT CHANGE
+/*
+	- remove sensible data
+	- adding exceptions
+	- summarize results
+*/
 func (opap *OPAProcessor) updateResults() {
+
 	// remove data from all objects
 	for i := range opap.AllResources {
 		removeData(opap.AllResources[i])
 	}
 
-	for f := range opap.PostureReport.FrameworkReports {
-		// set exceptions
-		exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
+	// set exceptions
+	for i := range opap.ResourcesResult {
 
-		// set counters
-		reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
+		t := opap.ResourcesResult[i]
 
-		// set default score
-		// reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+		// first set exceptions
+		if resource, ok := opap.AllResources[i]; ok {
+			t.SetExceptions(resource, opap.Exceptions, cautils.ClusterName)
+		}
+
+		// summarize the resources
+		opap.Report.AppendResourceResultToSummary(&t)
+
+		// Add score
+		// TODO
+
+		// save changes
+		opap.ResourcesResult[i] = t
 	}
+
+	// set result summary
+	opap.Report.SummaryDetails.InitResourcesSummary()
+
+	// for f := range opap.PostureReport.FrameworkReports {
+	// 	// set exceptions
+	// 	exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
+
+	// 	// set counters
+	// 	reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
+
+	// 	// set default score
+	// 	// reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+	// }
 }
 
 func getAllSupportedObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
@@ -172,6 +201,7 @@ func removeSecretData(workload workloadinterface.IWorkload) {
 func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
 	containers, err := workload.GetContainers()
 	if err != nil || len(containers) == 0 {

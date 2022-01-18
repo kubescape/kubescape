@@ -107,21 +107,34 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, er
 	if err = JSONDecoder(respStr).Decode(framework); err != nil {
 		return nil, err
 	}
-	SaveFrameworkInFile(framework, GetDefaultPath(name+".json"))
+	SaveInFile(framework, GetDefaultPath(name+".json"))
 
 	return framework, err
+}
+
+func (armoAPI *ArmoAPI) GetFrameworks() ([]reporthandling.Framework, error) {
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
+	if err != nil {
+		return nil, nil
+	}
+
+	frameworks := []reporthandling.Framework{}
+	if err = JSONDecoder(respStr).Decode(&frameworks); err != nil {
+		return nil, err
+	}
+	// SaveInFile(framework, GetDefaultPath(name+".json"))
+
+	return frameworks, err
 }
 
 func (armoAPI *ArmoAPI) GetControl(policyName string) (*reporthandling.Control, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
 
-func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (armoAPI *ArmoAPI) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	exceptions := []armotypes.PostureExceptionPolicy{}
-	if customerGUID == "" {
-		return exceptions, nil
-	}
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(customerGUID, clusterName), nil)
+
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(clusterName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -133,10 +146,10 @@ func (armoAPI *ArmoAPI) GetExceptions(customerGUID, clusterName string) ([]armot
 	return exceptions, nil
 }
 
-func (armoAPI *ArmoAPI) GetCustomerGUID(customerGUID string) (*TenantResponse, error) {
+func (armoAPI *ArmoAPI) GetCustomerGUID() (*TenantResponse, error) {
 	url := armoAPI.getCustomerURL()
-	if customerGUID != "" {
-		url = fmt.Sprintf("%s?customerGUID=%s", url, customerGUID)
+	if armoAPI.customerGUID != "" {
+		url = fmt.Sprintf("%s?customerGUID=%s", url, armoAPI.customerGUID)
 	}
 	respStr, err := HttpGetter(armoAPI.httpClient, url, nil)
 	if err != nil {
@@ -151,12 +164,12 @@ func (armoAPI *ArmoAPI) GetCustomerGUID(customerGUID string) (*TenantResponse, e
 }
 
 // ControlsInputs  // map[<control name>][<input arguments>]
-func (armoAPI *ArmoAPI) GetAccountConfig(customerGUID, clusterName string) (*armotypes.CustomerConfig, error) {
+func (armoAPI *ArmoAPI) GetAccountConfig(clusterName string) (*armotypes.CustomerConfig, error) {
 	accountConfig := &armotypes.CustomerConfig{}
-	if customerGUID == "" {
+	if armoAPI.customerGUID == "" {
 		return accountConfig, nil
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(customerGUID, clusterName), nil)
+	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(clusterName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -169,15 +182,15 @@ func (armoAPI *ArmoAPI) GetAccountConfig(customerGUID, clusterName string) (*arm
 }
 
 // ControlsInputs  // map[<control name>][<input arguments>]
-func (armoAPI *ArmoAPI) GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error) {
-	accountConfig, err := armoAPI.GetAccountConfig(customerGUID, clusterName)
+func (armoAPI *ArmoAPI) GetControlsInputs(clusterName string) (map[string][]string, error) {
+	accountConfig, err := armoAPI.GetAccountConfig(clusterName)
 	if err == nil {
 		return accountConfig.Settings.PostureControlInputs, nil
 	}
 	return nil, err
 }
 
-func (armoAPI *ArmoAPI) ListCustomFrameworks(customerGUID string) ([]string, error) {
+func (armoAPI *ArmoAPI) ListCustomFrameworks() ([]string, error) {
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, err
@@ -197,7 +210,7 @@ func (armoAPI *ArmoAPI) ListCustomFrameworks(customerGUID string) ([]string, err
 	return frameworkList, nil
 }
 
-func (armoAPI *ArmoAPI) ListFrameworks(customerGUID string) ([]string, error) {
+func (armoAPI *ArmoAPI) ListFrameworks() ([]string, error) {
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, err
@@ -217,6 +230,10 @@ func (armoAPI *ArmoAPI) ListFrameworks(customerGUID string) ([]string, error) {
 	}
 
 	return frameworkList, nil
+}
+
+func (armoAPI *ArmoAPI) ListControls(l ListType) ([]string, error) {
+	return nil, fmt.Errorf("control api is not public")
 }
 
 type TenantResponse struct {

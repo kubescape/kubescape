@@ -1,11 +1,29 @@
-package printer
+package controlmapping
 
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/objectsenvelopes"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/apis"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
+
+type WorkloadSummary struct {
+	resource workloadinterface.IMetadata
+	status   apis.ScanningStatus
+}
+
+func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.status == apis.StatusFailed
+}
+
+func workloadSummaryExclude(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.status == apis.StatusExcluded
+}
+
+func workloadSummaryPassed(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.status == apis.StatusPassed
+}
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
 func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSummary *WorkloadSummary) bool) map[string][]WorkloadSummary {
@@ -22,7 +40,7 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 		case workloadinterface.TypeWorkloadObject:
 			ns := ""
 			if resources[i].resource.GetNamespace() != "" {
-				ns = "Namespace " + resources[i].resource.GetNamespace()
+				ns = "Namescape " + resources[i].resource.GetNamespace()
 			}
 			if r, ok := mapResources[ns]; ok {
 				r = append(r, resources[i])
@@ -58,19 +76,17 @@ func isKindToBeGrouped(kind string) bool {
 	return false
 }
 
-func listResultSummary(ruleReports []reporthandling.RuleReport, allResources map[string]workloadinterface.IMetadata) []WorkloadSummary {
+func listResultSummary(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) []WorkloadSummary {
 	workloadsSummary := []WorkloadSummary{}
 
-	for c := range ruleReports {
-		resourcesIDs := ruleReports[c].ListResourcesIDs()
-		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetFailedResources(), reporthandling.StatusFailed)...)
-		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetWarningResources(), reporthandling.StatusWarning)...)
-		workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, resourcesIDs.GetPassedResources(), reporthandling.StatusPassed)...)
-	}
+	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Failed(), apis.StatusFailed)...)
+	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Excluded(), apis.StatusExcluded)...)
+	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Passed(), apis.StatusPassed)...)
+
 	return workloadsSummary
 }
 
-func newListWorkloadsSummary(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, status string) []WorkloadSummary {
+func newListWorkloadsSummary(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, status apis.ScanningStatus) []WorkloadSummary {
 	workloadsSummary := []WorkloadSummary{}
 
 	for _, i := range resourcesIDs {

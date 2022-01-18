@@ -6,9 +6,12 @@ import (
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
+	ksscore "github.com/armosec/kubescape/score"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/opa-utils/score"
+	"github.com/armosec/opa-utils/reporthandling/apis"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
+	"github.com/open-policy-agent/opa/storage"
 
 	"github.com/golang/glog"
 
@@ -18,7 +21,6 @@ import (
 	"github.com/armosec/opa-utils/resources"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
-	uuid "github.com/satori/go.uuid"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -58,41 +60,53 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opaSessionObj := <-*opaHandler.processedPolicy
 		opap := NewOPAProcessor(opaSessionObj, opaHandler.regoDependenciesData)
 
+		policies := ConvertFrameworksToPolicies(opap.Frameworks, cautils.BuildNumber)
+
+		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks, policies)
+
 		// process
-		if err := opap.Process(); err != nil {
+		if err := opap.Process(policies); err != nil {
 			// fmt.Println(err)
 		}
 
 		// edit results
 		opap.updateResults()
 
-		// update score
-		scoreutil := score.NewScore(opaSessionObj.AllResources)
-		scoreutil.Calculate(opaSessionObj.PostureReport.FrameworkReports)
-
+		//TODO: review this location
+		scorewrapper := ksscore.NewScoreWrapper(opaSessionObj)
+		scorewrapper.Calculate(ksscore.EPostureReportV2)
 		// report
 		*opaHandler.reportResults <- opaSessionObj
 	}
 }
 
-func (opap *OPAProcessor) Process() error {
+func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 	// glog.Infof(fmt.Sprintf("Starting 'Process'. reportID: %s", opap.PostureReport.ReportID))
 	cautils.ProgressTextDisplay(fmt.Sprintf("Scanning cluster %s", cautils.ClusterName))
 	cautils.StartSpinner()
-	frameworkReports := []reporthandling.FrameworkReport{}
+
 	var errs error
-	for i := range opap.Frameworks {
-		frameworkReport, err := opap.processFramework(&opap.Frameworks[i])
+	for _, control := range policies.Controls {
+
+		resourcesAssociatedControl, err := opap.processControl(&control)
 		if err != nil {
 			appendError(&errs, err)
 		}
-		frameworkReports = append(frameworkReports, *frameworkReport)
+		// update resources with latest results
+		if len(resourcesAssociatedControl) != 0 {
+			for resourceID, controlResult := range resourcesAssociatedControl {
+				if _, ok := opap.ResourcesResult[resourceID]; !ok {
+					opap.ResourcesResult[resourceID] = resourcesresults.Result{ResourceID: resourceID}
+				}
+				t := opap.ResourcesResult[resourceID]
+				t.AssociatedControls = append(t.AssociatedControls, controlResult)
+				opap.ResourcesResult[resourceID] = t
+			}
+		}
 	}
 
-	opap.PostureReport.FrameworkReports = frameworkReports
-	opap.PostureReport.ReportID = uuid.NewV4().String()
-	opap.PostureReport.ReportGenerationTime = time.Now().UTC()
-	// glog.Infof(fmt.Sprintf("Done 'Process'. reportID: %s", opap.PostureReport.ReportID))
+	opap.Report.ReportGenerationTime = time.Now().UTC()
+
 	cautils.StopSpinner()
 	cautils.SuccessTextDisplay(fmt.Sprintf("Done scanning cluster %s", cautils.ClusterName))
 	return errs
@@ -108,162 +122,143 @@ func appendError(errs *error, err error) {
 		*errs = fmt.Errorf("%v\n%s", *errs, err.Error())
 	}
 }
-func (opap *OPAProcessor) processFramework(framework *reporthandling.Framework) (*reporthandling.FrameworkReport, error) {
+
+func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
 	var errs error
 
-	frameworkReport := reporthandling.FrameworkReport{}
-	frameworkReport.Name = framework.Name
+	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
 
-	controlReports := []reporthandling.ControlReport{}
-	for i := range framework.Controls {
-		controlReport, err := opap.processControl(&framework.Controls[i])
-		if err != nil {
-			appendError(&errs, err)
-			// errs = fmt.Errorf("%v\n%s", errs, err.Error())
-		}
-		if controlReport != nil {
-			controlReports = append(controlReports, *controlReport)
-		}
-	}
-	frameworkReport.ControlReports = controlReports
-	return &frameworkReport, errs
-}
-
-func (opap *OPAProcessor) processControl(control *reporthandling.Control) (*reporthandling.ControlReport, error) {
-	var errs error
-
-	controlReport := reporthandling.ControlReport{}
-	controlReport.PortalBase = control.PortalBase
-	controlReport.ControlID = control.ControlID
-	controlReport.BaseScore = control.BaseScore
-
-	controlReport.Control_ID = control.Control_ID // TODO: delete when 'id' is deprecated
-
-	controlReport.Name = control.Name
-	controlReport.Description = control.Description
-	controlReport.Remediation = control.Remediation
-
-	ruleReports := []reporthandling.RuleReport{}
+	// ruleResults := make(map[string][]resourcesresults.ResourceAssociatedRule)
 	for i := range control.Rules {
-		ruleReport, err := opap.processRule(&control.Rules[i])
+		resourceAssociatedRule, err := opap.processRule(&control.Rules[i])
 		if err != nil {
 			appendError(&errs, err)
+			continue
 		}
-		if ruleReport != nil {
-			ruleReports = append(ruleReports, *ruleReport)
+
+		// append failed rules to controls
+		if len(resourceAssociatedRule) != 0 {
+			for resourceID, ruleResponse := range resourceAssociatedRule {
+
+				controlResult := resourcesresults.ResourceAssociatedControl{}
+				controlResult.SetID(control.ControlID)
+				controlResult.SetName(control.Name)
+
+				if _, ok := resourcesAssociatedControl[resourceID]; ok {
+					controlResult.ResourceAssociatedRules = resourcesAssociatedControl[resourceID].ResourceAssociatedRules
+				}
+				if ruleResponse != nil {
+					controlResult.ResourceAssociatedRules = append(controlResult.ResourceAssociatedRules, *ruleResponse)
+				}
+				resourcesAssociatedControl[resourceID] = controlResult
+			}
 		}
 	}
-	if len(ruleReports) == 0 {
-		return nil, nil
-	}
-	controlReport.RuleReports = ruleReports
-	return &controlReport, errs
+
+	return resourcesAssociatedControl, errs
 }
 
-func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (*reporthandling.RuleReport, error) {
-	if ruleWithArmoOpaDependency(rule.Attributes) || !isRuleKubescapeVersionCompatible(rule) {
-		return nil, nil
-	}
+func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+
+	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
 
 	inputResources, err := reporthandling.RegoResourcesAggregator(rule, getAllSupportedObjects(opap.K8SResources, opap.AllResources, rule))
 	if err != nil {
 		return nil, fmt.Errorf("error getting aggregated k8sObjects: %s", err.Error())
 	}
+	if len(inputResources) == 0 {
+		return nil, nil // no resources found for testing
+	}
 
 	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
 
-	ruleReport, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData)
-	if err != nil {
-		// ruleReport.RuleStatus.Status = reporthandling.StatusFailed
-		ruleReport.RuleStatus.Status = "failure"
-		ruleReport.RuleStatus.Message = err.Error()
-		glog.Error(err)
-	} else {
-		ruleReport.RuleStatus.Status = reporthandling.StatusPassed
-	}
-
+	resources := map[string]*resourcesresults.ResourceAssociatedRule{}
 	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
 	enumeratedData, err := opap.enumerateData(rule, inputRawResources)
 	if err != nil {
 		return nil, err
 	}
 	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
-	ruleReport.ListInputKinds = workloadinterface.ListMetaIDs(inputResources)
-
 	for i := range inputResources {
+		resources[inputResources[i].GetID()] = &resourcesresults.ResourceAssociatedRule{
+			Name:                  rule.Name,
+			ControlConfigurations: postureControlInputs,
+			Status:                apis.StatusPassed,
+		}
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
-	failedResources := objectsenvelopes.ListMapToMeta(ruleReport.GetFailedResources())
-	for i := range failedResources {
-		if r, ok := opap.AllResources[failedResources[i].GetID()]; !ok {
-			opap.AllResources[failedResources[i].GetID()] = r
-		}
-	}
-	warningResources := objectsenvelopes.ListMapToMeta(ruleReport.GetWarnignResources())
-	for i := range warningResources {
-		if r, ok := opap.AllResources[warningResources[i].GetID()]; !ok {
-			opap.AllResources[warningResources[i].GetID()] = r
+	ruleResponses, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData, postureControlInputs)
+	if err != nil {
+		// TODO - Handle error
+		glog.Error(err)
+	} else {
+		// ruleResponse to ruleResult
+		for i := range ruleResponses {
+			failedResources := objectsenvelopes.ListMapToMeta(ruleResponses[i].GetFailedResources())
+			for j := range failedResources {
+				ruleResult := &resourcesresults.ResourceAssociatedRule{}
+				if r, k := resources[failedResources[j].GetID()]; k {
+					ruleResult = r
+				}
+
+				ruleResult.Status = apis.StatusFailed
+				for j := range ruleResponses[i].FailedPaths {
+					ruleResult.Paths = append(ruleResult.Paths, resourcesresults.Path{FailedPath: ruleResponses[i].FailedPaths[j]})
+				}
+				resources[failedResources[j].GetID()] = ruleResult
+			}
 		}
 	}
 
-	// remove all data from responses, leave only the metadata
-	keepFields := []string{"kind", "apiVersion", "metadata"}
-	keepMetadataFields := []string{"name", "namespace", "labels"}
-	ruleReport.RemoveData(keepFields, keepMetadataFields)
-
-	return &ruleReport, err
+	return resources, err
 }
 
-func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string) (reporthandling.RuleReport, error) {
+func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, postureControlInputs map[string][]string) ([]reporthandling.RuleResponse, error) {
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
-		return opap.runRegoOnK8s(rule, k8sObjects, getRuleData)
+		return opap.runRegoOnK8s(rule, k8sObjects, getRuleData, postureControlInputs)
 	default:
-		return reporthandling.RuleReport{}, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
+		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
 
-func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string) (reporthandling.RuleReport, error) {
+func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, postureControlInputs map[string][]string) ([]reporthandling.RuleResponse, error) {
 	var errs error
-	ruleReport := reporthandling.RuleReport{
-		Name: rule.Name,
-	}
 
 	// compile modules
 	modules, err := getRuleDependencies()
 	if err != nil {
-		return ruleReport, fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
+		return nil, fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
 	}
 	modules[rule.Name] = getRuleData(rule)
 	compiled, err := ast.CompileModules(modules)
 	if err != nil {
-		return ruleReport, fmt.Errorf("in 'runRegoOnSingleRule', failed to compile rule, name: %s, reason: %s", rule.Name, err.Error())
+		return nil, fmt.Errorf("in 'runRegoOnSingleRule', failed to compile rule, name: %s, reason: %s", rule.Name, err.Error())
+	}
+
+	store, err := resources.TOStorage(postureControlInputs)
+	if err != nil {
+		return nil, err
 	}
 
 	// Eval
-	results, err := opap.regoEval(k8sObjects, compiled)
+	results, err := opap.regoEval(k8sObjects, compiled, &store)
 	if err != nil {
 		errs = fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
 	}
 
-	if results != nil {
-		ruleReport.RuleResponses = append(ruleReport.RuleResponses, results...)
-	}
-	return ruleReport, errs
+	return results, errs
 }
 
-func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRego *ast.Compiler) ([]reporthandling.RuleResponse, error) {
-	store, err := opap.regoDependenciesData.TOStorage() // get store
-	if err != nil {
-		return nil, err
-	}
+func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
+	// opap.regoDependenciesData.PostureControlInputs
 
 	rego := rego.New(
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
 		rego.Input(inputObj),
-		rego.Store(store),
+		rego.Store(*store),
 	)
 
 	// Run evaluation
@@ -284,9 +279,15 @@ func (opap *OPAProcessor) enumerateData(rule *reporthandling.PolicyRule, k8sObje
 	if ruleEnumeratorData(rule) == "" {
 		return k8sObjects, nil
 	}
-	ruleReport, err := opap.runOPAOnSingleRule(rule, k8sObjects, ruleEnumeratorData)
+	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs)
+
+	ruleResponse, err := opap.runOPAOnSingleRule(rule, k8sObjects, ruleEnumeratorData, postureControlInputs)
 	if err != nil {
 		return nil, err
 	}
-	return ruleReport.GetFailedResources(), nil
+	failedResources := []map[string]interface{}{}
+	for _, ruleResponse := range ruleResponse {
+		failedResources = append(failedResources, ruleResponse.GetFailedResources()...)
+	}
+	return failedResources, nil
 }
