@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	uuid "github.com/satori/go.uuid"
 
+	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
@@ -45,15 +46,17 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown cluster name. Run kubescape with the '--cluster <cluster name>' flag"
+		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
 		return nil
 	}
 	opaSessionObj.Report.ReportID = uuid.NewV4().String()
-	opaSessionObj.Report.CustomerGUID = report.clusterName
-	opaSessionObj.Report.ClusterName = report.customerGUID
+	opaSessionObj.Report.CustomerGUID = report.customerGUID
+	opaSessionObj.Report.ClusterName = report.clusterName
 
 	if err := report.prepareReport(opaSessionObj.Report); err != nil {
 		report.message = err.Error()
+	} else {
+		report.generateMessage()
 	}
 	return nil
 }
@@ -73,24 +76,23 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
-	// send framework results
-	if err := report.sendReport(host, postureReport); err != nil {
-		return err
-	}
+	reportCounter := 0
 
 	// send resources
-	if err := report.sendResults(host, postureReport); err != nil {
+	if err := report.sendResources(host, postureReport, &reportCounter, false); err != nil {
 		return err
 	}
+	// reportCounter++
 
-	// send resources
-	if err := report.sendResources(host, postureReport); err != nil {
-		return err
-	}
+	// // send results
+	// if err := report.sendResults(host, postureReport, &reportCounter, true); err != nil {
+	// 	return err
+	// }
+
 	return nil
 }
 
-func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport) error {
+func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
 	splittedPostureReport := setSubReport(postureReport)
 	counter := 0
 
@@ -103,12 +105,14 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
 
 			// send report
-			if err := report.sendReport(host, splittedPostureReport); err != nil {
+			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
 				return err
 			}
+			*reportCounter++
 
 			// delete resources
-			splittedPostureReport.Resources = []reporthandlingv2.Resource{}
+			splittedPostureReport.Resources = []reporthandling.Resource{}
+			splittedPostureReport.Results = []resourcesresults.Result{}
 
 			// restart counter
 			counter = 0
@@ -118,28 +122,23 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		splittedPostureReport.Resources = append(splittedPostureReport.Resources, v)
 	}
 
-	return report.sendReport(host, splittedPostureReport)
-}
-
-func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport) error {
-	splittedPostureReport := setSubReport(postureReport)
-	counter := 0
-
 	for _, v := range postureReport.Results {
 		r, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
 		}
 
-		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
+		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Results) > 0 {
 
 			// send report
-			if err := report.sendReport(host, splittedPostureReport); err != nil {
+			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
 				return err
 			}
+			*reportCounter++
 
 			// delete results
 			splittedPostureReport.Results = []resourcesresults.Result{}
+			splittedPostureReport.Resources = []reporthandling.Resource{}
 
 			// restart counter
 			counter = 0
@@ -149,12 +148,46 @@ func (report *ReportEventReceiver) sendResults(host string, postureReport *repor
 		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
 	}
 
-	return report.sendReport(host, splittedPostureReport)
+	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
 }
-func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport) error {
-	splittedPostureReport := setSubReport(postureReport)
-	splittedPostureReport.SummaryDetails = postureReport.SummaryDetails
 
+// func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
+// 	splittedPostureReport := setSubReport(postureReport)
+// 	counter := 0
+
+// 	for _, v := range postureReport.Results {
+// 		r, err := json.Marshal(v)
+// 		if err != nil {
+// 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
+// 		}
+
+// 		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
+
+// 			// send report
+// 			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
+// 				return err
+// 			}
+// 			*reportCounter++
+
+// 			// delete results
+// 			splittedPostureReport.Results = []resourcesresults.Result{}
+
+// 			// restart counter
+// 			counter = 0
+// 		}
+
+// 		counter += len(r)
+// 		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
+// 	}
+
+// 	return report.sendReport(host, splittedPostureReport, *reportCounter, isLastReport)
+// }
+
+func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
+		ReportNumber: counter,
+		IsLastReport: isLastReport,
+	}
 	reqBody, err := json.Marshal(postureReport)
 	if err != nil {
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)

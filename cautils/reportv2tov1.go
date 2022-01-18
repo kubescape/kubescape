@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
@@ -57,6 +58,7 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 
 	opaSessionObj.PostureReport.FrameworkReports = frameworks
 
+	// opaSessionObj.Report.SummaryDetails.Score = 0
 	// for i := range frameworks {
 	// 	for j := range frameworks[i].ControlReports {
 	// 		// frameworks[i].ControlReports[j].Score
@@ -74,7 +76,9 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 	// 			opaSessionObj.Report.SummaryDetails.Controls[frameworks[i].ControlReports[j].ControlID] = c
 	// 		}
 	// 	}
+	// 	opaSessionObj.Report.SummaryDetails.Score += opaSessionObj.PostureReport.FrameworkReports[i].Score
 	// }
+	// opaSessionObj.Report.SummaryDetails.Score /= float32(len(opaSessionObj.Report.SummaryDetails.Frameworks))
 }
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
@@ -84,7 +88,8 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.ControlID = controlID
 		crv1.BaseScore = crv2.ScoreFactor
 		crv1.Name = crv2.GetName()
-
+		crv1.Control_ID = controlID
+		// crv1.Attributes = crv2.
 		crv1.Score = crv2.GetScore()
 
 		// TODO - add fields
@@ -100,6 +105,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 					if _, ok := rulesv1[rulev2.GetName()]; !ok {
 						rulesv1[rulev2.GetName()] = reporthandling.RuleReport{
 							Name: rulev2.GetName(),
+							RuleStatus: reporthandling.RuleStatus{
+								Status: "success",
+							},
 						}
 					}
 
@@ -120,10 +128,11 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 						}
 
 						if fullRessource, ok := opaSessionObj.AllResources[resourceID]; ok {
-							ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, fullRessource.GetObject())
+							tmp := fullRessource.GetObject()
+							workloadinterface.RemoveFromMap(tmp, "spec")
+							ruleResponse.AlertObject.K8SApiObjects = append(ruleResponse.AlertObject.K8SApiObjects, tmp)
 						}
 						rulev1.RuleResponses = append(rulev1.RuleResponses, ruleResponse)
-
 					}
 
 					rulev1.ListInputKinds = append(rulev1.ListInputKinds, resourceID)
@@ -135,6 +144,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 			for i := range rulesv1 {
 				crv1.RuleReports = append(crv1.RuleReports, rulesv1[i])
 			}
+		}
+		if len(crv1.RuleReports) == 0 {
+			crv1.RuleReports = []reporthandling.RuleReport{}
 		}
 		controlRepors = append(controlRepors, crv1)
 	}

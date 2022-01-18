@@ -3,10 +3,10 @@
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
 
-Kubescape is the first open-source tool for testing if Kubernetes is deployed securely according to multiple frameworks:
-regulatory, customized company policies and DevSecOps best practices, such as the  [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo) and the [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) .  
-Kubescape scans K8s clusters, YAML files, and HELM charts, and detect misconfigurations and software vulnerabilities at early stages of the CI/CD pipeline and provides a risk score instantly and risk trends over time.
-Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI and Github workflows.
+Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer and image vulnerabilities scanning. 
+Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo) , [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
+It became one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins’ precious time, effort, and resources.
+Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack, and supports multi-cloud K8s deployments like EKS, GKE, and AKS.
 
 </br>
 
@@ -24,7 +24,7 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan --submit
+kubescape scan --submit --enable-host-scan
 ```
 
 <img src="docs/summary.png">
@@ -53,6 +53,9 @@ Want to contribute? Want to discuss something? Have an issue?
 
 
 # Options and examples
+
+## Playground
+* [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
 
 ## Tutorials
 
@@ -100,7 +103,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
 | `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
 | `--account`                 |                           | Armo portal account ID. Default will load account ID from configMap or config file                                                                                                                                                                                                                                   |                                              |
-| `--cluster`                 |        current-context               |  Cluster context to scan                                                                                                                                                                                                                              |                                              |
+| `--kube-context`                 |        current-context               |  Cluster context to scan                                                                                                                                                                                                                              |                                              |
 | `--verbose`                 | `false`                   | Display all of the input resources and not only failed resources                                                                                                                                                                                                                                                     | `true`/`false`                               |
 
 
@@ -264,7 +267,7 @@ go build -o kubescape .
 
 3. Run
 ```
-./kubescape scan framework nsa
+./kubescape scan --submit --enable-host-scan
 ```
 
 4. Enjoy :zany_face:
@@ -320,3 +323,9 @@ The tools retrieves Kubernetes objects from the API server and runs a set of [re
 The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
+
+## Thanks to all the contributors ❤️
+<a href = "https://github.com/armosec/kubescape/graphs/contributors">
+  <img src = "https://contrib.rocks/image?repo=armosec/kubescape"/>
+</a>
+
