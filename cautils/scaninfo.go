@@ -89,6 +89,9 @@ func (scanInfo *ScanInfo) Init() {
 }
 
 func (scanInfo *ScanInfo) setUseArtifactsFrom() {
+	if scanInfo.UseArtifactsFrom == "" {
+		return
+	}
 	// UseArtifactsFrom must be a path without a filename
 	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
 	if dir == "" {
