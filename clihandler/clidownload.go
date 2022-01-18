@@ -51,7 +51,7 @@ func setPathandFilename(downloadInfo *cautils.DownloadInfo) {
 		dir, file := filepath.Split(downloadInfo.Path)
 		if dir == "" {
 			downloadInfo.Path = file
-		} else if strings.Contains(file, ".") {
+		} else if strings.Contains(file, ".json") {
 			downloadInfo.Path = dir
 			downloadInfo.FileName = file
 		}

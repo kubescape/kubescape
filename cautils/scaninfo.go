@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -96,7 +97,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	dir, file := filepath.Split(scanInfo.UseArtifactsFrom)
 	if dir == "" {
 		scanInfo.UseArtifactsFrom = file
-	} else {
+	} else if strings.Contains(file, ".json") {
 		scanInfo.UseArtifactsFrom = dir
 	}
 	// set frameworks files
