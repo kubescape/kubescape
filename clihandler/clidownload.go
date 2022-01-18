@@ -51,7 +51,7 @@ func setPathandFilename(downloadInfo *cautils.DownloadInfo) {
 		dir, file := filepath.Split(downloadInfo.Path)
 		if dir == "" {
 			downloadInfo.Path = file
-		} else {
+		} else if strings.Contains(file, ".") {
 			downloadInfo.Path = dir
 			downloadInfo.FileName = file
 		}
