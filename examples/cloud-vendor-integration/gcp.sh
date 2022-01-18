@@ -36,6 +36,7 @@ export custom_role_name=$(gcloud iam roles create kubescape --project=$gcp_proje
 # Attach policies to the service account
 echo 'Attach policies to the service account'
 gcloud --quiet projects add-iam-policy-binding $gcp_project --member serviceAccount:$gcp_service_account --role $custom_role_name >/dev/null
+gcloud --quiet projects add-iam-policy-binding $gcp_project --member serviceAccount:$gcp_service_account --role roles/storage.objectViewer >/dev/null
 
 # If there are missing permissions, use this role instead
 # gcloud --quiet projects add-iam-policy-binding $gcp_project --member serviceAccount:$gcp_service_account --role roles/container.clusterViewer
