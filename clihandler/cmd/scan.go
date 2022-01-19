@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/spf13/cobra"
 )
 
@@ -27,17 +27,25 @@ var scanCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) == 0 {
 			scanInfo.ScanAll = true
-			frameworks := getter.NativeFrameworks
-			frameworkArgs := []string{strings.Join(frameworks, ",")}
-			frameworkCmd.RunE(cmd, frameworkArgs)
+			// frameworks := getter.NativeFrameworks
+			// frameworkArgs := []string{strings.Join(frameworks, ",")}
+			frameworkCmd.RunE(cmd, []string{"all"})
 		}
 	},
 }
 
+func frameworkInitConfig() {
+	k8sinterface.SetClusterContextName(scanInfo.KubeContext)
+}
+
 func init() {
+	cobra.OnInitialize(frameworkInitConfig)
+
 	rootCmd.AddCommand(scanCmd)
+	rootCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. Recommended: kube-system,kube-public")
 	scanCmd.PersistentFlags().Uint16VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 100, "Failure threshold is the percent above which the command fails and returns exit code 1")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. Supported formats: "pretty-printer"/"json"/"junit"/"prometheus"`)

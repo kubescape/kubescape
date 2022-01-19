@@ -19,7 +19,8 @@ Please note we have a code of conduct, please follow it in all your interactions
    build.
 2. Update the README.md with details of changes to the interface, this includes new environment 
    variables, exposed ports, useful file locations and container parameters.
-3. We will merge the Pull Request in once you have the sign-off.
+3. Open Pull Request to `dev` branch - we test the component before merging into the `master` branch
+4. We will merge the Pull Request in once you have the sign-off.
 
 ## Code of Conduct
 

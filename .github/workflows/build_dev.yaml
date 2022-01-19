@@ -23,7 +23,7 @@ jobs:
 
       - name: Build
         env:
-          RELEASE: v1.0.${{ github.run_number }} 
+          RELEASE: v2.0.${{ github.run_number }} 
           ArmoBEServer: api.armo.cloud
           ArmoERServer: report.euprod1.cyberarmorsoft.com
           ArmoWebsite: portal.armo.cloud
@@ -32,7 +32,7 @@ jobs:
       
       - name: Smoke Testing
         env:
-          RELEASE: v1.0.${{ github.run_number }}
+          RELEASE: v2.0.${{ github.run_number }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
 
@@ -53,7 +53,7 @@ jobs:
       - uses: actions/checkout@v2
 
       - name: Set name
-        run: echo quay.io/armosec/kubescape:dev-v1.0.${{ github.run_number }} > build_tag.txt
+        run: echo quay.io/armosec/kubescape:dev-v2.0.${{ github.run_number }} > build_tag.txt
 
       - name: Build the Docker image
         run: docker build . --file build/Dockerfile --tag $(cat build_tag.txt) --build-arg run_number=${{ github.run_number }}

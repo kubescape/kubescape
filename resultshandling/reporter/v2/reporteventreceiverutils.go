@@ -1,4 +1,4 @@
-package reporter
+package v2
 
 import (
 	"net/url"
@@ -6,6 +6,7 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/gofrs/uuid"
 )
 
@@ -14,7 +15,8 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 
 	urlObj.Scheme = "https"
 	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
-	urlObj.Path = "/k8s/postureReport"
+	urlObj.Path = "/k8s/v2/postureReport"
+
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.FromStringOrNil(report.customerGUID).String())
 	q.Add("clusterName", report.clusterName)
@@ -26,17 +28,22 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 
 func hostToString(host *url.URL, reportID string) string {
 	q := host.Query()
-	q.Add("reportID", reportID) // TODO - do we add the reportID?
+	q.Add("reportGUID", reportID) // TODO - do we add the reportID?
 	host.RawQuery = q.Encode()
 	return host.String()
 }
 
-func setPaginationReport(postureReport *reporthandling.PostureReport) *reporthandling.PostureReport {
-	return &reporthandling.PostureReport{
+func setSubReport(postureReport *reporthandlingv2.PostureReport) *reporthandlingv2.PostureReport {
+	return &reporthandlingv2.PostureReport{
 		CustomerGUID:         postureReport.CustomerGUID,
 		ClusterName:          postureReport.ClusterName,
 		ReportID:             postureReport.ReportID,
 		ReportGenerationTime: postureReport.ReportGenerationTime,
+		SummaryDetails:       postureReport.SummaryDetails,
+		Attributes:           postureReport.Attributes,
+		ClusterCloudProvider: postureReport.ClusterCloudProvider,
+		JobID:                postureReport.JobID,
+		ClusterAPIServerInfo: postureReport.ClusterAPIServerInfo,
 	}
 }
 func iMetaToResource(obj workloadinterface.IMetadata) *reporthandling.Resource {
