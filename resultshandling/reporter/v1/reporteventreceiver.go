@@ -38,7 +38,9 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 }
 
 func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
-	cautils.ReportV2ToV1(opaSessionObj)
+	if opaSessionObj.PostureReport == nil && opaSessionObj.Report != nil {
+		cautils.ReportV2ToV1(opaSessionObj)
+	}
 
 	if report.customerGUID == "" {
 		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
