@@ -108,7 +108,6 @@ func convertPostureReportToJunitResult(postureResult *reporthandling.PostureRepo
 			testCase.Classname = "Kubescape"
 			testCase.Time = postureResult.ReportGenerationTime.String()
 			if 0 < len(controlReports.RuleReports) && 0 < len(controlReports.RuleReports[0].RuleResponses) {
-
 				testCase.Resources = controlReports.GetNumberOfResources()
 				testCase.Excluded = controlReports.GetNumberOfWarningResources()
 				testCase.Failed = controlReports.GetNumberOfFailedResources()
