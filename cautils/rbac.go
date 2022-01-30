@@ -42,6 +42,17 @@ func (rbacObjects *RBACObjects) ListAllResources() (map[string]workloadinterface
 
 func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.RbacObjects) (map[string]workloadinterface.IMetadata, error) {
 	allresources := map[string]workloadinterface.IMetadata{}
+
+	/*
+		************************************************************************************************************************
+			This code is adding a non valid ID ->
+				(github.com/armosec/rbac-utils v0.0.11): "//SA2WLIDmap/SA2WLIDmap"
+				(github.com/armosec/rbac-utils v0.0.12): "armo.rbac.com/v0beta1//SAID2WLIDmap/SAID2WLIDmap"
+
+			Should be investigated
+		************************************************************************************************************************
+	*/
+
 	// wrap rbac aggregated objects in IMetadata and add to allresources
 	// TODO - DEPRECATE SA2WLIDmap
 	SA2WLIDmapIMeta, err := rbacutils.SA2WLIDmapIMetadataWrapper(resources.SA2WLIDmap)
@@ -62,7 +73,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1"
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("ClusterRole")
 		allresources[crIMeta.GetID()] = crIMeta
@@ -72,7 +83,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1"
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("Role")
 		allresources[crIMeta.GetID()] = crIMeta
@@ -82,7 +93,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1"
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("ClusterRoleBinding")
 		allresources[crIMeta.GetID()] = crIMeta
@@ -92,7 +103,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		if err != nil {
 			return nil, err
 		}
-		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1"
+		crmap["apiVersion"] = "rbac.authorization.k8s.io/v1" // TODO - is the the correct apiVersion?
 		crIMeta := workloadinterface.NewWorkloadObj(crmap)
 		crIMeta.SetKind("RoleBinding")
 		allresources[crIMeta.GetID()] = crIMeta

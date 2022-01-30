@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
+	ksscore "github.com/armosec/kubescape/score"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/apis"
@@ -71,6 +72,9 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		// edit results
 		opap.updateResults()
 
+		//TODO: review this location
+		scorewrapper := ksscore.NewScoreWrapper(opaSessionObj)
+		scorewrapper.Calculate(ksscore.EPostureReportV2)
 		// report
 		*opaHandler.reportResults <- opaSessionObj
 	}

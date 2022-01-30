@@ -38,14 +38,16 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 }
 
 func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
-	cautils.ReportV2ToV1(opaSessionObj)
+	if opaSessionObj.PostureReport == nil && opaSessionObj.Report != nil {
+		cautils.ReportV2ToV1(opaSessionObj)
+	}
 
 	if report.customerGUID == "" {
 		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown cluster name. Run kubescape with the '--cluster <cluster name>' flag"
+		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
 		return nil
 	}
 

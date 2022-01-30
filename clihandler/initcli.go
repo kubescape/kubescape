@@ -44,7 +44,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		}
 	}
 
-	tenantConfig := getTenantConfig(scanInfo.Account, scanInfo.ClusterName, k8s)
+	tenantConfig := getTenantConfig(scanInfo.Account, scanInfo.KubeContext, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)

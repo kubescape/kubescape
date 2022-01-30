@@ -96,7 +96,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 
 	if latestVersion.ClientUpdate != "" {
 		if BuildNumber != "" && BuildNumber < latestVersion.ClientUpdate {
-			WarningDisplay(os.Stderr, warningMessage(latestVersion.Client, latestVersion.ClientUpdate), "\n")
+			WarningDisplay(os.Stderr, warningMessage(latestVersion.Client, latestVersion.ClientUpdate)+"\n")
 		}
 	}
 
@@ -106,7 +106,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 	// }
 
 	if latestVersion.Message != "" {
-		InfoDisplay(os.Stderr, latestVersion.Message, "\n")
+		InfoDisplay(os.Stderr, latestVersion.Message+"\n")
 	}
 
 	return nil

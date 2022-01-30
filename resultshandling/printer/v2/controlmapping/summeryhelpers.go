@@ -40,7 +40,7 @@ func groupByNamespaceOrKind(resources []WorkloadSummary, status func(workloadSum
 		case workloadinterface.TypeWorkloadObject:
 			ns := ""
 			if resources[i].resource.GetNamespace() != "" {
-				ns = "Namescape " + resources[i].resource.GetNamespace()
+				ns = "Namespace " + resources[i].resource.GetNamespace()
 			}
 			if r, ok := mapResources[ns]; ok {
 				r = append(r, resources[i])

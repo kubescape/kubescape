@@ -20,7 +20,7 @@ func init() {
 }
 
 func getSubmittedClusterConfig(k8s *k8sinterface.KubernetesApi) (*cautils.ClusterConfig, error) {
-	clusterConfig := cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account, scanInfo.ClusterName) // TODO - support none cluster env submit
+	clusterConfig := cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), scanInfo.Account, scanInfo.KubeContext) // TODO - support none cluster env submit
 	if clusterConfig.GetCustomerGUID() != "" {
 		if err := clusterConfig.SetTenant(); err != nil {
 			return clusterConfig, err
