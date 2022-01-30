@@ -49,10 +49,7 @@ func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.Control
 		controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 		prettyPrinter.printTitle(controlSummary)
 		prettyPrinter.printResources(controlSummary, allResources)
-
-		if controlSummary.GetStatus().IsSkipped() {
-			prettyPrinter.printSummary(prettyPrinter.sortedControlNames[i], controlSummary)
-		}
+		prettyPrinter.printSummary(prettyPrinter.sortedControlNames[i], controlSummary)
 	}
 }
 
