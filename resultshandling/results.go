@@ -33,7 +33,10 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 		fmt.Println(err)
 	}
 
-	return opaSessionObj.Report.SummaryDetails.Score
+	score := opaSessionObj.Report.SummaryDetails.Score
+	resultsHandler.printerObj.Score(score)
+
+	return score
 }
 
 // CalculatePostureScore calculate final score
