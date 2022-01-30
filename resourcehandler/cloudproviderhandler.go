@@ -26,8 +26,14 @@ func initCloudProvider() ICloudProvider {
 
 	switch getCloudProvider() {
 	case "gke", "gcp":
+		if isEnvVars() {
+			return NewGKEProviderEnvVar()
+		}
 		return NewGKEProviderContext()
 	case "eks", "aws":
+		if isEnvVars() {
+			return NewEKSProviderEnvVar()
+		}
 		return NewEKSProviderContext()
 	}
 	return NewEmptyCloudProvider()
