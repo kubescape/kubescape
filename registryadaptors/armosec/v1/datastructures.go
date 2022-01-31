@@ -49,8 +49,8 @@ type ArmoSelectCustomer struct {
 
 type ArmoCivAdaptor struct {
 	registry   string
-	accountId  string
-	clientId   string
+	accountID  string
+	clientID   string
 	accessKey  string
 	feToken    FeLoginResponse
 	armoUrls   ArmoBeConfiguration

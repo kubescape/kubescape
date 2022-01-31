@@ -55,12 +55,13 @@ func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IRepo
 	return reporterv1.NewReportMock()
 }
 
-func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
+func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
-		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
+		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns, registryAdaptors)
 	}
+	getter.GetArmoAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects)
+	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors)
 }
 
 func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {

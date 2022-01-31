@@ -35,7 +35,7 @@ func (armoCivAdaptor *ArmoCivAdaptor) initializeUrls() error {
 }
 
 func (armoCivAdaptor *ArmoCivAdaptor) getAuthCookie() (string, error) {
-	selectCustomer := ArmoSelectCustomer{SelectedCustomerGuid: armoCivAdaptor.accountId}
+	selectCustomer := ArmoSelectCustomer{SelectedCustomerGuid: armoCivAdaptor.accountID}
 	requestBody, _ := json.Marshal(selectCustomer)
 	requestUrl := fmt.Sprintf("%s/api/v1/openid_customers", armoCivAdaptor.armoUrls.BackendUrl)
 	client := &http.Client{}
@@ -75,14 +75,18 @@ func (armoCivAdaptor *ArmoCivAdaptor) getAuthCookie() (string, error) {
 }
 
 func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulnerabilities.ContainerImageIdentifier) (string, error) {
-	filter := []map[string]string{{"imageTag": imageID.Tag}}
+	filter := []map[string]string{{"imageTag": imageID.Tag, "status": "Success"}}
 	pageSize := 1
 	pageNumber := 1
 	request := V2ListRequest{PageSize: &pageSize, PageNum: &pageNumber, InnerFilters: filter, OrderBy: "timestamp:desc"}
 	requestBody, _ := json.Marshal(request)
-	requestUrl := fmt.Sprintf("%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.armoUrls.BackendUrl, armoCivAdaptor.accountId)
+	requestUrl := fmt.Sprintf("%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.armoUrls.BackendUrl, armoCivAdaptor.accountID)
 	client := &http.Client{}
 	httpRequest, err := http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestBody))
+	if err != nil {
+		return "", err
+	}
+
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Authorization", fmt.Sprintf("Bearer %s", armoCivAdaptor.feToken.Token))
 	httpRequest.Header.Set("Cookie", fmt.Sprintf("auth=%s", armoCivAdaptor.authCookie))
@@ -119,4 +123,27 @@ func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulner
 	}
 
 	return scanSummartResult.Response[0].ContainerScanID, nil
+}
+
+func responseObjectToVulnerabilities(vulnerabilitiesList containerscan.VulnerabilitiesList) []registryvulnerabilities.Vulnerability {
+	vulnerabilities := make([]registryvulnerabilities.Vulnerability, len(vulnerabilitiesList))
+	for i, vulnerabilityEntry := range vulnerabilitiesList {
+		vulnerabilities[i].Description = vulnerabilityEntry.Description
+		vulnerabilities[i].Fixes = make([]registryvulnerabilities.FixedIn, len(vulnerabilityEntry.Fixes))
+		for j, fix := range vulnerabilityEntry.Fixes {
+			vulnerabilities[i].Fixes[j].ImgTag = fix.ImgTag
+			vulnerabilities[i].Fixes[j].Name = fix.Name
+			vulnerabilities[i].Fixes[j].Version = fix.Version
+		}
+		vulnerabilities[i].HealthStatus = vulnerabilityEntry.HealthStatus
+		vulnerabilities[i].Link = vulnerabilityEntry.Link
+		vulnerabilities[i].Metadata = vulnerabilityEntry.Metadata
+		vulnerabilities[i].Name = vulnerabilityEntry.Name
+		vulnerabilities[i].PackageVersion = vulnerabilityEntry.PackageVersion
+		vulnerabilities[i].RelatedPackageName = vulnerabilityEntry.RelatedPackageName
+		vulnerabilities[i].Relevancy = vulnerabilityEntry.Relevancy
+		vulnerabilities[i].Severity = vulnerabilityEntry.Severity
+		vulnerabilities[i].UrgentCount = vulnerabilityEntry.UrgentCount
+	}
+	return vulnerabilities
 }

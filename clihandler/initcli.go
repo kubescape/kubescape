@@ -63,7 +63,12 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.GetNamespace())
 	}
 
-	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler)
+	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
+	if err != nil {
+		// display warning
+	}
+
+	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
 
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
