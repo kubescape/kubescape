@@ -30,24 +30,26 @@ var (
 
 // Armo API for downloading policies
 type ArmoAPI struct {
-	httpClient   *http.Client
-	apiURL       string
-	erURL        string
-	feURL        string
-	customerGUID string
+	httpClient *http.Client
+	apiURL     string
+	erURL      string
+	feURL      string
+	accountID  string
+	clientID   string
+	accessKey  string
 }
 
-var globalArmoAPIConnecctor *ArmoAPI
+var globalArmoAPIConnector *ArmoAPI
 
 func SetARMOAPIConnector(armoAPI *ArmoAPI) {
-	globalArmoAPIConnecctor = armoAPI
+	globalArmoAPIConnector = armoAPI
 }
 
 func GetArmoAPIConnector() *ArmoAPI {
-	if globalArmoAPIConnecctor == nil {
+	if globalArmoAPIConnector == nil {
 		glog.Error("returning nil API connector")
 	}
-	return globalArmoAPIConnecctor
+	return globalArmoAPIConnector
 }
 
 func NewARMOAPIDev() *ArmoAPI {
@@ -85,17 +87,15 @@ func newArmoAPI() *ArmoAPI {
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
 	}
 }
-func (armoAPI *ArmoAPI) SetCustomerGUID(customerGUID string) {
-	armoAPI.customerGUID = customerGUID
 
-}
-func (armoAPI *ArmoAPI) GetFrontendURL() string {
-	return armoAPI.feURL
-}
-
-func (armoAPI *ArmoAPI) GetReportReceiverURL() string {
-	return armoAPI.erURL
-}
+func (armoAPI *ArmoAPI) GetAccountID() string          { return armoAPI.accountID }
+func (armoAPI *ArmoAPI) GetClientID() string           { return armoAPI.clientID }
+func (armoAPI *ArmoAPI) GetAccessKey() string          { return armoAPI.accessKey }
+func (armoAPI *ArmoAPI) GetFrontendURL() string        { return armoAPI.feURL }
+func (armoAPI *ArmoAPI) GetReportReceiverURL() string  { return armoAPI.erURL }
+func (armoAPI *ArmoAPI) SetAccountID(accountID string) { armoAPI.accountID = accountID }
+func (armoAPI *ArmoAPI) SetClientID(clientID string)   { armoAPI.clientID = clientID }
+func (armoAPI *ArmoAPI) SetAccessKey(accessKey string) { armoAPI.accessKey = accessKey }
 
 func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name), nil)
@@ -146,10 +146,10 @@ func (armoAPI *ArmoAPI) GetExceptions(clusterName string) ([]armotypes.PostureEx
 	return exceptions, nil
 }
 
-func (armoAPI *ArmoAPI) GetCustomerGUID() (*TenantResponse, error) {
-	url := armoAPI.getCustomerURL()
-	if armoAPI.customerGUID != "" {
-		url = fmt.Sprintf("%s?customerGUID=%s", url, armoAPI.customerGUID)
+func (armoAPI *ArmoAPI) GetTenant() (*TenantResponse, error) {
+	url := armoAPI.getAccountURL()
+	if armoAPI.accountID != "" {
+		url = fmt.Sprintf("%s?customerGUID=%s", url, armoAPI.accountID)
 	}
 	respStr, err := HttpGetter(armoAPI.httpClient, url, nil)
 	if err != nil {
@@ -159,14 +159,14 @@ func (armoAPI *ArmoAPI) GetCustomerGUID() (*TenantResponse, error) {
 	if err = JSONDecoder(respStr).Decode(tenant); err != nil {
 		return nil, err
 	}
-
+	armoAPI.accountID = tenant.TenantID
 	return tenant, nil
 }
 
 // ControlsInputs  // map[<control name>][<input arguments>]
 func (armoAPI *ArmoAPI) GetAccountConfig(clusterName string) (*armotypes.CustomerConfig, error) {
 	accountConfig := &armotypes.CustomerConfig{}
-	if armoAPI.customerGUID == "" {
+	if armoAPI.accountID == "" {
 		return accountConfig, nil
 	}
 	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(clusterName), nil)

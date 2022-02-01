@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/clihandler"
+	"github.com/armosec/kubescape/clihandler/cliobjects"
 	"github.com/spf13/cobra"
 )
 
@@ -28,7 +29,7 @@ var (
   https://hub.armo.cloud/docs/controls
 `
 )
-var listPolicies = cautils.ListPolicies{}
+var listPolicies = cliobjects.ListPolicies{}
 
 var listCmd = &cobra.Command{
 	Use:     "list <policy> [flags]",

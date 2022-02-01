@@ -99,16 +99,16 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
 
-	cautils.ClusterName = interfaces.tenantConfig.GetClusterName()   // TODO - Deprecated
-	cautils.CustomerGUID = interfaces.tenantConfig.GetCustomerGUID() // TODO - Deprecated
+	cautils.ClusterName = interfaces.tenantConfig.GetClusterName() // TODO - Deprecated
+	cautils.CustomerGUID = interfaces.tenantConfig.GetAccountID()  // TODO - Deprecated
 	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
-	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
+	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetAccountID())
 
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetCustomerGUID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
-	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
 
 	// TODO - list supported frameworks/controls

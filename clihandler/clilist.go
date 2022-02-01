@@ -5,11 +5,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/clihandler/cliobjects"
 )
 
-var listFunc = map[string]func(*cautils.ListPolicies) ([]string, error){
+var listFunc = map[string]func(*cliobjects.ListPolicies) ([]string, error){
 	"controls":   listControls,
 	"frameworks": listFrameworks,
 }
@@ -21,7 +21,7 @@ func ListSupportCommands() []string {
 	}
 	return commands
 }
-func CliList(listPolicies *cautils.ListPolicies) error {
+func CliList(listPolicies *cliobjects.ListPolicies) error {
 	if f, ok := listFunc[listPolicies.Target]; ok {
 		policies, err := f(listPolicies)
 		if err != nil {
@@ -40,16 +40,16 @@ func CliList(listPolicies *cautils.ListPolicies) error {
 	return fmt.Errorf("unknown command to download")
 }
 
-func listFrameworks(listPolicies *cautils.ListPolicies) ([]string, error) {
+func listFrameworks(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
-	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), true, nil)
+	g := getPolicyGetter(nil, tenant.GetAccountID(), true, nil)
 
 	return listFrameworksNames(g), nil
 }
 
-func listControls(listPolicies *cautils.ListPolicies) ([]string, error) {
+func listControls(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
-	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), false, nil)
+	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
 	l := getter.ListName
 	if listPolicies.ListIDs {
 		l = getter.ListID

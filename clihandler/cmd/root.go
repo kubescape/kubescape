@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cfgFile string
 var armoBEURLs = ""
 
 const envFlagUsage = "Send report results to specific URL. Format:<ReportReceiver>,<Backend>,<Frontend>.\n\t\tExample:report.armo.cloud,api.armo.cloud,portal.armo.cloud"
@@ -31,7 +30,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+
 	flag.CommandLine.StringVar(&armoBEURLs, "environment", "", envFlagUsage)
 	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "environment", "", envFlagUsage)
 	rootCmd.PersistentFlags().MarkHidden("environment")

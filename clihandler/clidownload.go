@@ -75,7 +75,7 @@ func downloadArtifacts(downloadInfo *cautils.DownloadInfo) error {
 
 func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
-	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetCustomerGUID(), nil)
+	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetAccountID(), nil)
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetClusterName())
 	if err != nil {
 		return err
@@ -97,7 +97,7 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 	exceptionsGetter := getExceptionsGetter("")
 	exceptions := []armotypes.PostureExceptionPolicy{}
-	if tenant.GetCustomerGUID() != "" {
+	if tenant.GetAccountID() != "" {
 		exceptions, err = exceptionsGetter.GetExceptions(tenant.GetClusterName())
 		if err != nil {
 			return err
@@ -118,7 +118,7 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
-	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), true, nil)
+	g := getPolicyGetter(nil, tenant.GetAccountID(), true, nil)
 
 	if downloadInfo.Name == "" {
 		// if framework name not specified - download all frameworks
@@ -154,7 +154,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 func downloadControl(downloadInfo *cautils.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
-	g := getPolicyGetter(nil, tenant.GetCustomerGUID(), false, nil)
+	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
 
 	if downloadInfo.Name == "" {
 		// TODO - support

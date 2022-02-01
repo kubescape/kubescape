@@ -4,6 +4,7 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
 	armosecadaptorv1 "github.com/armosec/kubescape/registryadaptors/armosec/v1"
 	"github.com/armosec/kubescape/registryadaptors/registryvulnerabilities"
 	"github.com/armosec/opa-utils/shared"
@@ -131,17 +132,24 @@ func imageTagsToContainerImageIdentifier(images []string) []registryvulnerabilit
 	return imagesIdentifiers
 }
 func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdaptor, error) {
-	customerGUID := " "
-	clientID := " "
-	accessKey := " "
-	registry := "armoui-dev.eudev3.cyberarmorsoft.com"
 
 	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
-	armosecAdaptor, err := armosecadaptorv1.NewArmoAdaptor(registry, map[string]string{"accountID": customerGUID, "clientID": clientID, "accessKey": accessKey})
-	if err != nil {
-		return nil, err
+
+	armoAPI := getter.GetArmoAPIConnector()
+	if armoAPI == nil {
+		accountID := armoAPI.GetAccountID()
+		clientID := armoAPI.GetClientID()
+		accessKey := armoAPI.GetAccessKey()
+		if accountID != "" && clientID != "" && accessKey != "" {
+			armosecAdaptor, err := armosecadaptorv1.NewArmoAdaptor(armoAPI.GetFrontendURL(), map[string]string{"accountID": accountID, "clientID": clientID, "accessKey": accessKey})
+			if err != nil {
+				return nil, err
+			}
+			adaptors = append(adaptors, armosecAdaptor)
+		} else {
+			// TODO - print warning
+		}
 	}
 
-	adaptors = append(adaptors, armosecAdaptor)
 	return adaptors, nil
 }

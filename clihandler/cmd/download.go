@@ -69,7 +69,7 @@ func init() {
 	// cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(downloadCmd)
-	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 }

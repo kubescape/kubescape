@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var setCmd = &cobra.Command{
+var setClusterCmd = &cobra.Command{
 	Use:   "set <key>=<value>",
 	Short: "Set configuration in cluster",
 	Long:  ``,
@@ -40,5 +40,5 @@ var setCmd = &cobra.Command{
 }
 
 func init() {
-	clusterCmd.AddCommand(setCmd)
+	clusterCmd.AddCommand(setClusterCmd)
 }

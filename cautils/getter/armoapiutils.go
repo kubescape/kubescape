@@ -13,7 +13,7 @@ func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.customerGUID)
+	q.Add("customerGUID", armoAPI.accountID)
 	if isNativeFramework(frameworkName) {
 		q.Add("frameworkName", strings.ToUpper(frameworkName))
 	} else {
@@ -31,7 +31,7 @@ func (armoAPI *ArmoAPI) getListFrameworkURL() string {
 	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.customerGUID)
+	q.Add("customerGUID", armoAPI.accountID)
 	u.RawQuery = q.Encode()
 
 	return u.String()
@@ -43,7 +43,7 @@ func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	u.Path = "api/v1/armoPostureExceptions"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.customerGUID)
+	q.Add("customerGUID", armoAPI.accountID)
 	// if clusterName != "" { // TODO - fix customer name support in Armo BE
 	// 	q.Add("clusterName", clusterName)
 	// }
@@ -59,7 +59,7 @@ func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	u.Path = "api/v1/armoCustomerConfiguration"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.customerGUID)
+	q.Add("customerGUID", armoAPI.accountID)
 	if clusterName != "" { // TODO - fix customer name support in Armo BE
 		q.Add("clusterName", clusterName)
 	}
@@ -68,7 +68,7 @@ func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getCustomerURL() string {
+func (armoAPI *ArmoAPI) getAccountURL() string {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = armoAPI.apiURL

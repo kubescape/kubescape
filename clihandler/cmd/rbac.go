@@ -29,7 +29,7 @@ var rabcCmd = &cobra.Command{
 		}
 
 		// list RBAC
-		rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName()))
+		rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetAccountID(), clusterConfig.GetClusterName()))
 
 		// submit resources
 		r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())

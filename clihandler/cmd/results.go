@@ -67,7 +67,7 @@ var resultsCmd = &cobra.Command{
 			return err
 		}
 
-		resultsObjects := NewResultsObject(clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName(), args[0])
+		resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
 
 		// submit resources
 		r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())

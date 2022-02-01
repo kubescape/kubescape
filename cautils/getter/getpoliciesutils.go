@@ -21,7 +21,7 @@ func GetDefaultPath(name string) string {
 }
 
 func SaveInFile(policy interface{}, pathStr string) error {
-	encodedData, err := json.Marshal(policy)
+	encodedData, err := json.MarshalIndent(policy, "", "  ")
 	if err != nil {
 		return err
 	}

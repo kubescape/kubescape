@@ -32,7 +32,7 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 	return &ReportEventReceiver{
 		httpClient:         &http.Client{},
 		clusterName:        tenantConfig.ClusterName,
-		customerGUID:       tenantConfig.CustomerGUID,
+		customerGUID:       tenantConfig.AccountID,
 		token:              tenantConfig.Token,
 		customerAdminEMail: tenantConfig.CustomerAdminEMail,
 	}
