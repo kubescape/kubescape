@@ -24,12 +24,12 @@ func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName +
 
 type ConfigObj struct {
 	AccountID          string `json:"accountID,omitempty"`
+	ClientID           string `json:"clientID,omitempty"`
+	AccessKey          string `json:"accessKey,omitempty"`
 	CustomerGUID       string `json:"customerGUID,omitempty"` // Deprecated
 	Token              string `json:"invitationParam,omitempty"`
 	CustomerAdminEMail string `json:"adminMail,omitempty"`
 	ClusterName        string `json:"clusterName,omitempty"`
-	ClientID           string `json:"clientID,omitempty"`
-	AccessKey          string `json:"accessKey,omitempty"`
 }
 
 // Config - convert ConfigObj to config file

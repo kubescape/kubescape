@@ -11,11 +11,14 @@ For these controls to work properly, it is necasery to
 2. Click Profile(top right icon)->"User Management"->"API Tokens" and Generate a token
 3. Copy the clientID and accessKey and run:
 ```
-kubescape set config --access-key <> --client-id <>
+kubescape config set clientID <>
+```
+```
+kubescape config set accessKey <>
 ```
 4. Confirm the keys are set
 ```
-kubescape view config
+kubescape config view
 ```
 Expecting:
 ```
@@ -25,7 +28,7 @@ Expecting:
   "accessKey": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 }
 ```
-> If you are missing the `accountID` field, set it by running `kubescape set config --account <>`
+> If you are missing the `accountID` field, set it by running `kubescape config set accountID <>`
 
 For CICD, set environments variables as following:
 ```

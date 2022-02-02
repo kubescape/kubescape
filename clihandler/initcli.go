@@ -11,7 +11,6 @@ import (
 
 	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
@@ -158,19 +157,9 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 }
 
 func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
-	policyNotification := &reporthandling.PolicyNotification{
-		NotificationType: reporthandling.TypeExecPostureScan,
-		Rules:            scanInfo.PolicyIdentifier,
-		Designators:      armotypes.PortalDesignator{},
-	}
-	switch policyNotification.NotificationType {
-	case reporthandling.TypeExecPostureScan:
-		if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
-			return err
-		}
-
-	default:
-		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
+	policyNotification := &reporthandling.PolicyNotification{Rules: scanInfo.PolicyIdentifier}
+	if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
+		return err
 	}
 	return nil
 }

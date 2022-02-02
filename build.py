@@ -37,7 +37,7 @@ def main():
     print("Building Kubescape")
 
     # print environment variables
-    print(os.environ)
+    # print(os.environ)
 
     # Set some variables
     packageName = getPackageName()

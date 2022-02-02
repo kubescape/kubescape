@@ -9,9 +9,10 @@ import (
 )
 
 var localGetCmd = &cobra.Command{
-	Use:   "get <key>",
-	Short: "Get configuration locally",
-	Long:  ``,
+	Use:        "get <key>",
+	Short:      "Get configuration locally",
+	Long:       ``,
+	Deprecated: "use the 'view' command instead",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 1 {
 			return fmt.Errorf("requires  one argument")
