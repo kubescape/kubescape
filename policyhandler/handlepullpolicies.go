@@ -16,7 +16,7 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 		return err
 	}
 	if len(frameworks) == 0 {
-		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(notification.Rules), ","))
+		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(notification.Rules), ", "))
 	}
 
 	policiesAndResources.Frameworks = frameworks

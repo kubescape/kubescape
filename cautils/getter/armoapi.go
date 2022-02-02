@@ -159,7 +159,9 @@ func (armoAPI *ArmoAPI) GetTenant() (*TenantResponse, error) {
 	if err = JSONDecoder(respStr).Decode(tenant); err != nil {
 		return nil, err
 	}
-	armoAPI.accountID = tenant.TenantID
+	if tenant.TenantID != "" {
+		armoAPI.accountID = tenant.TenantID
+	}
 	return tenant, nil
 }
 

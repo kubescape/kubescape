@@ -23,19 +23,13 @@ func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName +
 // ======================================================================================
 
 type ConfigObj struct {
-	AccountID          string `json:"customerGUID,omitempty"`
+	AccountID          string `json:"accountID,omitempty"`
+	CustomerGUID       string `json:"customerGUID,omitempty"` // Deprecated
 	Token              string `json:"invitationParam,omitempty"`
 	CustomerAdminEMail string `json:"adminMail,omitempty"`
 	ClusterName        string `json:"clusterName,omitempty"`
 	ClientID           string `json:"clientID,omitempty"`
 	AccessKey          string `json:"accessKey,omitempty"`
-}
-
-func (co *ConfigObj) Json() []byte {
-	if b, err := json.Marshal(co); err == nil {
-		return b
-	}
-	return []byte{}
 }
 
 // Config - convert ConfigObj to config file
@@ -459,6 +453,10 @@ func readConfig(dat []byte) (*ConfigObj, error) {
 	if err := json.Unmarshal(dat, configObj); err != nil {
 		return nil, err
 	}
+	if configObj.AccountID == "" {
+		configObj.AccountID = configObj.CustomerGUID
+	}
+	configObj.CustomerGUID = ""
 	return configObj, nil
 }
 
