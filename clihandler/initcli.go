@@ -5,13 +5,13 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
 
 	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
@@ -63,7 +63,12 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.GetNamespace())
 	}
 
-	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler)
+	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
+	if err != nil {
+		// display warning
+	}
+
+	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
 
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
@@ -94,16 +99,16 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
 
-	cautils.ClusterName = interfaces.tenantConfig.GetClusterName()   // TODO - Deprecated
-	cautils.CustomerGUID = interfaces.tenantConfig.GetCustomerGUID() // TODO - Deprecated
+	cautils.ClusterName = interfaces.tenantConfig.GetClusterName() // TODO - Deprecated
+	cautils.CustomerGUID = interfaces.tenantConfig.GetAccountID()  // TODO - Deprecated
 	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
-	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
+	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetAccountID())
 
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetCustomerGUID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
-	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
 
 	// TODO - list supported frameworks/controls

@@ -1,4 +1,4 @@
-package cautils
+package cliobjects
 
 type ListPolicies struct {
 	Target  string

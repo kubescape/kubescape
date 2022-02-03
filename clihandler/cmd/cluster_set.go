@@ -10,10 +10,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var setCmd = &cobra.Command{
-	Use:   "set <key>=<value>",
-	Short: "Set configuration in cluster",
-	Long:  ``,
+var setClusterCmd = &cobra.Command{
+	Use:        "set <key>=<value>",
+	Short:      "Set configuration in cluster",
+	Long:       ``,
+	Deprecated: "use the 'set' command instead",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 1 {
 			return fmt.Errorf("requires  one argument: <key>=<value>")
@@ -40,5 +41,5 @@ var setCmd = &cobra.Command{
 }
 
 func init() {
-	clusterCmd.AddCommand(setCmd)
+	clusterCmd.AddCommand(setClusterCmd)
 }
