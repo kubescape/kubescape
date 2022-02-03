@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	ksscore "github.com/armosec/kubescape/score"
 	"github.com/armosec/opa-utils/objectsenvelopes"
@@ -204,7 +205,10 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 
 				ruleResult.Status = apis.StatusFailed
 				for j := range ruleResponses[i].FailedPaths {
-					ruleResult.Paths = append(ruleResult.Paths, resourcesresults.Path{FailedPath: ruleResponses[i].FailedPaths[j]})
+					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: ruleResponses[i].FailedPaths[j]})
+				}
+				for j := range ruleResponses[i].FixPaths {
+					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: ruleResponses[i].FixPaths[j]})
 				}
 				resources[failedResources[j].GetID()] = ruleResult
 			}

@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
@@ -157,9 +158,21 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 }
 
 func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
-	policyNotification := &reporthandling.PolicyNotification{Rules: scanInfo.PolicyIdentifier}
-	if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
-		return err
+	policyNotification := &reporthandling.PolicyNotification{
+		Rules: scanInfo.PolicyIdentifier,
+		KubescapeNotification: reporthandling.KubescapeNotification{
+			Designators:      armotypes.PortalDesignator{},
+			NotificationType: reporthandling.TypeExecPostureScan,
+		},
+	}
+	switch policyNotification.KubescapeNotification.NotificationType {
+	case reporthandling.TypeExecPostureScan:
+		if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
+			return err
+		}
+
+	default:
+		return fmt.Errorf("notification type '%s' Unknown", policyNotification.KubescapeNotification.NotificationType)
 	}
 	return nil
 }

@@ -120,7 +120,12 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 						ruleResponse := reporthandling.RuleResponse{}
 						ruleResponse.Rulename = rulev2.GetName()
 						for i := range rulev2.Paths {
-							ruleResponse.FailedPaths = append(ruleResponse.FailedPaths, rulev2.Paths[i].FailedPath)
+							if rulev2.Paths[i].FailedPath != "" {
+								ruleResponse.FailedPaths = append(ruleResponse.FailedPaths, rulev2.Paths[i].FailedPath)
+							}
+							if rulev2.Paths[i].FixPath.Path != "" {
+								ruleResponse.FixPaths = append(ruleResponse.FixPaths, rulev2.Paths[i].FixPath)
+							}
 						}
 						ruleResponse.RuleStatus = string(status.Status())
 						if len(rulev2.Exception) > 0 {
