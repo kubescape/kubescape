@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"
@@ -99,8 +100,7 @@ var frameworkCmd = &cobra.Command{
 		cautils.SetSilentMode(scanInfo.Silent)
 		err := clihandler.ScanCliSetup(&scanInfo)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},

@@ -13,6 +13,8 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/opaprocessor"
@@ -38,8 +40,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	if scanInfo.GetScanningEnvironment() == cautils.ScanCluster {
 		k8s = getKubernetesApi()
 		if k8s == nil {
-			fmt.Println("Failed connecting to Kubernetes cluster")
-			os.Exit(1)
+			logger.L().Fatal("failed connecting to Kubernetes cluster")
 		}
 	}
 
@@ -50,11 +51,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	hostSensorHandler := getHostSensorHandler(scanInfo, k8s)
 	if err := hostSensorHandler.Init(); err != nil {
-		errMsg := "failed to init host sensor"
-		if scanInfo.VerboseMode {
-			errMsg = fmt.Sprintf("%s: %v", errMsg, err)
-		}
-		cautils.ErrorDisplay(errMsg)
+		logger.L().Error("failed to init host sensor", helpers.Error(err))
 		hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
 	}
 	// excluding hostsensor namespace
@@ -64,7 +61,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
 	if err != nil {
-		// display warning
+		logger.L().Error("failed to initialize registry adaptors", helpers.Error(err))
 	}
 
 	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
@@ -118,11 +115,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	//
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			errMsg := "failed to tear down host sensor"
-			if scanInfo.VerboseMode {
-				errMsg = fmt.Sprintf("%s: %v", errMsg, err)
-			}
-			cautils.ErrorDisplay(errMsg)
+			logger.L().Error("failed to tear down host sensor", helpers.Error(err))
 		}
 	}()
 
@@ -132,8 +125,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler)
 
 		if err := Scan(policyHandler, scanInfo); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 	}()
 

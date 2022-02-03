@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/spf13/cobra"
 )
@@ -58,8 +58,7 @@ var downloadCmd = &cobra.Command{
 			downloadInfo.Name = args[1]
 		}
 		if err := clihandler.CliDownload(&downloadInfo); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},
