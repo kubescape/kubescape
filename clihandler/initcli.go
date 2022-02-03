@@ -154,18 +154,20 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 
 func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
 	policyNotification := &reporthandling.PolicyNotification{
-		NotificationType: reporthandling.TypeExecPostureScan,
-		Rules:            scanInfo.PolicyIdentifier,
-		Designators:      armotypes.PortalDesignator{},
+		Rules: scanInfo.PolicyIdentifier,
+		KubescapeNotification: reporthandling.KubescapeNotification{
+			Designators:      armotypes.PortalDesignator{},
+			NotificationType: reporthandling.TypeExecPostureScan,
+		},
 	}
-	switch policyNotification.NotificationType {
+	switch policyNotification.KubescapeNotification.NotificationType {
 	case reporthandling.TypeExecPostureScan:
 		if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
 			return err
 		}
 
 	default:
-		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
+		return fmt.Errorf("notification type '%s' Unknown", policyNotification.KubescapeNotification.NotificationType)
 	}
 	return nil
 }
