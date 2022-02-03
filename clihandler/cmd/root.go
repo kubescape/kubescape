@@ -2,11 +2,10 @@ package cmd
 
 import (
 	"flag"
-	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/golang/glog"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -40,8 +39,7 @@ func init() {
 func InitArmoBEConnector() {
 	urlSlices := strings.Split(armoBEURLs, ",")
 	if len(urlSlices) > 3 {
-		glog.Errorf("Too many URLs")
-		os.Exit(1)
+		logger.L().Fatal("expected only 3 URLs")
 	}
 	switch len(urlSlices) {
 	case 1:
@@ -51,12 +49,10 @@ func InitArmoBEConnector() {
 		case "":
 			getter.SetARMOAPIConnector(getter.NewARMOAPIProd())
 		default:
-			glog.Errorf("--environment flag usage: %s", envFlagUsage)
-			os.Exit(1)
+			logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 		}
 	case 2:
-		glog.Errorf("--environment flag usage: %s", envFlagUsage)
-		os.Exit(1)
+		logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 	case 3:
 		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(urlSlices[0], urlSlices[1], urlSlices[2]))
 	}

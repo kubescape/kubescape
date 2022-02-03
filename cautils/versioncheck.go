@@ -7,6 +7,8 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	pkgutils "github.com/armosec/utils-go/utils"
 )
 
@@ -22,7 +24,7 @@ type IVersionCheckHandler interface {
 
 func NewIVersionCheckHandler() IVersionCheckHandler {
 	if BuildNumber == "" {
-		WarningDisplay(os.Stderr, "Warning: unknown build number, this might affect your scan results. Please make sure you are updated to latest version.\n")
+		logger.L().Warning("unknown build number, this might affect your scan results. Please make sure you are updated to latest version")
 	}
 	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && pkgutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
@@ -78,14 +80,14 @@ func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanni
 }
 
 func (v *VersionCheckHandlerMock) CheckLatestVersion(versionData *VersionCheckRequest) error {
-	fmt.Println("Skipping version check")
+	logger.L().Info("Skipping version check")
 	return nil
 }
 
 func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckRequest) error {
 	defer func() {
 		if err := recover(); err != nil {
-			WarningDisplay(os.Stderr, "failed to get latest version\n")
+			logger.L().Warning("failed to get latest version", helpers.Interface("error", err))
 		}
 	}()
 
@@ -96,7 +98,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 
 	if latestVersion.ClientUpdate != "" {
 		if BuildNumber != "" && BuildNumber < latestVersion.ClientUpdate {
-			WarningDisplay(os.Stderr, warningMessage(latestVersion.Client, latestVersion.ClientUpdate)+"\n")
+			logger.L().Warning(warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
 		}
 	}
 
@@ -106,7 +108,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 	// }
 
 	if latestVersion.Message != "" {
-		InfoDisplay(os.Stderr, latestVersion.Message+"\n")
+		logger.L().Info(latestVersion.Message)
 	}
 
 	return nil
@@ -132,5 +134,5 @@ func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest)
 }
 
 func warningMessage(kind, release string) string {
-	return fmt.Sprintf("Warning: '%s' is not updated to the latest release: '%s'", kind, release)
+	return fmt.Sprintf("'%s' is not updated to the latest release: '%s'", kind, release)
 }

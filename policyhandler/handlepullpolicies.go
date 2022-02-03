@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
 func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification, policiesAndResources *cautils.OPASessionObj) error {
-	cautils.ProgressTextDisplay("Downloading/Loading policy definitions")
+	logger.L().Info("Downloading/Loading policy definitions")
 
 	frameworks, err := policyHandler.getScanPolicies(notification)
 	if err != nil {
@@ -32,8 +33,7 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 	if err == nil {
 		policiesAndResources.RegoInputData.PostureControlInputs = controlsInputs
 	}
-
-	cautils.SuccessTextDisplay("Downloaded/Loaded policy")
+	logger.L().Success("Downloaded/Loaded policy")
 	return nil
 }
 

@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -47,7 +49,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
-	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
+	logger.L().Info("Accessing Kubernetes objects")
 
 	cautils.StartSpinner()
 
@@ -79,15 +81,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	}
 
 	cautils.StopSpinner()
+	logger.L().Success("Accessed successfully to Kubernetes objects")
 
-	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
 	return k8sResourcesMap, allResources, nil
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 	clusterAPIServerInfo, err := k8sHandler.k8s.DiscoveryClient.ServerVersion()
 	if err != nil {
-		cautils.ErrorDisplay(fmt.Sprintf("Failed to discover API server information: %v", err))
+		logger.L().Error(fmt.Sprintf("Failed to discover API server information", helpers.Error(err)))
 		return nil
 	}
 	return clusterAPIServerInfo

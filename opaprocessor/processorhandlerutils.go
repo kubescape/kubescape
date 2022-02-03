@@ -1,16 +1,17 @@
 package opaprocessor
 
 import (
+	"fmt"
+
 	pkgcautils "github.com/armosec/utils-go/utils"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 	resources "github.com/armosec/opa-utils/resources"
-
-	"github.com/golang/glog"
 )
 
 // updateResults update the results objects and report objects. This is a critical function - DO NOT CHANGE
@@ -79,8 +80,7 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
 							if k8sObj == nil {
-								continue
-								// glog.Errorf("Resource '%s' is nil, probably failed to pull the resource", groupResource)
+								logger.L().Debug(fmt.Sprintf("resource '%s' is nil, probably failed to pull the resource", groupResource))
 							}
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
@@ -122,7 +122,7 @@ func filterOutChildResources(objects []workloadinterface.IMetadata, match []repo
 func getRuleDependencies() (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {
-		glog.Warningf("failed to load rule dependencies")
+		logger.L().Warning("failed to load rule dependencies")
 	}
 	return modules, nil
 }

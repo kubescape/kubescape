@@ -88,7 +88,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 }
 
 func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
-	cautils.ScanStartDisplay()
+	logger.L().Info("ARMO security scanner starting")
 
 	interfaces := getInterfaces(scanInfo)
 	// setPolicyGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())

@@ -71,5 +71,5 @@ func (l Level) prefix() func(w io.Writer, format string, a ...interface{}) {
 }
 
 func (l Level) skip(l2 Level) bool {
-	return l > l2
+	return l < l2
 }

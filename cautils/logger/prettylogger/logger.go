@@ -47,8 +47,18 @@ func (pl *PrettyLogger) Success(msg string, details ...helpers.IDetails) {
 func (pl *PrettyLogger) print(level Level, msg string, details ...helpers.IDetails) {
 	if !level.skip(pl.level) {
 		level.prefix()(pl.writer, "[%s] ", level.string())
-		message(pl.writer, fmt.Sprintf("%s %+v", msg, details))
-		os.Exit(1)
+		message(pl.writer, fmt.Sprintf("%s %s\n", msg, detailsToString(details)))
 	}
 
+}
+
+func detailsToString(details []helpers.IDetails) string {
+	s := ""
+	for i := range details {
+		s += fmt.Sprintf("%s: %s", details[i].Key(), details[i].Value())
+		if i < len(details)-1 {
+			s += ";"
+		}
+	}
+	return s
 }
