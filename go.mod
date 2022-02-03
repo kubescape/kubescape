@@ -5,12 +5,14 @@ go 1.17
 require (
 	github.com/armosec/armoapi-go v0.0.41
 	github.com/armosec/k8s-interface v0.0.56
-	github.com/armosec/opa-utils v0.0.99
+	github.com/armosec/opa-utils v0.0.105
 	github.com/armosec/rbac-utils v0.0.12
 	github.com/armosec/utils-go v0.0.3
+	github.com/armosec/utils-k8s-go v0.0.1
 	github.com/briandowns/spinner v1.18.0
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
+	github.com/francoispqt/gojay v1.2.13
 	github.com/gofrs/uuid v4.1.0+incompatible
 	github.com/golang/glog v1.0.0
 	github.com/mattn/go-isatty v0.0.14
@@ -19,7 +21,6 @@ require (
 	github.com/satori/go.uuid v1.2.0
 	github.com/spf13/cobra v1.2.1
 	github.com/stretchr/testify v1.7.0
-	go.uber.org/zap v1.19.1
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/api v0.22.2
 	k8s.io/apimachinery v0.22.2
@@ -37,7 +38,6 @@ require (
 	github.com/Azure/go-autorest/tracing v0.6.0 // indirect
 	github.com/OneOfOne/xxhash v1.2.8 // indirect
 	github.com/armosec/armo-interfaces v0.0.3 // indirect
-	github.com/armosec/utils-k8s-go v0.0.1 // indirect
 	github.com/aws/aws-sdk-go v1.41.11 // indirect
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -45,7 +45,6 @@ require (
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
 	github.com/form3tech-oss/jwt-go v3.2.3+incompatible // indirect
-	github.com/francoispqt/gojay v1.2.13 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/go-gota/gota v0.12.0 // indirect
 	github.com/go-logr/logr v0.4.0 // indirect
@@ -78,6 +77,7 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
+	go.uber.org/zap v1.19.1 // indirect
 	golang.org/x/crypto v0.0.0-20210711020723-a769d52b0f97 // indirect
 	golang.org/x/net v0.0.0-20210825183410-e898025ed96a // indirect
 	golang.org/x/oauth2 v0.0.0-20211005180243-6b3c2da341f1 // indirect

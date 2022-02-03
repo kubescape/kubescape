@@ -30,14 +30,16 @@ type K8sResourceHandler struct {
 	hostSensorHandler hostsensorutils.IHostSensor
 	fieldSelector     IFieldSelector
 	rbacObjectsAPI    *cautils.RBACObjects
+	registryAdaptors  *RegistryAdaptors
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors) *K8sResourceHandler {
 	return &K8sResourceHandler{
 		k8s:               k8s,
 		fieldSelector:     fieldSelector,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
+		registryAdaptors:  registryAdaptors,
 	}
 }
 
@@ -60,6 +62,11 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
 		return k8sResourcesMap, allResources, err
 	}
+
+	if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources); err != nil {
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect image vulnerabilities: %s\n", err.Error())
+	}
+
 	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
 		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect host sensor resources\n")
 	}

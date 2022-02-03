@@ -6,6 +6,7 @@ echo
  
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
+KUBESCAPE_ZIP=kubescape.zip
 
 osName=$(uname -s)
 if [[ $osName == *"MINGW"* ]]; then

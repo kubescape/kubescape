@@ -24,8 +24,15 @@ type IExceptionsGetter interface {
 	GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error)
 }
 type IBackend interface {
-	GetCustomerGUID() (*TenantResponse, error)
-	SetCustomerGUID(customerGUID string)
+	GetAccountID() string
+	GetClientID() string
+	GetAccessKey() string
+
+	SetAccountID(accountID string)
+	SetClientID(clientID string)
+	SetAccessKey(accessKey string)
+
+	GetTenant() (*TenantResponse, error)
 }
 
 type IControlsInputsGetter interface {

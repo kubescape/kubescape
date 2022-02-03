@@ -34,13 +34,15 @@ const (
 
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
-	inputPatterns []string
+	inputPatterns    []string
+	registryAdaptors *RegistryAdaptors
 }
 
-func NewFileResourceHandler(inputPatterns []string) *FileResourceHandler {
+func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAdaptors) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
-		inputPatterns: inputPatterns,
+		inputPatterns:    inputPatterns,
+		registryAdaptors: registryAdaptors,
 	}
 }
 
@@ -88,6 +90,10 @@ func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling
 			}
 			(*k8sResources)[i] = ids
 		}
+	}
+
+	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources); err != nil {
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect images vulnerabilities: %s\n", err.Error())
 	}
 
 	return k8sResources, allResources, nil
