@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
 	"sigs.k8s.io/yaml"
 )
@@ -154,7 +155,8 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	if hsh.DaemonSet == nil {
 		return res, nil
 	}
-	cautils.ProgressTextDisplay("Accessing host sensor")
+
+	logger.L().Info("Accessing host sensor")
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 	kcData, err := hsh.GetKubeletConfigurations()
@@ -193,6 +195,7 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	}
 	res = append(res, kcData...)
 	// finish
-	cautils.SuccessTextDisplay("Read host information from host sensor")
+
+	logger.L().Success("Read host information from host sensor")
 	return res, nil
 }

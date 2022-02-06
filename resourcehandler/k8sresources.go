@@ -3,10 +3,11 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -47,7 +48,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
-	cautils.ProgressTextDisplay("Accessing Kubernetes objects")
+	logger.L().Info("Accessing Kubernetes objects")
 
 	cautils.StartSpinner()
 
@@ -64,36 +65,37 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	}
 
 	if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources); err != nil {
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect image vulnerabilities: %s\n", err.Error())
+		logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
 	}
 
 	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect host sensor resources\n")
+		logger.L().Warning("failed to collect host sensor resources", helpers.Error(err))
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect rbac resources\n")
+		logger.L().Warning("failed to collect rbac resources", helpers.Error(err))
 	}
 	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
-		cautils.WarningDisplay(os.Stderr, fmt.Sprintf("Warning: %v\n", err.Error()))
+		logger.L().Warning("failed to collect cloud data", helpers.Error(err))
 	}
 
 	cautils.StopSpinner()
+	logger.L().Success("Accessed successfully to Kubernetes objects")
 
-	cautils.SuccessTextDisplay("Accessed successfully to Kubernetes objects")
 	return k8sResourcesMap, allResources, nil
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 	clusterAPIServerInfo, err := k8sHandler.k8s.DiscoveryClient.ServerVersion()
 	if err != nil {
-		cautils.ErrorDisplay(fmt.Sprintf("Failed to discover API server information: %v", err))
+		logger.L().Error("failed to discover API server information", helpers.Error(err))
 		return nil
 	}
 	return clusterAPIServerInfo
 }
 
 func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
+	logger.L().Debug("Accessing Kubernetes objects")
 
 	var errs error
 	for groupResource := range *k8sResources {
@@ -106,7 +108,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 				if errs == nil {
 					errs = err
 				} else {
-					errs = fmt.Errorf("%s\n%s", errs, err.Error())
+					errs = fmt.Errorf("%s; %s", errs, err.Error())
 				}
 			}
 			continue
@@ -167,6 +169,8 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 }
 
 func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
+	logger.L().Debug("Collecting host sensor resources")
+
 	hostResources, err := k8sHandler.hostSensorHandler.CollectResources()
 	if err != nil {
 		return err
@@ -186,6 +190,8 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
+	logger.L().Debug("Collecting rbac resources")
+
 	if k8sHandler.rbacObjectsAPI == nil {
 		return nil
 	}
@@ -200,6 +206,8 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 }
 
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *cautils.K8SResources) error {
+	logger.L().Debug("Collecting cloud data")
+
 	cloudProvider := initCloudProvider()
 	cluster := cloudProvider.getKubeCluster()
 	clusterName := cloudProvider.getKubeClusterName()
@@ -212,6 +220,8 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 	if err != nil {
 		return err
 	}
+	logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
+
 	if provider != "" {
 		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
 		if err != nil {

@@ -101,7 +101,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--use-from`                |                           | Load local framework object from specified path. If not used will download latest                                                                                                                                                                                                                                    | 
 | `--use-artifacts-from`                |                           | Load artifacts (frameworks, control-config, exceptions) from local directory. If not used will download them                                                                                                                                                                                                                                    |                                              |
 | `--use-default`             | `false`                   | Load local framework object from default path. If not used will download latest                                                                                                                                                                                                                                      | `true`/`false`                               |
-| `--exceptions`              |                           | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal                                                                                                                                                                                               |  
+| `--exceptions`              |                           | Path to an exceptions obj, [examples](examples/exceptions/README.md). Default will download exceptions from Kubescape SaaS                                                                                                                                                                                               |  
 | `--controls-config`              |                           | Path to a controls-config obj. If not set will download controls-config from ARMO management portal                                                                                                                                                                                               |                                            |
 | `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
 | `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
@@ -113,6 +113,12 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ## Usage & Examples
 
 ### Examples
+
+
+#### Scan a running Kubernetes cluster and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
+```
+kubescape scan --submit
+```
 
 #### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
@@ -265,6 +271,7 @@ variables in this script:
 + ArmoBEServer
 + ArmoERServer
 + ArmoWebsite
++ ArmoAuthServer
 
 
 ## Build using go

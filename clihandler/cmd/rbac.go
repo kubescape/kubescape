@@ -1,11 +1,10 @@
 package cmd
 
 import (
-	"fmt"
-	"os"
-
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
@@ -23,10 +22,7 @@ var rabcCmd = &cobra.Command{
 		k8s := k8sinterface.NewKubernetesApi()
 
 		// get config
-		clusterConfig, err := getSubmittedClusterConfig(k8s)
-		if err != nil {
-			return err
-		}
+		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
 
 		// list RBAC
 		rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetAccountID(), clusterConfig.GetClusterName()))
@@ -41,8 +37,7 @@ var rabcCmd = &cobra.Command{
 		}
 
 		if err := clihandler.Submit(submitInterfaces); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},
@@ -50,4 +45,18 @@ var rabcCmd = &cobra.Command{
 
 func init() {
 	submitCmd.AddCommand(rabcCmd)
+}
+
+// getKubernetesApi
+func getKubernetesApi() *k8sinterface.KubernetesApi {
+	if !k8sinterface.IsConnectedToCluster() {
+		return nil
+	}
+	return k8sinterface.NewKubernetesApi()
+}
+func getTenantConfig(Account, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
+		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), Account, clusterName)
+	}
+	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), Account, clusterName)
 }

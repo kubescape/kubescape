@@ -72,6 +72,7 @@ type ScanInfo struct {
 	HostSensor         BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
 	Local              bool        // Do not submit results
 	Account            string      // account ID
+	Logger             string      // logger level
 	KubeContext        string      // context name
 	FrameworkScan      bool        // false if scanning control
 	ScanAll            bool        // true if scan all frameworks

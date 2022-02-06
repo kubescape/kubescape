@@ -10,6 +10,8 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -60,15 +62,17 @@ func (hsh *HostSensorHandler) Init() error {
 	// store namespace + port
 	// store pod names
 	// make sure all pods are running, after X seconds treat has running anyway, and log an error on the pods not running yet
-	cautils.ProgressTextDisplay("Installing host sensor")
+	logger.L().Info("Installing host sensor")
+
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
+
 	if err := hsh.applyYAML(); err != nil {
 		return fmt.Errorf("in HostSensorHandler init failed to apply YAML: %v", err)
 	}
 	hsh.populatePodNamesToNodeNames()
 	if err := hsh.checkPodForEachNode(); err != nil {
-		fmt.Printf("failed to validate host-sensor pods status: %v", err)
+		logger.L().Error("failed to validate host-sensor pods status", helpers.Error(err))
 	}
 	return nil
 }

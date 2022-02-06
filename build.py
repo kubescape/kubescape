@@ -8,6 +8,7 @@ BASE_GETTER_CONST = "github.com/armosec/kubescape/cautils/getter"
 BE_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoBEURL"
 ER_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoERURL"
 WEBSITE_CONST     = BASE_GETTER_CONST + ".ArmoFEURL"
+AUTH_SERVER_CONST = BASE_GETTER_CONST + ".armoAUTHURL"
 
 def checkStatus(status, msg):
     if status != 0:
@@ -46,6 +47,7 @@ def main():
     ArmoBEServer = os.getenv("ArmoBEServer")
     ArmoERServer = os.getenv("ArmoERServer")
     ArmoWebsite = os.getenv("ArmoWebsite")
+    ArmoAuthServer = os.getenv("ArmoAuthServer")
 
     # Create build directory
     buildDir = getBuildDir()
@@ -56,7 +58,8 @@ def main():
     # Build kubescape
     ldflags = "-w -s -X %s=%s -X %s=%s -X %s=%s -X %s=%s" \
         % (buildUrl, releaseVersion, BE_SERVER_CONST, ArmoBEServer,
-           ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite)
+           ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite,
+           AUTH_SERVER_CONST, ArmoAuthServer)
     status = subprocess.call(["go", "build", "-o", "%s/%s" % (buildDir, packageName), "-ldflags" ,ldflags])
     checkStatus(status, "Failed to build kubescape")
     

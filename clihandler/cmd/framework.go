@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"
@@ -46,7 +47,6 @@ var frameworkCmd = &cobra.Command{
 	Short:   "The framework you wish to use. Run 'kubescape list frameworks' for the list of supported frameworks",
 	Example: frameworkExample,
 	Long:    "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
-	// ValidArgs: getter.NativeFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			frameworks := strings.Split(args[0], ",")
@@ -65,7 +65,6 @@ var frameworkCmd = &cobra.Command{
 		var frameworks []string
 
 		if len(args) == 0 { // scan all frameworks
-			// frameworks = getter.NativeFrameworks
 			scanInfo.ScanAll = true
 		} else {
 			// Read frameworks from input args
@@ -99,8 +98,7 @@ var frameworkCmd = &cobra.Command{
 		cautils.SetSilentMode(scanInfo.Silent)
 		err := clihandler.ScanCliSetup(&scanInfo)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},
@@ -122,11 +120,9 @@ func init() {
 
 func flagValidationFramework() {
 	if scanInfo.Submit && scanInfo.Local {
-		fmt.Println("You can use `keep-local` or `submit`, but not both")
-		os.Exit(1)
+		logger.L().Fatal("you can use `keep-local` or `submit`, but not both")
 	}
 	if 100 < scanInfo.FailThreshold {
-		fmt.Println("bad argument: out of range threshold")
-		os.Exit(1)
+		logger.L().Fatal("bad argument: out of range threshold")
 	}
 }

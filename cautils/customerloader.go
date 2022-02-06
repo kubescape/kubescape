@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -114,7 +115,7 @@ func NewLocalConfig(backendAPI getter.IBackend, customerGUID, clusterName string
 
 	if lc.configObj.AccountID != "" {
 		if err := lc.SetTenant(); err != nil {
-			fmt.Println(err)
+			logger.L().Error(err.Error())
 		}
 	}
 
@@ -229,7 +230,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 
 	if c.configObj.AccountID != "" {
 		if err := c.SetTenant(); err != nil {
-			fmt.Println(err) // TODO: print to log
+			logger.L().Error(err.Error())
 		}
 	}
 

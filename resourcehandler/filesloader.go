@@ -14,6 +14,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 
@@ -107,7 +108,7 @@ func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info 
 func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
 	files, errs := listFiles(inputPatterns)
 	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
 		return nil, nil
@@ -115,7 +116,7 @@ func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetada
 
 	workloads, errs := loadFiles(files)
 	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	return workloads, nil
 }

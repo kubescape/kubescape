@@ -1,6 +1,10 @@
 package v1
 
-import "time"
+import (
+	"time"
+
+	"github.com/armosec/kubescape/cautils/getter"
+)
 
 type V2ListRequest struct {
 	// properties of the requested next page
@@ -26,33 +30,6 @@ type V2ListRequest struct {
 	FieldsList              []string          `json:"includeFields,omitempty"`
 	FieldsReverseKeywordMap map[string]string `json:"-,omitempty"`
 }
-
-type FeLoginData struct {
-	Secret   string `json:"secret"`
-	ClientId string `json:"clientId"`
-}
-
-type FeLoginResponse struct {
-	Token        string `json:"accessToken"`
-	RefreshToken string `json:"refreshToken"`
-	ExpiresIn    int32  `json:"expiresIn"`
-	Expires      string `json:"expires"`
-}
-
-type ArmoBeConfiguration struct {
-	BackendUrl string `json:"backend"`
-	AuthUrl    string `json:"authUrl"`
-}
-type ArmoSelectCustomer struct {
-	SelectedCustomerGuid string `json:"selectedCustomer"`
-}
-
 type ArmoCivAdaptor struct {
-	registry   string
-	accountID  string
-	clientID   string
-	accessKey  string
-	feToken    FeLoginResponse
-	armoUrls   ArmoBeConfiguration
-	authCookie string
+	armoAPI *getter.ArmoAPI
 }
