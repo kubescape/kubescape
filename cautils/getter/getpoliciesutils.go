@@ -57,7 +57,7 @@ func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]stri
 	if err != nil {
 		return "", err
 	}
-	addHeaders(req, headers)
+	setHeaders(req, headers)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -76,7 +76,7 @@ func HttpPost(httpClient *http.Client, fullURL string, headers map[string]string
 	if err != nil {
 		return "", err
 	}
-	addHeaders(req, headers)
+	setHeaders(req, headers)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
@@ -88,10 +88,10 @@ func HttpPost(httpClient *http.Client, fullURL string, headers map[string]string
 	return respStr, nil
 }
 
-func addHeaders(req *http.Request, headers map[string]string) {
+func setHeaders(req *http.Request, headers map[string]string) {
 	if len(headers) >= 0 { // might be nil
 		for k, v := range headers {
-			req.Header.Add(k, v)
+			req.Header.Set(k, v)
 		}
 	}
 }

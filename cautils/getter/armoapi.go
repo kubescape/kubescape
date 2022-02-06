@@ -121,7 +121,7 @@ func (armoAPI *ArmoAPI) IsLoggedIn() bool              { return armoAPI.loggedIn
 func (armoAPI *ArmoAPI) GetClientID() string           { return armoAPI.clientID }
 func (armoAPI *ArmoAPI) GetAccessKey() string          { return armoAPI.accessKey }
 func (armoAPI *ArmoAPI) GetFrontendURL() string        { return armoAPI.feURL }
-func (armoAPI *ArmoAPI) GetAPIURL() string             { return armoAPI.feURL }
+func (armoAPI *ArmoAPI) GetAPIURL() string             { return armoAPI.apiURL }
 func (armoAPI *ArmoAPI) GetReportReceiverURL() string  { return armoAPI.erURL }
 func (armoAPI *ArmoAPI) SetAccountID(accountID string) { armoAPI.accountID = accountID }
 func (armoAPI *ArmoAPI) SetClientID(clientID string)   { armoAPI.clientID = clientID }

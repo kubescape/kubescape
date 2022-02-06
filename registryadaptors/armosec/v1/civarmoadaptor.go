@@ -5,6 +5,8 @@ import (
 	"fmt"
 
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/containerscan"
 	"github.com/armosec/kubescape/registryadaptors/registryvulnerabilities"
 )
@@ -27,6 +29,8 @@ func (armoCivAdaptor *ArmoCivAdaptor) GetImagesVulnerabilities(imageIDs []regist
 		result, err := armoCivAdaptor.GetImageVulnerability(&imageID)
 		if err == nil {
 			resultList = append(resultList, *result)
+		} else {
+			logger.L().Debug("failed to get image vulnerabilities", helpers.String("image", imageID.Tag), helpers.Error(err))
 		}
 	}
 	return resultList, nil
