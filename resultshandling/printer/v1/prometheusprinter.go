@@ -6,6 +6,7 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -90,7 +91,6 @@ func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionO
 
 	err := printer.printReports(opaSessionObj.AllResources, opaSessionObj.PostureReport.FrameworkReports)
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		logger.L().Fatal(err.Error())
 	}
 }

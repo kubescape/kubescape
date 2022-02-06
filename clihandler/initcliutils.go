@@ -141,7 +141,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		if scanInfo.Submit {
 			// submit - Create tenant & Submit report
 			if err := tenantConfig.SetTenant(); err != nil {
-				fmt.Println(err)
+				logger.L().Error(err.Error())
 			}
 		}
 	}

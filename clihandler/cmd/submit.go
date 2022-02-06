@@ -10,6 +10,9 @@ import (
 
 var submitInfo cliobjects.Submit
 
+var submitCmdExamples = `
+
+`
 var submitCmd = &cobra.Command{
 	Use:   "submit <command>",
 	Short: "Submit an object to the Kubescape SaaS version",

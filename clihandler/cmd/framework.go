@@ -122,11 +122,9 @@ func init() {
 
 func flagValidationFramework() {
 	if scanInfo.Submit && scanInfo.Local {
-		fmt.Println("You can use `keep-local` or `submit`, but not both")
-		os.Exit(1)
+		logger.L().Fatal("you can use `keep-local` or `submit`, but not both")
 	}
 	if 100 < scanInfo.FailThreshold {
-		fmt.Println("bad argument: out of range threshold")
-		os.Exit(1)
+		logger.L().Fatal("bad argument: out of range threshold")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
@@ -33,13 +34,11 @@ func (junitPrinter *JunitPrinter) FinalizeData(opaSessionObj *cautils.OPASession
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.Report)
 	if err != nil {
-		fmt.Println("Failed to convert posture report object!")
-		os.Exit(1)
+		logger.L().Fatal("failed to convert posture report object")
 	}
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {
-		fmt.Println("Failed to convert posture report object!")
-		os.Exit(1)
+		logger.L().Fatal("failed to convert posture report object")
 	}
 	junitPrinter.writer.Write(postureReportStr)
 }

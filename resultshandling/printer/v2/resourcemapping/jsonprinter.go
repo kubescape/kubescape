@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/resultshandling/printer"
 )
 
@@ -30,8 +31,7 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 	postureReportStr, err := json.Marshal(opaSessionObj.Report)
 
 	if err != nil {
-		fmt.Println("Failed to convert posture report object!")
-		os.Exit(1)
+		logger.L().Fatal("failed to convert posture report object")
 	}
 	jsonPrinter.writer.Write(postureReportStr)
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -40,7 +41,7 @@ var getCmd = &cobra.Command{
 			}
 			return err
 		}
-		fmt.Println(key + "=" + val)
+		logger.L().Info(key + "=" + val)
 		return nil
 	},
 }

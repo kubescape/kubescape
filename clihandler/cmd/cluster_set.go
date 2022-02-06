@@ -7,6 +7,7 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -35,7 +36,7 @@ var setClusterCmd = &cobra.Command{
 		if err := clusterConfig.SetKeyValueInConfigmap(key, data); err != nil {
 			return err
 		}
-		fmt.Println("Value added successfully.")
+		logger.L().Info("value added successfully.")
 		return nil
 	},
 }
