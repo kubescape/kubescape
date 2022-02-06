@@ -18,11 +18,13 @@ func NewZapLogger() *ZapLogger {
 	}
 }
 
-func (zl *ZapLogger) SetLevel(level string) {}
-func (zl *ZapLogger) GetLevel() string      { return "" }
-func (zl *ZapLogger) SetWriter(w *os.File)  {}
-func (zl *ZapLogger) GetWriter() *os.File   { return nil }
+func (zl *ZapLogger) GetLevel() string     { return "" }
+func (zl *ZapLogger) SetWriter(w *os.File) {}
+func GetWriter() *os.File                  { return nil }
 
+func (zl *ZapLogger) SetLevel(level string) error {
+	return nil
+}
 func (zl *ZapLogger) Fatal(msg string, details ...helpers.IDetails) {
 	zl.zapL.Fatal(msg, detailsToZapFields(details)...)
 }

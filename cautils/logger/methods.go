@@ -15,7 +15,7 @@ type ILogger interface {
 	Info(msg string, details ...helpers.IDetails)
 	Debug(msg string, details ...helpers.IDetails)
 
-	SetLevel(level string)
+	SetLevel(level string) error
 	GetLevel() string
 
 	SetWriter(w *os.File)

@@ -9,44 +9,50 @@ import (
 
 type PrettyLogger struct {
 	writer *os.File
-	level  Level
+	level  helpers.Level
 }
 
 func NewPrettyLogger() *PrettyLogger {
 	return &PrettyLogger{
 		writer: os.Stderr, // default to stderr
-		level:  InfoLevel,
+		level:  helpers.InfoLevel,
 	}
 }
 
-func (pl *PrettyLogger) SetLevel(level string) { pl.level = toLevel(level) }
-func (pl *PrettyLogger) GetLevel() string      { return pl.level.string() }
-func (pl *PrettyLogger) SetWriter(w *os.File)  { pl.writer = w }
-func (pl *PrettyLogger) GetWriter() *os.File   { return pl.writer }
+func (pl *PrettyLogger) GetLevel() string     { return pl.level.String() }
+func (pl *PrettyLogger) SetWriter(w *os.File) { pl.writer = w }
+func (pl *PrettyLogger) GetWriter() *os.File  { return pl.writer }
 
+func (pl *PrettyLogger) SetLevel(level string) error {
+	pl.level = helpers.ToLevel(level)
+	if pl.level == helpers.UnknownLevel {
+		return fmt.Errorf("level '%s' unknown", level)
+	}
+	return nil
+}
 func (pl *PrettyLogger) Fatal(msg string, details ...helpers.IDetails) {
-	pl.print(FatalLevel, msg, details...)
+	pl.print(helpers.FatalLevel, msg, details...)
 	os.Exit(1)
 }
 func (pl *PrettyLogger) Error(msg string, details ...helpers.IDetails) {
-	pl.print(ErrorLevel, msg, details...)
+	pl.print(helpers.ErrorLevel, msg, details...)
 }
 func (pl *PrettyLogger) Warning(msg string, details ...helpers.IDetails) {
-	pl.print(WarningLevel, msg, details...)
+	pl.print(helpers.WarningLevel, msg, details...)
 }
 func (pl *PrettyLogger) Info(msg string, details ...helpers.IDetails) {
-	pl.print(InfoLevel, msg, details...)
+	pl.print(helpers.InfoLevel, msg, details...)
 }
 func (pl *PrettyLogger) Debug(msg string, details ...helpers.IDetails) {
-	pl.print(DebugLevel, msg, details...)
+	pl.print(helpers.DebugLevel, msg, details...)
 }
 func (pl *PrettyLogger) Success(msg string, details ...helpers.IDetails) {
-	pl.print(SuccessLevel, msg, details...)
+	pl.print(helpers.SuccessLevel, msg, details...)
 }
 
-func (pl *PrettyLogger) print(level Level, msg string, details ...helpers.IDetails) {
-	if !level.skip(pl.level) {
-		level.prefix()(pl.writer, "[%s] ", level.string())
+func (pl *PrettyLogger) print(level helpers.Level, msg string, details ...helpers.IDetails) {
+	if !level.Skip(pl.level) {
+		prefix(level)(pl.writer, "[%s] ", level.String())
 		message(pl.writer, fmt.Sprintf("%s %s\n", msg, detailsToString(details)))
 	}
 
