@@ -16,7 +16,6 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
@@ -166,27 +165,6 @@ func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo
 	default:
 		return fmt.Errorf("notification type '%s' Unknown", policyNotification.KubescapeNotification.NotificationType)
 	}
-	return nil
-}
-
-func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
-
-	// list resources
-	postureReport, err := submitInterfaces.SubmitObjects.SetResourcesReport()
-	if err != nil {
-		return err
-	}
-	allresources, err := submitInterfaces.SubmitObjects.ListAllResources()
-	if err != nil {
-		return err
-	}
-	// report
-	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
-		return err
-	}
-	logger.L().Success("Data has been submitted successfully")
-	submitInterfaces.Reporter.DisplayReportURL()
-
 	return nil
 }
 

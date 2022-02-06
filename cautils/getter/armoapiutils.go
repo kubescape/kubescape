@@ -56,6 +56,19 @@ func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	return u.String()
 }
 
+func (armoAPI *ArmoAPI) postExceptionsURL() string {
+	u := url.URL{}
+	u.Scheme = "https"
+	u.Host = armoAPI.apiURL
+	u.Path = "api/v1/postureExceptionPolicy"
+
+	q := u.Query()
+	q.Add("customerGUID", armoAPI.accountID)
+	u.RawQuery = q.Encode()
+
+	return u.String()
+}
+
 func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	u := url.URL{}
 	u.Scheme = "https"

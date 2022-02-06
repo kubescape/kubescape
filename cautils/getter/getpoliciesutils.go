@@ -106,21 +106,22 @@ func httpRespToString(resp *http.Response) (string, error) {
 	if resp.ContentLength > 0 {
 		strBuilder.Grow(int(resp.ContentLength))
 	}
-	bytesNum, err := io.Copy(&strBuilder, resp.Body)
+	_, err := io.Copy(&strBuilder, resp.Body)
 	respStr := strBuilder.String()
 	if err != nil {
 		respStrNewLen := len(respStr)
 		if respStrNewLen > 1024 {
 			respStrNewLen = 1024
 		}
-		return "", fmt.Errorf("HTTP request failed. URL: '%s', Read-ERROR: '%s', HTTP-CODE: '%s', BODY(top): '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), err, resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
+		return "", fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, respStr[:respStrNewLen])
+		// return "", fmt.Errorf("HTTP request failed. URL: '%s', Read-ERROR: '%s', HTTP-CODE: '%s', BODY(top): '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), err, resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respStrNewLen := len(respStr)
 		if respStrNewLen > 1024 {
 			respStrNewLen = 1024
 		}
-		err = fmt.Errorf("HTTP request failed. URL: '%s', HTTP-ERROR: '%s', BODY: '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
+		err = fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, respStr[:respStrNewLen])
 	}
 
 	return respStr, err

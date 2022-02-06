@@ -6,7 +6,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
@@ -60,13 +59,10 @@ var resultsCmd = &cobra.Command{
 			return fmt.Errorf("missing results file")
 		}
 
-		k8s := k8sinterface.NewKubernetesApi()
+		k8s := getKubernetesApi()
 
 		// get config
-		clusterConfig, err := getSubmittedClusterConfig(k8s)
-		if err != nil {
-			return err
-		}
+		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
 
 		resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
 

@@ -1,9 +1,10 @@
 package cmd
 
 import (
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
+	"fmt"
+
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliobjects"
 	"github.com/spf13/cobra"
 )
@@ -21,18 +22,25 @@ var submitCmd = &cobra.Command{
 	},
 }
 
+var submitExceptionsCmd = &cobra.Command{
+	Use:   "exceptions <full path to exceptins file>",
+	Short: "Submit exceptions to the Kubescape SaaS version",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) != 1 {
+			return fmt.Errorf("missing full path to exceptions file")
+		}
+		return nil
+	},
+	Run: func(cmd *cobra.Command, args []string) {
+		if err := clihandler.SubmitExceptions(submitInfo.Account, args[0]); err != nil {
+			logger.L().Fatal(err.Error())
+		}
+	},
+}
+
 func init() {
 	submitCmd.PersistentFlags().StringVarP(&submitInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 	rootCmd.AddCommand(submitCmd)
-}
 
-func getSubmittedClusterConfig(k8s *k8sinterface.KubernetesApi) (*cautils.ClusterConfig, error) {
-	clusterConfig := cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), submitInfo.Account, scanInfo.KubeContext) // TODO - support none cluster env submit
-	if clusterConfig.GetAccountID() != "" {
-		if err := clusterConfig.SetTenant(); err != nil {
-			return clusterConfig, err
-		}
-	}
-
-	return clusterConfig, nil
+	submitCmd.AddCommand(submitExceptionsCmd)
 }

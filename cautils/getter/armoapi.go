@@ -268,6 +268,21 @@ func (armoAPI *ArmoAPI) ListControls(l ListType) ([]string, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
 
+func (armoAPI *ArmoAPI) PostExceptions(exceptions []armotypes.PostureExceptionPolicy) error {
+
+	for i := range exceptions {
+		ex, err := json.Marshal(exceptions[i])
+		if err != nil {
+			return err
+		}
+		_, err = armoAPI.Post(armoAPI.postExceptionsURL(), map[string]string{"Content-Type": "application/json"}, ex)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (armoAPI *ArmoAPI) Login() error {
 	if armoAPI.accountID == "" {
 		return fmt.Errorf("failed to login, missing accountID")
