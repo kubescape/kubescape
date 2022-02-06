@@ -1,78 +1,12 @@
 package v1
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"strings"
 
 	"github.com/armosec/kubescape/containerscan"
 	"github.com/armosec/kubescape/registryadaptors/registryvulnerabilities"
 )
-
-func (armoCivAdaptor *ArmoCivAdaptor) initializeUrls() error {
-	configUrl := fmt.Sprintf("https://%s/assets/configs/config.json", armoCivAdaptor.registry)
-	resp, err := http.Get(configUrl)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("cannot retrieve backend config file %s: status %d", configUrl, resp.StatusCode)
-	}
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	err = json.Unmarshal(body, &armoCivAdaptor.armoUrls)
-	if err != nil {
-		return err
-	}
-	return nil
-
-}
-
-func (armoCivAdaptor *ArmoCivAdaptor) getAuthCookie() (string, error) {
-	selectCustomer := ArmoSelectCustomer{SelectedCustomerGuid: armoCivAdaptor.accountID}
-	requestBody, _ := json.Marshal(selectCustomer)
-	requestUrl := fmt.Sprintf("%s/api/v1/openid_customers", armoCivAdaptor.armoUrls.BackendUrl)
-	client := &http.Client{}
-	httpRequest, err := http.NewRequest(http.MethodPost, requestUrl, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return "", err
-	}
-	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("Authorization", fmt.Sprintf("Bearer %s", armoCivAdaptor.feToken.Token))
-	httpResponse, err := client.Do(httpRequest)
-	if err != nil {
-		return "", err
-	}
-	defer httpResponse.Body.Close()
-	if httpResponse.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("error getting cookie at %s: status %d", requestUrl, httpResponse.StatusCode)
-	}
-
-	cookies := httpResponse.Header.Get("set-cookie")
-	if len(cookies) == 0 {
-		return "", fmt.Errorf("no cookie field in response from %s", requestUrl)
-	}
-
-	authCookie := ""
-	for _, cookie := range strings.Split(cookies, ";") {
-		kv := strings.Split(cookie, "=")
-		if kv[0] == "auth" {
-			authCookie = kv[1]
-		}
-	}
-
-	if len(authCookie) == 0 {
-		return "", fmt.Errorf("no auth cookie field in response from %s", requestUrl)
-	}
-
-	return authCookie, nil
-}
 
 func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulnerabilities.ContainerImageIdentifier) (string, error) {
 	filter := []map[string]string{{"imageTag": imageID.Tag, "status": "Success"}}
@@ -80,27 +14,9 @@ func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulner
 	pageNumber := 1
 	request := V2ListRequest{PageSize: &pageSize, PageNum: &pageNumber, InnerFilters: filter, OrderBy: "timestamp:desc"}
 	requestBody, _ := json.Marshal(request)
-	requestUrl := fmt.Sprintf("%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.armoUrls.BackendUrl, armoCivAdaptor.accountID)
-	client := &http.Client{}
-	httpRequest, err := http.NewRequest("POST", requestUrl, bytes.NewBuffer(requestBody))
-	if err != nil {
-		return "", err
-	}
+	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.armoAPI.GetAPIURL(), armoCivAdaptor.armoAPI.GetAccountID())
 
-	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("Authorization", fmt.Sprintf("Bearer %s", armoCivAdaptor.feToken.Token))
-	httpRequest.Header.Set("Cookie", fmt.Sprintf("auth=%s", armoCivAdaptor.authCookie))
-	resp, err := client.Do(httpRequest)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("error requests %s with %d", requestUrl, resp.StatusCode)
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
+	resp, err := armoCivAdaptor.armoAPI.Post(requestUrl, map[string]string{"Content-Type": "application/json"}, requestBody)
 	if err != nil {
 		return "", err
 	}
@@ -113,7 +29,7 @@ func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulner
 		Response []containerscan.ElasticContainerScanSummaryResult `json:"response"`
 		Cursor   string                                            `json:"cursor"`
 	}{}
-	err = json.Unmarshal(body, &scanSummartResult)
+	err = json.Unmarshal([]byte(resp), &scanSummartResult)
 	if err != nil {
 		return "", err
 	}

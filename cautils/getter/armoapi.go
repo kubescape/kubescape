@@ -1,8 +1,10 @@
 package getter
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"strings"
 	"time"
@@ -19,24 +21,30 @@ import (
 var (
 	// ATTENTION!!!
 	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFULL
-	armoERURL = "report.armo.cloud"
-	armoBEURL = "api.armo.cloud"
-	armoFEURL = "portal.armo.cloud"
+	armoERURL   = "report.armo.cloud"
+	armoBEURL   = "api.armo.cloud"
+	armoFEURL   = "portal.armo.cloud"
+	armoAUTHURL = "eggauth.armo.cloud"
 
-	armoDevERURL = "report.eudev3.cyberarmorsoft.com"
-	armoDevBEURL = "eggdashbe.eudev3.cyberarmorsoft.com"
-	armoDevFEURL = "armoui-dev.eudev3.cyberarmorsoft.com"
+	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
+	armoDevBEURL   = "api-dev.armo.cloud"
+	armoDevFEURL   = "armoui-dev.eudev3.cyberarmorsoft.com"
+	armoDevAUTHURL = "eggauth.eudev3.cyberarmorsoft.com"
 )
 
 // Armo API for downloading policies
 type ArmoAPI struct {
 	httpClient *http.Client
 	apiURL     string
+	authURL    string
 	erURL      string
 	feURL      string
 	accountID  string
 	clientID   string
 	accessKey  string
+	feToken    FeLoginResponse
+	authCookie string
+	loggedIn   bool
 }
 
 var globalArmoAPIConnector *ArmoAPI
@@ -56,6 +64,7 @@ func NewARMOAPIDev() *ArmoAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.apiURL = armoDevBEURL
+	apiObj.authURL = armoDevAUTHURL
 	apiObj.erURL = armoDevERURL
 	apiObj.feURL = armoDevFEURL
 
@@ -68,16 +77,18 @@ func NewARMOAPIProd() *ArmoAPI {
 	apiObj.apiURL = armoBEURL
 	apiObj.erURL = armoERURL
 	apiObj.feURL = armoFEURL
+	apiObj.authURL = armoAUTHURL
 
 	return apiObj
 }
 
-func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL string) *ArmoAPI {
+func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL string) *ArmoAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.erURL = armoERURL
 	apiObj.apiURL = armoBEURL
 	apiObj.feURL = armoFEURL
+	apiObj.authURL = armoAUTHURL
 
 	return apiObj
 }
@@ -85,20 +96,39 @@ func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL string) *ArmoAPI {
 func newArmoAPI() *ArmoAPI {
 	return &ArmoAPI{
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
+		loggedIn:   false,
 	}
 }
 
+func (armoAPI *ArmoAPI) Post(fullURL string, headers map[string]string, body []byte) (string, error) {
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	armoAPI.appendAuthHeaders(headers)
+	return HttpPost(armoAPI.httpClient, fullURL, headers, body)
+}
+
+func (armoAPI *ArmoAPI) Get(fullURL string, headers map[string]string) (string, error) {
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	armoAPI.appendAuthHeaders(headers)
+	return HttpGetter(armoAPI.httpClient, fullURL, headers)
+}
+
 func (armoAPI *ArmoAPI) GetAccountID() string          { return armoAPI.accountID }
+func (armoAPI *ArmoAPI) IsLoggedIn() bool              { return armoAPI.loggedIn }
 func (armoAPI *ArmoAPI) GetClientID() string           { return armoAPI.clientID }
 func (armoAPI *ArmoAPI) GetAccessKey() string          { return armoAPI.accessKey }
 func (armoAPI *ArmoAPI) GetFrontendURL() string        { return armoAPI.feURL }
+func (armoAPI *ArmoAPI) GetAPIURL() string             { return armoAPI.feURL }
 func (armoAPI *ArmoAPI) GetReportReceiverURL() string  { return armoAPI.erURL }
 func (armoAPI *ArmoAPI) SetAccountID(accountID string) { armoAPI.accountID = accountID }
 func (armoAPI *ArmoAPI) SetClientID(clientID string)   { armoAPI.clientID = clientID }
 func (armoAPI *ArmoAPI) SetAccessKey(accessKey string) { armoAPI.accessKey = accessKey }
 
 func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getFrameworkURL(name), nil)
+	respStr, err := armoAPI.Get(armoAPI.getFrameworkURL(name), nil)
 	if err != nil {
 		return nil, nil
 	}
@@ -113,7 +143,7 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, er
 }
 
 func (armoAPI *ArmoAPI) GetFrameworks() ([]reporthandling.Framework, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
+	respStr, err := armoAPI.Get(armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, nil
 	}
@@ -134,7 +164,7 @@ func (armoAPI *ArmoAPI) GetControl(policyName string) (*reporthandling.Control, 
 func (armoAPI *ArmoAPI) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	exceptions := []armotypes.PostureExceptionPolicy{}
 
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getExceptionsURL(clusterName), nil)
+	respStr, err := armoAPI.Get(armoAPI.getExceptionsURL(clusterName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -151,7 +181,7 @@ func (armoAPI *ArmoAPI) GetTenant() (*TenantResponse, error) {
 	if armoAPI.accountID != "" {
 		url = fmt.Sprintf("%s?customerGUID=%s", url, armoAPI.accountID)
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, url, nil)
+	respStr, err := armoAPI.Get(url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +201,7 @@ func (armoAPI *ArmoAPI) GetAccountConfig(clusterName string) (*armotypes.Custome
 	if armoAPI.accountID == "" {
 		return accountConfig, nil
 	}
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getAccountConfig(clusterName), nil)
+	respStr, err := armoAPI.Get(armoAPI.getAccountConfig(clusterName), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -193,7 +223,7 @@ func (armoAPI *ArmoAPI) GetControlsInputs(clusterName string) (map[string][]stri
 }
 
 func (armoAPI *ArmoAPI) ListCustomFrameworks() ([]string, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
+	respStr, err := armoAPI.Get(armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -213,7 +243,7 @@ func (armoAPI *ArmoAPI) ListCustomFrameworks() ([]string, error) {
 }
 
 func (armoAPI *ArmoAPI) ListFrameworks() ([]string, error) {
-	respStr, err := HttpGetter(armoAPI.httpClient, armoAPI.getListFrameworkURL(), nil)
+	respStr, err := armoAPI.Get(armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -238,9 +268,48 @@ func (armoAPI *ArmoAPI) ListControls(l ListType) ([]string, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
 
-type TenantResponse struct {
-	TenantID  string `json:"tenantId"`
-	Token     string `json:"token"`
-	Expires   string `json:"expires"`
-	AdminMail string `json:"adminMail,omitempty"`
+func (armoAPI *ArmoAPI) Login() error {
+	if armoAPI.accountID == "" {
+		return fmt.Errorf("failed to login, missing accountID")
+	}
+	if armoAPI.clientID == "" {
+		return fmt.Errorf("failed to login, missing clientID")
+	}
+	if armoAPI.accessKey == "" {
+		return fmt.Errorf("failed to login, missing accessKey")
+	}
+
+	// init URLs
+	feLoginData := FeLoginData{ClientId: armoAPI.clientID, Secret: armoAPI.accessKey}
+	body, _ := json.Marshal(feLoginData)
+
+	resp, err := http.Post(armoAPI.getApiToken(), "application/json", bytes.NewBuffer(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("error authenticating: %d", resp.StatusCode)
+	}
+
+	responseBody, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	var feLoginResponse FeLoginResponse
+
+	if err = json.Unmarshal(responseBody, &feLoginResponse); err != nil {
+		return err
+	}
+	armoAPI.feToken = feLoginResponse
+
+	/* Now we have JWT */
+
+	armoAPI.authCookie, err = armoAPI.getAuthCookie()
+	if err != nil {
+		return err
+	}
+	armoAPI.loggedIn = true
+	return nil
 }

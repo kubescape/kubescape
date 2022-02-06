@@ -54,7 +54,6 @@ var controlCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 
 		if len(args) == 0 {
-			// scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, reporthandling.KindFramework)
 			scanInfo.ScanAll = true
 		} else { // expected control or list of control sepparated by ","
 

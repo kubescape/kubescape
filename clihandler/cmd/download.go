@@ -21,7 +21,7 @@ var (
   kubescape download artifacts --output /tmp
   
   # Download the NSA framework. Run 'kubescape list frameworks' for all frameworks names
-  kubescape download frameworks nsa
+  kubescape download framework nsa
 
   # Download the "Allowed hostPath" control. Run 'kubescape list controls' for all controls names
   kubescape download control "Allowed hostPath"

@@ -271,6 +271,7 @@ variables in this script:
 + ArmoBEServer
 + ArmoERServer
 + ArmoWebsite
++ ArmoAuthServer
 
 
 ## Build using go

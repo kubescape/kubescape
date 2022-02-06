@@ -3,6 +3,7 @@ package prettylogger
 import (
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 )
@@ -10,12 +11,14 @@ import (
 type PrettyLogger struct {
 	writer *os.File
 	level  helpers.Level
+	mutex  sync.Mutex
 }
 
 func NewPrettyLogger() *PrettyLogger {
 	return &PrettyLogger{
 		writer: os.Stderr, // default to stderr
 		level:  helpers.InfoLevel,
+		mutex:  sync.Mutex{},
 	}
 }
 
@@ -52,8 +55,10 @@ func (pl *PrettyLogger) Success(msg string, details ...helpers.IDetails) {
 
 func (pl *PrettyLogger) print(level helpers.Level, msg string, details ...helpers.IDetails) {
 	if !level.Skip(pl.level) {
+		pl.mutex.Lock()
 		prefix(level)(pl.writer, "[%s] ", level.String())
-		message(pl.writer, fmt.Sprintf("%s %s\n", msg, detailsToString(details)))
+		message(pl.writer, fmt.Sprintf("%s. %s\n", msg, detailsToString(details)))
+		pl.mutex.Unlock()
 	}
 
 }

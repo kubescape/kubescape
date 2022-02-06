@@ -5,6 +5,8 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	armosecadaptorv1 "github.com/armosec/kubescape/registryadaptors/armosec/v1"
 	"github.com/armosec/kubescape/registryadaptors/registryvulnerabilities"
 	"github.com/armosec/opa-utils/shared"
@@ -32,6 +34,7 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 }
 
 func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) error {
+	logger.L().Debug("Collecting images vulnerabilities")
 
 	// list cluster images
 	images := listImagesTags(k8sResourcesMap, allResources)
@@ -41,7 +44,8 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	for i := range registryAdaptors.adaptors { // login and and get vulnerabilities
 
 		if err := registryAdaptors.adaptors[i].Login(); err != nil {
-			return err
+			logger.L().Error("failed to login", helpers.Error(err))
+			continue
 		}
 		vulnerabilities, err := registryAdaptors.adaptors[i].GetImagesVulnerabilities(imagesIdentifiers)
 		if err != nil {
@@ -136,18 +140,9 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
 
 	armoAPI := getter.GetArmoAPIConnector()
-	if armoAPI == nil {
-		accountID := armoAPI.GetAccountID()
-		clientID := armoAPI.GetClientID()
-		accessKey := armoAPI.GetAccessKey()
-		if accountID != "" && clientID != "" && accessKey != "" {
-			armosecAdaptor, err := armosecadaptorv1.NewArmoAdaptor(armoAPI.GetFrontendURL(), map[string]string{"accountID": accountID, "clientID": clientID, "accessKey": accessKey})
-			if err != nil {
-				return nil, err
-			}
-			adaptors = append(adaptors, armosecAdaptor)
-		} else {
-			// TODO - print warning
+	if armoAPI != nil {
+		if armoAPI.GetAccessKey() != "" && armoAPI.GetClientID() != "" && armoAPI.GetAccountID() != "" {
+			adaptors = append(adaptors, armosecadaptorv1.NewArmoAdaptor(getter.GetArmoAPIConnector()))
 		}
 	}
 

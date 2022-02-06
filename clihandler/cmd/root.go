@@ -56,8 +56,8 @@ func initLogger() {
 }
 func initEnvironment() {
 	urlSlices := strings.Split(armoBEURLs, ",")
-	if len(urlSlices) > 3 {
-		logger.L().Fatal("expected only 3 URLs")
+	if len(urlSlices) != 1 && len(urlSlices) < 3 {
+		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
 	}
 	switch len(urlSlices) {
 	case 1:
@@ -71,7 +71,14 @@ func initEnvironment() {
 		}
 	case 2:
 		logger.L().Fatal("--environment flag usage: " + envFlagUsage)
-	case 3:
-		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(urlSlices[0], urlSlices[1], urlSlices[2]))
+	case 3, 4:
+		var armoAUTHURL string
+		armoERURL := urlSlices[0] // mandatory
+		armoBEURL := urlSlices[1] // mandatory
+		armoFEURL := urlSlices[2] // mandatory
+		if len(urlSlices) <= 4 {
+			armoAUTHURL = urlSlices[3]
+		}
+		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL))
 	}
 }

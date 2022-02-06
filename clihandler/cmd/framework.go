@@ -47,7 +47,6 @@ var frameworkCmd = &cobra.Command{
 	Short:   "The framework you wish to use. Run 'kubescape list frameworks' for the list of supported frameworks",
 	Example: frameworkExample,
 	Long:    "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
-	// ValidArgs: getter.NativeFrameworks,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			frameworks := strings.Split(args[0], ",")
@@ -66,7 +65,6 @@ var frameworkCmd = &cobra.Command{
 		var frameworks []string
 
 		if len(args) == 0 { // scan all frameworks
-			// frameworks = getter.NativeFrameworks
 			scanInfo.ScanAll = true
 		} else {
 			// Read frameworks from input args
