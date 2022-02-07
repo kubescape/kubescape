@@ -10,7 +10,7 @@ Kubescape is the first open-source tool for testing if Kubernetes is deployed se
 |-----|------|---------|-------------|
 | affinity | object | `{}` |  |
 | configMap | object | `{"create":true,"params":{"clusterName":"<MyK8sClusterName>","customerGUID":"<MyGUID>,"}}` | ARMO customer information |
-| frameworks | string | `"nsa"` | Comma-separated list of frameworks to scan (i.e. "nsa,mitre,armobest") |
+| frameworks | list | `["nsa"]` | List of frameworks to scan |
 | fullnameOverride | string | `""` |  |
 | image | object | `{"imageName":"kubescape","pullPolicy":"IfNotPresent","repository":"quay.io/armosec","tag":"latest"}` | Image and version to deploy |
 | imagePullSecrets | list | `[]` |  |

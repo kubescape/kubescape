@@ -1,3 +1,8 @@
+{{ $frameworks := "" }}
+{{ range .Values.frameworks }}
+{{ $frameworks = cat $frameworks . }}
+{{ end }}
+{{- $frameworks = $frameworks | trim | replace " " "," }}
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -15,7 +20,7 @@ spec:
             image: "{{ .Values.image.repository }}/{{ .Values.image.imageName }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
             imagePullPolicy: {{ .Values.image.pullPolicy }}
             command: ["/bin/sh", "-c"]
-            args: ["kubescape scan framework {{ .Values.frameworks }} --submit"]
+            args: ["kubescape scan framework {{ $frameworks }} --submit"]
             volumeMounts:
             - name: kubescape-config-volume
               mountPath: /root/.kubescape/config.json
