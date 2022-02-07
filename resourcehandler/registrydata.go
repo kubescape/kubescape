@@ -141,7 +141,7 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 
 	armoAPI := getter.GetArmoAPIConnector()
 	if armoAPI != nil {
-		if armoAPI.GetAccessKey() != "" && armoAPI.GetClientID() != "" && armoAPI.GetAccountID() != "" {
+		if armoAPI.GetSecretKey() != "" && armoAPI.GetClientID() != "" && armoAPI.GetAccountID() != "" {
 			adaptors = append(adaptors, armosecadaptorv1.NewArmoAdaptor(getter.GetArmoAPIConnector()))
 		}
 	}

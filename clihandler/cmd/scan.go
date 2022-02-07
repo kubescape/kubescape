@@ -17,7 +17,7 @@ var scanCmd = &cobra.Command{
 		if len(args) > 0 {
 			if args[0] != "framework" && args[0] != "control" {
 				scanInfo.ScanAll = true
-				return frameworkCmd.RunE(cmd, args)
+				return frameworkCmd.RunE(cmd, append([]string{"all"}, args...))
 			}
 		}
 		return nil

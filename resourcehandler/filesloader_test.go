@@ -1,11 +1,12 @@
 package resourcehandler
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func onlineBoutiquePath() string {
@@ -14,32 +15,26 @@ func onlineBoutiquePath() string {
 }
 
 func TestListFiles(t *testing.T) {
-	workDir, err := os.Getwd()
-	fmt.Printf("\n------------------\n%s,%v\n--------------\n", workDir, err)
+
 	filesPath := onlineBoutiquePath()
-	fmt.Printf("\n------------------\n%s\n--------------\n", filesPath)
 
 	files, errs := listFiles([]string{filesPath})
-	if len(errs) > 0 {
-		t.Error(errs)
-	}
-	expected := 12
-	if len(files) != expected {
-		t.Errorf("wrong number of files, expected: %d, found: %d", expected, len(files))
-	}
+	assert.Equal(t, 0, len(errs))
+	assert.Equal(t, 12, len(files))
 }
 
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles([]string{onlineBoutiquePath()})
-	loadFiles(files)
+	_, err := loadFiles(files)
+	assert.Equal(t, 0, len(err))
 }
 
 func TestLoadFile(t *testing.T) {
 	files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1)})
+	assert.Equal(t, 1, len(files))
+
 	_, err := loadFile(files[0])
-	if err != nil {
-		t.Errorf("%v", err)
-	}
+	assert.NoError(t, err)
 }
 func TestMapResources(t *testing.T) {
 	// policyHandler := &PolicyHandler{}
