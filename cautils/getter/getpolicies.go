@@ -26,11 +26,11 @@ type IExceptionsGetter interface {
 type IBackend interface {
 	GetAccountID() string
 	GetClientID() string
-	GetAccessKey() string
+	GetSecretKey() string
 
 	SetAccountID(accountID string)
 	SetClientID(clientID string)
-	SetAccessKey(accessKey string)
+	SetSecretKey(secretKey string)
 
 	GetTenant() (*TenantResponse, error)
 }

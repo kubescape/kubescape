@@ -11,8 +11,8 @@ func CliSetConfig(setConfig *cliobjects.SetConfig) error {
 	if setConfig.Account != "" {
 		tenant.GetConfigObj().AccountID = setConfig.Account
 	}
-	if setConfig.AccessKey != "" {
-		tenant.GetConfigObj().AccessKey = setConfig.AccessKey
+	if setConfig.SecretKey != "" {
+		tenant.GetConfigObj().SecretKey = setConfig.SecretKey
 	}
 	if setConfig.ClientID != "" {
 		tenant.GetConfigObj().ClientID = setConfig.ClientID

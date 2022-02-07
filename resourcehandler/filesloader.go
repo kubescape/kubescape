@@ -195,11 +195,15 @@ func listFiles(patterns []string) ([]string, []error) {
 			o, _ := os.Getwd()
 			patterns[i] = filepath.Join(o, patterns[i])
 		}
-		f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
-		if err != nil {
-			errs = append(errs, err)
+		if isFile(patterns[i]) {
+			files = append(files, patterns[i])
 		} else {
-			files = append(files, f...)
+			f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				files = append(files, f...)
+			}
 		}
 	}
 	return files, errs
@@ -276,8 +280,17 @@ func convertYamlToJson(i interface{}) interface{} {
 	return i
 }
 
+func isYaml(filePath string) bool {
+	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+}
+
+func isJson(filePath string) bool {
+	return cautils.StringInSlice(JSON_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+}
+
 func glob(root, pattern string) ([]string, error) {
 	var matches []string
+
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -297,12 +310,13 @@ func glob(root, pattern string) ([]string, error) {
 	}
 	return matches, nil
 }
-func isYaml(filePath string) bool {
-	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
-}
-
-func isJson(filePath string) bool {
-	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+func isFile(name string) bool {
+	if fi, err := os.Stat(name); err == nil {
+		if fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 func getFileFormat(filePath string) FileFormat {
