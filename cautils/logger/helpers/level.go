@@ -28,7 +28,7 @@ func ToLevel(level string) Level {
 		return InfoLevel
 	case "success":
 		return SuccessLevel
-	case "warnign", "warn":
+	case "warning", "warn":
 		return WarningLevel
 	case "error":
 		return ErrorLevel
@@ -47,7 +47,7 @@ func (l Level) String() string {
 	case SuccessLevel:
 		return "success"
 	case WarningLevel:
-		return "warnign"
+		return "warning"
 	case ErrorLevel:
 		return "error"
 	case FatalLevel:
