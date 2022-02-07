@@ -1,6 +1,6 @@
 # kubescape
 
-![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.0.128](https://img.shields.io/badge/AppVersion-v1.0.128-informational?style=flat-square)
+![Version: 1.0.1](https://img.shields.io/badge/Version-1.0.1-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.0.128](https://img.shields.io/badge/AppVersion-v1.0.128-informational?style=flat-square)
 
 Kubescape is the first open-source tool for testing if Kubernetes is deployed securely according to multiple frameworks regulatory, customized company policies and DevSecOps best practices, such as the  [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo) and the [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) . Kubescape scans K8s clusters, YAML files, and HELM charts, and detect misconfigurations and software vulnerabilities at early stages of the CI/CD pipeline and provides a risk score instantly and risk trends over time. Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI and Github workflows.
 
@@ -10,6 +10,7 @@ Kubescape is the first open-source tool for testing if Kubernetes is deployed se
 |-----|------|---------|-------------|
 | affinity | object | `{}` |  |
 | configMap | object | `{"create":true,"params":{"clusterName":"<MyK8sClusterName>","customerGUID":"<MyGUID>,"}}` | ARMO customer information |
+| frameworks | string | `"nsa"` | Comma-separated list of frameworks to scan (i.e. "nsa,mitre,armobest") |
 | fullnameOverride | string | `""` |  |
 | image | object | `{"imageName":"kubescape","pullPolicy":"IfNotPresent","repository":"quay.io/armosec","tag":"latest"}` | Image and version to deploy |
 | imagePullSecrets | list | `[]` |  |

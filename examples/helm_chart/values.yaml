@@ -15,6 +15,9 @@
 #      UTC * * * * *
 schedule: "* * 1 * *"
 
+# -- Comma-separated list of frameworks to scan (i.e. "nsa,mitre,armobest")
+frameworks: nsa
+
 # -- Image and version to deploy
 image:
   repository: quay.io/armosec
