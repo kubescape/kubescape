@@ -41,7 +41,7 @@ func (gkeProvider *GKEProviderEnvVar) getProjectForGKE(cluster string) (string, 
 	}
 	parsedName := strings.Split(cluster, "_")
 	if len(parsedName) < 3 {
-		return "", fmt.Errorf("error: failed to parse cluster name")
+		return "", fmt.Errorf("failed to parse project name from cluster name: '%s'", cluster)
 	}
 	project = parsedName[1]
 	return project, nil
@@ -54,7 +54,7 @@ func (gkeProvider *GKEProviderEnvVar) getRegionForGKE(cluster string) (string, e
 	}
 	parsedName := strings.Split(cluster, "_")
 	if len(parsedName) < 3 {
-		return "", fmt.Errorf("error: failed to parse cluster name")
+		return "", fmt.Errorf("failed to parse region name from cluster name: '%s'", cluster)
 	}
 	region = parsedName[2]
 	return region, nil
@@ -71,7 +71,11 @@ func NewGKEProviderContext() *GKEProviderContext {
 }
 
 func (gkeProviderContext *GKEProviderContext) getKubeClusterName() string {
-	cluster := k8sinterface.GetCurrentContext().Cluster
+	context := k8sinterface.GetCurrentContext()
+	if context == nil {
+		return ""
+	}
+	cluster := context.Cluster
 	parsedName := strings.Split(cluster, "_")
 	if len(parsedName) < 3 {
 		return ""
@@ -90,7 +94,11 @@ func (gkeProviderContext *GKEProviderContext) getKubeClusterName() string {
 }
 
 func (gkeProviderContext *GKEProviderContext) getKubeCluster() string {
-	cluster := k8sinterface.GetCurrentContext().Cluster
+	context := k8sinterface.GetCurrentContext()
+	if context == nil {
+		return ""
+	}
+	cluster := context.Cluster
 	if cluster != "" {
 		return cluster
 	}
@@ -109,7 +117,7 @@ func (gkeProviderContext *GKEProviderContext) getProject(cluster string, provide
 func (gkeProviderContext *GKEProviderContext) getProjectForGKE(cluster string) (string, error) {
 	parsedName := strings.Split(cluster, "_")
 	if len(parsedName) < 3 {
-		return "", fmt.Errorf("error: failed to parse cluster name")
+		return "", fmt.Errorf("failed to parse project name from cluster name: '%s'", cluster)
 	}
 	project := parsedName[1]
 	return project, nil
@@ -118,7 +126,7 @@ func (gkeProviderContext *GKEProviderContext) getProjectForGKE(cluster string) (
 func (gkeProviderContext *GKEProviderContext) getRegionForGKE(cluster string) (string, error) {
 	parsedName := strings.Split(cluster, "_")
 	if len(parsedName) < 3 {
-		return "", fmt.Errorf("error: failed to parse cluster name")
+		return "", fmt.Errorf("failed to parse region name from cluster name: '%s'", cluster)
 	}
 	region := parsedName[2]
 	return region, nil

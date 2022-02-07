@@ -5,18 +5,36 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
+// supported listing
+type ListType string
+
+const ListID ListType = "id"
+const ListName ListType = "name"
+
 type IPolicyGetter interface {
 	GetFramework(name string) (*reporthandling.Framework, error)
+	GetFrameworks() ([]reporthandling.Framework, error)
 	GetControl(name string) (*reporthandling.Control, error)
+
+	ListFrameworks() ([]string, error)
+	ListControls(ListType) ([]string, error)
 }
 
 type IExceptionsGetter interface {
-	GetExceptions(customerGUID, clusterName string) ([]armotypes.PostureExceptionPolicy, error)
+	GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error)
 }
 type IBackend interface {
-	GetCustomerGUID(customerGUID string) (*TenantResponse, error)
+	GetAccountID() string
+	GetClientID() string
+	GetAccessKey() string
+
+	SetAccountID(accountID string)
+	SetClientID(clientID string)
+	SetAccessKey(accessKey string)
+
+	GetTenant() (*TenantResponse, error)
 }
 
 type IControlsInputsGetter interface {
-	GetControlsInputs(customerGUID, clusterName string) (map[string][]string, error)
+	GetControlsInputs(clusterName string) (map[string][]string, error)
 }

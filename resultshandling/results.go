@@ -1,9 +1,8 @@
 package resultshandling
 
 import (
-	"fmt"
-
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -30,15 +29,10 @@ func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) 
 	resultsHandler.printerObj.ActionPrint(opaSessionObj)
 
 	if err := resultsHandler.reporterObj.ActionSendReport(opaSessionObj); err != nil {
-		fmt.Println(err)
+		logger.L().Error(err.Error())
 	}
 
-	// TODO - get score from table
-	var score float32 = 0
-	for i := range opaSessionObj.PostureReport.FrameworkReports {
-		score += opaSessionObj.PostureReport.FrameworkReports[i].Score
-	}
-	score /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
+	score := opaSessionObj.Report.SummaryDetails.Score
 	resultsHandler.printerObj.Score(score)
 
 	return score

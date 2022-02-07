@@ -9,9 +9,10 @@ import (
 )
 
 var localSetCmd = &cobra.Command{
-	Use:   "set <key>=<value>",
-	Short: "Set configuration locally",
-	Long:  ``,
+	Use:        "set <key>=<value>",
+	Short:      "Set configuration locally",
+	Long:       ``,
+	Deprecated: "use the 'set' command instead",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 1 {
 			return fmt.Errorf("requires  one argument: <key>=<value>")

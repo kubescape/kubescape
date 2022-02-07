@@ -14,6 +14,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 
@@ -34,13 +35,15 @@ const (
 
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
-	inputPatterns []string
+	inputPatterns    []string
+	registryAdaptors *RegistryAdaptors
 }
 
-func NewFileResourceHandler(inputPatterns []string) *FileResourceHandler {
+func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAdaptors) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
-		inputPatterns: inputPatterns,
+		inputPatterns:    inputPatterns,
+		registryAdaptors: registryAdaptors,
 	}
 }
 
@@ -90,6 +93,10 @@ func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling
 		}
 	}
 
+	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources); err != nil {
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect images vulnerabilities: %s\n", err.Error())
+	}
+
 	return k8sResources, allResources, nil
 
 }
@@ -101,7 +108,7 @@ func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info 
 func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
 	files, errs := listFiles(inputPatterns)
 	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
 		return nil, nil
@@ -109,7 +116,7 @@ func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetada
 
 	workloads, errs := loadFiles(files)
 	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	return workloads, nil
 }

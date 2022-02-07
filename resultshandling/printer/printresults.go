@@ -1,7 +1,11 @@
 package printer
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 )
 
 var INDENT = "   "
@@ -19,15 +23,16 @@ type IPrinter interface {
 	Score(score float32)
 }
 
-func GetPrinter(printFormat string, verboseMode bool) IPrinter {
-	switch printFormat {
-	case JsonFormat:
-		return NewJsonPrinter()
-	case JunitResultFormat:
-		return NewJunitPrinter()
-	case PrometheusFormat:
-		return NewPrometheusPrinter(verboseMode)
-	default:
-		return NewPrettyPrinter(verboseMode)
+func GetWriter(outputFile string) *os.File {
+	os.Remove(outputFile)
+	if outputFile != "" {
+		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			logger.L().Error(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
+			return os.Stderr
+		}
+		return f
 	}
+	return os.Stdout
+
 }

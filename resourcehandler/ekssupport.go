@@ -74,7 +74,11 @@ func (eksProviderContext *EKSProviderContext) getKubeClusterName() string {
 }
 
 func (eksProviderContext *EKSProviderContext) getKubeCluster() string {
-	cluster := k8sinterface.GetCurrentContext().Cluster
+	context := k8sinterface.GetCurrentContext()
+	if context == nil {
+		return ""
+	}
+	cluster := context.Cluster
 	if cluster != "" {
 		return cluster
 	}

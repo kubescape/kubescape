@@ -6,9 +6,10 @@ import (
 
 // clusterCmd represents the cluster command
 var clusterCmd = &cobra.Command{
-	Use:   "cluster",
-	Short: "Set configuration for cluster",
-	Long:  ``,
+	Use:        "cluster",
+	Short:      "Set configuration for cluster",
+	Long:       ``,
+	Deprecated: "use the 'set' command instead",
 	Run: func(cmd *cobra.Command, args []string) {
 	},
 }

@@ -6,15 +6,21 @@ import (
 	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/kubescape/resultshandling/printer"
+	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
+
+	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
+
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/clihandler/cliinterfaces"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/opaprocessor"
 	"github.com/armosec/kubescape/policyhandler"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling"
-	"github.com/armosec/kubescape/resultshandling/printer"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/mattn/go-isatty"
@@ -30,20 +36,22 @@ type componentInterfaces struct {
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
-	k8s := getKubernetesApi(scanInfo)
+	var k8s *k8sinterface.KubernetesApi
+	if scanInfo.GetScanningEnvironment() == cautils.ScanCluster {
+		k8s = getKubernetesApi()
+		if k8s == nil {
+			logger.L().Fatal("failed connecting to Kubernetes cluster")
+		}
+	}
 
-	tenantConfig := getTenantConfig(scanInfo, k8s)
+	tenantConfig := getTenantConfig(scanInfo.Account, scanInfo.KubeContext, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
 	hostSensorHandler := getHostSensorHandler(scanInfo, k8s)
 	if err := hostSensorHandler.Init(); err != nil {
-		errMsg := "failed to init host sensor"
-		if scanInfo.VerboseMode {
-			errMsg = fmt.Sprintf("%s: %v", errMsg, err)
-		}
-		cautils.ErrorDisplay(errMsg)
+		logger.L().Error("failed to init host sensor", helpers.Error(err))
 		hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
 	}
 	// excluding hostsensor namespace
@@ -51,7 +59,12 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.GetNamespace())
 	}
 
-	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler)
+	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
+	if err != nil {
+		logger.L().Error("failed to initialize registry adaptors", helpers.Error(err))
+	}
+
+	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
 
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
@@ -60,7 +73,8 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
 
 	// setup printer
-	printerHandler := printer.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	// printerHandler = printerv2.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	return componentInterfaces{
@@ -73,7 +87,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 }
 
 func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
-	cautils.ScanStartDisplay()
+	logger.L().Info("ARMO security scanner starting")
 
 	interfaces := getInterfaces(scanInfo)
 	// setPolicyGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())
@@ -81,23 +95,27 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	processNotification := make(chan *cautils.OPASessionObj)
 	reportResults := make(chan *cautils.OPASessionObj)
 
-	cautils.ClusterName = interfaces.tenantConfig.GetClusterName()   // TODO - Deprecated
-	cautils.CustomerGUID = interfaces.tenantConfig.GetCustomerGUID() // TODO - Deprecated
+	cautils.ClusterName = interfaces.tenantConfig.GetClusterName() // TODO - Deprecated
+	cautils.CustomerGUID = interfaces.tenantConfig.GetAccountID()  // TODO - Deprecated
 	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
-	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetCustomerGUID())
+	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetAccountID())
 
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
-	// set policy getter only after setting the customerGUID
-	setPolicyGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
-	setConfigInputsGetter(scanInfo, interfaces.tenantConfig.GetCustomerGUID(), downloadReleasedPolicy)
 
+	// set policy getter only after setting the customerGUID
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
+
+	// TODO - list supported frameworks/controls
+	if scanInfo.ScanAll {
+		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.Getters.PolicyGetter), reporthandling.KindFramework)
+	}
+
+	//
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			errMsg := "failed to tear down host sensor"
-			if scanInfo.VerboseMode {
-				errMsg = fmt.Sprintf("%s: %v", errMsg, err)
-			}
-			cautils.ErrorDisplay(errMsg)
+			logger.L().Error("failed to tear down host sensor", helpers.Error(err))
 		}
 	}()
 
@@ -107,8 +125,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler)
 
 		if err := Scan(policyHandler, scanInfo); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 	}()
 
@@ -133,40 +150,21 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 
 func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
 	policyNotification := &reporthandling.PolicyNotification{
-		NotificationType: reporthandling.TypeExecPostureScan,
-		Rules:            scanInfo.PolicyIdentifier,
-		Designators:      armotypes.PortalDesignator{},
+		Rules: scanInfo.PolicyIdentifier,
+		KubescapeNotification: reporthandling.KubescapeNotification{
+			Designators:      armotypes.PortalDesignator{},
+			NotificationType: reporthandling.TypeExecPostureScan,
+		},
 	}
-	switch policyNotification.NotificationType {
+	switch policyNotification.KubescapeNotification.NotificationType {
 	case reporthandling.TypeExecPostureScan:
 		if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
 			return err
 		}
 
 	default:
-		return fmt.Errorf("notification type '%s' Unknown", policyNotification.NotificationType)
+		return fmt.Errorf("notification type '%s' Unknown", policyNotification.KubescapeNotification.NotificationType)
 	}
-	return nil
-}
-
-func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
-
-	// list resources
-	postureReport, err := submitInterfaces.SubmitObjects.SetResourcesReport()
-	if err != nil {
-		return err
-	}
-	allresources, err := submitInterfaces.SubmitObjects.ListAllResources()
-	if err != nil {
-		return err
-	}
-	// report
-	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
-		return err
-	}
-	fmt.Printf("\nData has been submitted successfully")
-	submitInterfaces.Reporter.DisplayReportURL()
-
 	return nil
 }
 

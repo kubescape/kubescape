@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"os"
+	"strings"
 
 	"github.com/armosec/k8s-interface/cloudsupport"
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -22,32 +23,30 @@ type ICloudProvider interface {
 }
 
 func initCloudProvider() ICloudProvider {
-	var provider string
-	if isEnvVars() {
-		provider = getCloudProviderFromEnvVar()
-		switch provider {
-		case "gke":
+
+	switch getCloudProvider() {
+	case "gke", "gcp":
+		if isEnvVars() {
 			return NewGKEProviderEnvVar()
-		case "eks":
+		}
+		return NewGKEProviderContext()
+	case "eks", "aws":
+		if isEnvVars() {
 			return NewEKSProviderEnvVar()
 		}
-	} else {
-		provider = getCloudProviderFromContext()
-		switch provider {
-		case "gke":
-			return NewGKEProviderContext()
-		case "eks":
-			return NewEKSProviderContext()
-		}
+		return NewEKSProviderContext()
 	}
 	return NewEmptyCloudProvider()
 }
 
 func getCloudProvider() string {
+	var provider string
 	if isEnvVars() {
-		return getCloudProviderFromEnvVar()
+		provider = getCloudProviderFromEnvVar()
+	} else {
+		provider = getCloudProviderFromContext()
 	}
-	return getCloudProviderFromContext()
+	return strings.ToLower(provider)
 }
 
 func getCloudProviderFromContext() string {
@@ -55,7 +54,11 @@ func getCloudProviderFromContext() string {
 }
 
 func getClusterFromContext() string {
-	cluster := k8sinterface.GetCurrentContext().Cluster
+	context := k8sinterface.GetCurrentContext()
+	if context == nil {
+		return ""
+	}
+	cluster := context.Cluster
 	if cluster != "" {
 		return cluster
 	}

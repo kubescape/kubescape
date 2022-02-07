@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"
@@ -24,6 +24,9 @@ var (
   # Scan the NSA and MITRE framework
   kubescape scan framework nsa,mitre
   
+  # Scan all frameworks
+  kubescape scan framework all
+
   # Scan kubernetes YAML manifest files
   kubescape scan framework nsa *.yaml
 
@@ -35,14 +38,15 @@ var (
 
   # Display all resources
   kubescape scan --verbose
+
+  Run 'kubescape list frameworks' for the list of supported frameworks
 `
 )
 var frameworkCmd = &cobra.Command{
-	Use:       "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
-	Short:     fmt.Sprintf("The framework you wish to use. Supported frameworks: %s", strings.Join(getter.NativeFrameworks, ", ")),
-	Example:   frameworkExample,
-	Long:      "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
-	ValidArgs: getter.NativeFrameworks,
+	Use:     "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
+	Short:   "The framework you wish to use. Run 'kubescape list frameworks' for the list of supported frameworks",
+	Example: frameworkExample,
+	Long:    "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			frameworks := strings.Split(args[0], ",")
@@ -61,12 +65,14 @@ var frameworkCmd = &cobra.Command{
 		var frameworks []string
 
 		if len(args) == 0 { // scan all frameworks
-			frameworks = getter.NativeFrameworks
 			scanInfo.ScanAll = true
 		} else {
 			// Read frameworks from input args
 			frameworks = strings.Split(args[0], ",")
-
+			if cautils.StringInSlice(frameworks, "all") != cautils.ValueNotFound {
+				scanInfo.ScanAll = true
+				frameworks = []string{}
+			}
 			if len(args) > 1 {
 				if len(args[1:]) == 0 || args[1] != "-" {
 					scanInfo.InputPatterns = args[1:]
@@ -84,14 +90,15 @@ var frameworkCmd = &cobra.Command{
 				}
 			}
 		}
+		scanInfo.FrameworkScan = true
+
 		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
 
 		scanInfo.Init()
 		cautils.SetSilentMode(scanInfo.Silent)
 		err := clihandler.ScanCliSetup(&scanInfo)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},
@@ -113,11 +120,9 @@ func init() {
 
 func flagValidationFramework() {
 	if scanInfo.Submit && scanInfo.Local {
-		fmt.Println("You can use `keep-local` or `submit`, but not both")
-		os.Exit(1)
+		logger.L().Fatal("you can use `keep-local` or `submit`, but not both")
 	}
 	if 100 < scanInfo.FailThreshold {
-		fmt.Println("bad argument: out of range threshold")
-		os.Exit(1)
+		logger.L().Fatal("bad argument: out of range threshold")
 	}
 }
