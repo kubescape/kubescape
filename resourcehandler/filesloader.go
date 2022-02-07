@@ -195,11 +195,15 @@ func listFiles(patterns []string) ([]string, []error) {
 			o, _ := os.Getwd()
 			patterns[i] = filepath.Join(o, patterns[i])
 		}
-		f, err := filepath.Glob(patterns[i])
-		if err != nil {
-			errs = append(errs, err)
+		if isFile(patterns[i]) {
+			files = append(files, patterns[i])
 		} else {
-			files = append(files, f...)
+			f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				files = append(files, f...)
+			}
 		}
 	}
 	return files, errs
@@ -282,6 +286,37 @@ func isYaml(filePath string) bool {
 
 func isJson(filePath string) bool {
 	return cautils.StringInSlice(JSON_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+}
+
+func glob(root, pattern string) ([]string, error) {
+	var matches []string
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
+			return err
+		} else if matched {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return matches, nil
+}
+func isFile(name string) bool {
+	if fi, err := os.Stat(name); err == nil {
+		if fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 func getFileFormat(filePath string) FileFormat {
