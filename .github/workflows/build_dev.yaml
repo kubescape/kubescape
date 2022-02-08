@@ -25,7 +25,7 @@ jobs:
         env:
           RELEASE: v2.0.${{ github.run_number }} 
           ArmoBEServer: api.armo.cloud
-          ArmoAuthServer: eggauth.armo.cloud
+          ArmoAuthServer: auth.armo.cloud
           ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
