@@ -41,7 +41,7 @@ jobs:
         env:
           RELEASE: v2.0.${{ github.run_number }} 
           ArmoBEServer: api.armo.cloud
-          ArmoAuthServer: eggauth.armo.cloud
+          ArmoAuthServer: auth.armo.cloud
           ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
@@ -108,14 +108,14 @@ jobs:
           docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
           docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
       
-      - name: Install cosign
-        uses: sigstore/cosign-installer@main
-        with:
-          cosign-release: 'v1.5.1' # optional
-      - name: sign kubescape container image
-        env:
-          COSIGN_EXPERIMENTAL: "true"
-        run: |
-            cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
-            cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+      # - name: Install cosign
+      #   uses: sigstore/cosign-installer@main
+      #   with:
+      #     cosign-release: 'v1.5.1' # optional
+      # - name: sign kubescape container image
+      #   env:
+      #     COSIGN_EXPERIMENTAL: "true"
+      #   run: |
+      #       cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
+      #       cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
 

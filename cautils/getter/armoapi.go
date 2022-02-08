@@ -24,7 +24,7 @@ var (
 	armoERURL   = "report.armo.cloud"
 	armoBEURL   = "api.armo.cloud"
 	armoFEURL   = "portal.armo.cloud"
-	armoAUTHURL = "eggauth.armo.cloud"
+	armoAUTHURL = "auth.armo.cloud"
 
 	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armo.cloud"
