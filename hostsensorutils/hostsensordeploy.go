@@ -161,7 +161,7 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames() {
 			LabelSelector: fmt.Sprintf("name=%s", hsh.DaemonSet.Spec.Template.Labels["name"]),
 		})
 		if err != nil {
-			fmt.Printf("Failed to watch over daemonset pods")
+			logger.L().Error("failed to watch over daemonset pods", helpers.Error(err))
 		}
 		for eve := range watchRes.ResultChan() {
 			pod, ok := eve.Object.(*corev1.Pod)
