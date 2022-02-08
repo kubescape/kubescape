@@ -47,15 +47,19 @@ jobs:
   build-docker:
     name: Build docker container, tag and upload to registry
     needs: build
-    if: ${{ github.repository == 'armosec/kubescape' }}
+    # if: ${{ github.repository == 'armosec/kubescape' }}
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v2
 
       - name: Set name
         id: set-name
-        run: echo ::set-output name:IMAGE_NAME::quay.io/armosec/kubescape:dev-v2.0.${{ github.run_number }}'
+        run: echo ::set-output name=IMAGE_NAME::quay.io/${{ github.repository }}/kubescape:dev-v2.0.${{ github.run_number }}'
 
       - name: Build the Docker image
         run: docker build . --file build/Dockerfile --tag ${{ steps.set-name.outputs.IMAGE_NAME }} --build-arg run_number=${{ github.run_number }}
