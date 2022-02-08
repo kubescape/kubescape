@@ -69,6 +69,7 @@ jobs:
     name: Build docker container, tag and upload to registry
     needs: build
     runs-on: ubuntu-latest
+    if: ${{ github.repository == 'armosec/kubescape' }} # TODO
     permissions:
       id-token: write
       packages: write
@@ -77,29 +78,36 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - name: Set name
-        id: set-name
-        run: echo '::set-output name:IMAGE_NAME::quay.io/${{ github.repository_owner }}/kubescape:v2.0.${{ github.run_number }}'
+      - name: Set image version
+        id: image-version
+        run: echo '::set-output version=IMAGE_VERSION::v2.0.${{ github.run_number }}'
+
+      - name: Set image name
+        id: image-name
+        run: echo '::set-output name=IMAGE_NAME::quay.io/${{ github.repository_owner }}/kubescape'
 
       - name: Build the Docker image
-        run: docker build . --file build/Dockerfile --tag ${{ steps.set-name.outputs.IMAGE_NAME }} --build-arg run_number=${{ github.run_number }}
+        run: docker build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --build-arg run_number=${{ github.run_number }}
+      
       - name: Re-Tag Image to latest
-        run: docker tag ${{ steps.set-name.outputs.IMAGE_NAME }} quay.io/${{ github.repository_owner }}/kubescape:latest
+        run: docker tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+      
       - name: Login to Quay.io
         env: # Or as an environment variable
           QUAY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
           QUAY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
         run: docker login -u="${QUAY_USERNAME}" -p="${QUAY_PASSWORD}" quay.io
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v1
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+      # - name: Login to GitHub Container Registry
+      #   uses: docker/login-action@v1
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
       - name: Push Docker image
         run: |
-          docker push ${{ steps.set-name.outputs.IMAGE_NAME }}
-          docker push quay.io/${{ github.repository_owner }}/kubescape:latest
+          docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
+          docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+      
       - name: Install cosign
         uses: sigstore/cosign-installer@main
         with:
@@ -108,6 +116,6 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-            cosign sign --force ${{ steps.set-name.outputs.IMAGE_NAME }}
-            cosign sign --force quay.io/${{ github.repository_owner }}/kubescape:latest
+            cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
+            cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
 
