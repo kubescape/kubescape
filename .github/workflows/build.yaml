@@ -80,7 +80,7 @@ jobs:
 
       - name: Set image version
         id: image-version
-        run: echo '::set-output version=IMAGE_VERSION::v2.0.${{ github.run_number }}'
+        run: echo '::set-output name=IMAGE_VERSION::v2.0.${{ github.run_number }}'
 
       - name: Set image name
         id: image-name
