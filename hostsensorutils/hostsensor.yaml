@@ -50,6 +50,12 @@ spec:
         volumeMounts:
         - mountPath: /host_fs
           name: host-filesystem
+        readinessProbe:
+          httpGet:
+            path: /kernelVersion
+            port: 7888
+            initialDelaySeconds: 1
+            periodSeconds: 1
       terminationGracePeriodSeconds: 120
       dnsPolicy: ClusterFirstWithHostNet
       automountServiceAccountToken: false
