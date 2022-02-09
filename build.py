@@ -56,7 +56,7 @@ def main():
         os.makedirs(buildDir)
 
     # Build kubescape
-    ldflags = "-w -s -X %s=%s -X %s=%s -X %s=%s -X %s=%s" \
+    ldflags = "-w -s -X %s=%s -X %s=%s -X %s=%s -X %s=%s -X %s=%s" \
         % (buildUrl, releaseVersion, BE_SERVER_CONST, ArmoBEServer,
            ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite,
            AUTH_SERVER_CONST, ArmoAuthServer)

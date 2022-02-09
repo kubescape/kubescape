@@ -8,6 +8,8 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 )
 
 var downloadFunc = map[string]func(*cautils.DownloadInfo) error{
@@ -67,7 +69,7 @@ func downloadArtifacts(downloadInfo *cautils.DownloadInfo) error {
 	}
 	for artifact := range artifacts {
 		if err := downloadArtifact(&cautils.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
-			fmt.Printf("error downloading %s, error: %s", artifact, err)
+			logger.L().Error("error downloading", helpers.String("artifact", artifact), helpers.Error(err))
 		}
 	}
 	return nil
@@ -88,7 +90,7 @@ func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
 	return nil
 }
 
@@ -111,7 +113,7 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
 	return nil
 }
 
@@ -131,7 +133,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("'%s': '%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, fw.Name, filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name)+".json")))
+			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", fw.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
 		}
 		// return fmt.Errorf("missing framework name")
 	} else {
@@ -146,7 +148,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+		logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
 	}
 	return nil
 }
@@ -171,6 +173,6 @@ func downloadControl(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("'%s' downloaded successfully and saved at: '%s'\n", downloadInfo.Target, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", downloadInfo.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
 	return nil
 }

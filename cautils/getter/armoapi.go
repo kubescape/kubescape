@@ -24,7 +24,7 @@ var (
 	armoERURL   = "report.armo.cloud"
 	armoBEURL   = "api.armo.cloud"
 	armoFEURL   = "portal.armo.cloud"
-	armoAUTHURL = "eggauth.armo.cloud"
+	armoAUTHURL = "auth.armo.cloud"
 
 	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armo.cloud"
@@ -41,7 +41,7 @@ type ArmoAPI struct {
 	feURL      string
 	accountID  string
 	clientID   string
-	accessKey  string
+	secretKey  string
 	feToken    FeLoginResponse
 	authCookie string
 	loggedIn   bool
@@ -119,13 +119,13 @@ func (armoAPI *ArmoAPI) Get(fullURL string, headers map[string]string) (string, 
 func (armoAPI *ArmoAPI) GetAccountID() string          { return armoAPI.accountID }
 func (armoAPI *ArmoAPI) IsLoggedIn() bool              { return armoAPI.loggedIn }
 func (armoAPI *ArmoAPI) GetClientID() string           { return armoAPI.clientID }
-func (armoAPI *ArmoAPI) GetAccessKey() string          { return armoAPI.accessKey }
+func (armoAPI *ArmoAPI) GetSecretKey() string          { return armoAPI.secretKey }
 func (armoAPI *ArmoAPI) GetFrontendURL() string        { return armoAPI.feURL }
 func (armoAPI *ArmoAPI) GetAPIURL() string             { return armoAPI.apiURL }
 func (armoAPI *ArmoAPI) GetReportReceiverURL() string  { return armoAPI.erURL }
 func (armoAPI *ArmoAPI) SetAccountID(accountID string) { armoAPI.accountID = accountID }
 func (armoAPI *ArmoAPI) SetClientID(clientID string)   { armoAPI.clientID = clientID }
-func (armoAPI *ArmoAPI) SetAccessKey(accessKey string) { armoAPI.accessKey = accessKey }
+func (armoAPI *ArmoAPI) SetSecretKey(secretKey string) { armoAPI.secretKey = secretKey }
 
 func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := armoAPI.Get(armoAPI.getFrameworkURL(name), nil)
@@ -290,12 +290,12 @@ func (armoAPI *ArmoAPI) Login() error {
 	if armoAPI.clientID == "" {
 		return fmt.Errorf("failed to login, missing clientID")
 	}
-	if armoAPI.accessKey == "" {
-		return fmt.Errorf("failed to login, missing accessKey")
+	if armoAPI.secretKey == "" {
+		return fmt.Errorf("failed to login, missing secretKey")
 	}
 
 	// init URLs
-	feLoginData := FeLoginData{ClientId: armoAPI.clientID, Secret: armoAPI.accessKey}
+	feLoginData := FeLoginData{ClientId: armoAPI.clientID, Secret: armoAPI.secretKey}
 	body, _ := json.Marshal(feLoginData)
 
 	resp, err := http.Post(armoAPI.getApiToken(), "application/json", bytes.NewBuffer(body))

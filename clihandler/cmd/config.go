@@ -29,7 +29,7 @@ var (
   kubescape config set clientID <client id> 
 
   # Set access key
-  kubescape config set accessKey <access key>
+  kubescape config set secretKey <access key>
 `
 )
 
@@ -63,7 +63,7 @@ var configSetCmd = &cobra.Command{
 var supportConfigSet = map[string]func(*cliobjects.SetConfig, string){
 	"accountID": func(s *cliobjects.SetConfig, account string) { s.Account = account },
 	"clientID":  func(s *cliobjects.SetConfig, clientID string) { s.ClientID = clientID },
-	"accessKey": func(s *cliobjects.SetConfig, accessKey string) { s.AccessKey = accessKey },
+	"secretKey": func(s *cliobjects.SetConfig, secretKey string) { s.SecretKey = secretKey },
 }
 
 func stringKeysToSlice(m map[string]func(*cliobjects.SetConfig, string)) []string {

@@ -26,7 +26,7 @@ func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName +
 type ConfigObj struct {
 	AccountID          string `json:"accountID,omitempty"`
 	ClientID           string `json:"clientID,omitempty"`
-	AccessKey          string `json:"accessKey,omitempty"`
+	SecretKey          string `json:"secretKey,omitempty"`
 	CustomerGUID       string `json:"customerGUID,omitempty"` // Deprecated
 	Token              string `json:"invitationParam,omitempty"`
 	CustomerAdminEMail string `json:"adminMail,omitempty"`
@@ -111,7 +111,7 @@ func NewLocalConfig(backendAPI getter.IBackend, customerGUID, clusterName string
 
 	lc.backendAPI.SetAccountID(lc.configObj.AccountID)
 	lc.backendAPI.SetClientID(lc.configObj.ClientID)
-	lc.backendAPI.SetAccessKey(lc.configObj.AccessKey)
+	lc.backendAPI.SetSecretKey(lc.configObj.SecretKey)
 
 	if lc.configObj.AccountID != "" {
 		if err := lc.SetTenant(); err != nil {
@@ -177,7 +177,7 @@ KS_DEFAULT_CONFIGMAP_NAMESPACE   // configmap namespace, if not set default is '
 
 KS_ACCOUNT_ID
 KS_CLIENT_ID
-KS_ACCESS_KEY
+KS_SECRET_KEY
 
 TODO - supprot:
 KS_CACHE // path to cached files
@@ -226,7 +226,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 
 	c.backendAPI.SetAccountID(c.configObj.AccountID)
 	c.backendAPI.SetClientID(c.configObj.ClientID)
-	c.backendAPI.SetAccessKey(c.configObj.AccessKey)
+	c.backendAPI.SetSecretKey(c.configObj.SecretKey)
 
 	if c.configObj.AccountID != "" {
 		if err := c.SetTenant(); err != nil {
@@ -513,7 +513,7 @@ func getAccountFromEnv(configObj *ConfigObj) {
 	if clientID := os.Getenv("KS_CLIENT_ID"); clientID != "" {
 		configObj.ClientID = clientID
 	}
-	if accessKey := os.Getenv("KS_ACCESS_KEY"); accessKey != "" {
-		configObj.AccessKey = accessKey
+	if secretKey := os.Getenv("KS_SECRET_KEY"); secretKey != "" {
+		configObj.SecretKey = secretKey
 	}
 }

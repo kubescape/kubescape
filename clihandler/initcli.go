@@ -177,8 +177,8 @@ func askUserForHostSensor() bool {
 	if ssss, err := os.Stdin.Stat(); err == nil {
 		// fmt.Printf("Found stdin type: %s\n", ssss.Mode().Type())
 		if ssss.Mode().Type()&(fs.ModeDevice|fs.ModeCharDevice) > 0 { //has TTY
-			fmt.Printf("Would you like to scan K8s nodes? [y/N]. This is required to collect valuable data for certain controls\n")
-			fmt.Printf("Use --enable-host-scan flag to suppress this message\n")
+			fmt.Fprintf(os.Stderr, "Would you like to scan K8s nodes? [y/N]. This is required to collect valuable data for certain controls\n")
+			fmt.Fprintf(os.Stderr, "Use --enable-host-scan flag to suppress this message\n")
 			var b []byte = make([]byte, 1)
 			if n, err := os.Stdin.Read(b); err == nil {
 				if n > 0 && len(b) > 0 && (b[0] == 'y' || b[0] == 'Y') {

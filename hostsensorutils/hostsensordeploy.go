@@ -161,7 +161,7 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames() {
 			LabelSelector: fmt.Sprintf("name=%s", hsh.DaemonSet.Spec.Template.Labels["name"]),
 		})
 		if err != nil {
-			fmt.Printf("Failed to watch over daemonset pods")
+			logger.L().Error("failed to watch over daemonset pods", helpers.Error(err))
 		}
 		for eve := range watchRes.ResultChan() {
 			pod, ok := eve.Object.(*corev1.Pod)
@@ -179,7 +179,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 
 	switch eventType {
 	case watch.Added, watch.Modified:
-		if podObj.Status.Phase == corev1.PodRunning {
+		if podObj.Status.Phase == corev1.PodRunning && podObj.Status.ContainerStatuses[0].Ready {
 			hsh.HostSensorPodNames[podObj.ObjectMeta.Name] = podObj.Spec.NodeName
 		} else {
 			delete(hsh.HostSensorPodNames, podObj.ObjectMeta.Name)
