@@ -14,6 +14,8 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 
 	"gopkg.in/yaml.v2"
@@ -33,13 +35,15 @@ const (
 
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
-	inputPatterns []string
+	inputPatterns    []string
+	registryAdaptors *RegistryAdaptors
 }
 
-func NewFileResourceHandler(inputPatterns []string) *FileResourceHandler {
+func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAdaptors) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
-		inputPatterns: inputPatterns,
+		inputPatterns:    inputPatterns,
+		registryAdaptors: registryAdaptors,
 	}
 }
 
@@ -89,6 +93,10 @@ func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling
 		}
 	}
 
+	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources); err != nil {
+		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect images vulnerabilities: %s\n", err.Error())
+	}
+
 	return k8sResources, allResources, nil
 
 }
@@ -100,7 +108,7 @@ func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info 
 func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
 	files, errs := listFiles(inputPatterns)
 	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
 		return nil, nil
@@ -108,7 +116,7 @@ func loadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetada
 
 	workloads, errs := loadFiles(files)
 	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	return workloads, nil
 }
@@ -124,7 +132,7 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 			continue
 		}
 
-		if workloadinterface.IsTypeWorkload(workloads[i].GetObject()) {
+		if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
 			w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
 			if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
 				// TODO - print warning
@@ -187,11 +195,15 @@ func listFiles(patterns []string) ([]string, []error) {
 			o, _ := os.Getwd()
 			patterns[i] = filepath.Join(o, patterns[i])
 		}
-		f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
-		if err != nil {
-			errs = append(errs, err)
+		if isFile(patterns[i]) {
+			files = append(files, patterns[i])
 		} else {
-			files = append(files, f...)
+			f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				files = append(files, f...)
+			}
 		}
 	}
 	return files, errs
@@ -211,8 +223,12 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
 			continue
 		}
 		if obj, ok := j.(map[string]interface{}); ok {
-			if o := workloadinterface.NewObject(obj); o != nil {
-				yamlObjs = append(yamlObjs, o)
+			if o := objectsenvelopes.NewObject(obj); o != nil {
+				if o.GetKind() == "List" {
+					yamlObjs = append(yamlObjs, handleListObject(o)...)
+				} else {
+					yamlObjs = append(yamlObjs, o)
+				}
 			}
 		} else {
 			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
@@ -237,7 +253,7 @@ func convertJsonToWorkload(jsonObj interface{}, workloads *[]workloadinterface.I
 
 	switch x := jsonObj.(type) {
 	case map[string]interface{}:
-		if o := workloadinterface.NewObject(x); o != nil {
+		if o := objectsenvelopes.NewObject(x); o != nil {
 			(*workloads) = append(*workloads, o)
 		}
 	case []interface{}:
@@ -264,8 +280,17 @@ func convertYamlToJson(i interface{}) interface{} {
 	return i
 }
 
+func isYaml(filePath string) bool {
+	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+}
+
+func isJson(filePath string) bool {
+	return cautils.StringInSlice(JSON_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+}
+
 func glob(root, pattern string) ([]string, error) {
 	var matches []string
+
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -285,12 +310,13 @@ func glob(root, pattern string) ([]string, error) {
 	}
 	return matches, nil
 }
-func isYaml(filePath string) bool {
-	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
-}
-
-func isJson(filePath string) bool {
-	return cautils.StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != cautils.ValueNotFound
+func isFile(name string) bool {
+	if fi, err := os.Stat(name); err == nil {
+		if fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
 }
 
 func getFileFormat(filePath string) FileFormat {
@@ -301,4 +327,21 @@ func getFileFormat(filePath string) FileFormat {
 	} else {
 		return FileFormat(filePath)
 	}
+}
+
+// handleListObject handle a List manifest
+func handleListObject(obj workloadinterface.IMetadata) []workloadinterface.IMetadata {
+	yamlObjs := []workloadinterface.IMetadata{}
+	if i, ok := workloadinterface.InspectMap(obj.GetObject(), "items"); ok && i != nil {
+		if items, ok := i.([]interface{}); ok && items != nil {
+			for item := range items {
+				if m, ok := items[item].(map[string]interface{}); ok && m != nil {
+					if o := objectsenvelopes.NewObject(m); o != nil {
+						yamlObjs = append(yamlObjs, o)
+					}
+				}
+			}
+		}
+	}
+	return yamlObjs
 }

@@ -9,9 +9,10 @@ import (
 )
 
 var localGetCmd = &cobra.Command{
-	Use:   "get <key>",
-	Short: "Get configuration locally",
-	Long:  ``,
+	Use:        "get <key>",
+	Short:      "Get configuration locally",
+	Long:       ``,
+	Deprecated: "use the 'view' command instead",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 1 {
 			return fmt.Errorf("requires  one argument")
@@ -30,8 +31,7 @@ var localGetCmd = &cobra.Command{
 		val, err := cautils.GetValueFromConfigJson(key)
 		if err != nil {
 			if err.Error() == "value does not exist." {
-				fmt.Printf("Could net get value from: %s, reason: %s\n", cautils.ConfigFileFullPath(), err)
-				return nil
+				return fmt.Errorf("failed to get value from: %s, reason: %s", cautils.ConfigFileFullPath(), err.Error())
 			}
 			return err
 		}

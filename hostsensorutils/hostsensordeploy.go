@@ -1,6 +1,7 @@
 package hostsensorutils
 
 import (
+	_ "embed"
 	"fmt"
 	"io"
 	"strings"
@@ -9,6 +10,8 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -16,6 +19,11 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	appsapplyv1 "k8s.io/client-go/applyconfigurations/apps/v1"
 	coreapplyv1 "k8s.io/client-go/applyconfigurations/core/v1"
+)
+
+var (
+	//go:embed hostsensor.yaml
+	hostSensorYAML string
 )
 
 type HostSensorHandler struct {
@@ -54,15 +62,17 @@ func (hsh *HostSensorHandler) Init() error {
 	// store namespace + port
 	// store pod names
 	// make sure all pods are running, after X seconds treat has running anyway, and log an error on the pods not running yet
-	cautils.ProgressTextDisplay("Installing host sensor")
+	logger.L().Info("Installing host sensor")
+
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
+
 	if err := hsh.applyYAML(); err != nil {
 		return fmt.Errorf("in HostSensorHandler init failed to apply YAML: %v", err)
 	}
 	hsh.populatePodNamesToNodeNames()
 	if err := hsh.checkPodForEachNode(); err != nil {
-		fmt.Printf("failed to validate host-sensor pods status: %v", err)
+		logger.L().Error("failed to validate host-sensor pods status", helpers.Error(err))
 	}
 	return nil
 }
@@ -151,7 +161,7 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames() {
 			LabelSelector: fmt.Sprintf("name=%s", hsh.DaemonSet.Spec.Template.Labels["name"]),
 		})
 		if err != nil {
-			fmt.Printf("Failed to watch over daemonset pods")
+			logger.L().Error("failed to watch over daemonset pods", helpers.Error(err))
 		}
 		for eve := range watchRes.ResultChan() {
 			pod, ok := eve.Object.(*corev1.Pod)
@@ -201,5 +211,8 @@ func (hsh *HostSensorHandler) TearDown() error {
 }
 
 func (hsh *HostSensorHandler) GetNamespace() string {
+	if hsh.DaemonSet == nil {
+		return ""
+	}
 	return hsh.DaemonSet.Namespace
 }

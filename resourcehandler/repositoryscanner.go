@@ -127,7 +127,6 @@ func (g *GitHubRepository) setTree() error {
 	err = json.Unmarshal([]byte(body), &tree)
 	if err != nil {
 		return fmt.Errorf("failed to unmarshal response body from '%s', reason: %s", g.treeAPI(), err.Error())
-		// fmt.Printf("failed to unmarshal response body from '%s', reason: %s", urlCommand, err.Error())
 		// return nil
 	}
 	g.tree = tree

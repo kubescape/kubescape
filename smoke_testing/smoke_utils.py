@@ -5,9 +5,9 @@ def get_exec_from_args(args: list):
     return args[1]
 
 
-def run_command(command):
+def run_command(command, stdin=subprocess.PIPE, stderr=subprocess.STDOUT):
     try:
-        return f"{subprocess.check_output(command, stdin=subprocess.PIPE, stderr=subprocess.STDOUT)}"
+        return f"{subprocess.check_output(command, stdin=stdin, stderr=stderr)}"
     except Exception as e:
         return f"{e}"
 

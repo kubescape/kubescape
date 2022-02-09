@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 )
 
 func loadResourcesFromUrl(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
@@ -19,7 +19,7 @@ func loadResourcesFromUrl(inputPatterns []string) ([]workloadinterface.IMetadata
 
 	workloads, errs := downloadFiles(urls)
 	if len(errs) > 0 {
-		cautils.ErrorDisplay(fmt.Sprintf("%v", errs)) // TODO - print error
+		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	return workloads, nil
 }

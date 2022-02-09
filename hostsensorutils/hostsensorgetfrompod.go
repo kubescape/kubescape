@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
 	"sigs.k8s.io/yaml"
 )
 
@@ -56,12 +59,12 @@ func (hsh *HostSensorHandler) ForwardToPod(podName, path string) ([]byte, error)
 
 // sendAllPodsHTTPGETRequest fills the raw byte response in the envelope and the node name, but not the GroupVersionKind
 // so the caller is responsible to convert the raw data to some structured data and add the GroupVersionKind details
-func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string) ([]hostsensor.HostSensorDataEnvelope, error) {
 	podList, err := hsh.getPodList()
 	if err != nil {
 		return nil, fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
 	}
-	res := make([]HostSensorDataEnvelope, 0, len(podList))
+	res := make([]hostsensor.HostSensorDataEnvelope, 0, len(podList))
 	resLock := sync.Mutex{}
 	wg := sync.WaitGroup{}
 	wg.Add(len(podList))
@@ -70,11 +73,16 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]HostSens
 			defer wg.Done()
 			resBytes, err := hsh.HTTPGetToPod(podName, path)
 			if err != nil {
-				fmt.Printf("In sendAllPodsHTTPGETRequest failed to get data '%s' from pod '%s': %v", path, podName, err)
+				logger.L().Error("failed to get data", helpers.String("path", path), helpers.String("pos", path), helpers.Error(err))
 			} else {
 				resLock.Lock()
 				defer resLock.Unlock()
-				res = append(res, HostSensorDataEnvelope{NodeName: podList[podName], Data: resBytes})
+				hostSensorDataEnvelope := hostsensor.HostSensorDataEnvelope{}
+				hostSensorDataEnvelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
+				hostSensorDataEnvelope.SetKind(requestKind)
+				hostSensorDataEnvelope.SetName(podList[podName])
+				hostSensorDataEnvelope.SetData(resBytes)
+				res = append(res, hostSensorDataEnvelope)
 			}
 
 		}(podName, path)
@@ -83,95 +91,73 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path string) ([]HostSens
 	return res, nil
 }
 
-// return list of
-func (hsh *HostSensorHandler) GetOpenPortsList() ([]HostSensorDataEnvelope, error) {
+// return list of OpenPortsList
+func (hsh *HostSensorHandler) GetOpenPortsList() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/openedPorts")
-	for resIdx := range res {
-		res[resIdx].GroupVersionResource.Resource = "OpenPortsList"
-		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
-		res[resIdx].GroupVersionResource.Version = "v1beta0"
+	return hsh.sendAllPodsHTTPGETRequest("/openedPorts", "OpenPortsList")
+}
+
+// return list of LinuxSecurityHardeningStatus
+func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening", "LinuxSecurityHardeningStatus")
+}
+
+// return list of KubeletCommandLine
+func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	resps, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", "KubeletCommandLine")
+	if err != nil {
+		return resps, err
 	}
-	return res, err
+	for resp := range resps {
+		var data = make(map[string]interface{})
+		data["fullCommand"] = string(resps[resp].Data)
+		resBytesMarshal, err := json.Marshal(data)
+		// TODO catch error
+		if err == nil {
+			resps[resp].Data = json.RawMessage(resBytesMarshal)
+		}
+	}
+
+	return resps, nil
+
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKernelVersion() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening")
-	for resIdx := range res {
-		res[resIdx].GroupVersionResource.Resource = "LinuxSecurityHardeningStatus"
-		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
-		res[resIdx].GroupVersionResource.Version = "v1beta0"
-	}
-	return res, err
+	return hsh.sendAllPodsHTTPGETRequest("/kernelVersion", "KernelVersion")
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetOsReleaseFile() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine")
-	for resIdx := range res {
-		res[resIdx].GroupVersionResource.Resource = "KubeletCommandLine"
-		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
-		res[resIdx].GroupVersionResource.Version = "v1beta0"
-	}
-	return res, err
+	return hsh.sendAllPodsHTTPGETRequest("/osRelease", "OsReleaseFile")
 }
 
 // return list of
-func (hsh *HostSensorHandler) GetKernelVersion() ([]HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/kernelVersion")
-	for resIdx := range res {
-		res[resIdx].GroupVersionResource.Resource = "KernelVersion"
-		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
-		res[resIdx].GroupVersionResource.Version = "v1beta0"
-	}
-	return res, err
-}
-
-// return list of
-func (hsh *HostSensorHandler) GetOsReleaseFile() ([]HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/osRelease")
-	for resIdx := range res {
-		res[resIdx].GroupVersionResource.Resource = "OsReleaseFile"
-		res[resIdx].GroupVersionResource.Group = "hostdata.armo.cloud"
-		res[resIdx].GroupVersionResource.Version = "v1beta0"
-	}
-	return res, err
-}
-
-// return list of
-func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations")
+	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
 	for resIdx := range res {
 		jsonBytes, err := yaml.YAMLToJSON(res[resIdx].Data)
 		if err != nil {
-			fmt.Printf("In GetKubeletConfigurations failed to YAMLToJSON: %v;\n%v", err, res[resIdx])
+			logger.L().Error("failed to convert kubelet configurations from yaml to json", helpers.Error(err))
 			continue
 		}
-		res[resIdx].Data = jsonBytes
-		kindDet := metav1.TypeMeta{}
-		if err = json.Unmarshal(jsonBytes, &kindDet); err != nil {
-			fmt.Printf("In GetKubeletConfigurations failed to Unmarshal GroupVersionKind: %v;\n%v", err, jsonBytes)
-			continue
-		}
-		res[resIdx].GroupVersionResource.Resource = kindDet.Kind
-		res[resIdx].GroupVersionResource.Group = kindDet.GroupVersionKind().Group
-		res[resIdx].GroupVersionResource.Version = kindDet.GroupVersionKind().Version
+		res[resIdx].SetData(jsonBytes)
 	}
 	return res, err
 }
 
-func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, error) {
-	res := make([]HostSensorDataEnvelope, 0)
+func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnvelope, error) {
+	res := make([]hostsensor.HostSensorDataEnvelope, 0)
 	if hsh.DaemonSet == nil {
 		return res, nil
 	}
-	cautils.ProgressTextDisplay("Accessing host sensor")
+
+	logger.L().Info("Accessing host sensor")
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 	kcData, err := hsh.GetKubeletConfigurations()
@@ -210,6 +196,7 @@ func (hsh *HostSensorHandler) CollectResources() ([]HostSensorDataEnvelope, erro
 	}
 	res = append(res, kcData...)
 	// finish
-	cautils.SuccessTextDisplay("Read host information from host sensor")
+
+	logger.L().Success("Read host information from host sensor")
 	return res, nil
 }

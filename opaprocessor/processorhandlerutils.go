@@ -1,39 +1,77 @@
 package opaprocessor
 
 import (
+	"fmt"
+
 	pkgcautils "github.com/armosec/utils-go/utils"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/exceptions"
 	"github.com/armosec/opa-utils/reporthandling"
 	resources "github.com/armosec/opa-utils/resources"
-
-	"github.com/golang/glog"
 )
 
+// updateResults update the results objects and report objects. This is a critical function - DO NOT CHANGE
+/*
+	- remove sensible data
+	- adding exceptions
+	- summarize results
+*/
 func (opap *OPAProcessor) updateResults() {
+
 	// remove data from all objects
 	for i := range opap.AllResources {
 		removeData(opap.AllResources[i])
 	}
 
-	for f := range opap.PostureReport.FrameworkReports {
-		// set exceptions
-		exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
+	// set exceptions
+	for i := range opap.ResourcesResult {
 
-		// set counters
-		reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
+		t := opap.ResourcesResult[i]
 
-		// set default score
-		reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+		// first set exceptions
+		if resource, ok := opap.AllResources[i]; ok {
+			t.SetExceptions(resource, opap.Exceptions, cautils.ClusterName)
+		}
+
+		// summarize the resources
+		opap.Report.AppendResourceResultToSummary(&t)
+
+		// Add score
+		// TODO
+
+		// save changes
+		opap.ResourcesResult[i] = t
 	}
+
+	// set result summary
+	opap.Report.SummaryDetails.InitResourcesSummary()
+
+	// for f := range opap.PostureReport.FrameworkReports {
+	// 	// set exceptions
+	// 	exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
+
+	// 	// set counters
+	// 	reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
+
+	// 	// set default score
+	// 	// reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
+	// }
+}
+
+func getAllSupportedObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
+	k8sObjects := []workloadinterface.IMetadata{}
+	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
+	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.DynamicMatch)...)
+	return k8sObjects
 }
 
 func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
+
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
 			for _, version := range match[m].APIVersions {
@@ -42,8 +80,7 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
 							if k8sObj == nil {
-								continue
-								// glog.Errorf("Resource '%s' is nil, probably failed to pull the resource", groupResource)
+								logger.L().Debug(fmt.Sprintf("resource '%s' is nil, probably failed to pull the resource", groupResource))
 							}
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
@@ -55,13 +92,37 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 		}
 	}
 
-	return k8sObjects
+	return filterOutChildResources(k8sObjects, match)
 }
 
+// filterOutChildResources filter out child resources if the parent resource is in the list
+func filterOutChildResources(objects []workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+	response := []workloadinterface.IMetadata{}
+	owners := []string{}
+	for m := range match {
+		for i := range match[m].Resources {
+			owners = append(owners, match[m].Resources[i])
+		}
+	}
+	for i := range objects {
+		if !k8sinterface.IsTypeWorkload(objects[i].GetObject()) {
+			response = append(response, objects[i])
+			continue
+		}
+		w := workloadinterface.NewWorkloadObj(objects[i].GetObject())
+		ownerReferences, err := w.GetOwnerReferences()
+		if err != nil || len(ownerReferences) == 0 {
+			response = append(response, w)
+		} else if !k8sinterface.IsStringInSlice(owners, ownerReferences[0].Kind) {
+			response = append(response, w)
+		}
+	}
+	return response
+}
 func getRuleDependencies() (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {
-		glog.Warningf("failed to load rule dependencies")
+		logger.L().Warning("failed to load rule dependencies")
 	}
 	return modules, nil
 }
@@ -100,7 +161,7 @@ func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
 }
 
 func removeData(obj workloadinterface.IMetadata) {
-	if !workloadinterface.IsTypeWorkload(obj.GetObject()) {
+	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
 		return // remove data only from kubernetes objects
 	}
 	workload := workloadinterface.NewWorkloadObj(obj.GetObject())
@@ -116,17 +177,31 @@ func removeData(obj workloadinterface.IMetadata) {
 
 func removeConfigMapData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
-	workloadinterface.RemoveFromMap(workload.GetObject(), "data")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
-
+	overrideSensitiveData(workload)
 }
+
+func overrideSensitiveData(workload workloadinterface.IWorkload) {
+	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
+	if ok {
+		data, ok := dataInterface.(map[string]interface{})
+		if ok {
+			for key := range data {
+				workloadinterface.SetInMap(workload.GetObject(), []string{"data"}, key, "XXXXXX")
+			}
+		}
+	}
+}
+
 func removeSecretData(workload workloadinterface.IWorkload) {
-	workloadinterface.NewWorkloadObj(workload.GetObject()).RemoveSecretData()
+	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+	overrideSensitiveData(workload)
 }
 func removePodData(workload workloadinterface.IWorkload) {
 	workload.RemoveAnnotation("kubectl.kubernetes.io/last-applied-configuration")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
+	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
 	containers, err := workload.GetContainers()
 	if err != nil || len(containers) == 0 {
@@ -134,7 +209,7 @@ func removePodData(workload workloadinterface.IWorkload) {
 	}
 	for i := range containers {
 		for j := range containers[i].Env {
-			containers[i].Env[j].Value = ""
+			containers[i].Env[j].Value = "XXXXXX"
 		}
 	}
 	workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
@@ -144,9 +219,6 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 	return rule.Rule
 }
 
-func preRuleData(rule *reporthandling.PolicyRule) string {
-	if len(rule.PreRun) > 0 {
-		return rule.PreRun[0]
-	}
-	return ""
+func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
+	return rule.ResourceEnumerator
 }

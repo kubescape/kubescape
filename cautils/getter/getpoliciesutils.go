@@ -10,8 +10,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-
-	"github.com/armosec/opa-utils/reporthandling"
 )
 
 func GetDefaultPath(name string) string {
@@ -22,33 +20,8 @@ func GetDefaultPath(name string) string {
 	return defaultfilePath
 }
 
-// Save control as json in file
-func SaveControlInFile(control *reporthandling.Control, pathStr string) error {
-	encodedData, err := json.Marshal(control)
-	if err != nil {
-		return err
-	}
-	err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
-	if err != nil {
-		if os.IsNotExist(err) {
-			pathDir := path.Dir(pathStr)
-			if err := os.Mkdir(pathDir, 0744); err != nil {
-				return err
-			}
-		} else {
-			return err
-
-		}
-		err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func SaveFrameworkInFile(framework *reporthandling.Framework, pathStr string) error {
-	encodedData, err := json.Marshal(framework)
+func SaveInFile(policy interface{}, pathStr string) error {
+	encodedData, err := json.MarshalIndent(policy, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -84,7 +57,7 @@ func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]stri
 	if err != nil {
 		return "", err
 	}
-	addHeaders(req, headers)
+	setHeaders(req, headers)
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -103,7 +76,7 @@ func HttpPost(httpClient *http.Client, fullURL string, headers map[string]string
 	if err != nil {
 		return "", err
 	}
-	addHeaders(req, headers)
+	setHeaders(req, headers)
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return "", err
@@ -115,10 +88,10 @@ func HttpPost(httpClient *http.Client, fullURL string, headers map[string]string
 	return respStr, nil
 }
 
-func addHeaders(req *http.Request, headers map[string]string) {
+func setHeaders(req *http.Request, headers map[string]string) {
 	if len(headers) >= 0 { // might be nil
 		for k, v := range headers {
-			req.Header.Add(k, v)
+			req.Header.Set(k, v)
 		}
 	}
 }
@@ -133,21 +106,22 @@ func httpRespToString(resp *http.Response) (string, error) {
 	if resp.ContentLength > 0 {
 		strBuilder.Grow(int(resp.ContentLength))
 	}
-	bytesNum, err := io.Copy(&strBuilder, resp.Body)
+	_, err := io.Copy(&strBuilder, resp.Body)
 	respStr := strBuilder.String()
 	if err != nil {
 		respStrNewLen := len(respStr)
 		if respStrNewLen > 1024 {
 			respStrNewLen = 1024
 		}
-		return "", fmt.Errorf("HTTP request failed. URL: '%s', Read-ERROR: '%s', HTTP-CODE: '%s', BODY(top): '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), err, resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
+		return "", fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, respStr[:respStrNewLen])
+		// return "", fmt.Errorf("HTTP request failed. URL: '%s', Read-ERROR: '%s', HTTP-CODE: '%s', BODY(top): '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), err, resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		respStrNewLen := len(respStr)
 		if respStrNewLen > 1024 {
 			respStrNewLen = 1024
 		}
-		err = fmt.Errorf("HTTP request failed. URL: '%s', HTTP-ERROR: '%s', BODY: '%s', HTTP-HEADERS: %v, HTTP-BODY-BUFFER-LENGTH: %v", resp.Request.URL.RequestURI(), resp.Status, respStr[:respStrNewLen], resp.Header, bytesNum)
+		err = fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, respStr[:respStrNewLen])
 	}
 
 	return respStr, err
