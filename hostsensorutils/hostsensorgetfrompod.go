@@ -73,7 +73,7 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 			defer wg.Done()
 			resBytes, err := hsh.HTTPGetToPod(podName, path)
 			if err != nil {
-				logger.L().Error("failed to get data", helpers.String("path", path), helpers.String("pos", path), helpers.Error(err))
+				logger.L().Error("failed to get data", helpers.String("path", path), helpers.String("podName", podName), helpers.Error(err))
 			} else {
 				resLock.Lock()
 				defer resLock.Unlock()
