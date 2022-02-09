@@ -6,8 +6,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
@@ -59,15 +59,12 @@ var resultsCmd = &cobra.Command{
 			return fmt.Errorf("missing results file")
 		}
 
-		k8s := k8sinterface.NewKubernetesApi()
+		k8s := getKubernetesApi()
 
 		// get config
-		clusterConfig, err := getSubmittedClusterConfig(k8s)
-		if err != nil {
-			return err
-		}
+		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
 
-		resultsObjects := NewResultsObject(clusterConfig.GetCustomerGUID(), clusterConfig.GetClusterName(), args[0])
+		resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
 
 		// submit resources
 		r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())
@@ -79,8 +76,7 @@ var resultsCmd = &cobra.Command{
 		}
 
 		if err := clihandler.Submit(submitInterfaces); err != nil {
-			fmt.Println(err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},

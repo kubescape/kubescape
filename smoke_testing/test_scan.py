@@ -29,7 +29,11 @@ def scan_framework(kubescape_exec: str):
 
 
 def scan_frameworks(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa,mitre,armobest", all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa,mitre", all_files, "--enable-host-scan=false"])
+
+
+def scan_all(kubescape_exec: str):
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--enable-host-scan=false"])
 
 
 def scan_from_stdin(kubescape_exec: str):
@@ -62,6 +66,10 @@ def run(kubescape_exec: str):
 
     print("Testing scan frameworks")
     msg = scan_frameworks(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+    print("Testing scan all")
+    msg = scan_all(kubescape_exec=kubescape_exec)
     smoke_utils.assertion(msg)
 
     # TODO - fix test

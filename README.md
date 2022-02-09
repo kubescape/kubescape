@@ -101,18 +101,25 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--use-from`                |                           | Load local framework object from specified path. If not used will download latest                                                                                                                                                                                                                                    | 
 | `--use-artifacts-from`                |                           | Load artifacts (frameworks, control-config, exceptions) from local directory. If not used will download them                                                                                                                                                                                                                                    |                                              |
 | `--use-default`             | `false`                   | Load local framework object from default path. If not used will download latest                                                                                                                                                                                                                                      | `true`/`false`                               |
-| `--exceptions`              |                           | Path to an [exceptions obj](examples/exceptions.json). If not set will download exceptions from Armo management portal                                                                                                                                                                                               |  
+| `--exceptions`              |                           | Path to an exceptions obj, [examples](examples/exceptions/README.md). Default will download exceptions from Kubescape SaaS                                                                                                                                                                                               |  
 | `--controls-config`              |                           | Path to a controls-config obj. If not set will download controls-config from ARMO management portal                                                                                                                                                                                               |                                            |
 | `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
 | `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
 | `--account`                 |                           | Armo portal account ID. Default will load account ID from configMap or config file                                                                                                                                                                                                                                   |                                              |
 | `--kube-context`                 |        current-context               |  Cluster context to scan                                                                                                                                                                                                                              |                                              |
 | `--verbose`                 | `false`                   | Display all of the input resources and not only failed resources                                                                                                                                                                                                                                                     | `true`/`false`                               |
+| `--logger`                 | `info`                   | Set the logger level                                                                                                                                                                                                                                                 | `debug`/`info`/`success`/`warning`/`error`/`fatal`                               |
 
 
 ## Usage & Examples
 
 ### Examples
+
+
+#### Scan a running Kubernetes cluster and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
+```
+kubescape scan --submit
+```
 
 #### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
@@ -133,58 +140,58 @@ kubescape scan control "Privileged container"
 
 #### Scan specific namespaces
 ```
-kubescape scan framework nsa --include-namespaces development,staging,production
+kubescape scan --include-namespaces development,staging,production
 ```
 
 #### Scan cluster and exclude some namespaces
 ```
-kubescape scan framework nsa --exclude-namespaces kube-system,kube-public
+kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 
 #### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
 ```
-kubescape scan framework nsa *.yaml
+kubescape scan *.yaml
 ```
 
 #### Scan kubernetes manifest files from a public github repository 
 ```
-kubescape scan framework nsa https://github.com/armosec/kubescape
+kubescape scan https://github.com/armosec/kubescape
 ```
 
 #### Display all scanned resources (including the resources who passed) 
 ```
-kubescape scan framework nsa --verbose
+kubescape scan --verbose
 ```
 
 #### Output in `json` format
 ```
-kubescape scan framework nsa --format json --output results.json
+kubescape scan --format json --output results.json
 ```
 
 #### Output in `junit xml` format
 ```
-kubescape scan framework nsa --format junit --output results.xml
+kubescape scan --format junit --output results.xml
 ```
 
 #### Output in `prometheus` metrics format - Contributed by [@Joibel](https://github.com/Joibel)
 ```
-kubescape scan framework nsa --format prometheus
+kubescape scan --format prometheus
 ```
 
 #### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
 [Full documentation](examples/exceptions/README.md)
 ```
-kubescape scan framework nsa --exceptions examples/exceptions/exclude-kube-namespaces.json
+kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 
 #### Scan Helm charts - Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout
 ```
-helm template [NAME] [CHART] [flags] --dry-run | kubescape scan framework nsa -
+helm template [NAME] [CHART] [flags] --dry-run | kubescape scan -
 ```
 
 e.g.
 ```
-helm template bitnami/mysql --generate-name --dry-run | kubescape scan framework nsa -
+helm template bitnami/mysql --generate-name --dry-run | kubescape scan -
 ```
 
 
@@ -221,19 +228,15 @@ kubescape scan framework nsa --use-artifacts-from path/to/local/dir
 ```
 
 ## Scan Periodically using Helm - Contributed by [@yonahd](https://github.com/yonahd)  
- 
-You can scan your cluster periodically by adding a `CronJob` that will repeatedly trigger kubescape
-
-```
-helm install kubescape examples/helm_chart/
-```
+[Please follow the instructions here](https://hub.armo.cloud/docs/installation-of-armo-in-cluster)
+[helm chart repo](https://github.com/armosec/armo-helm)
 
 ## Scan using docker image
 
 Official Docker image `quay.io/armosec/kubescape`
 
 ```
-docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan framework nsa /app/example.yaml
+docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan /app/example.yaml
 ```
 
 # Submit data manually
@@ -265,6 +268,7 @@ variables in this script:
 + ArmoBEServer
 + ArmoERServer
 + ArmoWebsite
++ ArmoAuthServer
 
 
 ## Build using go

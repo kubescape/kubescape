@@ -1,8 +1,7 @@
-# kubescape
+# Helm chart - DEPRECATED
 
-![Version: 1.0.0](https://img.shields.io/badge/Version-1.0.0-informational?style=flat-square) ![Type: application](https://img.shields.io/badge/Type-application-informational?style=flat-square) ![AppVersion: v1.0.128](https://img.shields.io/badge/AppVersion-v1.0.128-informational?style=flat-square)
+[helm chart repo](https://github.com/armosec/armo-helm)
 
-Kubescape is the first open-source tool for testing if Kubernetes is deployed securely according to multiple frameworks regulatory, customized company policies and DevSecOps best practices, such as the  [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo) and the [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) . Kubescape scans K8s clusters, YAML files, and HELM charts, and detect misconfigurations and software vulnerabilities at early stages of the CI/CD pipeline and provides a risk score instantly and risk trends over time. Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI and Github workflows.
 
 ## Values
 

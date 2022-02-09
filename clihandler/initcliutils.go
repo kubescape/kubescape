@@ -7,6 +7,7 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling/reporter"
@@ -42,7 +43,7 @@ func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
 
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
 	if submit {
-		return cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, tenantConfig.GetCustomerGUID(), tenantConfig.GetClusterName()))
+		return cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, tenantConfig.GetAccountID(), tenantConfig.GetClusterName()))
 	}
 	return nil
 }
@@ -55,12 +56,13 @@ func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IRepo
 	return reporterv1.NewReportMock()
 }
 
-func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
+func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
-		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns)
+		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns, registryAdaptors)
 	}
+	getter.GetArmoAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects)
+	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors)
 }
 
 func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
@@ -72,12 +74,12 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	// we need to determined which controls needs host sensor
 	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
 		scanInfo.HostSensor.SetBool(askUserForHostSensor())
-		cautils.WarningDisplay(os.Stderr, "Warning: Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag\n")
+		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag")
 	}
 	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
 		if err != nil {
-			cautils.WarningDisplay(os.Stderr, fmt.Sprintf("Warning: failed to create host sensor: %v\n", err.Error()))
+			logger.L().Warning(fmt.Sprintf("failed to create host sensor: %s", err.Error()))
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
 		return hostSensorHandler
@@ -139,7 +141,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		if scanInfo.Submit {
 			// submit - Create tenant & Submit report
 			if err := tenantConfig.SetTenant(); err != nil {
-				fmt.Println(err)
+				logger.L().Error(err.Error())
 			}
 		}
 	}
@@ -152,7 +154,6 @@ func getPolicyGetter(loadPoliciesFromFile []string, accountID string, frameworkS
 	}
 	if accountID != "" && frameworkScope {
 		g := getter.GetArmoAPIConnector() // download policy from ARMO backend
-		g.SetCustomerGUID(accountID)
 		return g
 	}
 	if downloadReleasedPolicy == nil {
@@ -183,7 +184,6 @@ func getConfigInputsGetter(ControlsInputs string, accountID string, downloadRele
 	}
 	if accountID != "" {
 		g := getter.GetArmoAPIConnector() // download config from ARMO backend
-		g.SetCustomerGUID(accountID)
 		return g
 	}
 	if downloadReleasedPolicy == nil {

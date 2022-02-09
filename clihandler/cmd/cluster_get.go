@@ -7,13 +7,15 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/spf13/cobra"
 )
 
 var getCmd = &cobra.Command{
-	Use:   "get <key>",
-	Short: "Get configuration in cluster",
-	Long:  ``,
+	Use:        "get <key>",
+	Short:      "Get configuration in cluster",
+	Long:       ``,
+	Deprecated: "use the 'view' command instead",
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) < 1 || len(args) > 1 {
 			return fmt.Errorf("requires  one argument")
@@ -34,12 +36,11 @@ var getCmd = &cobra.Command{
 		val, err := clusterConfig.GetValueByKeyFromConfigMap(key)
 		if err != nil {
 			if err.Error() == "value does not exist." {
-				fmt.Printf("Could net get value from configmap, reason: %s\n", err)
-				return nil
+				return fmt.Errorf("failed to get value from configmap, reason: %s", err.Error())
 			}
 			return err
 		}
-		fmt.Println(key + "=" + val)
+		logger.L().Info(key + "=" + val)
 		return nil
 	},
 }

@@ -5,18 +5,19 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
 func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification, policiesAndResources *cautils.OPASessionObj) error {
-	cautils.ProgressTextDisplay("Downloading/Loading policy definitions")
+	logger.L().Info("Downloading/Loading policy definitions")
 
 	frameworks, err := policyHandler.getScanPolicies(notification)
 	if err != nil {
 		return err
 	}
 	if len(frameworks) == 0 {
-		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(notification.Rules), ","))
+		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(notification.Rules), ", "))
 	}
 
 	policiesAndResources.Frameworks = frameworks
@@ -32,8 +33,7 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 	if err == nil {
 		policiesAndResources.RegoInputData.PostureControlInputs = controlsInputs
 	}
-
-	cautils.SuccessTextDisplay("Downloaded/Loaded policy")
+	logger.L().Success("Downloaded/Loaded policy")
 	return nil
 }
 

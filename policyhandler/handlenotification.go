@@ -50,7 +50,7 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 
 func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 
-	opaSessionObj.PostureReport.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
+	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
 	resourcesMap, allResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj.Frameworks, &notification.Designators)
 	if err != nil {
 		return err

@@ -5,15 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	ksscore "github.com/armosec/kubescape/score"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/open-policy-agent/opa/storage"
-
-	"github.com/golang/glog"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
@@ -66,7 +66,7 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 
 		// process
 		if err := opap.Process(policies); err != nil {
-			// fmt.Println(err)
+			logger.L().Error(err.Error())
 		}
 
 		// edit results
@@ -81,8 +81,8 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 }
 
 func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
-	// glog.Infof(fmt.Sprintf("Starting 'Process'. reportID: %s", opap.PostureReport.ReportID))
-	cautils.ProgressTextDisplay(fmt.Sprintf("Scanning cluster %s", cautils.ClusterName))
+	logger.L().Info(fmt.Sprintf("Scanning cluster %s", cautils.ClusterName))
+
 	cautils.StartSpinner()
 
 	var errs error
@@ -90,7 +90,7 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 
 		resourcesAssociatedControl, err := opap.processControl(&control)
 		if err != nil {
-			appendError(&errs, err)
+			logger.L().Error(err.Error())
 		}
 		// update resources with latest results
 		if len(resourcesAssociatedControl) != 0 {
@@ -108,19 +108,8 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 	opap.Report.ReportGenerationTime = time.Now().UTC()
 
 	cautils.StopSpinner()
-	cautils.SuccessTextDisplay(fmt.Sprintf("Done scanning cluster %s", cautils.ClusterName))
+	logger.L().Success(fmt.Sprintf("Done scanning cluster %s", cautils.ClusterName))
 	return errs
-}
-
-func appendError(errs *error, err error) {
-	if err == nil {
-		return
-	}
-	if errs == nil {
-		errs = &err
-	} else {
-		*errs = fmt.Errorf("%v\n%s", *errs, err.Error())
-	}
 }
 
 func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
@@ -132,7 +121,7 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 	for i := range control.Rules {
 		resourceAssociatedRule, err := opap.processRule(&control.Rules[i])
 		if err != nil {
-			appendError(&errs, err)
+			logger.L().Error(err.Error())
 			continue
 		}
 
@@ -191,7 +180,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 	ruleResponses, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData, postureControlInputs)
 	if err != nil {
 		// TODO - Handle error
-		glog.Error(err)
+		logger.L().Error(err.Error())
 	} else {
 		// ruleResponse to ruleResult
 		for i := range ruleResponses {
@@ -204,7 +193,10 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 
 				ruleResult.Status = apis.StatusFailed
 				for j := range ruleResponses[i].FailedPaths {
-					ruleResult.Paths = append(ruleResult.Paths, resourcesresults.Path{FailedPath: ruleResponses[i].FailedPaths[j]})
+					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: ruleResponses[i].FailedPaths[j]})
+				}
+				for j := range ruleResponses[i].FixPaths {
+					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: ruleResponses[i].FixPaths[j]})
 				}
 				resources[failedResources[j].GetID()] = ruleResult
 			}
@@ -224,7 +216,6 @@ func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8
 }
 
 func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, postureControlInputs map[string][]string) ([]reporthandling.RuleResponse, error) {
-	var errs error
 
 	// compile modules
 	modules, err := getRuleDependencies()
@@ -245,10 +236,10 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjec
 	// Eval
 	results, err := opap.regoEval(k8sObjects, compiled, &store)
 	if err != nil {
-		errs = fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
+		logger.L().Error(err.Error())
 	}
 
-	return results, errs
+	return results, nil
 }
 
 func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {

@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/spf13/cobra"
 )
@@ -21,7 +21,7 @@ var (
   kubescape download artifacts --output /tmp
   
   # Download the NSA framework. Run 'kubescape list frameworks' for all frameworks names
-  kubescape download frameworks nsa
+  kubescape download framework nsa
 
   # Download the "Allowed hostPath" control. Run 'kubescape list controls' for all controls names
   kubescape download control "Allowed hostPath"
@@ -58,8 +58,7 @@ var downloadCmd = &cobra.Command{
 			downloadInfo.Name = args[1]
 		}
 		if err := clihandler.CliDownload(&downloadInfo); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},
@@ -69,7 +68,7 @@ func init() {
 	// cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(downloadCmd)
-	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 }

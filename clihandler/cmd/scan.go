@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/spf13/cobra"
@@ -13,24 +10,24 @@ var scanInfo cautils.ScanInfo
 
 // scanCmd represents the scan command
 var scanCmd = &cobra.Command{
-	Use:   "scan <command>",
+	Use:   "scan [command]",
 	Short: "Scan the current running cluster or yaml files",
 	Long:  `The action you want to perform`,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
-			if !strings.EqualFold(args[0], "framework") && !strings.EqualFold(args[0], "control") {
-				return fmt.Errorf("invalid parameter '%s'. Supported parameters: framework, control", args[0])
+			if args[0] != "framework" && args[0] != "control" {
+				scanInfo.ScanAll = true
+				return frameworkCmd.RunE(cmd, append([]string{"all"}, args...))
 			}
 		}
 		return nil
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
 			scanInfo.ScanAll = true
-			// frameworks := getter.NativeFrameworks
-			// frameworkArgs := []string{strings.Join(frameworks, ",")}
-			frameworkCmd.RunE(cmd, []string{"all"})
+			return frameworkCmd.RunE(cmd, []string{"all"})
 		}
+		return nil
 	},
 }
 
@@ -39,10 +36,13 @@ func frameworkInitConfig() {
 }
 
 func init() {
+
 	cobra.OnInitialize(frameworkInitConfig)
 
 	rootCmd.AddCommand(scanCmd)
-	rootCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
+
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
@@ -61,4 +61,5 @@ func init() {
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensor, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valueable data from cluster nodes for certain controls")
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
+
 }

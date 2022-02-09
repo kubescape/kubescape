@@ -9,6 +9,8 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	uuid "github.com/satori/go.uuid"
 
 	"github.com/armosec/opa-utils/reporthandling"
@@ -32,7 +34,7 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 	return &ReportEventReceiver{
 		httpClient:         &http.Client{},
 		clusterName:        tenantConfig.ClusterName,
-		customerGUID:       tenantConfig.CustomerGUID,
+		customerGUID:       tenantConfig.AccountID,
 		token:              tenantConfig.Token,
 		customerAdminEMail: tenantConfig.CustomerAdminEMail,
 	}
@@ -207,7 +209,8 @@ func (report *ReportEventReceiver) generateMessage() {
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
 	if report.customerAdminEMail != "" {
-		report.message = fmt.Sprintf("%s %s/risk/%s\n(Account: %s)", message, u.String(), report.clusterName, maskID(report.customerGUID))
+		logger.L().Debug("", helpers.String("account ID", report.customerGUID))
+		report.message = fmt.Sprintf("%s %s/risk/%s", message, u.String(), report.clusterName)
 		return
 	}
 	u.Path = "account/sign-up"

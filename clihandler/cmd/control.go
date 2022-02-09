@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"
@@ -53,7 +54,6 @@ var controlCmd = &cobra.Command{
 		scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
 
 		if len(args) == 0 {
-			// scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, reporthandling.KindFramework)
 			scanInfo.ScanAll = true
 		} else { // expected control or list of control sepparated by ","
 
@@ -83,8 +83,7 @@ var controlCmd = &cobra.Command{
 		cautils.SetSilentMode(scanInfo.Silent)
 		err := clihandler.ScanCliSetup(&scanInfo)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},
@@ -97,8 +96,7 @@ func init() {
 
 func flagValidationControl() {
 	if 100 < scanInfo.FailThreshold {
-		fmt.Println("bad argument: out of range threshold")
-		os.Exit(1)
+		logger.L().Fatal("bad argument: out of range threshold")
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 )
 
 var INDENT = "   "
@@ -27,8 +28,8 @@ func GetWriter(outputFile string) *os.File {
 	if outputFile != "" {
 		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
-			fmt.Println("failed to open file for writing, reason: ", err.Error())
-			return os.Stdout
+			logger.L().Error(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
+			return os.Stderr
 		}
 		return f
 	}

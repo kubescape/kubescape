@@ -7,6 +7,8 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
 	"sigs.k8s.io/yaml"
 )
@@ -71,7 +73,7 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 			defer wg.Done()
 			resBytes, err := hsh.HTTPGetToPod(podName, path)
 			if err != nil {
-				fmt.Printf("In sendAllPodsHTTPGETRequest failed to get data '%s' from pod '%s': %v", path, podName, err)
+				logger.L().Error("failed to get data", helpers.String("path", path), helpers.String("podName", podName), helpers.Error(err))
 			} else {
 				resLock.Lock()
 				defer resLock.Unlock()
@@ -141,7 +143,7 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSenso
 	for resIdx := range res {
 		jsonBytes, err := yaml.YAMLToJSON(res[resIdx].Data)
 		if err != nil {
-			fmt.Printf("In GetKubeletConfigurations failed to YAMLToJSON: %v;\n%v", err, res[resIdx])
+			logger.L().Error("failed to convert kubelet configurations from yaml to json", helpers.Error(err))
 			continue
 		}
 		res[resIdx].SetData(jsonBytes)
@@ -154,7 +156,8 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	if hsh.DaemonSet == nil {
 		return res, nil
 	}
-	cautils.ProgressTextDisplay("Accessing host sensor")
+
+	logger.L().Info("Accessing host sensor")
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 	kcData, err := hsh.GetKubeletConfigurations()
@@ -193,6 +196,7 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	}
 	res = append(res, kcData...)
 	// finish
-	cautils.SuccessTextDisplay("Read host information from host sensor")
+
+	logger.L().Success("Read host information from host sensor")
 	return res, nil
 }

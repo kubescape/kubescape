@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	uuid "github.com/satori/go.uuid"
 )
@@ -31,7 +32,7 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 	return &ReportEventReceiver{
 		httpClient:         &http.Client{},
 		clusterName:        tenantConfig.ClusterName,
-		customerGUID:       tenantConfig.CustomerGUID,
+		customerGUID:       tenantConfig.AccountID,
 		token:              tenantConfig.Token,
 		customerAdminEMail: tenantConfig.CustomerAdminEMail,
 	}
@@ -126,7 +127,6 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 	if err != nil {
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
 	}
-	// fmt.Printf("\n\n%s\n\n", reqBody)
 
 	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
 	if err != nil {
@@ -143,7 +143,8 @@ func (report *ReportEventReceiver) generateMessage() {
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
 	if report.customerAdminEMail != "" {
-		report.message = fmt.Sprintf("%s %s/risk/%s\n(Account: %s)", message, u.String(), report.clusterName, maskID(report.customerGUID))
+		logger.L().Debug("", helpers.String("account ID", report.customerGUID))
+		report.message = fmt.Sprintf("%s %s/risk/%s", message, u.String(), report.clusterName)
 		return
 	}
 	u.Path = "account/sign-up"
@@ -159,20 +160,20 @@ func (report *ReportEventReceiver) DisplayReportURL() {
 	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 }
 
-func maskID(id string) string {
-	sep := "-"
-	splitted := strings.Split(id, sep)
-	if len(splitted) != 5 {
-		return ""
-	}
-	str := splitted[0][:4]
-	splitted[0] = splitted[0][4:]
-	for i := range splitted {
-		for j := 0; j < len(splitted[i]); j++ {
-			str += "X"
-		}
-		str += sep
-	}
+// func maskID(id string) string {
+// 	sep := "-"
+// 	splitted := strings.Split(id, sep)
+// 	if len(splitted) != 5 {
+// 		return ""
+// 	}
+// 	str := splitted[0][:4]
+// 	splitted[0] = splitted[0][4:]
+// 	for i := range splitted {
+// 		for j := 0; j < len(splitted[i]); j++ {
+// 			str += "X"
+// 		}
+// 		str += sep
+// 	}
 
-	return strings.TrimSuffix(str, sep)
-}
+// 	return strings.TrimSuffix(str, sep)
+// }
