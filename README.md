@@ -195,37 +195,39 @@ helm template bitnami/mysql --generate-name --dry-run | kubescape scan -
 ```
 
 
-### Offline Support
+### Offline/Air-gaped Environment Support
 
 [Video tutorial](https://youtu.be/IGXL9s37smM)
 
 It is possible to run Kubescape offline!
-
-First download the framework and then scan with `--use-from` flag
-
-1. Download and save in file, if file name not specified, will save in `~/.kubescape/<framework name>.json`
-```
-kubescape download framework nsa --output nsa.json
-```
-
-2. Scan using the downloaded framework
-```
-kubescape scan framework nsa --use-from nsa.json
-```
-
-
-
-You can also download all artifacts to a local path and then load them using `--use-artifacts-from` flag
+#### Download all artifacts
 
 1. Download and save in local directory, if path not specified, will save all in `~/.kubescape`
 ```
 kubescape download artifacts --output path/to/local/dir
 ```
+2. Copy the downloaded artifacts to the air-gaped/offline environment
 
-2. Scan using the downloaded artifacts
+3. Scan using the downloaded artifacts
 ```
-kubescape scan framework nsa --use-artifacts-from path/to/local/dir
+kubescape scan --use-artifacts-from path/to/local/dir
 ```
+
+#### Download a single artifacts
+
+You can also download a single artifacts and scan with the `--use-from` flag
+
+1. Download and save in file, if file name not specified, will save in `~/.kubescape/<framework name>.json`
+```
+kubescape download framework nsa --output /path/nsa.json
+```
+2. Copy the downloaded artifacts to the air-gaped/offline environment
+
+3. Scan using the downloaded framework
+```
+kubescape scan framework nsa --use-from /path/nsa.json
+```
+
 
 ## Scan Periodically using Helm - Contributed by [@yonahd](https://github.com/yonahd)  
 [Please follow the instructions here](https://hub.armo.cloud/docs/installation-of-armo-in-cluster)

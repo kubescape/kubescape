@@ -71,7 +71,7 @@ func detailsToString(details []helpers.IDetails) string {
 	for i := range details {
 		s += fmt.Sprintf("%s: %s", details[i].Key(), details[i].Value())
 		if i < len(details)-1 {
-			s += ";"
+			s += "; "
 		}
 	}
 	return s

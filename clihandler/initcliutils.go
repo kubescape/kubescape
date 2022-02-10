@@ -8,6 +8,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling/reporter"
@@ -198,7 +199,7 @@ func getConfigInputsGetter(ControlsInputs string, accountID string, downloadRele
 
 func getDownloadReleasedPolicy(downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to get policies from github release, loading policies from cache\n")
+		logger.L().Warning("failed to get policies from github release, loading policies from cache", helpers.Error(err))
 		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
 	} else {
 		return downloadReleasedPolicy
