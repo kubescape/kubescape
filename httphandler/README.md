@@ -12,6 +12,6 @@ Running `kubescape` will start up a webserver on port `8080` which will serve th
 
 ## Installation into kubernetes
 
-The files in [kubescape.yaml](kubescape.yaml) will deploy one instance of kubescape to run on your cluster. 
+The [yaml](ks-prometheus-support.yaml) file will deploy one instance of kubescape (with all relevant dependencies) to run on your cluster
 
-**NOTE** Make sure the configurations suit your cluster (e.g. `serviceType`)
+**NOTE** Make sure the configurations suit your cluster (e.g. `serviceType`, namespace, etc.)
