@@ -57,7 +57,10 @@ func (pl *PrettyLogger) print(level helpers.Level, msg string, details ...helper
 	if !level.Skip(pl.level) {
 		pl.mutex.Lock()
 		prefix(level)(pl.writer, "[%s] ", level.String())
-		message(pl.writer, fmt.Sprintf("%s. %s\n", msg, detailsToString(details)))
+		if d := detailsToString(details); d != "" {
+			msg = fmt.Sprintf("%s. %s", msg, d)
+		}
+		message(pl.writer, fmt.Sprintf("%s\n", msg))
 		pl.mutex.Unlock()
 	}
 
@@ -68,7 +71,7 @@ func detailsToString(details []helpers.IDetails) string {
 	for i := range details {
 		s += fmt.Sprintf("%s: %s", details[i].Key(), details[i].Value())
 		if i < len(details)-1 {
-			s += ";"
+			s += "; "
 		}
 	}
 	return s

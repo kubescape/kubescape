@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
@@ -65,10 +66,16 @@ var downloadCmd = &cobra.Command{
 }
 
 func init() {
-	// cobra.OnInitialize(initConfig)
+	cobra.OnInitialize(initDownload)
 
 	rootCmd.AddCommand(downloadCmd)
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
+}
+
+func initDownload() {
+	if filepath.Ext(downloadInfo.Path) == ".json" {
+		downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
+	}
 }
