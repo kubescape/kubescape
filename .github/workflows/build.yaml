@@ -80,7 +80,7 @@ jobs:
 
       - name: Set image version
         id: image-version
-        run: echo '::set-output version=IMAGE_VERSION::v2.0.${{ github.run_number }}'
+        run: echo '::set-output name=IMAGE_VERSION::v2.0.${{ github.run_number }}'
 
       - name: Set image name
         id: image-name
@@ -108,13 +108,15 @@ jobs:
           docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
           docker push ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
       
-      - name: Install cosign
-        uses: sigstore/cosign-installer@main
-        with:
-          cosign-release: 'v1.5.1' # optional
-      - name: sign kubescape container image
-        env:
-          COSIGN_EXPERIMENTAL: "true"
-        run: |
-            cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+      # TODO - Wait for casign to support fixed tags -> https://github.com/sigstore/cosign/issues/1424
+      # - name: Install cosign
+      #   uses: sigstore/cosign-installer@main
+      #   with:
+      #     cosign-release: 'v1.5.1' # optional
+      # - name: sign kubescape container image
+      #   env:
+      #     COSIGN_EXPERIMENTAL: "true"
+      #   run: |
+      #       cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+      #       cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
 
