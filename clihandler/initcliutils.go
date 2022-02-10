@@ -58,6 +58,7 @@ func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IRepo
 
 func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
+		// scanInfo.HostSensor.SetBool(false)
 		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns, registryAdaptors)
 	}
 	getter.GetArmoAPIConnector()
