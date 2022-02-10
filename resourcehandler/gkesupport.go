@@ -89,8 +89,7 @@ func (gkeProviderContext *GKEProviderContext) getKubeClusterName() string {
 	if len(parsedName) < 3 {
 		return ""
 	}
-	clusterName = parsedName[3]
-	return clusterName
+	return parsedName[3]
 }
 
 func (gkeProviderContext *GKEProviderContext) getKubeCluster() string {
@@ -98,9 +97,8 @@ func (gkeProviderContext *GKEProviderContext) getKubeCluster() string {
 	if context == nil {
 		return ""
 	}
-	cluster := context.Cluster
-	if cluster != "" {
-		return cluster
+	if context.Cluster != "" {
+		return context.Cluster
 	}
 	return k8sinterface.GetClusterName()
 

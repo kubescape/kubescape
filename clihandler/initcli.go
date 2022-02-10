@@ -36,6 +36,7 @@ type componentInterfaces struct {
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
+	// ================== setup k8s interface object ======================================
 	var k8s *k8sinterface.KubernetesApi
 	if scanInfo.GetScanningEnvironment() == cautils.ScanCluster {
 		k8s = getKubernetesApi()
@@ -44,10 +45,19 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		}
 	}
 
+	// ================== setup tenant object ======================================
+
 	tenantConfig := getTenantConfig(scanInfo.Account, scanInfo.KubeContext, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
+
+	// ================== version testing ======================================
+
+	v := cautils.NewIVersionCheckHandler()
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
+
+	// ================== setup host sensor object ======================================
 
 	hostSensorHandler := getHostSensorHandler(scanInfo, k8s)
 	if err := hostSensorHandler.Init(); err != nil {
@@ -59,23 +69,28 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.GetNamespace())
 	}
 
+	// ================== setup registry adaptors ======================================
+
 	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
 	if err != nil {
 		logger.L().Error("failed to initialize registry adaptors", helpers.Error(err))
 	}
 
+	// ================== setup resource collector object ======================================
+
 	resourceHandler := getResourceHandler(scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
+
+	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
-
-	v := cautils.NewIVersionCheckHandler()
-	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
 
 	// setup printer
 	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	// printerHandler = printerv2.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
+
+	// ================== return interface ======================================
 
 	return componentInterfaces{
 		tenantConfig:      tenantConfig,
