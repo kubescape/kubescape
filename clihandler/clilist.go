@@ -32,7 +32,7 @@ func CliList(listPolicies *cliobjects.ListPolicies) error {
 		sep := "\n  * "
 		usageCmd := strings.TrimSuffix(listPolicies.Target, "s")
 		fmt.Printf("Supported %s:%s%s\n", listPolicies.Target, sep, strings.Join(policies, sep))
-		fmt.Printf("\nUseage:\n")
+		fmt.Printf("\nUsage:\n")
 		fmt.Printf("$ kubescape scan %s \"name\"\n", usageCmd)
 		fmt.Printf("$ kubescape scan %s \"name-0\",\"name-1\"\n\n", usageCmd)
 		return nil
