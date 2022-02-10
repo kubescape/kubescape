@@ -65,7 +65,7 @@ jobs:
         run: echo '::set-output name=IMAGE_NAME::quay.io/${{ github.repository_owner }}/kubescape'
 
       - name: Build the Docker image
-        run: docker build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --build-arg run_number=${{ github.run_number }}
+        run: docker build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --build-arg image_version=${{ steps.image-version.outputs.IMAGE_VERSION }}
       
       - name: Login to Quay.io
         env:

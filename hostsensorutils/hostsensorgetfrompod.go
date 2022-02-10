@@ -157,7 +157,7 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 		return res, nil
 	}
 
-	logger.L().Info("Accessing host sensor")
+	logger.L().Debug("Accessing host sensor")
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 	kcData, err := hsh.GetKubeletConfigurations()
@@ -197,6 +197,6 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	res = append(res, kcData...)
 	// finish
 
-	logger.L().Success("Read host information from host sensor")
+	logger.L().Debug("Done reading information from host sensor")
 	return res, nil
 }
