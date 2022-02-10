@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -55,7 +54,8 @@ func SetARMOAPIConnector(armoAPI *ArmoAPI) {
 
 func GetArmoAPIConnector() *ArmoAPI {
 	if globalArmoAPIConnector == nil {
-		logger.L().Error("returning nil API connector")
+		// logger.L().Error("returning nil API connector")
+		SetARMOAPIConnector(NewARMOAPIProd())
 	}
 	return globalArmoAPIConnector
 }

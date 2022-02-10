@@ -49,10 +49,10 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IReport {
+func getReporter(tenantConfig cautils.ITenantConfig, submit bool, reportID string) reporter.IReport {
 	if submit {
 		// return reporterv1.NewReportEventReceiver(tenantConfig.GetConfigObj())
-		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj())
+		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID)
 	}
 	return reporterv1.NewReportMock()
 }

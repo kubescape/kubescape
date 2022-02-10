@@ -14,6 +14,7 @@ require (
 	github.com/fatih/color v1.13.0
 	github.com/francoispqt/gojay v1.2.13
 	github.com/gofrs/uuid v4.1.0+incompatible
+	github.com/gorilla/mux v1.8.0
 	github.com/mattn/go-isatty v0.0.14
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/open-policy-agent/opa v0.33.1

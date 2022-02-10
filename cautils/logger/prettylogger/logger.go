@@ -69,7 +69,7 @@ func (pl *PrettyLogger) print(level helpers.Level, msg string, details ...helper
 func detailsToString(details []helpers.IDetails) string {
 	s := ""
 	for i := range details {
-		s += fmt.Sprintf("%s: %s", details[i].Key(), details[i].Value())
+		s += fmt.Sprintf("%s: %v", details[i].Key(), details[i].Value())
 		if i < len(details)-1 {
 			s += "; "
 		}

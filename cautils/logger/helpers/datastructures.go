@@ -1,5 +1,7 @@
 package helpers
 
+import "time"
+
 type StringObj struct {
 	key   string
 	value string
@@ -24,3 +26,6 @@ func Error(e error) *ErrorObj                         { return &ErrorObj{key: "e
 func Int(k string, v int) *IntObj                     { return &IntObj{key: k, value: v} }
 func String(k, v string) *StringObj                   { return &StringObj{key: k, value: v} }
 func Interface(k string, v interface{}) *InterfaceObj { return &InterfaceObj{key: k, value: v} }
+func Time() *StringObj {
+	return &StringObj{key: "time", value: time.Now().Format("2006-01-02 15:04:05")}
+}

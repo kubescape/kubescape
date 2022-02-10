@@ -83,7 +83,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
+	reportHandler := getReporter(tenantConfig, scanInfo.Submit, scanInfo.ReportID)
 
 	// setup printer
 	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)

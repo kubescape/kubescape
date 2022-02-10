@@ -69,6 +69,7 @@ type ScanInfo struct {
 	Silent             bool        // Silent mode - Do not print progress logs
 	FailThreshold      uint16      // Failure score threshold
 	Submit             bool        // Submit results to Armo BE
+	ReportID           string      // Report id of the current scan
 	HostSensor         BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
 	Local              bool        // Do not submit results
 	Account            string      // account ID

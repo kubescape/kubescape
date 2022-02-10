@@ -28,15 +28,17 @@ type ReportEventReceiver struct {
 	token              string
 	customerAdminEMail string
 	message            string
+	reportID           string
 }
 
-func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceiver {
+func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string) *ReportEventReceiver {
 	return &ReportEventReceiver{
 		httpClient:         &http.Client{},
 		clusterName:        tenantConfig.ClusterName,
 		customerGUID:       tenantConfig.AccountID,
 		token:              tenantConfig.Token,
 		customerAdminEMail: tenantConfig.CustomerAdminEMail,
+		reportID:           reportID,
 	}
 }
 
@@ -51,7 +53,9 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
 		return nil
 	}
-	opaSessionObj.Report.ReportID = uuid.NewV4().String()
+	if opaSessionObj.Report.ReportID == "" {
+		opaSessionObj.Report.ReportID = uuid.NewV4().String()
+	}
 	opaSessionObj.Report.CustomerGUID = report.customerGUID
 	opaSessionObj.Report.ClusterName = report.clusterName
 
