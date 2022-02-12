@@ -40,6 +40,7 @@ spec:
           - name: http
             hostPort: 7888
             containerPort: 7888
+            protocol: TCP
         resources:
           limits:
             cpu: 0.1m
