@@ -79,14 +79,11 @@ Note: if you get an error you might need to change the execution policy (i.e. en
 Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
 
-## Install on macOS
+## Install via brew on macOS
 
-1. ```
-    brew tap armosec/kubescape
-    ```
-2. ```
-    brew install kubescape
-    ```
+```
+$ brew install kubescape
+```
 
 ## Flags
 
