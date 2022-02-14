@@ -53,17 +53,15 @@ jobs:
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
       - name: Calculate Hash
-        uses: KEINOS/gh-action-hash-for-cache@main
-        id: hash
+        uses: MCJack123/ghaction-generate-release-hashes@v1
         with:
-          path: build/${{ matrix.os }}/kubescape
-        # // generate hash build/${{ matrix.os }}/kubescape
-        # // save to file build/${{ matrix.os }}/kubescape-hash
+          hash-type: sha1
+          file-name: hashes.txt
       - name: Upload Hash
         uses: actions/upload-artifact@v2
         with:
-          name: Calculate Hash
-          path: build/${{ matrix.os }}/kubescape-hash
+          name: Asset Hashes
+          path: hashes.txt
       - name: Upload Release binaries
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
