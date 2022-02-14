@@ -54,7 +54,7 @@ jobs:
         run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
       - name: Calculate Hash
         uses: KEINOS/gh-action-hash-for-cache@main
-        id: ${{ matrix.os }}.hash
+        id: hash
         with:
           path: build/${{ matrix.os }}/kubescape
         # // generate hash build/${{ matrix.os }}/kubescape
