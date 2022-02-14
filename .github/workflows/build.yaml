@@ -63,6 +63,15 @@ jobs:
           asset_path: build/${{ matrix.os }}/kubescape
           asset_name: kubescape-${{ matrix.os }}
           asset_content_type: application/octet-stream
+      - name: Upload Release hashes
+        id: upload-release-hash
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.once.outputs.upload_url }}
+          asset_path: build/${{ matrix.os }}/kubescape.sha1
+          asset_name: kubescape-${{ matrix.os }}-hash
 
 
   build-docker:
