@@ -20,16 +20,6 @@ jobs:
           release_name: Release v2.0.${{ github.run_number }}
           draft: false
           prerelease: false
-      - name: Calculate Hash
-        uses: MCJack123/ghaction-generate-release-hashes@v1
-        with:
-          hash-type: sha1
-          file-name: hashes.txt
-      - name: Upload Hash
-        uses: actions/upload-artifact@v2
-        with:
-          name: Asset Hashes
-          path: hashes.txt
   build:
     name: Create cross-platform release build, tag and upload binaries
     needs: once
@@ -62,6 +52,7 @@ jobs:
           RELEASE: v2.0.${{ github.run_number }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
+
       - name: Upload Release binaries
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
