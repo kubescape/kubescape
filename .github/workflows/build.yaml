@@ -72,6 +72,7 @@ jobs:
           upload_url: ${{ needs.once.outputs.upload_url }}
           asset_path: build/${{ matrix.os }}/kubescape.sha1
           asset_name: kubescape-${{ matrix.os }}-hash
+          asset_content_type: text/plain
 
 
   build-docker:
