@@ -80,7 +80,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	}
 
 	cautils.StopSpinner()
-	logger.L().Success("Accessed successfully to Kubernetes objects")
+	logger.L().Success("Accessed to Kubernetes objects")
 
 	return k8sResourcesMap, allResources, nil
 }

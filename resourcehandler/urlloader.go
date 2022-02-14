@@ -28,11 +28,11 @@ func listUrls(patterns []string) []string {
 	urls := []string{}
 	for i := range patterns {
 		if strings.HasPrefix(patterns[i], "http") {
-			if !isYaml(patterns[i]) || !isJson(patterns[i]) { // if url of repo
+			if !isYaml(patterns[i]) && !isJson(patterns[i]) { // if url of repo
 				if yamls, err := ScanRepository(patterns[i], ""); err == nil { // TODO - support branch
 					urls = append(urls, yamls...)
 				} else {
-					fmt.Print(err) // TODO - handle errors
+					logger.L().Error(err.Error())
 				}
 			} else { // url of single file
 				urls = append(urls, patterns[i])
