@@ -71,7 +71,12 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 	for podName := range podList {
 		go func(podName, path string) {
 			defer wg.Done()
-			resBytes, err := hsh.HTTPGetToPod(podName, path)
+			var resBytes []byte
+			if requestKind == "LinuxSecurityHardeningStatus" {
+				resBytes = getJsonMock()
+			} else {
+				resBytes, err = hsh.HTTPGetToPod(podName, path)
+			}
 			if err != nil {
 				logger.L().Error("failed to get data", helpers.String("path", path), helpers.String("podName", podName), helpers.Error(err))
 			} else {
@@ -101,6 +106,33 @@ func (hsh *HostSensorHandler) GetOpenPortsList() ([]hostsensor.HostSensorDataEnv
 func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	return hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening", "LinuxSecurityHardeningStatus")
+}
+
+func getJsonMock() []byte {
+	mock := `
+    [
+	{
+        "key":"unprivileged_userns_clone",
+        "value": 0,
+        "source": "/proc/sys/kernel/unprivileged_userns_clone"
+    },
+    {
+        "key":"user.max_user_namespaces",
+        "value": 0,
+        "source": "/etc/sysctl.d/userns.conf"
+    }
+]
+	`
+	var jsonMock interface{}
+	json.Unmarshal([]byte(mock), &jsonMock)
+	return []byte(fmt.Sprintf("%v", jsonMock.(interface{})))
+
+}
+
+// return list of LinuxKernelVariables
+func (hsh *HostSensorHandler) GetLinuxKernelVariables() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/LinuxKernelVariables", "LinuxSecurityKernelVariables")
 }
 
 // return list of KubeletCommandLine
@@ -191,6 +223,12 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	res = append(res, kcData...)
 	//
 	kcData, err = hsh.GetOpenPortsList()
+	if err != nil {
+		return kcData, err
+	}
+	res = append(res, kcData...)
+	//
+	kcData, err = hsh.GetLinuxKernelVariables()
 	if err != nil {
 		return kcData, err
 	}
