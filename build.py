@@ -63,10 +63,10 @@ def main():
     status = subprocess.call(["go", "build", "-o", "%s/%s" % (buildDir, packageName), "-ldflags" ,ldflags])
     checkStatus(status, "Failed to build kubescape")
     
-    sha1 = hashlib.sha1()
+    sha1 = hashlib.sha3_512()
     with open(buildDir + "/" + packageName, "rb") as kube:
         sha1.update(kube.read())
-        with open(buildDir + "/" + packageName + ".sha1", "w") as kube_sha:
+        with open(buildDir + "/" + packageName + ".hash", "w") as kube_sha:
             kube_sha.write(sha1.hexdigest())
 
     print("Build Done")
