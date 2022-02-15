@@ -144,7 +144,7 @@ func (report *ReportEventReceiver) generateMessage() {
 
 	if report.customerAdminEMail != "" {
 		logger.L().Debug("", helpers.String("account ID", report.customerGUID))
-		report.message = fmt.Sprintf("%s %s/risk/%s", message, u.String(), report.clusterName)
+		report.message = fmt.Sprintf("%s %s/configuration-scanning/%s", message, u.String(), report.clusterName)
 		return
 	}
 	u.Path = "account/sign-up"

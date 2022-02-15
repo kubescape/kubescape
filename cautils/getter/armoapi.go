@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -50,6 +51,7 @@ type ArmoAPI struct {
 var globalArmoAPIConnector *ArmoAPI
 
 func SetARMOAPIConnector(armoAPI *ArmoAPI) {
+	logger.L().Debug("Armo URLs", helpers.String("api", armoAPI.apiURL), helpers.String("auth", armoAPI.authURL), helpers.String("report", armoAPI.erURL), helpers.String("UI", armoAPI.feURL))
 	globalArmoAPIConnector = armoAPI
 }
 
