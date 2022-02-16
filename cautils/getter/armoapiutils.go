@@ -17,7 +17,7 @@ func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.accountID)
+	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
 	if isNativeFramework(frameworkName) {
 		q.Add("frameworkName", strings.ToUpper(frameworkName))
 	} else {
@@ -35,7 +35,7 @@ func (armoAPI *ArmoAPI) getListFrameworkURL() string {
 	u.Host = armoAPI.apiURL
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.accountID)
+	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
 	u.RawQuery = q.Encode()
 
 	return u.String()
@@ -47,7 +47,7 @@ func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	u.Path = "api/v1/armoPostureExceptions"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.accountID)
+	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
 	// if clusterName != "" { // TODO - fix customer name support in Armo BE
 	// 	q.Add("clusterName", clusterName)
 	// }
@@ -63,7 +63,7 @@ func (armoAPI *ArmoAPI) postExceptionsURL() string {
 	u.Path = "api/v1/postureExceptionPolicy"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.accountID)
+	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
 	u.RawQuery = q.Encode()
 
 	return u.String()
@@ -76,7 +76,7 @@ func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	u.Path = "api/v1/armoCustomerConfiguration"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.accountID)
+	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
 	if clusterName != "" { // TODO - fix customer name support in Armo BE
 		q.Add("clusterName", clusterName)
 	}
@@ -155,4 +155,11 @@ func (armoAPI *ArmoAPI) appendAuthHeaders(headers map[string]string) {
 	if armoAPI.authCookie != "" {
 		headers["Cookie"] = fmt.Sprintf("auth=%s", armoAPI.authCookie)
 	}
+}
+
+func (armoAPI *ArmoAPI) getCustomerGUIDFallBack() string {
+	if armoAPI.accountID != "" {
+		return armoAPI.accountID
+	}
+	return "11111111-1111-1111-1111-111111111111"
 }

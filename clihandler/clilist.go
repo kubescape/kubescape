@@ -49,6 +49,7 @@ func listFrameworks(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 
 func listControls(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
+
 	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
 	l := getter.ListName
 	if listPolicies.ListIDs {

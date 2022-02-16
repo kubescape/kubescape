@@ -23,6 +23,7 @@ var rabcCmd = &cobra.Command{
 
 		// get config
 		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
+		clusterConfig.SetTenant()
 
 		// list RBAC
 		rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetAccountID(), clusterConfig.GetClusterName()))

@@ -118,6 +118,7 @@ func NewLocalConfig(backendAPI getter.IBackend, customerGUID, clusterName string
 			logger.L().Error(err.Error())
 		}
 	}
+	lc.UpdateCachedConfig()
 
 	return lc
 }
@@ -228,11 +229,12 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	c.backendAPI.SetClientID(c.configObj.ClientID)
 	c.backendAPI.SetSecretKey(c.configObj.SecretKey)
 
-	if c.configObj.AccountID != "" {
-		if err := c.SetTenant(); err != nil {
-			logger.L().Error(err.Error())
-		}
-	}
+	// if c.configObj.AccountID != "" {
+	// 	if err := c.SetTenant(); err != nil {
+	// 		logger.L().Error(err.Error())
+	// 	}
+	// }
+	c.UpdateCachedConfig()
 
 	return c
 }

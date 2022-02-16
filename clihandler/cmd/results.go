@@ -63,6 +63,7 @@ var resultsCmd = &cobra.Command{
 
 		// get config
 		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
+		clusterConfig.SetTenant()
 
 		resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
 
