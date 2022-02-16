@@ -49,11 +49,12 @@ def main():
     ArmoWebsite = os.getenv("ArmoWebsite")
     ArmoAuthServer = os.getenv("ArmoAuthServer")
 
-    ks_file = os.path.join(buildDir, packageName)
-    hash_file = os.path.join(buildDir, packageName + ".sha256")
 
     # Create build directory
     buildDir = getBuildDir()
+    
+    ks_file = os.path.join(buildDir, packageName)
+    hash_file = ks_file + ".sha256"
 
     if not os.path.isdir(buildDir):
         os.makedirs(buildDir)
