@@ -15,6 +15,7 @@ const (
 	JsonFormat        string = "json"
 	JunitResultFormat string = "junit"
 	PrometheusFormat  string = "prometheus"
+	PdfFormat         string = "pdf"
 )
 
 type IPrinter interface {
