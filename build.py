@@ -49,8 +49,12 @@ def main():
     ArmoWebsite = os.getenv("ArmoWebsite")
     ArmoAuthServer = os.getenv("ArmoAuthServer")
 
+
     # Create build directory
     buildDir = getBuildDir()
+    
+    ks_file = os.path.join(buildDir, packageName)
+    hash_file = ks_file + ".sha256"
 
     if not os.path.isdir(buildDir):
         os.makedirs(buildDir)
@@ -60,14 +64,18 @@ def main():
         % (buildUrl, releaseVersion, BE_SERVER_CONST, ArmoBEServer,
            ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite,
            AUTH_SERVER_CONST, ArmoAuthServer)
-    status = subprocess.call(["go", "build", "-o", "%s/%s" % (buildDir, packageName), "-ldflags" ,ldflags])
+
+    print("Building kubescape and saving here: {}".format(ks_file))
+    status = subprocess.call(["go", "build", "-o", ks_file, "-ldflags" ,ldflags])
     checkStatus(status, "Failed to build kubescape")
     
-    sha1 = hashlib.sha1()
-    with open(buildDir + "/" + packageName, "rb") as kube:
-        sha1.update(kube.read())
-        with open(buildDir + "/" + packageName + ".sha1", "w") as kube_sha:
-            kube_sha.write(sha1.hexdigest())
+    sha256 = hashlib.sha256()
+    with open(ks_file, "rb") as kube:
+        sha256.update(kube.read())
+        with open(hash_file, "w") as kube_sha:
+            hash = sha256.hexdigest()
+            print("kubescape hash: {}, file: {}".format(hash, hash_file))
+            kube_sha.write(sha256.hexdigest())
 
     print("Build Done")
  

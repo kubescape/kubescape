@@ -53,7 +53,7 @@ jobs:
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
 
-      - name: Upload Release binaries
+      - name: Upload release binaries
         id: upload-release-asset
         uses: actions/upload-release-asset@v1
         env:
@@ -63,6 +63,18 @@ jobs:
           asset_path: build/${{ matrix.os }}/kubescape
           asset_name: kubescape-${{ matrix.os }}
           asset_content_type: application/octet-stream
+
+      - name: Upload release hash
+        id: upload-release-hash
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ needs.once.outputs.upload_url }}
+          asset_path: build/${{ matrix.os }}/kubescape.sha256
+          asset_name: kubescape-${{ matrix.os }}-sha256
+          asset_content_type: application/octet-stream
+
 
 
   build-docker:
