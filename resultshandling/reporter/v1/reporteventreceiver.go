@@ -44,11 +44,11 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	}
 
 	if report.customerGUID == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
+		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Please feel free to contact ARMO team for more details"
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
+		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS.Please feel free to contact ARMO team for more details"
 		return nil
 	}
 
