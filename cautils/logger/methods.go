@@ -5,6 +5,8 @@ import (
 
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/cautils/logger/prettylogger"
+	"github.com/armosec/kubescape/cautils/logger/zaplogger"
+	"github.com/mattn/go-isatty"
 )
 
 type ILogger interface {
@@ -32,10 +34,10 @@ func L() ILogger {
 }
 
 func InitializeLogger() {
-	initializeLogger()
-}
 
-func initializeLogger() {
-	// TODO - support zap logger
-	l = prettylogger.NewPrettyLogger()
+	if isatty.IsTerminal(os.Stdout.Fd()) {
+		l = prettylogger.NewPrettyLogger()
+	} else {
+		l = zaplogger.NewZapLogger()
+	}
 }
