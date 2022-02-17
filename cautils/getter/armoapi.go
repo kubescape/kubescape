@@ -148,7 +148,7 @@ func (armoAPI *ArmoAPI) GetFrameworks() ([]reporthandling.Framework, error) {
 		return nil, nil
 	}
 
-	frameworks := []reporthandling.Framework{}
+	var frameworks []reporthandling.Framework
 	if err = JSONDecoder(respStr).Decode(&frameworks); err != nil {
 		return nil, err
 	}
@@ -162,7 +162,7 @@ func (armoAPI *ArmoAPI) GetControl(policyName string) (*reporthandling.Control, 
 }
 
 func (armoAPI *ArmoAPI) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
-	exceptions := []armotypes.PostureExceptionPolicy{}
+	var exceptions []armotypes.PostureExceptionPolicy
 
 	respStr, err := armoAPI.Get(armoAPI.getExceptionsURL(clusterName), nil)
 	if err != nil {
@@ -227,12 +227,12 @@ func (armoAPI *ArmoAPI) ListCustomFrameworks() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	frs := []reporthandling.Framework{}
+	var frs []reporthandling.Framework
 	if err = json.Unmarshal([]byte(respStr), &frs); err != nil {
 		return nil, err
 	}
 
-	frameworkList := []string{}
+	var frameworkList []string
 	for _, fr := range frs {
 		if !isNativeFramework(fr.Name) {
 			frameworkList = append(frameworkList, fr.Name)
@@ -247,12 +247,12 @@ func (armoAPI *ArmoAPI) ListFrameworks() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	frs := []reporthandling.Framework{}
+	var frs []reporthandling.Framework
 	if err = json.Unmarshal([]byte(respStr), &frs); err != nil {
 		return nil, err
 	}
 
-	frameworkList := []string{}
+	var frameworkList []string
 	for _, fr := range frs {
 		if isNativeFramework(fr.Name) {
 			frameworkList = append(frameworkList, strings.ToLower(fr.Name))
