@@ -8,6 +8,7 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
@@ -63,7 +64,9 @@ var resultsCmd = &cobra.Command{
 
 		// get config
 		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
-		clusterConfig.SetTenant()
+		if err := clusterConfig.SetTenant(); err != nil {
+			logger.L().Error("failed setting account ID", helpers.Error(err))
+		}
 
 		resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
 

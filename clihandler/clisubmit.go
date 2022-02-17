@@ -34,7 +34,9 @@ func SubmitExceptions(accountID, excPath string) error {
 
 	// load cached config
 	tenantConfig := getTenantConfig(accountID, "", getKubernetesApi())
-	tenantConfig.SetTenant()
+	if err := tenantConfig.SetTenant(); err != nil {
+		logger.L().Error("failed setting account ID", helpers.Error(err))
+	}
 
 	// load exceptions from file
 	loader := getter.NewLoadPolicy([]string{excPath})
