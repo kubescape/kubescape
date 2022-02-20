@@ -27,6 +27,11 @@ var (
 	armoFEURL   = "portal.armo.cloud"
 	armoAUTHURL = "auth.armo.cloud"
 
+	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft"
+	armoStageBEURL   = "api-stage.armo.cloud"
+	armoStageFEURL   = "armoui.eustage2.cyberarmorsoft.com"
+	armoStageAUTHURL = "eggauth.eustage2.cyberarmorsoft.com"
+
 	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armo.cloud"
 	armoDevFEURL   = "armoui-dev.eudev3.cyberarmorsoft.com"
@@ -80,6 +85,17 @@ func NewARMOAPIProd() *ArmoAPI {
 	apiObj.erURL = armoERURL
 	apiObj.feURL = armoFEURL
 	apiObj.authURL = armoAUTHURL
+
+	return apiObj
+}
+
+func NewARMOAPIStaging() *ArmoAPI {
+	apiObj := newArmoAPI()
+
+	apiObj.apiURL = armoStageBEURL
+	apiObj.erURL = armoStageERURL
+	apiObj.feURL = armoStageFEURL
+	apiObj.authURL = armoStageAUTHURL
 
 	return apiObj
 }
