@@ -49,10 +49,9 @@ def main():
     ArmoWebsite = os.getenv("ArmoWebsite")
     ArmoAuthServer = os.getenv("ArmoAuthServer")
 
-
     # Create build directory
     buildDir = getBuildDir()
-    
+
     ks_file = os.path.join(buildDir, packageName)
     hash_file = ks_file + ".sha256"
 
@@ -60,13 +59,24 @@ def main():
         os.makedirs(buildDir)
 
     # Build kubescape
-    ldflags = "-w -s -X %s=%s -X %s=%s -X %s=%s -X %s=%s -X %s=%s" \
-        % (buildUrl, releaseVersion, BE_SERVER_CONST, ArmoBEServer,
-           ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite,
-           AUTH_SERVER_CONST, ArmoAuthServer)
+    ldflags = "-w -s"
+    if releaseVersion:
+        ldflags += " -X {}={}".format(buildUrl, releaseVersion)
+    if ArmoBEServer:
+        ldflags += " -X {}={}".format(BE_SERVER_CONST, ArmoBEServer)
+    if ArmoERServer:
+        ldflags += " -X {}={}".format(ER_SERVER_CONST, ArmoERServer)
+    if ArmoWebsite:
+        ldflags += " -X {}={}".format(WEBSITE_CONST, ArmoWebsite)
+    if ArmoAuthServer:
+        ldflags += " -X {}={}".format(AUTH_SERVER_CONST, ArmoAuthServer)
+
+    build_command = ["go", "build", "-o", ks_file, "-ldflags" ,ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
-    status = subprocess.call(["go", "build", "-o", ks_file, "-ldflags" ,ldflags])
+    print("Build command: {}".format(" ".join(build_command)))
+
+    status = subprocess.call(build_command)
     checkStatus(status, "Failed to build kubescape")
     
     sha256 = hashlib.sha256()
