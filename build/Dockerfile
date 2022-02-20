@@ -3,7 +3,7 @@ FROM golang:1.17-alpine as builder
 
 ARG image_version
 
-ENV RELEASE=image_version
+ENV RELEASE=$image_version
 
 ENV GO111MODULE=
 
