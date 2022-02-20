@@ -2,6 +2,7 @@ package logger
 
 import (
 	"os"
+	"strings"
 
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/cautils/logger/prettylogger"
@@ -28,16 +29,23 @@ var l ILogger
 
 func L() ILogger {
 	if l == nil {
-		InitializeLogger()
+		InitializeLogger("")
 	}
 	return l
 }
 
-func InitializeLogger() {
+func InitializeLogger(loggerName string) {
 
-	if isatty.IsTerminal(os.Stdout.Fd()) {
-		l = prettylogger.NewPrettyLogger()
-	} else {
+	switch strings.ToLower(loggerName) {
+	case "zap":
 		l = zaplogger.NewZapLogger()
+	case "pretty":
+		l = prettylogger.NewPrettyLogger()
+	default:
+		if isatty.IsTerminal(os.Stdout.Fd()) {
+			l = prettylogger.NewPrettyLogger()
+		} else {
+			l = zaplogger.NewZapLogger()
+		}
 	}
 }
