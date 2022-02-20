@@ -21,7 +21,6 @@ ADD . .
 RUN python build.py
 
 RUN ls -ltr build/ubuntu-latest
-RUN cat /work/build/ubuntu-latest/kubescape.sha1
 
 FROM alpine
 COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kubescape
