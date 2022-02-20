@@ -216,8 +216,8 @@ func getDefaultFrameworksPaths() []string {
 
 func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	fw, err := policyGetter.ListFrameworks()
-	if err != nil {
-		fw = getDefaultFrameworksPaths()
+	if err == nil {
+		return fw
 	}
-	return fw
+	return getter.NativeFrameworks
 }

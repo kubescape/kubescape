@@ -13,11 +13,7 @@ import (
 )
 
 func GetDefaultPath(name string) string {
-	defaultfilePath := filepath.Join(DefaultLocalStore, name)
-	if homeDir, err := os.UserHomeDir(); err == nil {
-		defaultfilePath = filepath.Join(homeDir, defaultfilePath)
-	}
-	return defaultfilePath
+	return filepath.Join(DefaultLocalStore, name)
 }
 
 func SaveInFile(policy interface{}, pathStr string) error {

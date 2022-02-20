@@ -168,6 +168,18 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 	return workloads
 }
 
+// func (k8sHandler *K8sResourceHandler) collectHostResourcesAPI(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
+
+// 	HostSensorAPI := map[string]string{
+// 		"bla/v1": "",
+// 	}
+// 	for apiVersion := range allResources {
+// 		if HostSensorAPI == apiVersion {
+// 			k8sHandler.collectHostResources()
+// 		}
+// 	}
+// 	return nil
+// }
 func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
 	logger.L().Debug("Collecting host sensor resources")
 
@@ -175,6 +187,7 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 	if err != nil {
 		return err
 	}
+
 	for rscIdx := range hostResources {
 		group, version := getGroupNVersion(hostResources[rscIdx].GetApiVersion())
 		groupResource := k8sinterface.JoinResourceTriplets(group, version, hostResources[rscIdx].GetKind())
@@ -220,9 +233,10 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 	if err != nil {
 		return err
 	}
-	logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
 
 	if provider != "" {
+		logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
+
 		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info

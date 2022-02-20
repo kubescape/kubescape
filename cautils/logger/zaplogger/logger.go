@@ -10,20 +10,40 @@ import (
 
 type ZapLogger struct {
 	zapL *zap.Logger
+	cfg  zap.Config
 }
 
 func NewZapLogger() *ZapLogger {
+	ec := zap.NewProductionEncoderConfig()
+	ec.EncodeTime = zapcore.RFC3339TimeEncoder
+	cfg := zap.NewProductionConfig()
+	cfg.DisableCaller = true
+	cfg.DisableStacktrace = true
+	cfg.Encoding = "json"
+	cfg.EncoderConfig = ec
+
+	zapLogger, err := cfg.Build()
+	if err != nil {
+		panic(err)
+	}
 	return &ZapLogger{
-		zapL: zap.L(),
+		zapL: zapLogger,
+		cfg:  cfg,
 	}
 }
 
-func (zl *ZapLogger) GetLevel() string     { return "" }
+func (zl *ZapLogger) GetLevel() string     { return zl.cfg.Level.Level().String() }
 func (zl *ZapLogger) SetWriter(w *os.File) {}
+func (zl *ZapLogger) GetWriter() *os.File  { return nil }
 func GetWriter() *os.File                  { return nil }
 
 func (zl *ZapLogger) SetLevel(level string) error {
-	return nil
+	l := zapcore.Level(1)
+	err := l.Set(level)
+	if err == nil {
+		zl.cfg.Level.SetLevel(l)
+	}
+	return err
 }
 func (zl *ZapLogger) Fatal(msg string, details ...helpers.IDetails) {
 	zl.zapL.Fatal(msg, detailsToZapFields(details)...)
