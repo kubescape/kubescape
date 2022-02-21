@@ -13,7 +13,7 @@ import (
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
-	uuid "github.com/satori/go.uuid"
+	"github.com/gofrs/uuid"
 )
 
 const MAX_REPORT_SIZE = 2097152 // 2 MB
@@ -51,8 +51,8 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
 		return nil
 	}
-
-	opaSessionObj.PostureReport.ReportID = uuid.NewV4().String()
+	uuidStr, _ := uuid.NewV4()
+	opaSessionObj.PostureReport.ReportID = uuidStr.String()
 	opaSessionObj.PostureReport.CustomerGUID = report.customerGUID
 	opaSessionObj.PostureReport.ClusterName = report.clusterName
 
