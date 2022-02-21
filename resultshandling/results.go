@@ -4,6 +4,9 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/resultshandling/printer"
+	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
+	printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
+
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -48,4 +51,20 @@ func CalculatePostureScore(postureReport *reporthandling.PostureReport) float32 
 	}
 
 	return (float32(len(allResources)) - float32(len(failedResources))) / float32(len(allResources))
+}
+
+func GetPrinter(printFormat string, verboseMode bool) printer.IPrinter {
+
+	switch printFormat {
+	case printer.JsonFormat:
+		return printerv1.NewJsonPrinter()
+	case printer.JunitResultFormat:
+		return printerv1.NewJunitPrinter()
+	case printer.PrometheusFormat:
+		return printerv1.NewPrometheusPrinter(verboseMode)
+	case printer.PdfFormat:
+		return printerv2.NewPdfPrinter()
+	default:
+		return printerv1.NewPrettyPrinter(verboseMode)
+	}
 }

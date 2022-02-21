@@ -8,9 +8,6 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/resultshandling/printer"
-	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
-
-	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -86,8 +83,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
 
 	// setup printer
-	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
-	// printerHandler = printerv2.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	printerHandler := resultshandling.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	// ================== return interface ======================================
