@@ -11,7 +11,7 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -51,7 +51,7 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
 		return nil
 	}
-	opaSessionObj.Report.ReportID = uuid.NewV4().String()
+	opaSessionObj.Report.ReportID = uuid.NewString()
 	opaSessionObj.Report.CustomerGUID = report.customerGUID
 	opaSessionObj.Report.ClusterName = report.clusterName
 
