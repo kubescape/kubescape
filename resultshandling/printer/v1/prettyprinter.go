@@ -31,6 +31,7 @@ func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	overallRiskScore := opaSessionObj.Report.SummaryDetails.Score
 	cautils.ReportV2ToV1(opaSessionObj)
 
 	// score := calculatePostureScore(opaSessionObj.PostureReport)
@@ -40,7 +41,6 @@ func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessio
 	frameworkNames := []string{}
 	frameworkScores := []float32{}
 
-	var overallRiskScore float32 = 0
 	for _, frameworkReport := range opaSessionObj.PostureReport.FrameworkReports {
 		frameworkNames = append(frameworkNames, frameworkReport.Name)
 		frameworkScores = append(frameworkScores, frameworkReport.Score)
@@ -48,10 +48,7 @@ func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessio
 		warningResources = reporthandling.GetUniqueResourcesIDs(append(warningResources, frameworkReport.ListResourcesIDs().GetWarningResources()...))
 		allResources = reporthandling.GetUniqueResourcesIDs(append(allResources, frameworkReport.ListResourcesIDs().GetAllResources()...))
 		prettyPrinter.summarySetup(frameworkReport, opaSessionObj.AllResources)
-		overallRiskScore += frameworkReport.Score
 	}
-
-	overallRiskScore /= float32(len(opaSessionObj.PostureReport.FrameworkReports))
 
 	prettyPrinter.frameworkSummary = ResultSummary{
 		RiskScore:      overallRiskScore,

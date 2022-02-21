@@ -176,7 +176,7 @@ kubescape scan --format json --output results.json
 kubescape scan --format junit --output results.xml
 ```
 
-#### Output in `pdf` format
+#### Output in `pdf` format - Contributed by [@alegrey91](https://github.com/alegrey91)
 
 ```
 kubescape scan --format pdf --output results.pdf

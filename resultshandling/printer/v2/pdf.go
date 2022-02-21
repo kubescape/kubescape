@@ -21,7 +21,7 @@ import (
 
 const (
 	pdfOutputFile = "report"
-	pdfOutputExt = ".pdf"
+	pdfOutputExt  = ".pdf"
 )
 
 var (
@@ -125,7 +125,7 @@ func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsu
 		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetScore())
 	}
 	m.Row(10, func() {
-		m.Text(fmt.Sprintf(p), props.Text{
+		m.Text(p, props.Text{
 			Align:  consts.Center,
 			Size:   8,
 			Family: consts.Arial,
@@ -167,7 +167,7 @@ func (pdfPrinter *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsum
 		Line:               false,
 	})
 	m.Line(1)
-	m.Row(2, func(){})
+	m.Row(2, func() {})
 }
 
 // Add final results.

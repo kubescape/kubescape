@@ -62,6 +62,7 @@ func init() {
 	// cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(listCmd)
-	listCmd.PersistentFlags().StringVarP(&listPolicies.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	listCmd.PersistentFlags().StringVar(&listPolicies.Account, "account", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-printer'/'json'")
 	listCmd.PersistentFlags().BoolVarP(&listPolicies.ListIDs, "id", "", false, "List control ID's instead of controls names")
 }
