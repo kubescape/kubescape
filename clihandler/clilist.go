@@ -1,6 +1,7 @@
 package clihandler
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,6 +13,11 @@ import (
 var listFunc = map[string]func(*cliobjects.ListPolicies) ([]string, error){
 	"controls":   listControls,
 	"frameworks": listFrameworks,
+}
+
+var listFormatFunc = map[string]func(*cliobjects.ListPolicies, []string){
+	"pretty-print": prettyPrintListFormat,
+	"json":         jsonListFormat,
 }
 
 func ListSupportCommands() []string {
@@ -29,12 +35,8 @@ func CliList(listPolicies *cliobjects.ListPolicies) error {
 		}
 		sort.Strings(policies)
 
-		sep := "\n  * "
-		usageCmd := strings.TrimSuffix(listPolicies.Target, "s")
-		fmt.Printf("Supported %s:%s%s\n", listPolicies.Target, sep, strings.Join(policies, sep))
-		fmt.Printf("\nUsage:\n")
-		fmt.Printf("$ kubescape scan %s \"name\"\n", usageCmd)
-		fmt.Printf("$ kubescape scan %s \"name-0\",\"name-1\"\n\n", usageCmd)
+		listFormatFunc[listPolicies.Format](listPolicies, policies)
+
 		return nil
 	}
 	return fmt.Errorf("unknown command to download")
@@ -56,4 +58,18 @@ func listControls(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 		l = getter.ListID
 	}
 	return g.ListControls(l)
+}
+
+func prettyPrintListFormat(listPolicies *cliobjects.ListPolicies, policies []string) {
+	sep := "\n  * "
+	usageCmd := strings.TrimSuffix(listPolicies.Target, "s")
+	fmt.Printf("Supported %s:%s%s\n", listPolicies.Target, sep, strings.Join(policies, sep))
+	fmt.Printf("\nUsage:\n")
+	fmt.Printf("$ kubescape scan %s \"name\"\n", usageCmd)
+	fmt.Printf("$ kubescape scan %s \"name-0\",\"name-1\"\n\n", usageCmd)
+}
+
+func jsonListFormat(listPolicies *cliobjects.ListPolicies, policies []string) {
+	j, _ := json.MarshalIndent(policies, "", "  ")
+	fmt.Printf("%s\n", j)
 }
