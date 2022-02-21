@@ -8,7 +8,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/armosec/rbac-utils/rbacutils"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 )
 
 type RBACObjects struct {
@@ -21,7 +21,7 @@ func NewRBACObjects(scanner *rbacscanner.RbacScannerFromK8sAPI) *RBACObjects {
 
 func (rbacObjects *RBACObjects) SetResourcesReport() (*reporthandling.PostureReport, error) {
 	return &reporthandling.PostureReport{
-		ReportID:             uuid.NewV4().String(),
+		ReportID:             uuid.NewString(),
 		ReportGenerationTime: time.Now().UTC(),
 		CustomerGUID:         rbacObjects.scanner.CustomerGUID,
 		ClusterName:          rbacObjects.scanner.ClusterName,
