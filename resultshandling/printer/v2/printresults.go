@@ -15,6 +15,8 @@ func GetPrinter(printFormat string, verboseMode bool) printer.IPrinter {
 		return NewJunitPrinter()
 	// case printer.PrometheusFormat:
 	// 	return NewPrometheusPrinter(verboseMode)
+	case printer.PdfFormat:
+		return NewPdfPrinter()
 	default:
 		return resourcemapping.NewPrettyPrinter(verboseMode)
 	}
