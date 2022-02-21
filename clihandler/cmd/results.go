@@ -13,7 +13,7 @@ import (
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	"github.com/armosec/opa-utils/reporthandling"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -37,10 +37,9 @@ func (resultsObject *ResultsObject) SetResourcesReport() (*reporthandling.Postur
 	if err != nil {
 		return nil, err
 	}
-
 	return &reporthandling.PostureReport{
 		FrameworkReports:     frameworkReports,
-		ReportID:             uuid.NewV4().String(),
+		ReportID:             uuid.NewString(),
 		ReportGenerationTime: time.Now().UTC(),
 		CustomerGUID:         resultsObject.customerGUID,
 		ClusterName:          resultsObject.clusterName,
