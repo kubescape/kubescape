@@ -74,6 +74,7 @@ type ScanInfo struct {
 	Local              bool        // Do not submit results
 	Account            string      // account ID
 	Logger             string      // logger level
+	CacheDir           string      // cached dir
 	KubeContext        string      // context name
 	FrameworkScan      bool        // false if scanning control
 	ScanAll            bool        // true if scan all frameworks

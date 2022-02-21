@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -25,6 +26,11 @@ var (
 	armoBEURL   = "api.armo.cloud"
 	armoFEURL   = "portal.armo.cloud"
 	armoAUTHURL = "auth.armo.cloud"
+
+	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft"
+	armoStageBEURL   = "api-stage.armo.cloud"
+	armoStageFEURL   = "armoui.eustage2.cyberarmorsoft.com"
+	armoStageAUTHURL = "eggauth.eustage2.cyberarmorsoft.com"
 
 	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armo.cloud"
@@ -50,6 +56,7 @@ type ArmoAPI struct {
 var globalArmoAPIConnector *ArmoAPI
 
 func SetARMOAPIConnector(armoAPI *ArmoAPI) {
+	logger.L().Debug("Armo URLs", helpers.String("api", armoAPI.apiURL), helpers.String("auth", armoAPI.authURL), helpers.String("report", armoAPI.erURL), helpers.String("UI", armoAPI.feURL))
 	globalArmoAPIConnector = armoAPI
 }
 
@@ -78,6 +85,17 @@ func NewARMOAPIProd() *ArmoAPI {
 	apiObj.erURL = armoERURL
 	apiObj.feURL = armoFEURL
 	apiObj.authURL = armoAUTHURL
+
+	return apiObj
+}
+
+func NewARMOAPIStaging() *ArmoAPI {
+	apiObj := newArmoAPI()
+
+	apiObj.apiURL = armoStageBEURL
+	apiObj.erURL = armoStageERURL
+	apiObj.feURL = armoStageFEURL
+	apiObj.authURL = armoStageAUTHURL
 
 	return apiObj
 }

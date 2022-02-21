@@ -60,6 +60,8 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	} else {
 		report.generateMessage()
 	}
+	logger.L().Debug("", helpers.String("account ID", report.customerGUID))
+
 	return nil
 }
 
@@ -202,24 +204,28 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 }
 
 func (report *ReportEventReceiver) generateMessage() {
-	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here:"
 
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
-	if report.customerAdminEMail != "" {
-		logger.L().Debug("", helpers.String("account ID", report.customerGUID))
-		report.message = fmt.Sprintf("%s %s/risk/%s", message, u.String(), report.clusterName)
-		return
-	}
-	u.Path = "account/sign-up"
-	q := u.Query()
-	q.Add("invitationToken", report.token)
-	q.Add("customerGUID", report.customerGUID)
+	if report.customerAdminEMail != "" { // data has been submitted
+		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+	} else {
+		u.Path = "account/sign-up"
+		q := u.Query()
+		q.Add("invitationToken", report.token)
+		q.Add("customerGUID", report.customerGUID)
 
-	u.RawQuery = q.Encode()
-	report.message = fmt.Sprintf("%s %s", message, u.String())
+		u.RawQuery = q.Encode()
+	}
+
+	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+	report.message = sep
+	report.message += "   << WOW! Now you can see the scan results on the web >>\n\n"
+	report.message += fmt.Sprintf("   %s\n", u.String())
+	report.message += sep
+
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -13,7 +14,15 @@ import (
 // =======================================================================================================================
 // ============================================== LoadPolicy =============================================================
 // =======================================================================================================================
-const DefaultLocalStore = ".kubescape"
+var DefaultLocalStore = getCacheDir()
+
+func getCacheDir() string {
+	defaultDirPath := ".kubescape"
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		defaultDirPath = filepath.Join(homeDir, defaultDirPath)
+	}
+	return defaultDirPath
+}
 
 // Load policies from a local repository
 type LoadPolicy struct {

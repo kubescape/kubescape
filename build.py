@@ -52,22 +52,40 @@ def main():
     # Create build directory
     buildDir = getBuildDir()
 
+    ks_file = os.path.join(buildDir, packageName)
+    hash_file = ks_file + ".sha256"
+
     if not os.path.isdir(buildDir):
         os.makedirs(buildDir)
 
     # Build kubescape
-    ldflags = "-w -s -X %s=%s -X %s=%s -X %s=%s -X %s=%s -X %s=%s" \
-        % (buildUrl, releaseVersion, BE_SERVER_CONST, ArmoBEServer,
-           ER_SERVER_CONST, ArmoERServer, WEBSITE_CONST, ArmoWebsite,
-           AUTH_SERVER_CONST, ArmoAuthServer)
-    status = subprocess.call(["go", "build", "-o", "%s/%s" % (buildDir, packageName), "-ldflags" ,ldflags])
+    ldflags = "-w -s"
+    if releaseVersion:
+        ldflags += " -X {}={}".format(buildUrl, releaseVersion)
+    if ArmoBEServer:
+        ldflags += " -X {}={}".format(BE_SERVER_CONST, ArmoBEServer)
+    if ArmoERServer:
+        ldflags += " -X {}={}".format(ER_SERVER_CONST, ArmoERServer)
+    if ArmoWebsite:
+        ldflags += " -X {}={}".format(WEBSITE_CONST, ArmoWebsite)
+    if ArmoAuthServer:
+        ldflags += " -X {}={}".format(AUTH_SERVER_CONST, ArmoAuthServer)
+
+    build_command = ["go", "build", "-o", ks_file, "-ldflags" ,ldflags]
+
+    print("Building kubescape and saving here: {}".format(ks_file))
+    print("Build command: {}".format(" ".join(build_command)))
+
+    status = subprocess.call(build_command)
     checkStatus(status, "Failed to build kubescape")
     
-    sha1 = hashlib.sha3_512()
-    with open(buildDir + "/" + packageName, "rb") as kube:
-        sha1.update(kube.read())
-        with open(buildDir + "/" + packageName + ".hash", "w") as kube_sha:
-            kube_sha.write(sha1.hexdigest())
+    sha256 = hashlib.sha256()
+    with open(ks_file, "rb") as kube:
+        sha256.update(kube.read())
+        with open(hash_file, "w") as kube_sha:
+            hash = sha256.hexdigest()
+            print("kubescape hash: {}, file: {}".format(hash, hash_file))
+            kube_sha.write(sha256.hexdigest())
 
     print("Build Done")
  
