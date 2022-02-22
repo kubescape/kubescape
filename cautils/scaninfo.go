@@ -4,12 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -105,7 +106,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	// set frameworks files
 	files, err := ioutil.ReadDir(scanInfo.UseArtifactsFrom)
 	if err != nil {
-		log.Fatal(err)
+		logger.L().Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {

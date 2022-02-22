@@ -132,11 +132,12 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 			return err
 		}
 		for _, fw := range frameworks {
-			err = getter.SaveInFile(fw, filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name)+".json")))
+			downloadTo := filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name) + ".json"))
+			err = getter.SaveInFile(fw, downloadTo)
 			if err != nil {
 				return err
 			}
-			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", fw.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", fw.Name), helpers.String("path", downloadTo))
 		}
 		// return fmt.Errorf("missing framework name")
 	} else {
@@ -147,11 +148,12 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 		if err != nil {
 			return err
 		}
-		err = getter.SaveInFile(framework, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+		downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+		err = getter.SaveInFile(framework, downloadTo)
 		if err != nil {
 			return err
 		}
-		logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+		logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", downloadTo))
 	}
 	return nil
 }
@@ -173,10 +175,11 @@ func downloadControl(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
-	err = getter.SaveInFile(controls, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+	err = getter.SaveInFile(controls, downloadTo)
 	if err != nil {
 		return err
 	}
-	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", downloadInfo.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", downloadInfo.Name), helpers.String("path", downloadTo))
 	return nil
 }
