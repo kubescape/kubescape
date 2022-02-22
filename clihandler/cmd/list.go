@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliobjects"
 	"github.com/spf13/cobra"
@@ -51,8 +51,7 @@ var listCmd = &cobra.Command{
 		listPolicies.Target = args[0]
 
 		if err := clihandler.CliList(&listPolicies); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},

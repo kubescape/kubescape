@@ -27,7 +27,7 @@ var (
 	armoFEURL   = "portal.armo.cloud"
 	armoAUTHURL = "auth.armo.cloud"
 
-	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft"
+	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft.com"
 	armoStageBEURL   = "api-stage.armo.cloud"
 	armoStageFEURL   = "armoui.eustage2.cyberarmorsoft.com"
 	armoStageAUTHURL = "eggauth.eustage2.cyberarmorsoft.com"

@@ -42,7 +42,7 @@ func (eksProviderEnvVar *EKSProviderEnvVar) getRegionForEKS(cluster string) (str
 	}
 	splittedClusterContext := strings.Split(cluster, ".")
 	if len(splittedClusterContext) < 2 {
-		return "", fmt.Errorf("error: failed to get region")
+		return "", fmt.Errorf("failed to get region")
 	}
 	region = splittedClusterContext[1]
 	return region, nil
@@ -90,7 +90,7 @@ func (eksProviderContext *EKSProviderContext) getKubeCluster() string {
 func (eksProviderContext *EKSProviderContext) getRegion(cluster string, provider string) (string, error) {
 	splittedClusterContext := strings.Split(cluster, ".")
 	if len(splittedClusterContext) < 2 {
-		return "", fmt.Errorf("error: failed to get region")
+		return "", fmt.Errorf("failed to get region")
 	}
 	region := splittedClusterContext[1]
 	return region, nil

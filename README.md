@@ -49,10 +49,11 @@ We invite you to our team! We are excited about this project and want to return 
 Want to contribute? Want to discuss something? Have an issue?
 
 * Open a issue, we are trying to respond within 48 hours
-* [Join us](https://armosec.github.io/kubescape/) in a discussion on our discord server!
-[![discord](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://img.shields.io/discord/893048809884643379)
+* [Join us](https://armosec.github.io/kubescape/) in a discussion on our discord server! 
+
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
+![discord](https://img.shields.io/discord/893048809884643379)
 
 
 # Options and examples
