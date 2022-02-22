@@ -44,11 +44,12 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	finalizeReport(opaSessionObj)
 
 	if report.customerGUID == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
+		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
+
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
+		logger.L().Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
 	opaSessionObj.Report.ReportID = uuid.NewString()
@@ -56,7 +57,7 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	opaSessionObj.Report.ClusterName = report.clusterName
 
 	if err := report.prepareReport(opaSessionObj.Report); err != nil {
-		report.message = err.Error()
+		logger.L().Error("failed to publish results", helpers.Error(err))
 	} else {
 		report.generateMessage()
 	}
@@ -229,5 +230,7 @@ func (report *ReportEventReceiver) generateMessage() {
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {
-	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+	if report.message != "" {
+		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+	}
 }
