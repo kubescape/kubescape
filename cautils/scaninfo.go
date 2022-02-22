@@ -154,6 +154,11 @@ func (scanInfo *ScanInfo) setOutputFile() {
 			scanInfo.Output += ".xml"
 		}
 	}
+	if scanInfo.Format == "pdf" {
+		if filepath.Ext(scanInfo.Output) != ".pdf" {
+			scanInfo.Output += ".pdf"
+		}
+	}
 }
 
 func (scanInfo *ScanInfo) GetScanningEnvironment() string {
