@@ -7,7 +7,7 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
-	"github.com/gofrs/uuid"
+	"github.com/google/uuid"
 )
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
@@ -18,7 +18,7 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj.Path = "/k8s/v2/postureReport"
 
 	q := urlObj.Query()
-	q.Add("customerGUID", uuid.FromStringOrNil(report.customerGUID).String())
+	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())
 	q.Add("clusterName", report.clusterName)
 
 	urlObj.RawQuery = q.Encode()
