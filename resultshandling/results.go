@@ -6,7 +6,6 @@ import (
 	"github.com/armosec/kubescape/resultshandling/printer"
 	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
 	printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
-	"github.com/armosec/kubescape/resultshandling/printer/v2/controlmapping"
 
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -66,6 +65,6 @@ func NewPrinter(printFormat string, verboseMode bool) printer.IPrinter {
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
 	default:
-		return controlmapping.NewPrettyPrinter(verboseMode)
+		return printerv2.NewPrettyPrinter(verboseMode)
 	}
 }

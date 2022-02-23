@@ -151,7 +151,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 			hsh.podListLock.RLock()
 			podsMap := hsh.HostSensorPodNames
 			hsh.podListLock.RUnlock()
-			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceded. We will take data only from the pods below: %v",
+			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceeded. Kubescape will take data only from the pods below: %v",
 				podsNum, len(nodesList.Items), podsMap)
 		}
 		time.Sleep(100 * time.Millisecond)

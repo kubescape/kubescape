@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -111,21 +110,8 @@ func (pdfPrinter *PdfPrinter) printHeader(m pdf.Maroto) {
 
 // Print pdf frameworks after pdf header.
 func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IPolicies) {
-	var p string
-	if len(frameworks) == 1 {
-		if frameworks[0].GetName() != "" {
-			p = fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
-		}
-	} else if len(frameworks) > 1 {
-		p = "FRAMEWORKS: "
-		i := 0
-		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())
-		}
-		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetScore())
-	}
 	m.Row(10, func() {
-		m.Text(p, props.Text{
+		m.Text(frameworksScoresToString(frameworks), props.Text{
 			Align:  consts.Center,
 			Size:   8,
 			Family: consts.Arial,
@@ -136,8 +122,7 @@ func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsu
 
 // Create pdf table
 func (pdfPrinter *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails) {
-	headers := []string{"CONTROL NAME", "FAILED RESOURCES", "EXCLUDED RESOURCES", "ALL RESOURCES", "% RISK-SCORE"}
-
+	headers := getControlTableHeaders()
 	controls := make([][]string, len(pdfPrinter.sortedControlNames))
 	for i := range controls {
 		controls[i] = make([]string, len(headers))
@@ -214,33 +199,4 @@ func (pdfPrinter *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *rep
 			})
 		})
 	})
-}
-
-// Return sorted control names.
-func getSortedControlsNames(controls reportsummary.ControlSummaries) []string {
-	controlNames := make([]string, 0, len(controls))
-	for k := range controls {
-		c := controls[k]
-		controlNames = append(controlNames, c.GetName())
-	}
-	sort.Strings(controlNames)
-	return controlNames
-}
-
-// Generate rows to be appended to the table.
-func generateRow(controlSummary reportsummary.IControlSummary) []string {
-	// We use ReplaceAll because some control name
-	// has a too long name that unformat the pdf view.
-	controlName := strings.ReplaceAll(controlSummary.GetName(), "-", " ")
-	row := []string{controlName}
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().All()))
-
-	if !controlSummary.GetStatus().IsSkipped() {
-		row = append(row, fmt.Sprintf("%d", int(controlSummary.GetScore()))+"%")
-	} else {
-		row = append(row, "skipped")
-	}
-	return row
 }

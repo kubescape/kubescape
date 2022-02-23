@@ -1,4 +1,4 @@
-package controlmapping
+package v2
 
 import (
 	"fmt"
@@ -31,6 +31,7 @@ func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	prettyPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
+	// prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
 	prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails)
 
@@ -152,25 +153,6 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	}
 	return relatedStr
 }
-
-func generateRow(controlSummary reportsummary.IControlSummary) []string {
-	row := []string{controlSummary.GetName()}
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().All()))
-
-	if !controlSummary.GetStatus().IsSkipped() {
-		row = append(row, fmt.Sprintf("%d", int(controlSummary.GetScore()))+"%")
-	} else {
-		row = append(row, "skipped")
-	}
-	return row
-}
-
-func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
-}
-
 func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	// Control name | # failed resources | all resources | % success
 	row := []string{}
@@ -184,11 +166,11 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 }
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails) {
 	// For control scan framework will be nil
-	prettyPrinter.printFramework(summaryDetails.ListFrameworks().All())
+	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks().All()))
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
-	summaryTable.SetHeader(generateHeader())
+	summaryTable.SetHeader(getControlTableHeaders())
 	summaryTable.SetHeaderLine(true)
 	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
 	summaryTable.SetColumnAlignment(alignments)
@@ -203,10 +185,11 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.Render()
 }
 
-func (prettyPrinter *PrettyPrinter) printFramework(frameworks []reportsummary.IPolicies) {
+func frameworksScoresToString(frameworks []reportsummary.IPolicies) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			cautils.InfoTextDisplay(prettyPrinter.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName()))
+			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
+			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
 		}
 	} else if len(frameworks) > 1 {
 		p := "FRAMEWORKS: "
@@ -215,17 +198,9 @@ func (prettyPrinter *PrettyPrinter) printFramework(frameworks []reportsummary.IP
 			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())
 		}
 		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetScore())
-		cautils.InfoTextDisplay(prettyPrinter.writer, p)
+		return p
 	}
-}
-func getSortedControlsNames(controls reportsummary.ControlSummaries) []string {
-	controlNames := make([]string, 0, len(controls))
-	for k := range controls {
-		c := controls[k]
-		controlNames = append(controlNames, c.GetName())
-	}
-	sort.Strings(controlNames)
-	return controlNames
+	return ""
 }
 
 // func getSortedControlsNames(controls []reportsummary.IPolicies) []string {
