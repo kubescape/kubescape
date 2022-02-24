@@ -98,7 +98,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 
 	if latestVersion.ClientUpdate != "" {
 		if BuildNumber != "" && BuildNumber < latestVersion.ClientUpdate {
-			logger.L().Warning(warningMessage(latestVersion.Client, latestVersion.ClientUpdate))
+			logger.L().Warning(warningMessage(latestVersion.ClientUpdate))
 		}
 	}
 
@@ -133,6 +133,6 @@ func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest)
 	return vResp, nil
 }
 
-func warningMessage(kind, release string) string {
-	return fmt.Sprintf("'%s' is not updated to the latest release: '%s'", kind, release)
+func warningMessage(release string) string {
+	return fmt.Sprintf("current version '%s' is not updated to the latest release: '%s'", BuildNumber, release)
 }
