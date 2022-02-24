@@ -53,6 +53,10 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 	return nil
 }
 
+type RootInfo struct {
+	Logger   string // logger level
+	CacheDir string // cached dir
+}
 type ScanInfo struct {
 	Getters
 	PolicyIdentifier   []reporthandling.PolicyIdentifier
@@ -64,17 +68,17 @@ type ScanInfo struct {
 	VerboseMode        bool        // Display all of the input resources and not only failed resources
 	Format             string      // Format results (table, json, junit ...)
 	Output             string      // Store results in an output file, Output file name
+	OutputVersion      string      // Output object can be differnet between versions, this is for testing and backward compatibility
 	ExcludedNamespaces string      // used for host sensor namespace
 	IncludeNamespaces  string      // DEPRECATED?
 	InputPatterns      []string    // Yaml files input patterns
 	Silent             bool        // Silent mode - Do not print progress logs
 	FailThreshold      uint16      // Failure score threshold
 	Submit             bool        // Submit results to Armo BE
-	HostSensor         BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
+	HostSensorEnabled  BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
+	HostSensorYamlPath string      // Path to hostsensor file
 	Local              bool        // Do not submit results
 	Account            string      // account ID
-	Logger             string      // logger level
-	CacheDir           string      // cached dir
 	KubeContext        string      // context name
 	FrameworkScan      bool        // false if scanning control
 	ScanAll            bool        // true if scan all frameworks

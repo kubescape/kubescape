@@ -1,4 +1,4 @@
-package controlmapping
+package v2
 
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"

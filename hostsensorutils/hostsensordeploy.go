@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -37,10 +38,17 @@ type HostSensorHandler struct {
 	gracePeriod                 int64
 }
 
-func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandler, error) {
+func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile string) (*HostSensorHandler, error) {
 
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
+	}
+	if hostSensorYAMLFile != "" {
+		d, err := loadHostSensorFromFile(hostSensorYAMLFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load host-scan yaml file, reason: %s", err.Error())
+		}
+		hostSensorYAML = d
 	}
 	hsh := &HostSensorHandler{
 		k8sObj:                      k8sObj,
@@ -151,7 +159,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 			hsh.podListLock.RLock()
 			podsMap := hsh.HostSensorPodNames
 			hsh.podListLock.RUnlock()
-			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceded. We will take data only from the pods below: %v",
+			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceeded. Kubescape will take data only from the pods below: %v",
 				podsNum, len(nodesList.Items), podsMap)
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -248,4 +256,13 @@ func (hsh *HostSensorHandler) GetNamespace() string {
 		return ""
 	}
 	return hsh.DaemonSet.Namespace
+}
+
+func loadHostSensorFromFile(hostSensorYAMLFile string) (string, error) {
+	dat, err := os.ReadFile(hostSensorYAMLFile)
+	if err != nil {
+		return "", err
+	}
+	// TODO - Add file validation
+	return string(dat), err
 }
