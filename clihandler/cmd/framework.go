@@ -16,7 +16,7 @@ import (
 var (
 	frameworkExample = `
   # Scan all frameworks and submit the results
-  kubescape scan --submit
+  kubescape scan framework all --submit
   
   # Scan the NSA framework
   kubescape scan framework nsa
@@ -29,15 +29,6 @@ var (
 
   # Scan kubernetes YAML manifest files
   kubescape scan framework nsa *.yaml
-
-  # Scan and save the results in the JSON format
-  kubescape scan --format json --output results.json
-
-  # Save scan results in JSON format
-  kubescape scan --format json --output results.json
-
-  # Display all resources
-  kubescape scan --verbose
 
   Run 'kubescape list frameworks' for the list of supported frameworks
 `

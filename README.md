@@ -58,6 +58,8 @@ Want to contribute? Want to discuss something? Have an issue?
 
 # Options and examples
 
+[Kubescape docs](https://hub.armo.cloud/docs)
+
 ## Playground
 * [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
 
@@ -65,9 +67,10 @@ Want to contribute? Want to discuss something? Have an issue?
 
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
 * [How To Secure Kubernetes Clusters With Kubescape And Armo](https://youtu.be/ZATGiDIDBQk)
-* [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Scan Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
+* [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
 
 ## Install on Windows
 

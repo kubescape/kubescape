@@ -10,7 +10,9 @@ import (
 )
 
 func (prettyPrinter *PrettyPrinter) resourceTable(results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) {
-
+	if prettyPrinter.outputVersion != "v2" {
+		return
+	}
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(true)
 	summaryTable.SetAutoMergeCells(true)

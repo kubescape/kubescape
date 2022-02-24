@@ -17,21 +17,23 @@ import (
 )
 
 type PrettyPrinter struct {
+	outputVersion      string
 	writer             *os.File
 	verboseMode        bool
 	sortedControlNames []string
 }
 
-func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, outputVersion string) *PrettyPrinter {
 	return &PrettyPrinter{
-		verboseMode: verboseMode,
+		verboseMode:   verboseMode,
+		outputVersion: outputVersion,
 	}
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	prettyPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
-	// prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
+	prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
 	prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails)
 
@@ -45,6 +47,10 @@ func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 
 func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) {
+	if prettyPrinter.outputVersion != "v1" {
+		return
+	}
+
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
 
 		controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
@@ -165,8 +171,6 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	return row
 }
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails) {
-	// For control scan framework will be nil
-	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks().All()))
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
@@ -183,6 +187,9 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 
 	// summaryTable.SetFooter(generateFooter())
 	summaryTable.Render()
+
+	// For control scan framework will be nil
+	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks().All()))
 }
 
 func frameworksScoresToString(frameworks []reportsummary.IPolicies) string {

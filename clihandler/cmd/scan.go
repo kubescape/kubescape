@@ -8,11 +8,32 @@ import (
 
 var scanInfo cautils.ScanInfo
 
+var scanCmdExamples = `
+  Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defind frameworks 
+  
+  # Scan current cluster with all frameworks
+  kubescape scan --submit --enable-host-scan
+
+  # Scan kubernetes YAML manifest files
+  kubescape scan *.yaml
+
+  # Scan and save the results in the JSON format
+  kubescape scan --format json --output results.json
+
+  # Display all resources
+  kubescape scan --verbose
+
+  # Scan different clusters from the kubectl context 
+  kubescape scan --kube-context <kubernetes context>
+  
+`
+
 // scanCmd represents the scan command
 var scanCmd = &cobra.Command{
-	Use:   "scan [command]",
-	Short: "Scan the current running cluster or yaml files",
-	Long:  `The action you want to perform`,
+	Use:     "scan",
+	Short:   "Scan the current running cluster or yaml files",
+	Long:    `The action you want to perform`,
+	Example: scanCmdExamples,
 	Args: func(cmd *cobra.Command, args []string) error {
 		if len(args) > 0 {
 			if args[0] != "framework" && args[0] != "control" {
@@ -57,9 +78,13 @@ func init() {
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
-
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host sensor DaemonSet. Use this flag cautiously")
-	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.OutputVersion, "output-version", "v1", "Output object can be differnet between versions, this is for testing and backward compatibility")
+
+	// hidden flags
+	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemoSet can not run pods on the nodes
+	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
+	scanCmd.PersistentFlags().MarkHidden("output-version") // meant for testing different output approaches and not for common use
 
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valueable data from cluster nodes for certain controls")
 	hostF.NoOptDefVal = "true"
