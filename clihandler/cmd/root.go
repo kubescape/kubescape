@@ -35,13 +35,14 @@ var rootCmd = &cobra.Command{
 	Use:     "kubescape",
 	Version: cautils.BuildNumber,
 	Short:   "Kubescape is a tool for testing Kubernetes security posture",
-	Long:    `Kubescape is a tool for testing Kubernetes security posture based on NSA \ MITRE ATT&CK® and other frameworks specifications`,
+	Long:    `Based on NSA \ MITRE ATT&CK® and other frameworks specifications`,
 	Example: ksExamples,
 }
 
 func Execute() {
 	rootCmd.Execute()
 }
+
 func init() {
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
