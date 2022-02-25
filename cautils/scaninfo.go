@@ -73,7 +73,7 @@ type ScanInfo struct {
 	IncludeNamespaces  string      // DEPRECATED?
 	InputPatterns      []string    // Yaml files input patterns
 	Silent             bool        // Silent mode - Do not print progress logs
-	FailThreshold      uint16      // Failure score threshold
+	FailThreshold      float32     // Failure score threshold
 	Submit             bool        // Submit results to Armo BE
 	HostSensorEnabled  BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
 	HostSensorYamlPath string      // Path to hostsensor file
