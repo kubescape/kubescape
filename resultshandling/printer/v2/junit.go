@@ -5,18 +5,61 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/resultshandling/printer"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 type JunitPrinter struct {
-	writer *os.File
+	writer  *os.File
+	verbose bool
 }
 
-func NewJunitPrinter() *JunitPrinter {
-	return &JunitPrinter{}
+type JUnitTestSuites struct {
+	XMLName    xml.Name          `xml:"testsuite"`
+	Suites     []JUnitTestCase   `xml:"testsuites"`
+	Frameworks []JUnitFrameworks `xml:"framework"`
+	RiskScore  float32           `xml:"riskScore,attr"` // test risk score
+	Time       string            `xml:"time,attr"`      // scanning time
+	Controls   int               `xml:"testcases,attr"` // number of controls
+}
+
+type JUnitFrameworks struct { // Frameworks
+	Name      string  `xml:"name,attr"`
+	RiskScore float32 `xml:"riskscore,attr"`
+	Status    string  `xml:"status,attr"`
+}
+
+// JUnitTestCase is a single test case with its result.
+type JUnitTestCase struct { // Control
+	XMLName      xml.Name        `xml:"testcase"`
+	Name         string          `xml:"name,attr"`
+	ID           string          `xml:"id,attr"`
+	Url          string          `xml:"url,attr"`
+	RiskScore    float32         `xml:"riskScore,attr"`
+	Status       string          `xml:"status,attr"`
+	Info         string          `xml:"info,attr"`
+	AllResources int             `xml:"allResources,attr"`
+	Excluded     int             `xml:"excludedResources,attr"`
+	Failed       int             `xml:"filedResources,attr"`
+	Resources    []JUnitResource `xml:"resource"`
+}
+
+type JUnitResource struct { // Single resource
+	Name        string                   `xml:"name,attr"`
+	Namespace   string                   `xml:"namespace,attr"`
+	Kind        string                   `xml:"kind,attr"`
+	ApiVersion  string                   `xml:"apiVersion,attr"`
+	FailedPaths []armotypes.PosturePaths `xml:"jsonpath"`
+}
+
+func NewJunitPrinter(verbose bool) *JunitPrinter {
+	return &JunitPrinter{
+		verbose: verbose,
+	}
 }
 
 func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
@@ -32,97 +75,82 @@ func (junitPrinter *JunitPrinter) FinalizeData(opaSessionObj *cautils.OPASession
 }
 
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	junitResult, err := convertPostureReportToJunitResult(opaSessionObj.Report)
+	junitResult, err := junitPrinter.convertPostureReportToJunitResult(opaSessionObj)
 	if err != nil {
-		logger.L().Fatal("failed to convert posture report object")
+		logger.L().Fatal("failed to build xml result object", helpers.Error(err))
 	}
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {
-		logger.L().Fatal("failed to convert posture report object")
+		logger.L().Fatal("failed to Marshal xml result object", helpers.Error(err))
 	}
 	junitPrinter.writer.Write(postureReportStr)
 }
 
-type JUnitTestSuites struct {
-	XMLName xml.Name         `xml:"testsuites"`
-	Suites  []JUnitTestSuite `xml:"testsuite"`
-}
-
-// JUnitTestSuite is a single JUnit test suite which may contain many
-// testcases.
-type JUnitTestSuite struct {
-	XMLName    xml.Name        `xml:"testsuite"`
-	Tests      int             `xml:"tests,attr"`
-	Time       string          `xml:"time,attr"`
-	Name       string          `xml:"name,attr"`
-	Resources  int             `xml:"resources,attr"`
-	Excluded   int             `xml:"excluded,attr"`
-	Failed     int             `xml:"filed,attr"`
-	Properties []JUnitProperty `xml:"properties>property,omitempty"`
-	TestCases  []JUnitTestCase `xml:"testcase"`
-}
-
-// JUnitTestCase is a single test case with its result.
-type JUnitTestCase struct {
-	XMLName     xml.Name          `xml:"testcase"`
-	Classname   string            `xml:"classname,attr"`
-	Name        string            `xml:"name,attr"`
-	Time        string            `xml:"time,attr"`
-	Resources   int               `xml:"resources,attr"`
-	Excluded    int               `xml:"excluded,attr"`
-	Failed      int               `xml:"filed,attr"`
-	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
-	Failure     *JUnitFailure     `xml:"failure,omitempty"`
-}
-
-// JUnitSkipMessage contains the reason why a testcase was skipped.
-type JUnitSkipMessage struct {
-	Message string `xml:"message,attr"`
-}
-
-// JUnitProperty represents a key/value pair used to define properties.
-type JUnitProperty struct {
-	Name  string `xml:"name,attr"`
-	Value string `xml:"value,attr"`
-}
-
-// JUnitFailure contains data related to a failed test.
-type JUnitFailure struct {
-	Message  string `xml:"message,attr"`
-	Type     string `xml:"type,attr"`
-	Contents string `xml:",chardata"`
-}
-
-func convertPostureReportToJunitResult(postureResult *reporthandlingv2.PostureReport) (*JUnitTestSuites, error) {
-	juResult := JUnitTestSuites{XMLName: xml.Name{Local: "Kubescape scan results"}}
-	for _, framework := range postureResult.ListFrameworks().All() {
-		suite := JUnitTestSuite{
-			Name:      framework.GetName(),
-			Resources: framework.NumberOfResources().All(),
-			Excluded:  framework.NumberOfResources().Excluded(),
-			Failed:    framework.NumberOfResources().Failed(),
-		}
-		for _, controlReports := range postureResult.ListControls().All() {
-			suite.Tests = suite.Tests + 1
-			testCase := JUnitTestCase{}
-			testCase.Name = controlReports.GetName()
-			testCase.Classname = "Kubescape"
-			testCase.Time = postureResult.ReportGenerationTime.String()
-			// if 0 < len(controlReports.RuleReports[0].RuleResponses) {
-
-			// 	testCase.Resources = controlReports.NumberOfResources().All()
-			// 	testCase.Excluded = controlReports.NumberOfResources().Excluded()
-			// 	testCase.Failed = controlReports.NumberOfResources().Failed()
-			// 	failure := JUnitFailure{}
-			// 	failure.Message = fmt.Sprintf("%d resources failed", testCase.Failed)
-			// 	for _, ruleResponses := range controlReports.RuleReports[0].RuleResponses {
-			// 		failure.Contents = fmt.Sprintf("%s\n%s", failure.Contents, ruleResponses.AlertMessage)
-			// 	}
-			// 	testCase.Failure = &failure
-			// }
-			suite.TestCases = append(suite.TestCases, testCase)
-		}
-		juResult.Suites = append(juResult.Suites, suite)
+func (junitPrinter *JunitPrinter) convertPostureReportToJunitResult(results *cautils.OPASessionObj) (*JUnitTestSuites, error) {
+	juResult := JUnitTestSuites{
+		XMLName: xml.Name{
+			Local: "Kubescape scan results",
+		},
+		RiskScore:  results.Report.SummaryDetails.Score,
+		Time:       results.Report.GetTimestamp().String(),
+		Controls:   len(results.Report.ListControls().All()),
+		Frameworks: []JUnitFrameworks{},
 	}
+
+	// Frameworks
+	for _, frameworksReports := range results.Report.ListFrameworks().All() {
+		fw := JUnitFrameworks{}
+		fw.Name = frameworksReports.GetName()
+		fw.RiskScore = frameworksReports.GetScore()
+		fw.Status = string(frameworksReports.GetStatus().Status())
+		juResult.Frameworks = append(juResult.Frameworks, fw)
+	}
+
+	// controls
+	for _, controlIDs := range results.Report.ListControlsIDs().All() {
+		controlReport := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controlIDs)
+
+		// control data
+		testCase := JUnitTestCase{}
+		testCase.Name = controlReport.GetName()
+		testCase.ID = controlReport.GetID()
+		testCase.Url = getControlURL(controlReport.GetID())
+		testCase.Name = controlReport.GetName()
+		testCase.Status = string(controlReport.GetStatus().Status())
+
+		// resources counters
+		testCase.AllResources = controlReport.NumberOfResources().All()
+		testCase.Excluded = controlReport.NumberOfResources().Excluded()
+		testCase.Failed = controlReport.NumberOfResources().Failed()
+
+		// resources
+		var jUnitResources []JUnitResource
+		for _, resourceID := range controlReport.ListResourcesIDs().All() {
+			result, ok := results.ResourcesResult[resourceID]
+			if !ok {
+				continue
+			}
+			if result.GetStatus(nil).IsPassed() && !junitPrinter.verbose { // add passed resources only in verbose mode
+				continue
+			}
+
+			jUnitResource := JUnitResource{}
+			rules := result.ListRulesOfControl(controlReport.GetID(), "")
+			for _, rule := range rules {
+				jUnitResource.FailedPaths = append(jUnitResource.FailedPaths, rule.Paths...)
+			}
+			if resource, ok := results.AllResources[resourceID]; ok {
+				jUnitResource.Name = resource.GetName()
+				jUnitResource.Namespace = resource.GetNamespace()
+				jUnitResource.Kind = resource.GetKind()
+				jUnitResource.ApiVersion = resource.GetApiVersion()
+			}
+
+			jUnitResources = append(jUnitResources, jUnitResource)
+		}
+		testCase.Resources = jUnitResources
+		juResult.Suites = append(juResult.Suites, testCase)
+	}
+
 	return &juResult, nil
 }

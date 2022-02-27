@@ -2,6 +2,7 @@ package v2
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
@@ -21,7 +22,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(results map[string]resourcesre
 	summaryTable.SetRowLine(true)
 	// summaryTable.SetFooter([]string{"", "", "Total", "", "$146.93"})
 	// For control scan framework will be nil
-	data := [][]string{}
+	data := Matrix{}
 	for i := range results {
 		resource, ok := allResources[i]
 		if !ok {
@@ -32,7 +33,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(results map[string]resourcesre
 			data = append(data, raw...)
 		}
 	}
-	sortTable(data)
+	sort.Sort(data)
 	summaryTable.AppendBulk(data)
 
 	summaryTable.Render()
@@ -78,18 +79,18 @@ func generateResourceHeader() []string {
 	return []string{"Control", "Namespace", "Kind/Name", "Statues"}
 }
 
-func sortTable(data [][]string) {
+type Matrix [][]string
 
-	for j := len(data[0]) - 1; j >= 0; j-- {
-		for k := 0; k < len(data)-2; {
-			if data[k][j] > data[k+1][j] {
-				tmp := data[k]
-				data[k] = data[k+1]
-				data[k+1] = tmp
-				k = 0
-			} else {
-				k++
-			}
+func (a Matrix) Len() int      { return len(a) }
+func (a Matrix) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
+func (a Matrix) Less(i, j int) bool {
+	l := len(a[i])
+	for k := 0; k < l; k++ {
+		if a[i][k] < a[j][k] {
+			return true
+		} else if a[i][k] > a[j][k] {
+			return false
 		}
 	}
+	return true
 }
