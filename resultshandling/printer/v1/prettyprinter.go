@@ -30,6 +30,7 @@ func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
 	}
 }
 
+// !!!! DEPRECATED !!!! use v2 package
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	overallRiskScore := opaSessionObj.Report.SummaryDetails.Score
 	cautils.ReportV2ToV1(opaSessionObj)
