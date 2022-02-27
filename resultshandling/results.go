@@ -59,7 +59,7 @@ func NewPrinter(printFormat, outputVersion string, verboseMode bool) printer.IPr
 	case printer.JsonFormat:
 		return printerv1.NewJsonPrinter()
 	case printer.JunitResultFormat:
-		return printerv1.NewJunitPrinter()
+		return printerv2.NewJunitPrinter(verboseMode)
 	case printer.PrometheusFormat:
 		return printerv1.NewPrometheusPrinter(verboseMode)
 	case printer.PdfFormat:
