@@ -24,17 +24,6 @@
                     "namespace": "kube-node-lease"
                 }
             }
-        ],
-        "posturePolicies": [
-            {
-                "frameworkName": "NSA"
-            },
-            {
-                "frameworkName": "MITRE"
-            },
-            {
-                "frameworkName": "ArmoBest"
-            }
         ]
     }
 ]
