@@ -126,6 +126,13 @@ func (armoAPI *ArmoAPI) Post(fullURL string, headers map[string]string, body []b
 	return HttpPost(armoAPI.httpClient, fullURL, headers, body)
 }
 
+func (armoAPI *ArmoAPI) Delete(fullURL string, headers map[string]string) (string, error) {
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	armoAPI.appendAuthHeaders(headers)
+	return HttpDelete(armoAPI.httpClient, fullURL, headers)
+}
 func (armoAPI *ArmoAPI) Get(fullURL string, headers map[string]string) (string, error) {
 	if headers == nil {
 		headers = make(map[string]string)
@@ -293,7 +300,7 @@ func (armoAPI *ArmoAPI) PostExceptions(exceptions []armotypes.PostureExceptionPo
 		if err != nil {
 			return err
 		}
-		_, err = armoAPI.Post(armoAPI.postExceptionsURL(), map[string]string{"Content-Type": "application/json"}, ex)
+		_, err = armoAPI.Post(armoAPI.exceptionsURL(""), map[string]string{"Content-Type": "application/json"}, ex)
 		if err != nil {
 			return err
 		}
@@ -301,6 +308,14 @@ func (armoAPI *ArmoAPI) PostExceptions(exceptions []armotypes.PostureExceptionPo
 	return nil
 }
 
+func (armoAPI *ArmoAPI) DeleteException(exceptionName string) error {
+
+	_, err := armoAPI.Delete(armoAPI.exceptionsURL(exceptionName), nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 func (armoAPI *ArmoAPI) Login() error {
 	if armoAPI.accountID == "" {
 		return fmt.Errorf("failed to login, missing accountID")

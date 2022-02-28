@@ -55,18 +55,8 @@ func generateResourceRows(resource workloadinterface.IMetadata, controls []resou
 
 		row = append(row, fmt.Sprintf("%s\nhttps://hub.armo.cloud/docs/%s", controls[i].GetName(), strings.ToLower(controls[i].GetID())))
 		row = append(row, resource.GetNamespace())
-		var paths []string
-		for j := range controls[i].ResourceAssociatedRules {
-			for k := range controls[i].ResourceAssociatedRules[j].Paths {
-				if p := controls[i].ResourceAssociatedRules[j].Paths[k].FailedPath; p != "" {
-					paths = append(paths, p)
-				}
-				if p := controls[i].ResourceAssociatedRules[j].Paths[k].FixPath.Path; p != "" {
-					v := controls[i].ResourceAssociatedRules[j].Paths[k].FixPath.Value
-					paths = append(paths, fmt.Sprintf("%s=%s", p, v))
-				}
-			}
-		}
+		paths := failedPathsToString(&controls[i])
+
 		row = append(row, fmt.Sprintf("%s/%s\n%s", resource.GetKind(), resource.GetName(), strings.Join(paths, ";\n")))
 		row = append(row, string(controls[i].GetStatus(nil).Status()))
 		rows = append(rows, row)
@@ -93,4 +83,21 @@ func (a Matrix) Less(i, j int) bool {
 		}
 	}
 	return true
+}
+
+func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].FailedPath; p != "" {
+				paths = append(paths, p)
+			}
+			if p := control.ResourceAssociatedRules[j].Paths[k].FixPath.Path; p != "" {
+				v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
+				paths = append(paths, fmt.Sprintf("%s=%s", p, v))
+			}
+		}
+	}
+	return paths
 }

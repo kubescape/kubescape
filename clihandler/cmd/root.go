@@ -13,6 +13,7 @@ import (
 )
 
 var armoBEURLs = ""
+var armoBEURLsDep = ""
 var rootInfo cautils.RootInfo
 
 const envFlagUsage = "Send report results to specific URL. Format:<ReportReceiver>,<Backend>,<Frontend>.\n\t\tExample:report.armo.cloud,api.armo.cloud,portal.armo.cloud"
@@ -47,8 +48,12 @@ func init() {
 
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
-	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "environment", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&armoBEURLsDep, "environment", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "env", "", envFlagUsage)
+	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
 	rootCmd.PersistentFlags().MarkHidden("environment")
+	rootCmd.PersistentFlags().MarkHidden("env")
+
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 }
@@ -80,6 +85,9 @@ func initCacheDir() {
 	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 }
 func initEnvironment() {
+	if armoBEURLsDep != "" {
+		armoBEURLs = armoBEURLsDep
+	}
 	urlSlices := strings.Split(armoBEURLs, ",")
 	if len(urlSlices) != 1 && len(urlSlices) < 3 {
 		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
