@@ -61,8 +61,8 @@ func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
 		opap := NewOPAProcessor(opaSessionObj, opaHandler.regoDependenciesData)
 
 		policies := ConvertFrameworksToPolicies(opap.Frameworks, cautils.BuildNumber)
-
-		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks, policies)
+		// buildMap
+		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks, policies, opaSessionObj.ControlToStatusInfoMap)
 
 		// process
 		if err := opap.Process(policies); err != nil {

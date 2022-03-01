@@ -6,6 +6,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/apis"
 )
 
 // PolicyHandler -
@@ -51,7 +52,13 @@ func (policyHandler *PolicyHandler) HandleNotificationRequest(notification *repo
 func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
-	resourcesMap, allResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj.Frameworks, &notification.Designators)
+	if !(*scanInfo.HostSensor.Get()) {
+		opaSessionObj.HostSensorStaus = apis.StatusInfo{
+			InnerStatus: apis.InfoStatusSkipped,
+			InnerInfo:   "flag not used",
+		}
+	}
+	resourcesMap, allResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &notification.Designators)
 	if err != nil {
 		return err
 	}

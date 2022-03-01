@@ -71,6 +71,8 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
 	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), getControlURL(controlSummary.GetID()))
 	switch controlSummary.GetStatus().Status() {
+	case apis.InfoStatusIrelevant:
+		cautils.InfoDisplay(prettyPrinter.writer, "irrelevant %v\n", emoji.NeutralFace)
 	case apis.StatusSkipped:
 		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
 	case apis.StatusFailed:
@@ -93,16 +95,19 @@ func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.
 	if prettyPrinter.verboseMode {
 		passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
 	}
-	if len(failedWorkloads) > 0 {
+	status := controlSummary.GetStatus().Status()
+	switch status {
+	case apis.StatusFailed:
 		cautils.FailureDisplay(prettyPrinter.writer, "Failed:\n")
 		prettyPrinter.printGroupedResources(failedWorkloads)
-	}
-	if len(excludedWorkloads) > 0 {
+	case apis.StatusExcluded:
 		cautils.WarningDisplay(prettyPrinter.writer, "Excluded:\n")
 		prettyPrinter.printGroupedResources(excludedWorkloads)
-	}
-	if len(passedWorkloads) > 0 {
+	case apis.StatusPassed:
 		cautils.SuccessDisplay(prettyPrinter.writer, "Passed:\n")
+		prettyPrinter.printGroupedResources(passedWorkloads)
+	case apis.StatusSkipped:
+		cautils.SuccessDisplay(prettyPrinter.writer, "Skipped:\n")
 		prettyPrinter.printGroupedResources(passedWorkloads)
 	}
 
@@ -158,17 +163,18 @@ func generateRow(controlSummary reportsummary.IControlSummary) []string {
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().All()))
-
 	if !controlSummary.GetStatus().IsSkipped() {
 		row = append(row, fmt.Sprintf("%d", int(controlSummary.GetScore()))+"%")
+		row = append(row, "")
 	} else {
-		row = append(row, "skipped")
+		row = append(row, string(controlSummary.GetStatus().Status()))
+		row = append(row, strings.ToUpper(controlSummary.GetStatus().Info()))
 	}
 	return row
 }
 
 func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
+	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score", "INFO"}
 }
 
 func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
@@ -179,6 +185,7 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()))
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().All()))
 	row = append(row, fmt.Sprintf("%.2f%s", summaryDetails.Score, "%"))
+	row = append(row, "")
 
 	return row
 }

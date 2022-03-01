@@ -2,6 +2,8 @@ module github.com/armosec/kubescape
 
 go 1.17
 
+replace github.com/armosec/opa-utils => /home/daniel/go/src/opa-utils
+
 require (
 	github.com/armosec/armoapi-go v0.0.49
 	github.com/armosec/k8s-interface v0.0.60

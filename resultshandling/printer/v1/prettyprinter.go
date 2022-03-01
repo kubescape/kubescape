@@ -209,7 +209,7 @@ func generateRow(control string, cs ResultSummary) []string {
 }
 
 func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
+	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score", "Info"}
 }
 
 func generateFooter(prettyPrinter *PrettyPrinter) []string {
@@ -220,6 +220,7 @@ func generateFooter(prettyPrinter *PrettyPrinter) []string {
 	row = append(row, fmt.Sprintf("%d", prettyPrinter.frameworkSummary.TotalWarning))
 	row = append(row, fmt.Sprintf("%d", prettyPrinter.frameworkSummary.TotalResources))
 	row = append(row, fmt.Sprintf("%.2f%s", prettyPrinter.frameworkSummary.RiskScore, "%"))
+	row = append(row, "")
 
 	return row
 }

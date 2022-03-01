@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -24,7 +25,7 @@ func TestInitializeSummaryDetails(t *testing.T) {
 	summaryDetails := reportsummary.SummaryDetails{}
 	frameworks := []reporthandling.Framework{*fw0, *fw1}
 	policies := ConvertFrameworksToPolicies([]reporthandling.Framework{*fw0, *fw1}, "")
-	ConvertFrameworksToSummaryDetails(&summaryDetails, frameworks, policies)
+	ConvertFrameworksToSummaryDetails(&summaryDetails, frameworks, policies, map[string]apis.StatusInfo{})
 	assert.Equal(t, 2, len(summaryDetails.Frameworks))
 	assert.Equal(t, 3, len(summaryDetails.Controls))
 }
