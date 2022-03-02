@@ -71,18 +71,21 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
 	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), getControlURL(controlSummary.GetID()))
 	switch controlSummary.GetStatus().Status() {
-	case apis.InfoStatusIrelevant:
-		cautils.InfoDisplay(prettyPrinter.writer, "irrelevant %v\n", emoji.NeutralFace)
 	case apis.StatusSkipped:
 		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
 	case apis.StatusFailed:
 		cautils.FailureDisplay(prettyPrinter.writer, "failed %v\n", emoji.SadButRelievedFace)
 	case apis.StatusExcluded:
 		cautils.WarningDisplay(prettyPrinter.writer, "excluded %v\n", emoji.NeutralFace)
+	case apis.InfoStatusIrelevant:
+		cautils.SuccessDisplay(prettyPrinter.writer, "irrelevant %v\n", emoji.ConfusedFace)
 	default:
 		cautils.SuccessDisplay(prettyPrinter.writer, "passed %v\n", emoji.ThumbsUp)
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.GetDescription())
+	if controlSummary.GetStatus().Info() != "" {
+		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
+	}
 }
 func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
 
@@ -95,19 +98,16 @@ func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.
 	if prettyPrinter.verboseMode {
 		passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
 	}
-	status := controlSummary.GetStatus().Status()
-	switch status {
-	case apis.StatusFailed:
+	if len(failedWorkloads) > 0 {
 		cautils.FailureDisplay(prettyPrinter.writer, "Failed:\n")
 		prettyPrinter.printGroupedResources(failedWorkloads)
-	case apis.StatusExcluded:
+	}
+	if len(excludedWorkloads) > 0 {
 		cautils.WarningDisplay(prettyPrinter.writer, "Excluded:\n")
 		prettyPrinter.printGroupedResources(excludedWorkloads)
-	case apis.StatusPassed:
+	}
+	if len(passedWorkloads) > 0 {
 		cautils.SuccessDisplay(prettyPrinter.writer, "Passed:\n")
-		prettyPrinter.printGroupedResources(passedWorkloads)
-	case apis.StatusSkipped:
-		cautils.SuccessDisplay(prettyPrinter.writer, "Skipped:\n")
 		prettyPrinter.printGroupedResources(passedWorkloads)
 	}
 
@@ -158,23 +158,22 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	return relatedStr
 }
 
-func generateRow(controlSummary reportsummary.IControlSummary) []string {
+func generateRow(controlSummary reportsummary.IControlSummary, infoMap map[string]string) []string {
 	row := []string{controlSummary.GetName()}
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().All()))
+
 	if !controlSummary.GetStatus().IsSkipped() {
 		row = append(row, fmt.Sprintf("%d", int(controlSummary.GetScore()))+"%")
-		row = append(row, "")
 	} else {
-		row = append(row, string(controlSummary.GetStatus().Status()))
-		row = append(row, strings.ToUpper(controlSummary.GetStatus().Info()))
+		row = append(row, fmt.Sprintf("%v%v", controlSummary.GetStatus().Status(), infoMap[controlSummary.GetStatus().Info()]))
 	}
 	return row
 }
 
 func generateHeader() []string {
-	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score", "INFO"}
+	return []string{"Control Name", "Failed Resources", "Excluded Resources", "All Resources", "% risk-score"}
 }
 
 func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
@@ -185,10 +184,25 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()))
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().All()))
 	row = append(row, fmt.Sprintf("%.2f%s", summaryDetails.Score, "%"))
-	row = append(row, "")
 
 	return row
 }
+
+func setInfoMap(summaryDetails *reportsummary.SummaryDetails) map[string]string {
+	infoMap := make(map[string]string)
+	starsCount := "*"
+	for _, controlSmmary := range summaryDetails.Controls {
+		if controlSmmary.GetStatus().Info() != "" {
+			if _, ok := infoMap[controlSmmary.GetStatus().Info()]; !ok {
+				infoMap[controlSmmary.GetStatus().Info()] = starsCount
+				starsCount += starsCount
+			}
+		}
+	}
+	infoMap[""] = ""
+	return infoMap
+}
+
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails) {
 	// For control scan framework will be nil
 	prettyPrinter.printFramework(summaryDetails.ListFrameworks().All())
@@ -197,17 +211,30 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
 	summaryTable.SetHeaderLine(true)
-	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_DEFAULT}
 	summaryTable.SetColumnAlignment(alignments)
-
+	infoMap := setInfoMap(summaryDetails)
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i])))
+		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]), infoMap))
 	}
 
 	summaryTable.SetFooter(generateFooter(summaryDetails))
 
 	// summaryTable.SetFooter(generateFooter())
 	summaryTable.Render()
+
+	prettyPrinter.printInfo(infoMap)
+}
+
+func (prettyPrinter *PrettyPrinter) printInfo(infoMap map[string]string) {
+	for key, val := range infoMap {
+		if val != "" {
+			if i := strings.Index(key, "\n"); i != -1 {
+				key = key[:i+1] + strings.Repeat(" ", len(infoMap[key])+1) + key[i+1:]
+			}
+			cautils.SimpleDisplay(os.Stdout, fmt.Sprintf("%v %v\n", val, key))
+		}
+	}
 }
 
 func (prettyPrinter *PrettyPrinter) printFramework(frameworks []reportsummary.IPolicies) {

@@ -232,7 +232,7 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(frameworksNames []string, 
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(generateHeader())
 	summaryTable.SetHeaderLine(true)
-	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_DEFAULT}
 	summaryTable.SetColumnAlignment(alignments)
 
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {

@@ -55,7 +55,7 @@ func (policyHandler *PolicyHandler) getResources(notification *reporthandling.Po
 	if !(*scanInfo.HostSensor.Get()) {
 		opaSessionObj.HostSensorStaus = apis.StatusInfo{
 			InnerStatus: apis.InfoStatusSkipped,
-			InnerInfo:   "flag not used",
+			InnerInfo:   "'--enable-host-scan' flag not used",
 		}
 	}
 	resourcesMap, allResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &notification.Designators)
