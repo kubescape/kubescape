@@ -47,6 +47,24 @@ func JSONDecoder(origin string) *json.Decoder {
 	return dec
 }
 
+func HttpDelete(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
+
+	req, err := http.NewRequest("DELETE", fullURL, nil)
+	if err != nil {
+		return "", err
+	}
+	setHeaders(req, headers)
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	respStr, err := httpRespToString(resp)
+	if err != nil {
+		return "", err
+	}
+	return respStr, nil
+}
 func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
 
 	req, err := http.NewRequest("GET", fullURL, nil)

@@ -5,7 +5,6 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/armosec/opa-utils/score"
 )
 
 func ReportV2ToV1(opaSessionObj *OPASessionObj) {
@@ -22,7 +21,6 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 			fwv1 := reporthandling.FrameworkReport{}
 			fwv1.Name = fwv2.GetName()
 			fwv1.Score = fwv2.GetScore()
-
 			fwv1.ControlReports = append(fwv1.ControlReports, controlReportV2ToV1(opaSessionObj, fwv2.GetName(), fwv2.Controls)...)
 			frameworks = append(frameworks, fwv1)
 
@@ -30,10 +28,10 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 	} else {
 		fwv1 := reporthandling.FrameworkReport{}
 		fwv1.Name = ""
-		fwv1.Score = 0
 
 		fwv1.ControlReports = append(fwv1.ControlReports, controlReportV2ToV1(opaSessionObj, "", opaSessionObj.Report.SummaryDetails.Controls)...)
 		frameworks = append(frameworks, fwv1)
+		fwv1.Score = opaSessionObj.Report.SummaryDetails.Score
 	}
 
 	// // remove unused data
@@ -49,36 +47,14 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 		reporthandling.SetUniqueResourcesCounter(&frameworks[f])
 
 		// set default score
-		reporthandling.SetDefaultScore(&frameworks[f])
+		// reporthandling.SetDefaultScore(&frameworks[f])
 	}
 
-	// update score
-	scoreutil := score.NewScore(opaSessionObj.AllResources)
-	scoreutil.Calculate(frameworks)
+	// // update score
+	// scoreutil := score.NewScore(opaSessionObj.AllResources)
+	// scoreutil.Calculate(frameworks)
 
 	opaSessionObj.PostureReport.FrameworkReports = frameworks
-
-	// opaSessionObj.Report.SummaryDetails.Score = 0
-	// for i := range frameworks {
-	// 	for j := range frameworks[i].ControlReports {
-	// 		// frameworks[i].ControlReports[j].Score
-	// 		for w := range opaSessionObj.Report.SummaryDetails.Frameworks {
-	// 			if opaSessionObj.Report.SummaryDetails.Frameworks[w].Name == frameworks[i].Name {
-	// 				opaSessionObj.Report.SummaryDetails.Frameworks[w].Score = frameworks[i].Score
-	// 			}
-	// 			if c, ok := opaSessionObj.Report.SummaryDetails.Frameworks[w].Controls[frameworks[i].ControlReports[j].ControlID]; ok {
-	// 				c.Score = frameworks[i].ControlReports[j].Score
-	// 				opaSessionObj.Report.SummaryDetails.Frameworks[w].Controls[frameworks[i].ControlReports[j].ControlID] = c
-	// 			}
-	// 		}
-	// 		if c, ok := opaSessionObj.Report.SummaryDetails.Controls[frameworks[i].ControlReports[j].ControlID]; ok {
-	// 			c.Score = frameworks[i].ControlReports[j].Score
-	// 			opaSessionObj.Report.SummaryDetails.Controls[frameworks[i].ControlReports[j].ControlID] = c
-	// 		}
-	// 	}
-	// 	opaSessionObj.Report.SummaryDetails.Score += opaSessionObj.PostureReport.FrameworkReports[i].Score
-	// }
-	// opaSessionObj.Report.SummaryDetails.Score /= float32(len(opaSessionObj.Report.SummaryDetails.Frameworks))
 }
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
@@ -88,9 +64,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.ControlID = controlID
 		crv1.BaseScore = crv2.ScoreFactor
 		crv1.Name = crv2.GetName()
+		crv1.Score = crv2.GetScore()
 		crv1.Control_ID = controlID
 		// crv1.Attributes = crv2.
-		crv1.Score = crv2.GetScore()
 
 		// TODO - add fields
 		crv1.Description = crv2.Description

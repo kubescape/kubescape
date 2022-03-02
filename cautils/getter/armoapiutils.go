@@ -56,7 +56,7 @@ func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) postExceptionsURL() string {
+func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = armoAPI.apiURL
@@ -64,6 +64,10 @@ func (armoAPI *ArmoAPI) postExceptionsURL() string {
 
 	q := u.Query()
 	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
+	if exceptionsPolicyName != "" { // for delete
+		q.Add("policyName", exceptionsPolicyName)
+	}
+
 	u.RawQuery = q.Encode()
 
 	return u.String()

@@ -49,13 +49,16 @@ We invite you to our team! We are excited about this project and want to return 
 Want to contribute? Want to discuss something? Have an issue?
 
 * Open a issue, we are trying to respond within 48 hours
-* [Join us](https://armosec.github.io/kubescape/) in a discussion on our discord server!
-[![discord](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://img.shields.io/discord/893048809884643379)
+* [Join us](https://armosec.github.io/kubescape/) in a discussion on our discord server! 
+
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
+![discord](https://img.shields.io/discord/893048809884643379)
 
 
 # Options and examples
+
+[Kubescape docs](https://hub.armo.cloud/docs)
 
 ## Playground
 * [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
@@ -64,9 +67,11 @@ Want to contribute? Want to discuss something? Have an issue?
 
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
 * [How To Secure Kubernetes Clusters With Kubescape And Armo](https://youtu.be/ZATGiDIDBQk)
-* [Scanning Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Scan Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
+* [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
+* Customize controls configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
 ## Install on Windows
 
@@ -99,13 +104,13 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 | `--include-namespaces`      | Scan all namespaces       | Scan specific namespaces                                                                                                                            |                                              |
 | `-s`/`--silent`             | Display progress messages | Silent progress messages                                                                                                                                                                                                                                                                                             |                                              |
 | `-t`/`--fail-threshold`     | `100` (do not fail)         | fail command (return exit code 1) if result is above threshold                                                                                                                                                                                                                                                       | `0` -> `100`                                 |
-| `-f`/`--format`             | `pretty-printer`          | Output format                                                                                                                                                                                                                                                                                                        | `pretty-printer`/`json`/`junit`/`prometheus` |
+| `-f`/`--format`             | `pretty-printer`          | Output format                                                                                                                                                                                                                                                                                                        | `pretty-printer`/`json`/`junit`/`prometheus`/`pdf` |
 | `-o`/`--output`             | print to stdout           | Save scan result in file                                                                                                                                                                                                                                                                                             |                                              |
-| `--use-from`                |                           | Load local framework object from specified path. If not used will download latest                                                                                                                                                                                                                                    | 
+| `--use-from`                |                           | Load local framework object from specified path. If not used will download latest                                                                                                                                                                                                                                    ||
 | `--use-artifacts-from`                |                           | Load artifacts (frameworks, control-config, exceptions) from local directory. If not used will download them                                                                                                                                                                                                                                    |                                              |
 | `--use-default`             | `false`                   | Load local framework object from default path. If not used will download latest                                                                                                                                                                                                                                      | `true`/`false`                               |
-| `--exceptions`              |                           | Path to an exceptions obj, [examples](examples/exceptions/README.md). Default will download exceptions from Kubescape SaaS                                                                                                                                                                                               |  
-| `--controls-config`              |                           | Path to a controls-config obj. If not set will download controls-config from ARMO management portal                                                                                                                                                                                               |                                            |
+| `--exceptions`              |                           | Path to an exceptions obj, [examples](https://github.com/armosec/kubescape/tree/master/examples/exceptions/README.md). Default will download exceptions from Kubescape SaaS                                                                                                                                                                                               ||
+| `--controls-config`              |                           | Path to a controls-config obj. If not set will download controls-config from ARMO management portal. [docs](https://hub.armo.cloud/docs/configuration-parameters)                                                                                                                                                                                                |                                            |
 | `--submit`                  | `false`                   | If set, Kubescape will send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not sent | `true`/`false`                               |
 | `--keep-local`              | `false`                   | Kubescape will not send scan results to Armo management portal. Use this flag if you ran with the `--submit` flag in the past and you do not want to submit your current scan results                                                                                                                                | `true`/`false`                               |
 | `--account`                 |                           | Armo portal account ID. Default will load account ID from configMap or config file                                                                                                                                                                                                                                   |                                              |
@@ -176,7 +181,14 @@ kubescape scan --format json --output results.json
 kubescape scan --format junit --output results.xml
 ```
 
+#### Output in `pdf` format - Contributed by [@alegrey91](https://github.com/alegrey91)
+
+```
+kubescape scan --format pdf --output results.pdf
+```
+
 #### Output in `prometheus` metrics format - Contributed by [@Joibel](https://github.com/Joibel)
+
 ```
 kubescape scan --format prometheus
 ```

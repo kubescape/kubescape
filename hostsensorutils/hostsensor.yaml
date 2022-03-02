@@ -2,29 +2,31 @@ apiVersion: v1
 kind: Namespace
 metadata:
   labels:
-    app: host-sensor
-    kubernetes.io/metadata.name: armo-kube-host-sensor
-    tier: armo-kube-host-sensor-control-plane
-  name: armo-kube-host-sensor
+    app: kubescape-host-scanner
+    k8s-app: kubescape-host-scanner
+    kubernetes.io/metadata.name: kubescape-host-scanner
+    tier: kubescape-host-scanner-control-plane
+  name: kubescape-host-scanner
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: host-sensor
-  namespace: armo-kube-host-sensor
+  name: host-scanner
+  namespace: kubescape-host-scanner
   labels:
-    k8s-app: armo-kube-host-sensor
+    app: host-scanner
+    k8s-app: kubescape-host-scanner
 spec:
   selector:
     matchLabels:
-      name: host-sensor
+      name: host-scanner
   template:
     metadata:
       labels:
-        name: host-sensor
+        name: host-scanner
     spec:
       tolerations:
-      # this toleration is to have the daemonset runnable on master nodes
+      # this toleration is to have the DaemonDet runnable on master nodes
       # remove it if your masters can't run pods
       - key: node-role.kubernetes.io/master
         operator: Exists
@@ -37,7 +39,7 @@ spec:
           readOnlyRootFilesystem: true
           procMount: Unmasked
         ports:
-          - name: http
+          - name: scanner # Do not change port name
             hostPort: 7888
             containerPort: 7888
             protocol: TCP

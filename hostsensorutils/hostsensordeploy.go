@@ -2,23 +2,21 @@ package hostsensorutils
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
-	"io"
-	"strings"
+	"os"
 	"sync"
 	"time"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/apimachinery/pkg/watch"
-	appsapplyv1 "k8s.io/client-go/applyconfigurations/apps/v1"
-	coreapplyv1 "k8s.io/client-go/applyconfigurations/core/v1"
 )
 
 var (
@@ -26,27 +24,36 @@ var (
 	hostSensorYAML string
 )
 
+const PortName string = "scanner"
+
 type HostSensorHandler struct {
-	HostSensorPort              int32
-	HostSensorPodNames          map[string]string //map from pod names to node names
-	HostSensorUnshedulePodNames map[string]string //map from pod names to node names
-	IsReady                     <-chan bool       //readonly chan
-	k8sObj                      *k8sinterface.KubernetesApi
-	DaemonSet                   *appsv1.DaemonSet
-	podListLock                 sync.RWMutex
-	gracePeriod                 int64
+	HostSensorPort                int32
+	HostSensorPodNames            map[string]string //map from pod names to node names
+	HostSensorUnscheduledPodNames map[string]string //map from pod names to node names
+	IsReady                       <-chan bool       //readonly chan
+	k8sObj                        *k8sinterface.KubernetesApi
+	DaemonSet                     *appsv1.DaemonSet
+	podListLock                   sync.RWMutex
+	gracePeriod                   int64
 }
 
-func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi) (*HostSensorHandler, error) {
+func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile string) (*HostSensorHandler, error) {
 
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
 	}
+	if hostSensorYAMLFile != "" {
+		d, err := loadHostSensorFromFile(hostSensorYAMLFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load host-scan yaml file, reason: %s", err.Error())
+		}
+		hostSensorYAML = d
+	}
 	hsh := &HostSensorHandler{
-		k8sObj:                      k8sObj,
-		HostSensorPodNames:          map[string]string{},
-		HostSensorUnshedulePodNames: map[string]string{},
-		gracePeriod:                 int64(15),
+		k8sObj:                        k8sObj,
+		HostSensorPodNames:            map[string]string{},
+		HostSensorUnscheduledPodNames: map[string]string{},
+		gracePeriod:                   int64(15),
 	}
 	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
 	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
@@ -70,7 +77,7 @@ func (hsh *HostSensorHandler) Init() error {
 	defer cautils.StopSpinner()
 
 	if err := hsh.applyYAML(); err != nil {
-		return fmt.Errorf("in HostSensorHandler init failed to apply YAML: %v", err)
+		return fmt.Errorf("failed to apply host sensor YAML, reason: %v", err)
 	}
 	hsh.populatePodNamesToNodeNames()
 	if err := hsh.checkPodForEachNode(); err != nil {
@@ -80,55 +87,83 @@ func (hsh *HostSensorHandler) Init() error {
 }
 
 func (hsh *HostSensorHandler) applyYAML() error {
-	dec := yaml.NewDocumentDecoder(io.NopCloser(strings.NewReader(hostSensorYAML)))
-	// apply namespace
-	singleYAMLBytes := make([]byte, 4096)
-	if readLen, err := dec.Read(singleYAMLBytes); err != nil {
-		return fmt.Errorf("failed to read YAML of namespace: %v", err)
-	} else {
-		singleYAMLBytes = singleYAMLBytes[:readLen]
+	workloads, err := cautils.ReadFile([]byte(hostSensorYAML), cautils.YAML_FILE_FORMAT)
+	if len(err) != 0 {
+		return fmt.Errorf("failed to read YAML files, reason: %v", err)
 	}
-	namespaceAC := &coreapplyv1.NamespaceApplyConfiguration{}
-	if err := yaml.Unmarshal(singleYAMLBytes, namespaceAC); err != nil {
-		return fmt.Errorf("failed to Unmarshal YAML of namespace: %v", err)
-	}
-	namespaceName := ""
 
-	if ns, err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Apply(hsh.k8sObj.Context, namespaceAC, metav1.ApplyOptions{
-		FieldManager: "kubescape",
-	}); err != nil {
-		return fmt.Errorf("failed to apply YAML of namespace: %v", err)
-	} else {
-		namespaceName = ns.Name
-	}
-	// apply DaemonSet
-	daemonAC := &appsapplyv1.DaemonSetApplyConfiguration{}
-	singleYAMLBytes = make([]byte, 4096)
-	if readLen, err := dec.Read(singleYAMLBytes); err != nil {
-		if erra := hsh.tearDownNamesapce(namespaceName); erra != nil {
-			err = fmt.Errorf("%v; In addidtion %v", err, erra)
+	// Get namespace name
+	namespaceName := ""
+	for i := range workloads {
+		if workloads[i].GetKind() == "Namespace" {
+			namespaceName = workloads[i].GetName()
+			break
 		}
-		return fmt.Errorf("failed to read YAML of DaemonSet: %v", err)
-	} else {
-		singleYAMLBytes = singleYAMLBytes[:readLen]
 	}
-	if err := yaml.Unmarshal(singleYAMLBytes, daemonAC); err != nil {
-		if erra := hsh.tearDownNamesapce(namespaceName); erra != nil {
-			err = fmt.Errorf("%v; In addidtion %v", err, erra)
+
+	// Update workload data before applying
+	for i := range workloads {
+		w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
+		if w == nil {
+			return fmt.Errorf("invalid workload: %v", workloads[i].GetObject())
 		}
-		return fmt.Errorf("failed to Unmarshal YAML of DaemonSet: %v", err)
-	}
-	daemonAC.Namespace = &namespaceName
-	if ds, err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(namespaceName).Apply(hsh.k8sObj.Context, daemonAC, metav1.ApplyOptions{
-		FieldManager: "kubescape",
-	}); err != nil {
-		if erra := hsh.tearDownNamesapce(namespaceName); erra != nil {
-			err = fmt.Errorf("%v; In addidtion %v", err, erra)
+		// set namespace in all objects
+		if w.GetKind() != "Namespace" {
+			w.SetNamespace(namespaceName)
 		}
-		return fmt.Errorf("failed to apply YAML of DaemonSet: %v", err)
-	} else {
-		hsh.HostSensorPort = ds.Spec.Template.Spec.Containers[0].Ports[0].ContainerPort
-		hsh.DaemonSet = ds
+		// Get container port
+		if w.GetKind() == "DaemonSet" {
+			containers, err := w.GetContainers()
+			if err != nil {
+				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
+					logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+				}
+				return fmt.Errorf("container not found in DaemonSet: %v", err)
+			}
+			for j := range containers {
+				for k := range containers[j].Ports {
+					if containers[j].Ports[k].Name == PortName {
+						hsh.HostSensorPort = containers[j].Ports[k].ContainerPort
+					}
+				}
+			}
+
+		}
+
+		// Apply workload
+		var newWorkload k8sinterface.IWorkload
+		var e error
+
+		if g, err := hsh.k8sObj.GetWorkload(w.GetNamespace(), w.GetKind(), w.GetName()); err == nil && g != nil {
+			newWorkload, e = hsh.k8sObj.UpdateWorkload(w)
+		} else {
+			newWorkload, e = hsh.k8sObj.CreateWorkload(w)
+		}
+		if e != nil {
+			if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
+				logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+			}
+			return fmt.Errorf("failed to create/update YAML, reason: %v", e)
+		}
+
+		// Save DaemonSet
+		if newWorkload.GetKind() == "DaemonSet" {
+			b, err := json.Marshal(newWorkload.GetObject())
+			if err != nil {
+				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
+					logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+				}
+				return fmt.Errorf("failed to Marshal YAML of DaemonSet, reason: %v", err)
+			}
+			var ds appsv1.DaemonSet
+			if err := json.Unmarshal(b, &ds); err != nil {
+				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
+					logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+				}
+				return fmt.Errorf("failed to Unmarshal YAML of DaemonSet, reason: %v", err)
+			}
+			hsh.DaemonSet = &ds
+		}
 	}
 	return nil
 }
@@ -142,7 +177,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 		}
 		hsh.podListLock.RLock()
 		podsNum := len(hsh.HostSensorPodNames)
-		unschedPodNum := len(hsh.HostSensorUnshedulePodNames)
+		unschedPodNum := len(hsh.HostSensorUnscheduledPodNames)
 		hsh.podListLock.RUnlock()
 		if len(nodesList.Items) <= podsNum+unschedPodNum {
 			break
@@ -151,7 +186,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 			hsh.podListLock.RLock()
 			podsMap := hsh.HostSensorPodNames
 			hsh.podListLock.RUnlock()
-			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceded. We will take data only from the pods below: %v",
+			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceeded. Kubescape will take data only from the pods below: %v",
 				podsNum, len(nodesList.Items), podsMap)
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -194,7 +229,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 		if podObj.Status.Phase == corev1.PodRunning && len(podObj.Status.ContainerStatuses) > 0 &&
 			podObj.Status.ContainerStatuses[0].Ready {
 			hsh.HostSensorPodNames[podObj.ObjectMeta.Name] = podObj.Spec.NodeName
-			delete(hsh.HostSensorUnshedulePodNames, podObj.ObjectMeta.Name)
+			delete(hsh.HostSensorUnscheduledPodNames, podObj.ObjectMeta.Name)
 		} else {
 			if podObj.Status.Phase == corev1.PodPending && len(podObj.Status.Conditions) > 0 &&
 				podObj.Status.Conditions[0].Reason == corev1.PodReasonUnschedulable {
@@ -211,7 +246,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 					helpers.String("nodeName", nodeName),
 					helpers.String("podName", podObj.ObjectMeta.Name))
 				if nodeName != "" {
-					hsh.HostSensorUnshedulePodNames[podObj.ObjectMeta.Name] = nodeName
+					hsh.HostSensorUnscheduledPodNames[podObj.ObjectMeta.Name] = nodeName
 				}
 			} else {
 				delete(hsh.HostSensorPodNames, podObj.ObjectMeta.Name)
@@ -222,7 +257,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 	}
 }
 
-func (hsh *HostSensorHandler) tearDownNamesapce(namespace string) error {
+func (hsh *HostSensorHandler) tearDownNamespace(namespace string) error {
 
 	if err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Delete(hsh.k8sObj.Context, namespace, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor namespace: %v", err)
@@ -235,7 +270,7 @@ func (hsh *HostSensorHandler) TearDown() error {
 	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.GetNamespace()).Delete(hsh.k8sObj.Context, hsh.DaemonSet.Name, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
 	}
-	if err := hsh.tearDownNamesapce(namespace); err != nil {
+	if err := hsh.tearDownNamespace(namespace); err != nil {
 		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
 	}
 	// TODO: wait for termination? may take up to 120 seconds!!!
@@ -248,4 +283,13 @@ func (hsh *HostSensorHandler) GetNamespace() string {
 		return ""
 	}
 	return hsh.DaemonSet.Namespace
+}
+
+func loadHostSensorFromFile(hostSensorYAMLFile string) (string, error) {
+	dat, err := os.ReadFile(hostSensorYAMLFile)
+	if err != nil {
+		return "", err
+	}
+	// TODO - Add file validation
+	return string(dat), err
 }

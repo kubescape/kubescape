@@ -8,9 +8,6 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/resultshandling/printer"
-	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
-
-	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -86,8 +83,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
 
 	// setup printer
-	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
-	// printerHandler = printerv2.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.OutputVersion, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	// ================== return interface ======================================
@@ -157,7 +153,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	interfaces.report.DisplayReportURL()
 
 	if score > float32(scanInfo.FailThreshold) {
-		return fmt.Errorf("scan risk-score %.2f is above permitted threshold %d", score, scanInfo.FailThreshold)
+		return fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", score, scanInfo.FailThreshold)
 	}
 
 	return nil
