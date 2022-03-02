@@ -48,6 +48,7 @@ func (opap *OPAProcessor) updateResults() {
 	}
 
 	// set result summary
+	// opap.buildmap , send map . <ID> = StatusInfo
 	opap.Report.SummaryDetails.InitResourcesSummary()
 
 	// for f := range opap.PostureReport.FrameworkReports {

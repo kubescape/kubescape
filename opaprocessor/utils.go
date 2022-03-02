@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -14,7 +15,7 @@ func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version 
 }
 
 // ConvertFrameworksToSummaryDetails initialize the summary details for the report object
-func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDetails, frameworks []reporthandling.Framework, policies *cautils.Policies) {
+func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDetails, frameworks []reporthandling.Framework, policies *cautils.Policies, controlToStatusInfoMap map[string]apis.StatusInfo) {
 	if summaryDetails.Controls == nil {
 		summaryDetails.Controls = make(map[string]reportsummary.ControlSummary)
 	}
@@ -30,6 +31,11 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 					Description: frameworks[i].Controls[j].Description,
 					Remediation: frameworks[i].Controls[j].Remediation,
 				}
+				c.StatusInfo.InnerInfo = controlToStatusInfoMap[c.ControlID].InnerInfo
+				if c.Status == "" {
+					c.Status = apis.StatusSkipped
+				}
+				c.StatusInfo.InnerStatus = controlToStatusInfoMap[c.ControlID].InnerStatus
 				controls[frameworks[i].Controls[j].ControlID] = c
 				summaryDetails.Controls[id] = c
 			}

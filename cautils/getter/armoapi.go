@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -25,6 +26,11 @@ var (
 	armoBEURL   = "api.armo.cloud"
 	armoFEURL   = "portal.armo.cloud"
 	armoAUTHURL = "auth.armo.cloud"
+
+	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft.com"
+	armoStageBEURL   = "api-stage.armo.cloud"
+	armoStageFEURL   = "armoui.eustage2.cyberarmorsoft.com"
+	armoStageAUTHURL = "eggauth.eustage2.cyberarmorsoft.com"
 
 	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armo.cloud"
@@ -50,6 +56,7 @@ type ArmoAPI struct {
 var globalArmoAPIConnector *ArmoAPI
 
 func SetARMOAPIConnector(armoAPI *ArmoAPI) {
+	logger.L().Debug("Armo URLs", helpers.String("api", armoAPI.apiURL), helpers.String("auth", armoAPI.authURL), helpers.String("report", armoAPI.erURL), helpers.String("UI", armoAPI.feURL))
 	globalArmoAPIConnector = armoAPI
 }
 
@@ -82,6 +89,17 @@ func NewARMOAPIProd() *ArmoAPI {
 	return apiObj
 }
 
+func NewARMOAPIStaging() *ArmoAPI {
+	apiObj := newArmoAPI()
+
+	apiObj.apiURL = armoStageBEURL
+	apiObj.erURL = armoStageERURL
+	apiObj.feURL = armoStageFEURL
+	apiObj.authURL = armoStageAUTHURL
+
+	return apiObj
+}
+
 func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL string) *ArmoAPI {
 	apiObj := newArmoAPI()
 
@@ -108,6 +126,13 @@ func (armoAPI *ArmoAPI) Post(fullURL string, headers map[string]string, body []b
 	return HttpPost(armoAPI.httpClient, fullURL, headers, body)
 }
 
+func (armoAPI *ArmoAPI) Delete(fullURL string, headers map[string]string) (string, error) {
+	if headers == nil {
+		headers = make(map[string]string)
+	}
+	armoAPI.appendAuthHeaders(headers)
+	return HttpDelete(armoAPI.httpClient, fullURL, headers)
+}
 func (armoAPI *ArmoAPI) Get(fullURL string, headers map[string]string) (string, error) {
 	if headers == nil {
 		headers = make(map[string]string)
@@ -275,7 +300,7 @@ func (armoAPI *ArmoAPI) PostExceptions(exceptions []armotypes.PostureExceptionPo
 		if err != nil {
 			return err
 		}
-		_, err = armoAPI.Post(armoAPI.postExceptionsURL(), map[string]string{"Content-Type": "application/json"}, ex)
+		_, err = armoAPI.Post(armoAPI.exceptionsURL(""), map[string]string{"Content-Type": "application/json"}, ex)
 		if err != nil {
 			return err
 		}
@@ -283,6 +308,14 @@ func (armoAPI *ArmoAPI) PostExceptions(exceptions []armotypes.PostureExceptionPo
 	return nil
 }
 
+func (armoAPI *ArmoAPI) DeleteException(exceptionName string) error {
+
+	_, err := armoAPI.Delete(armoAPI.exceptionsURL(exceptionName), nil)
+	if err != nil {
+		return err
+	}
+	return nil
+}
 func (armoAPI *ArmoAPI) Login() error {
 	if armoAPI.accountID == "" {
 		return fmt.Errorf("failed to login, missing accountID")

@@ -1,4 +1,4 @@
-package controlmapping
+package v2
 
 import (
 	"fmt"
@@ -17,20 +17,23 @@ import (
 )
 
 type PrettyPrinter struct {
+	outputVersion      string
 	writer             *os.File
 	verboseMode        bool
 	sortedControlNames []string
 }
 
-func NewPrettyPrinter(verboseMode bool) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, outputVersion string) *PrettyPrinter {
 	return &PrettyPrinter{
-		verboseMode: verboseMode,
+		verboseMode:   verboseMode,
+		outputVersion: outputVersion,
 	}
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	prettyPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
+	prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
 	prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails)
 
@@ -44,6 +47,10 @@ func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 
 func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) {
+	if prettyPrinter.outputVersion != "v1" {
+		return
+	}
+
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
 
 		controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
@@ -77,10 +84,15 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 		cautils.FailureDisplay(prettyPrinter.writer, "failed %v\n", emoji.SadButRelievedFace)
 	case apis.StatusExcluded:
 		cautils.WarningDisplay(prettyPrinter.writer, "excluded %v\n", emoji.NeutralFace)
+	case apis.InfoStatusIrelevant:
+		cautils.SuccessDisplay(prettyPrinter.writer, "irrelevant %v\n", emoji.ConfusedFace)
 	default:
 		cautils.SuccessDisplay(prettyPrinter.writer, "passed %v\n", emoji.ThumbsUp)
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.GetDescription())
+	if controlSummary.GetStatus().Info() != "" {
+		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
+	}
 }
 func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
 
@@ -153,7 +165,7 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	return relatedStr
 }
 
-func generateRow(controlSummary reportsummary.IControlSummary) []string {
+func generateRow(controlSummary reportsummary.IControlSummary, infoMap map[string]string) []string {
 	row := []string{controlSummary.GetName()}
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
@@ -162,7 +174,7 @@ func generateRow(controlSummary reportsummary.IControlSummary) []string {
 	if !controlSummary.GetStatus().IsSkipped() {
 		row = append(row, fmt.Sprintf("%d", int(controlSummary.GetScore()))+"%")
 	} else {
-		row = append(row, "skipped")
+		row = append(row, fmt.Sprintf("%v%v", controlSummary.GetStatus().Status(), infoMap[controlSummary.GetStatus().Info()]))
 	}
 	return row
 }
@@ -182,31 +194,59 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 
 	return row
 }
+
+func setInfoMap(summaryDetails *reportsummary.SummaryDetails) map[string]string {
+	infoMap := make(map[string]string)
+	starsCount := "*"
+	for _, controlSmmary := range summaryDetails.Controls {
+		if controlSmmary.GetStatus().Info() != "" {
+			if _, ok := infoMap[controlSmmary.GetStatus().Info()]; !ok {
+				infoMap[controlSmmary.GetStatus().Info()] = starsCount
+				starsCount += starsCount
+			}
+		}
+	}
+	infoMap[""] = ""
+	return infoMap
+}
+
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails) {
-	// For control scan framework will be nil
-	prettyPrinter.printFramework(summaryDetails.ListFrameworks().All())
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
-	summaryTable.SetHeader(generateHeader())
+	summaryTable.SetHeader(getControlTableHeaders())
 	summaryTable.SetHeaderLine(true)
-	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_DEFAULT}
 	summaryTable.SetColumnAlignment(alignments)
-
+	infoMap := setInfoMap(summaryDetails)
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i])))
+		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]), infoMap))
 	}
 
 	summaryTable.SetFooter(generateFooter(summaryDetails))
 
 	// summaryTable.SetFooter(generateFooter())
 	summaryTable.Render()
+
+	prettyPrinter.printInfo(infoMap)
 }
 
-func (prettyPrinter *PrettyPrinter) printFramework(frameworks []reportsummary.IPolicies) {
+func (prettyPrinter *PrettyPrinter) printInfo(infoMap map[string]string) {
+	for key, val := range infoMap {
+		if val != "" {
+			if i := strings.Index(key, "\n"); i != -1 {
+				key = key[:i+1] + strings.Repeat(" ", len(infoMap[key])+1) + key[i+1:]
+			}
+			cautils.SimpleDisplay(os.Stdout, fmt.Sprintf("%v %v\n", val, key))
+		}
+	}
+}
+
+func frameworksScoresToString(frameworks []reportsummary.IPolicies) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			cautils.InfoTextDisplay(prettyPrinter.writer, fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName()))
+			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
+			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
 		}
 	} else if len(frameworks) > 1 {
 		p := "FRAMEWORKS: "
@@ -215,17 +255,9 @@ func (prettyPrinter *PrettyPrinter) printFramework(frameworks []reportsummary.IP
 			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())
 		}
 		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetScore())
-		cautils.InfoTextDisplay(prettyPrinter.writer, p)
+		return p
 	}
-}
-func getSortedControlsNames(controls reportsummary.ControlSummaries) []string {
-	controlNames := make([]string, 0, len(controls))
-	for k := range controls {
-		c := controls[k]
-		controlNames = append(controlNames, c.GetName())
-	}
-	sort.Strings(controlNames)
-	return controlNames
+	return ""
 }
 
 // func getSortedControlsNames(controls []reportsummary.IPolicies) []string {

@@ -11,7 +11,6 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -112,12 +111,6 @@ func NewLocalConfig(backendAPI getter.IBackend, customerGUID, clusterName string
 	lc.backendAPI.SetAccountID(lc.configObj.AccountID)
 	lc.backendAPI.SetClientID(lc.configObj.ClientID)
 	lc.backendAPI.SetSecretKey(lc.configObj.SecretKey)
-
-	if lc.configObj.AccountID != "" {
-		if err := lc.SetTenant(); err != nil {
-			logger.L().Error(err.Error())
-		}
-	}
 
 	return lc
 }
@@ -227,12 +220,6 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	c.backendAPI.SetAccountID(c.configObj.AccountID)
 	c.backendAPI.SetClientID(c.configObj.ClientID)
 	c.backendAPI.SetSecretKey(c.configObj.SecretKey)
-
-	if c.configObj.AccountID != "" {
-		if err := c.SetTenant(); err != nil {
-			logger.L().Error(err.Error())
-		}
-	}
 
 	return c
 }

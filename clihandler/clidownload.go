@@ -77,6 +77,7 @@ func downloadArtifacts(downloadInfo *cautils.DownloadInfo) error {
 
 func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
+
 	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetAccountID(), nil)
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetClusterName())
 	if err != nil {
@@ -97,6 +98,7 @@ func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 	var err error
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
+
 	exceptionsGetter := getExceptionsGetter("")
 	exceptions := []armotypes.PostureExceptionPolicy{}
 	if tenant.GetAccountID() != "" {
@@ -120,6 +122,7 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
+
 	g := getPolicyGetter(nil, tenant.GetAccountID(), true, nil)
 
 	if downloadInfo.Name == "" {
@@ -129,11 +132,12 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 			return err
 		}
 		for _, fw := range frameworks {
-			err = getter.SaveInFile(fw, filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name)+".json")))
+			downloadTo := filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name) + ".json"))
+			err = getter.SaveInFile(fw, downloadTo)
 			if err != nil {
 				return err
 			}
-			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", fw.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+			logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", fw.Name), helpers.String("path", downloadTo))
 		}
 		// return fmt.Errorf("missing framework name")
 	} else {
@@ -144,11 +148,12 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 		if err != nil {
 			return err
 		}
-		err = getter.SaveInFile(framework, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+		downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+		err = getter.SaveInFile(framework, downloadTo)
 		if err != nil {
 			return err
 		}
-		logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+		logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", framework.Name), helpers.String("path", downloadTo))
 	}
 	return nil
 }
@@ -156,6 +161,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 func downloadControl(downloadInfo *cautils.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
+
 	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
 
 	if downloadInfo.Name == "" {
@@ -169,10 +175,11 @@ func downloadControl(downloadInfo *cautils.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
-	err = getter.SaveInFile(controls, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
+	err = getter.SaveInFile(controls, downloadTo)
 	if err != nil {
 		return err
 	}
-	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", downloadInfo.Name), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", downloadInfo.Name), helpers.String("path", downloadTo))
 	return nil
 }

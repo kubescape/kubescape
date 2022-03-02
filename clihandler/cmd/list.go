@@ -2,10 +2,10 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliobjects"
 	"github.com/spf13/cobra"
@@ -51,8 +51,7 @@ var listCmd = &cobra.Command{
 		listPolicies.Target = args[0]
 
 		if err := clihandler.CliList(&listPolicies); err != nil {
-			fmt.Fprintf(os.Stderr, "error: %v\n", err)
-			os.Exit(1)
+			logger.L().Fatal(err.Error())
 		}
 		return nil
 	},
@@ -62,6 +61,7 @@ func init() {
 	// cobra.OnInitialize(initConfig)
 
 	rootCmd.AddCommand(listCmd)
-	listCmd.PersistentFlags().StringVarP(&listPolicies.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	listCmd.PersistentFlags().StringVar(&listPolicies.Account, "account", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-printer'/'json'")
 	listCmd.PersistentFlags().BoolVarP(&listPolicies.ListIDs, "id", "", false, "List control ID's instead of controls names")
 }

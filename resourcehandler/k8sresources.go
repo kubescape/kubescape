@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/apis"
 
 	"github.com/armosec/k8s-interface/cloudsupport"
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -44,7 +45,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -54,7 +55,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	k8sResourcesMap := setResourceMap(frameworks)
+	k8sResourcesMap := setResourceMap(sessionObj.Frameworks)
 
 	// get namespace and labels from designator (ignore cluster labels)
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
@@ -67,22 +68,100 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources); err != nil {
 		logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
 	}
-
-	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
-		logger.L().Warning("failed to collect host sensor resources", helpers.Error(err))
+	if sessionObj.HostSensorStaus.InnerStatus != apis.InfoStatusSkipped {
+		if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
+			sessionObj.HostSensorStaus = apis.StatusInfo{
+				InnerStatus: apis.StatusSkipped,
+				InnerInfo:   err.Error(),
+			}
+			logger.L().Warning("failed to collect host sensor resources", helpers.Error(err))
+		}
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
 		logger.L().Warning("failed to collect rbac resources", helpers.Error(err))
 	}
 	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
+		sessionObj.CloudStatus = apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			InnerInfo:   err.Error(),
+		}
 		logger.L().Warning("failed to collect cloud data", helpers.Error(err))
 	}
-
+	setControlStatues(sessionObj)
 	cautils.StopSpinner()
 	logger.L().Success("Accessed to Kubernetes objects")
 
 	return k8sResourcesMap, allResources, nil
+}
+
+func setControlStatues(sessionObj *cautils.OPASessionObj) {
+	sessionObj.ControlToStatusInfoMap = map[string]apis.StatusInfo{}
+	for _, framework := range sessionObj.Frameworks {
+		for _, control := range framework.Controls {
+			if isCloudControl(control) {
+				sessionObj.ControlToStatusInfoMap[control.ControlID] = sessionObj.CloudStatus
+			}
+			if isHostSensorControl(control) {
+				sessionObj.ControlToStatusInfoMap[control.ControlID] = sessionObj.HostSensorStaus
+			}
+		}
+	}
+}
+
+func isCloudControl(control reporthandling.Control) bool {
+	for _, rule := range control.Rules {
+		if isCloudRule(rule) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHostSensorControl(control reporthandling.Control) bool {
+	for _, rule := range control.Rules {
+		if isHostSensorRule(rule) {
+			return true
+		}
+	}
+	return false
+}
+
+func isHostSensorRule(rule reporthandling.PolicyRule) bool {
+	for _, match := range rule.Match {
+		for _, resource := range match.Resources {
+			if cautils.StringInSlice(cautils.HostSensorResources, resource) != -1 {
+				return true
+			}
+		}
+	}
+	for _, match := range rule.DynamicMatch {
+		for _, resource := range match.Resources {
+			if cautils.StringInSlice(cautils.HostSensorResources, resource) != -1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isCloudRule(rule reporthandling.PolicyRule) bool {
+	for _, match := range rule.Match {
+		for _, resource := range match.Resources {
+			if cautils.StringInSlice(cautils.CloudResources, resource) != -1 {
+				return true
+			}
+		}
+
+		for _, match := range rule.DynamicMatch {
+			for _, resource := range match.Resources {
+				if cautils.StringInSlice(cautils.CloudResources, resource) != -1 {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
@@ -168,13 +247,26 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 	return workloads
 }
 
+// func (k8sHandler *K8sResourceHandler) collectHostResourcesAPI(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
+
+// 	HostSensorAPI := map[string]string{
+// 		"bla/v1": "",
+// 	}
+// 	for apiVersion := range allResources {
+// 		if HostSensorAPI == apiVersion {
+// 			k8sHandler.collectHostResources()
+// 		}
+// 	}
+// 	return nil
+// }
 func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
 	logger.L().Debug("Collecting host sensor resources")
-
+	//return errors.New("fail deploying host sensor")
 	hostResources, err := k8sHandler.hostSensorHandler.CollectResources()
 	if err != nil {
 		return err
 	}
+
 	for rscIdx := range hostResources {
 		group, version := getGroupNVersion(hostResources[rscIdx].GetApiVersion())
 		groupResource := k8sinterface.JoinResourceTriplets(group, version, hostResources[rscIdx].GetKind())
@@ -220,19 +312,20 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 	if err != nil {
 		return err
 	}
-	logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
 
 	if provider != "" {
+		logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
+
 		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info
 			switch provider {
 			case "gke":
-				return fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
+				return fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client.\nSee https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
 			case "eks":
-				return fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
+				return fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client.\nCheck out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
 			case "aks":
-				return fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
+				return fmt.Errorf("could not get descriptive information about aks cluster: %s.\n%v", cluster, err.Error())
 			}
 			return err
 		}

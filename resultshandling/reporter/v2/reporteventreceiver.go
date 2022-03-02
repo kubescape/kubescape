@@ -11,7 +11,7 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -44,22 +44,25 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	finalizeReport(opaSessionObj)
 
 	if report.customerGUID == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
+		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
+
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
+		logger.L().Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
-	opaSessionObj.Report.ReportID = uuid.NewV4().String()
+	opaSessionObj.Report.ReportID = uuid.NewString()
 	opaSessionObj.Report.CustomerGUID = report.customerGUID
 	opaSessionObj.Report.ClusterName = report.clusterName
 
 	if err := report.prepareReport(opaSessionObj.Report); err != nil {
-		report.message = err.Error()
+		logger.L().Error("failed to publish results", helpers.Error(err))
 	} else {
 		report.generateMessage()
 	}
+	logger.L().Debug("", helpers.String("account ID", report.customerGUID))
+
 	return nil
 }
 
@@ -202,26 +205,32 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 }
 
 func (report *ReportEventReceiver) generateMessage() {
-	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here:"
 
 	u := url.URL{}
 	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
-	if report.customerAdminEMail != "" {
-		logger.L().Debug("", helpers.String("account ID", report.customerGUID))
-		report.message = fmt.Sprintf("%s %s/risk/%s", message, u.String(), report.clusterName)
-		return
-	}
-	u.Path = "account/sign-up"
-	q := u.Query()
-	q.Add("invitationToken", report.token)
-	q.Add("customerGUID", report.customerGUID)
+	if report.customerAdminEMail != "" { // data has been submitted
+		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+	} else {
+		u.Path = "account/sign-up"
+		q := u.Query()
+		q.Add("invitationToken", report.token)
+		q.Add("customerGUID", report.customerGUID)
 
-	u.RawQuery = q.Encode()
-	report.message = fmt.Sprintf("%s %s", message, u.String())
+		u.RawQuery = q.Encode()
+	}
+
+	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+	report.message = sep
+	report.message += "   << WOW! Now you can see the scan results on the web >>\n\n"
+	report.message += fmt.Sprintf("   %s\n", u.String())
+	report.message += sep
+
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {
-	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+	if report.message != "" {
+		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+	}
 }

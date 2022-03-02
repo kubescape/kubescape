@@ -8,11 +8,12 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	"github.com/armosec/opa-utils/reporthandling"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -36,10 +37,9 @@ func (resultsObject *ResultsObject) SetResourcesReport() (*reporthandling.Postur
 	if err != nil {
 		return nil, err
 	}
-
 	return &reporthandling.PostureReport{
 		FrameworkReports:     frameworkReports,
-		ReportID:             uuid.NewV4().String(),
+		ReportID:             uuid.NewString(),
 		ReportGenerationTime: time.Now().UTC(),
 		CustomerGUID:         resultsObject.customerGUID,
 		ClusterName:          resultsObject.clusterName,
@@ -63,6 +63,9 @@ var resultsCmd = &cobra.Command{
 
 		// get config
 		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
+		if err := clusterConfig.SetTenant(); err != nil {
+			logger.L().Error("failed setting account ID", helpers.Error(err))
+		}
 
 		resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
 

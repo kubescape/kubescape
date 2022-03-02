@@ -74,12 +74,12 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 
 	hasHostSensorControls := true
 	// we need to determined which controls needs host sensor
-	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
-		scanInfo.HostSensor.SetBool(askUserForHostSensor())
+	if scanInfo.HostSensorEnabled.Get() == nil && hasHostSensorControls {
+		scanInfo.HostSensorEnabled.SetBool(askUserForHostSensor())
 		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag")
 	}
-	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
-		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
+	if hostSensorVal := scanInfo.HostSensorEnabled.Get(); hostSensorVal != nil && *hostSensorVal {
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
 			logger.L().Warning(fmt.Sprintf("failed to create host sensor: %s", err.Error()))
 			return &hostsensorutils.HostSensorHandlerMock{}
@@ -216,8 +216,8 @@ func getDefaultFrameworksPaths() []string {
 
 func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	fw, err := policyGetter.ListFrameworks()
-	if err != nil {
-		fw = getDefaultFrameworksPaths()
+	if err == nil {
+		return fw
 	}
-	return fw
+	return getter.NativeFrameworks
 }

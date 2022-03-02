@@ -1,10 +1,11 @@
 package cmd
 
 import (
-	"flag"
 	"fmt"
+	"os"
 	"strings"
 
+	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
@@ -12,6 +13,8 @@ import (
 )
 
 var armoBEURLs = ""
+var armoBEURLsDep = ""
+var rootInfo cautils.RootInfo
 
 const envFlagUsage = "Send report results to specific URL. Format:<ReportReceiver>,<Backend>,<Frontend>.\n\t\tExample:report.armo.cloud,api.armo.cloud,portal.armo.cloud"
 
@@ -31,30 +34,60 @@ var ksExamples = `
 
 var rootCmd = &cobra.Command{
 	Use:     "kubescape",
+	Version: cautils.BuildNumber,
 	Short:   "Kubescape is a tool for testing Kubernetes security posture",
-	Long:    `Kubescape is a tool for testing Kubernetes security posture based on NSA \ MITRE ATT&CK® and other frameworks specifications`,
+	Long:    `Based on NSA \ MITRE ATT&CK® and other frameworks specifications`,
 	Example: ksExamples,
 }
 
 func Execute() {
 	rootCmd.Execute()
 }
-func init() {
-	cobra.OnInitialize(initLogger, initEnvironment)
 
-	flag.CommandLine.StringVar(&armoBEURLs, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "environment", "", envFlagUsage)
+func init() {
+
+	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
+
+	rootCmd.PersistentFlags().StringVar(&armoBEURLsDep, "environment", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "env", "", envFlagUsage)
+	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
 	rootCmd.PersistentFlags().MarkHidden("environment")
-	rootCmd.PersistentFlags().StringVar(&scanInfo.Logger, "logger", "info", fmt.Sprintf("Logger level. Supported: %s", strings.Join(helpers.SupportedLevels(), "/")))
-	flag.Parse()
+	rootCmd.PersistentFlags().MarkHidden("env")
+
+	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
+	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 }
 
 func initLogger() {
-	if err := logger.L().SetLevel(scanInfo.Logger); err != nil {
+	if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
+		logger.InitializeLogger(l)
+	}
+}
+func initLoggerLevel() {
+	if rootInfo.Logger != helpers.InfoLevel.String() {
+	} else if l := os.Getenv("KS_LOGGER"); l != "" {
+		rootInfo.Logger = l
+	}
+	if err := logger.L().SetLevel(rootInfo.Logger); err != nil {
 		logger.L().Fatal(fmt.Sprintf("supported levels: %s", strings.Join(helpers.SupportedLevels(), "/")), helpers.Error(err))
 	}
 }
+
+func initCacheDir() {
+	if rootInfo.CacheDir != getter.DefaultLocalStore {
+		getter.DefaultLocalStore = rootInfo.CacheDir
+	} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
+		getter.DefaultLocalStore = cacheDir
+	} else {
+		return // using default cache di location
+	}
+
+	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+}
 func initEnvironment() {
+	if armoBEURLsDep != "" {
+		armoBEURLs = armoBEURLsDep
+	}
 	urlSlices := strings.Split(armoBEURLs, ",")
 	if len(urlSlices) != 1 && len(urlSlices) < 3 {
 		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
@@ -62,8 +95,10 @@ func initEnvironment() {
 	switch len(urlSlices) {
 	case 1:
 		switch urlSlices[0] {
-		case "dev":
+		case "dev", "development":
 			getter.SetARMOAPIConnector(getter.NewARMOAPIDev())
+		case "stage", "staging":
+			getter.SetARMOAPIConnector(getter.NewARMOAPIStaging())
 		case "":
 			getter.SetARMOAPIConnector(getter.NewARMOAPIProd())
 		default:

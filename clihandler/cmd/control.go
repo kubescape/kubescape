@@ -40,8 +40,10 @@ var controlCmd = &cobra.Command{
 		if len(args) > 0 {
 			controls := strings.Split(args[0], ",")
 			if len(controls) > 1 {
-				if controls[1] == "" {
-					return fmt.Errorf("usage: <control-0>,<control-1>")
+				for _, control := range controls {
+					if control == "" {
+						return fmt.Errorf("usage: <control-0>,<control-1>")
+					}
 				}
 			}
 		} else {
