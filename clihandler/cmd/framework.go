@@ -42,8 +42,10 @@ var frameworkCmd = &cobra.Command{
 		if len(args) > 0 {
 			frameworks := strings.Split(args[0], ",")
 			if len(frameworks) > 1 {
-				if frameworks[1] == "" {
-					return fmt.Errorf("usage: <framework-0>,<framework-1>")
+				for _, framework := range frameworks {
+					if framework == "" {
+						return fmt.Errorf("usage: <framework-0>,<framework-1>")
+					}
 				}
 			}
 		} else {
