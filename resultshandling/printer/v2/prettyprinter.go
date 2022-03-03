@@ -34,9 +34,9 @@ func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessio
 	prettyPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
 	if prettyPrinter.formatVersion == "v1" {
-		prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
-	} else if prettyPrinter.formatVersion == "v2" {
 		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
+	} else if prettyPrinter.formatVersion == "v2" {
+		prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
 	}
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails)
 
