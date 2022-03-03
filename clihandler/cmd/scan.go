@@ -79,12 +79,12 @@ func init() {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to Armo management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host sensor DaemonSet. Use this flag cautiously")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.OutputVersion, "output-version", "v1", "Output object can be differnet between versions, this is for testing and backward compatibility")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v1", "Output object can be differnet between versions, this is for testing and backward compatibility")
 
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemoSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
-	scanCmd.PersistentFlags().MarkHidden("output-version") // meant for testing different output approaches and not for common use
+	scanCmd.PersistentFlags().MarkHidden("format-version") // meant for testing different output approaches and not for common use
 
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valueable data from cluster nodes for certain controls. Yaml file: https://raw.githubusercontent.com/armosec/kubescape/master/hostsensorutils/hostsensor.yaml")
 	hostF.NoOptDefVal = "true"

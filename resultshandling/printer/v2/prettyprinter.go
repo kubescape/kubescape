@@ -17,24 +17,27 @@ import (
 )
 
 type PrettyPrinter struct {
-	outputVersion      string
+	formatVersion      string
 	writer             *os.File
 	verboseMode        bool
 	sortedControlNames []string
 }
 
-func NewPrettyPrinter(verboseMode bool, outputVersion string) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
 	return &PrettyPrinter{
 		verboseMode:   verboseMode,
-		outputVersion: outputVersion,
+		formatVersion: formatVersion,
 	}
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	prettyPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
-	prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
-	prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
+	if prettyPrinter.formatVersion == "v1" {
+		prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
+	} else if prettyPrinter.formatVersion == "v2" {
+		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
+	}
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails)
 
 }
@@ -47,10 +50,6 @@ func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 
 func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) {
-	if prettyPrinter.outputVersion != "v1" {
-		return
-	}
-
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
 
 		controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)

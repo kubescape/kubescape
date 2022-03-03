@@ -150,7 +150,7 @@ kubescape scan --verbose
 
 #### Output in `json` format
 ```
-kubescape scan --format json --output results.json
+kubescape scan --format json  --format-version v2 --output results.json
 ```
 
 #### Output in `junit xml` format

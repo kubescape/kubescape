@@ -68,7 +68,7 @@ type ScanInfo struct {
 	VerboseMode        bool        // Display all of the input resources and not only failed resources
 	Format             string      // Format results (table, json, junit ...)
 	Output             string      // Store results in an output file, Output file name
-	OutputVersion      string      // Output object can be differnet between versions, this is for testing and backward compatibility
+	FormatVersion      string      // Output object can be differnet between versions, this is for testing and backward compatibility
 	ExcludedNamespaces string      // used for host sensor namespace
 	IncludeNamespaces  string      // DEPRECATED?
 	InputPatterns      []string    // Yaml files input patterns

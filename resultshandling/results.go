@@ -53,11 +53,16 @@ func CalculatePostureScore(postureReport *reporthandling.PostureReport) float32 
 	return (float32(len(allResources)) - float32(len(failedResources))) / float32(len(allResources))
 }
 
-func NewPrinter(printFormat, outputVersion string, verboseMode bool) printer.IPrinter {
+func NewPrinter(printFormat, formatVersion string, verboseMode bool) printer.IPrinter {
 
 	switch printFormat {
 	case printer.JsonFormat:
-		return printerv1.NewJsonPrinter()
+		switch formatVersion {
+		case "v2":
+			return printerv2.NewJsonPrinter()
+		default:
+			return printerv1.NewJsonPrinter()
+		}
 	case printer.JunitResultFormat:
 		return printerv2.NewJunitPrinter(verboseMode)
 	case printer.PrometheusFormat:
@@ -65,6 +70,6 @@ func NewPrinter(printFormat, outputVersion string, verboseMode bool) printer.IPr
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
 	default:
-		return printerv2.NewPrettyPrinter(verboseMode, outputVersion)
+		return printerv2.NewPrettyPrinter(verboseMode, formatVersion)
 	}
 }
