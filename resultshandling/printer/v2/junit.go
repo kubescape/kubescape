@@ -4,12 +4,16 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/resultshandling/printer"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/armosec/opa-utils/shared"
 )
 
 /*
@@ -104,178 +108,108 @@ func (junitPrinter *JunitPrinter) FinalizeData(opaSessionObj *cautils.OPASession
 }
 
 func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	junitResult, err := junitPrinter.convertPostureReportToJunitResult(opaSessionObj)
-	if err != nil {
-		logger.L().Fatal("failed to build xml result object", helpers.Error(err))
-	}
+	junitResult := testsSuites(opaSessionObj)
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {
 		logger.L().Fatal("failed to Marshal xml result object", helpers.Error(err))
 	}
+
+	logOUtputFile(junitPrinter.writer.Name())
+
 	junitPrinter.writer.Write(postureReportStr)
 }
 
-func (junitPrinter *JunitPrinter) convertPostureReportToJunitResult(results *cautils.OPASessionObj) (*JUnitTestSuites, error) {
-
-	// // Frameworks
-	// for _, frameworksReports := range results.Report.ListFrameworks().All() {
-	// 	fw := JUnitFrameworks{}
-	// 	fw.Name = frameworksReports.GetName()
-	// 	fw.RiskScore = frameworksReports.GetScore()
-	// 	fw.Status = string(frameworksReports.GetStatus().Status())
-	// 	juResult.Frameworks = append(juResult.Frameworks, fw)
-	// }
-	testSuites := JUnitTestSuites{
-		XMLName: xml.Name{
-			Local: "Kubescape scan results",
-		},
+func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
+	return &JUnitTestSuites{
+		Suites:   listTestsSuite(results),
+		Tests:    results.Report.SummaryDetails.NumberOfControls().All(),
+		Name:     "Kubescape Scanning",
+		Failures: results.Report.SummaryDetails.NumberOfControls().Failed(),
 	}
-	testSuites.Failures = results.Report.SummaryDetails.NumberOfResources().Failed()
-	testSuites.Tests = results.Report.SummaryDetails.NumberOfResources().All()
-	testSuites.Disabled = results.Report.SummaryDetails.NumberOfResources().Skipped()
-	// summary.errors =
-	// summary.Name = "?"
+}
+func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
+	var testSuites []JUnitTestSuite
 
-	// resources
-	counter := 0
-	for resourceID, resourceResult := range results.ResourcesResult {
-		counter++
-
-		// resource data
-		testSuite := JUnitTestSuite{
-			XMLName: xml.Name{
-				Local: resourceID,
-			},
-		}
-		testSuite.Name = resourceID
-		testSuite.Disabled = 0
-		testSuite.Errors = 0
-		testSuite.Failures = len(resourceResult.ListControlsIDs(nil).Failed())
-		testSuite.Hostname = ""
-		testSuite.ID = counter
-		// testSuite.Skipped = ""
-		testSuite.Time = ""
-		testSuite.Timestamp = results.PostureReport.ReportGenerationTime.String()
-
-		testSuite.Properties = []JUnitProperty{
-			{
-				Name:  "ID",
-				Value: resourceID,
-			},
-		}
-
-		// controls
-		for _, control := range resourceResult.ListControls() {
-			testCase := JUnitTestCase{
-				XMLName: xml.Name{
-					Local: control.GetName(),
-					Space: getControlURL(control.GetID()),
-				},
-			}
-			testCase.Name = control.GetName()
-			testCase.Classname = control.GetID()
-			testCase.Status = string(control.GetStatus(nil).Status())
-
-			if control.GetStatus(nil).IsFailed() {
-				paths := failedPathsToString(&control)
-
-				testCaseFailure := JUnitFailure{}
-				testCaseFailure.Contents = fmt.Sprintf("More deatiles: %s", getControlURL(control.GetID()))
-				testCaseFailure.Message = strings.Join(paths, ";")
-				testCaseFailure.Type = "" // TODO - suppot add/modify
-
-				testCase.Failure = &testCaseFailure
-			}
-
-			testSuite.TestCases = append(testSuite.TestCases, testCase)
-		}
-
-		testSuites.Suites = append(testSuites.Suites, testSuite)
+	// control scan
+	if len(results.Report.SummaryDetails.ListFrameworks().All()) == 0 {
+		testSuite := JUnitTestSuite{}
+		testSuite.Failures = results.Report.SummaryDetails.NumberOfControls().Failed()
+		testSuite.Timestamp = results.Report.ReportGenerationTime.String()
+		testSuite.ID = 0
+		testSuite.Name = "kubescape"
+		testSuite.Properties = properties(results.Report.SummaryDetails.Score)
+		testSuite.TestCases = testsCases(results, &results.Report.SummaryDetails.Controls, "Kubescape")
+		testSuites = append(testSuites, testSuite)
+		return testSuites
 	}
 
-	return &testSuites, nil
+	for i, f := range results.Report.SummaryDetails.Frameworks {
+		testSuite := JUnitTestSuite{}
+		testSuite.Failures = f.NumberOfControls().Failed()
+		testSuite.Timestamp = results.Report.ReportGenerationTime.String()
+		testSuite.ID = i
+		testSuite.Name = f.Name
+		testSuite.Properties = properties(f.Score)
+		testSuite.TestCases = testsCases(results, f.ListControls(), f.GetName())
+		testSuites = append(testSuites, testSuite)
+	}
+
+	return testSuites
+}
+func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
+	var testCases []JUnitTestCase
+
+	for _, cID := range controls.ListControlsIDs().All() {
+		testCase := JUnitTestCase{}
+		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, cID)
+
+		testCase.Name = control.GetName()
+		testCase.Classname = classname
+		testCase.Status = string(control.GetStatus().Status())
+
+		if control.GetStatus().IsFailed() {
+			resources := map[string]interface{}{}
+			resourceIDs := control.ListResourcesIDs().Failed()
+			for j := range resourceIDs {
+				resource := results.AllResources[resourceIDs[j]]
+				resources[resourceToString(resource)] = nil
+			}
+			resourcesStr := shared.MapStringToSlice(resources)
+			sort.Strings(resourcesStr)
+			testCaseFailure := JUnitFailure{}
+			testCaseFailure.Type = "Control"
+			// testCaseFailure.Contents =
+			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), getControlURL(control.GetID()), strings.Join(resourcesStr, "\n"))
+
+			testCase.Failure = &testCaseFailure
+		} else if control.GetStatus().IsSkipped() {
+			testCase.SkipMessage = &JUnitSkipMessage{
+				Message: "", // TODO - fill after statusInfo is supportred
+			}
+
+		}
+		testCases = append(testCases, testCase)
+	}
+	return testCases
 }
 
-// func (junitPrinter *JunitPrinter) convertPostureReportToJunitResult(results *cautils.OPASessionObj) (*JUnitTestSuites, error) {
+func resourceToString(resource workloadinterface.IMetadata) string {
+	sep := "; "
+	s := ""
+	s += fmt.Sprintf("apiVersion: %s", resource.GetApiVersion()) + sep
+	s += fmt.Sprintf("kind: %s", resource.GetKind()) + sep
+	if resource.GetNamespace() != "" {
+		s += fmt.Sprintf("namespace: %s", resource.GetNamespace()) + sep
+	}
+	s += fmt.Sprintf("name: %s", resource.GetName())
+	return s
+}
 
-// 	// // Frameworks
-// 	// for _, frameworksReports := range results.Report.ListFrameworks().All() {
-// 	// 	fw := JUnitFrameworks{}
-// 	// 	fw.Name = frameworksReports.GetName()
-// 	// 	fw.RiskScore = frameworksReports.GetScore()
-// 	// 	fw.Status = string(frameworksReports.GetStatus().Status())
-// 	// 	juResult.Frameworks = append(juResult.Frameworks, fw)
-// 	// }
-// 	testSuites := JUnitTestSuites{
-// 		XMLName: xml.Name{
-// 			Local: "Kubescape scan results",
-// 		},
-// 	}
-// 	testSuites.Failures = results.Report.SummaryDetails.NumberOfControls().Failed()
-// 	testSuites.Tests = results.Report.SummaryDetails.NumberOfControls().All()
-// 	testSuites.Disabled = results.Report.SummaryDetails.NumberOfControls().Skipped()
-// 	// summary.errors =
-// 	// summary.Name = "?"
-
-// 	// controls
-// 	for _, controlIDs := range results.Report.ListControlsIDs().All() {
-// 		controlReport := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controlIDs)
-
-// 		// control data
-// 		testSuite := JUnitTestSuite{
-// 			XMLName: xml.Name{
-// 				Local: controlReport.GetName(),
-// 				Space: getControlURL(controlReport.GetID()),
-// 			},
-// 		}
-// 		testSuite.Name = controlReport.GetName()
-// 		testSuite.Disabled = 0
-// 		testSuite.Errors = 0
-// 		testSuite.Failures = controlReport.NumberOfResources().Failed()
-// 		testSuite.Hostname = ""
-// 		testSuite.ID = 0
-// 		// testSuite.Skipped = ""
-// 		testSuite.Time = ""
-// 		testSuite.Timestamp = ""
-
-// 		testCase.Classname = controlReport.GetID()
-// 		testCase.Url = getControlURL(controlReport.GetID())
-// 		testCase.Name = controlReport.GetName()
-// 		testCase.Status = string(controlReport.GetStatus().Status())
-
-// 		// resources counters
-// 		testCase.AllResources = controlReport.NumberOfResources().All()
-// 		testCase.Excluded = controlReport.NumberOfResources().Excluded()
-// 		testCase.Failed = controlReport.NumberOfResources().Failed()
-
-// 		// resources
-// 		var jUnitResources []JUnitResource
-// 		for _, resourceID := range controlReport.ListResourcesIDs().All() {
-// 			result, ok := results.ResourcesResult[resourceID]
-// 			if !ok {
-// 				continue
-// 			}
-// 			if result.GetStatus(nil).IsPassed() && !junitPrinter.verbose { // add passed resources only in verbose mode
-// 				continue
-// 			}
-
-// 			jUnitResource := JUnitResource{}
-// 			rules := result.ListRulesOfControl(controlReport.GetID(), "")
-// 			for _, rule := range rules {
-// 				jUnitResource.FailedPaths = append(jUnitResource.FailedPaths, rule.Paths...)
-// 			}
-// 			if resource, ok := results.AllResources[resourceID]; ok {
-// 				jUnitResource.Name = resource.GetName()
-// 				jUnitResource.Namespace = resource.GetNamespace()
-// 				jUnitResource.Kind = resource.GetKind()
-// 				jUnitResource.ApiVersion = resource.GetApiVersion()
-// 			}
-
-// 			jUnitResources = append(jUnitResources, jUnitResource)
-// 		}
-// 		testCase.Resources = jUnitResources
-// 		juResult.Suites = append(juResult.Suites, testCase)
-// 	}
-
-// 	return &juResult, nil
-// }
+func properties(riskScore float32) []JUnitProperty {
+	return []JUnitProperty{
+		{
+			Name:  "riskScore",
+			Value: fmt.Sprintf("%.2f", riskScore),
+		},
+	}
+}

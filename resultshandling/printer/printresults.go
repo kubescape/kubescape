@@ -30,7 +30,7 @@ func GetWriter(outputFile string) *os.File {
 		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			logger.L().Error(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
-			return os.Stderr
+			return os.Stdout
 		}
 		return f
 	}
