@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 )
 
@@ -28,7 +29,7 @@ func listUrls(patterns []string) []string {
 	urls := []string{}
 	for i := range patterns {
 		if strings.HasPrefix(patterns[i], "http") {
-			if !isYaml(patterns[i]) && !isJson(patterns[i]) { // if url of repo
+			if !cautils.IsYaml(patterns[i]) && !cautils.IsJson(patterns[i]) { // if url of repo
 				if yamls, err := ScanRepository(patterns[i], ""); err == nil { // TODO - support branch
 					urls = append(urls, yamls...)
 				} else {
@@ -52,7 +53,7 @@ func downloadFiles(urls []string) ([]workloadinterface.IMetadata, []error) {
 			errs = append(errs, err)
 			continue
 		}
-		w, e := readFile(f, getFileFormat(urls[i]))
+		w, e := cautils.ReadFile(f, cautils.GetFileFormat(urls[i]))
 		errs = append(errs, e...)
 		if w != nil {
 			workloads = append(workloads, w...)

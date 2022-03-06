@@ -12,7 +12,6 @@ import (
 	"github.com/armosec/kubescape/hostsensorutils"
 	"github.com/armosec/kubescape/resourcehandler"
 	"github.com/armosec/kubescape/resultshandling/reporter"
-	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 
 	"github.com/armosec/opa-utils/reporthandling"
@@ -49,12 +48,22 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IReport {
-	if submit {
-		// return reporterv1.NewReportEventReceiver(tenantConfig.GetConfigObj())
+func getReporter(tenantConfig cautils.ITenantConfig, submit, fwScan, clusterScan bool) reporter.IReport {
+	if submit && clusterScan {
 		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj())
 	}
-	return reporterv1.NewReportMock()
+	if tenantConfig.GetAccountID() == "" && fwScan && clusterScan {
+		// Add link only when scanning a cluster using a framework
+		return reporterv2.NewReportMock(reporterv2.NO_SUBMIT_QUERY, "run kubescape with the '--submit' flag")
+	}
+	var message string
+	if !fwScan {
+		message = "Kubescape does not submit scan results when scanning controls"
+	}
+	if !clusterScan {
+		message = "Kubescape will submit scan results only when scanning a cluster (not YAML files)"
+	}
+	return reporterv2.NewReportMock("", message)
 }
 
 func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
@@ -74,12 +83,12 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 
 	hasHostSensorControls := true
 	// we need to determined which controls needs host sensor
-	if scanInfo.HostSensor.Get() == nil && hasHostSensorControls {
-		scanInfo.HostSensor.SetBool(askUserForHostSensor())
+	if scanInfo.HostSensorEnabled.Get() == nil && hasHostSensorControls {
+		scanInfo.HostSensorEnabled.SetBool(askUserForHostSensor())
 		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag")
 	}
-	if hostSensorVal := scanInfo.HostSensor.Get(); hostSensorVal != nil && *hostSensorVal {
-		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s)
+	if hostSensorVal := scanInfo.HostSensorEnabled.Get(); hostSensorVal != nil && *hostSensorVal {
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
 			logger.L().Warning(fmt.Sprintf("failed to create host sensor: %s", err.Error()))
 			return &hostsensorutils.HostSensorHandlerMock{}
@@ -139,14 +148,8 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 			// Submit report
 			scanInfo.Submit = true
 		}
-	} else { // config not found in cache (not submitted)
-		if scanInfo.Submit {
-			// submit - Create tenant & Submit report
-			if err := tenantConfig.SetTenant(); err != nil {
-				logger.L().Error(err.Error())
-			}
-		}
 	}
+
 }
 
 // setPolicyGetter set the policy getter - local file/github release/ArmoAPI

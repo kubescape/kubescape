@@ -19,11 +19,12 @@ e.g. When a `kube-system` resource fails and it is ok, simply add the resource t
     * `cluster`: k8s cluster name (usually it is the `current-context`) (case-sensitive, regex supported)
     * resource labels as key value (case-sensitive, regex NOT supported)
 * `posturePolicies`- An attribute-based declaration {key: value}
-    * `frameworkName` - Framework names can be find [here](https://github.com/armosec/regolibrary/tree/master/frameworks)
-    * `controlName` - Control names can be find [here](https://github.com/armosec/regolibrary/tree/master/controls) 
-    * `controlID` - Not yet supported
-    * `ruleName` - Rule names can be find [here](https://github.com/armosec/regolibrary/tree/master/rules) 
+    * `frameworkName` - Framework names can be find [here](https://github.com/armosec/regolibrary/tree/master/frameworks) (regex supported)
+    * `controlName` - Control names can be find [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
+    * `controlID` - Control ID can be find [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
+    * `ruleName` - Rule names can be find [here](https://github.com/armosec/regolibrary/tree/master/rules) (regex supported)
  
+You can find [here](https://github.com/armosec/kubescape/tree/master/examples/exceptions) some examples of exceptions files
 
 ## Usage
 
@@ -92,7 +93,7 @@ Here are some examples demonstrating the different ways the exceptions file can 
 
 ### Exclude  control
 
-Exclude the ["Allowed hostPath" control](https://github.com/armosec/regolibrary/blob/master/controls/allowedhostpath.json#L2) by declaring the control in the `"posturePolicies"` section.
+Exclude the [C-0060 control](https://github.com/armosec/regolibrary/blob/master/controls/allowedhostpath.json#L2) by declaring the control ID in the `"posturePolicies"` section.
 
 The resources
 
@@ -114,7 +115,7 @@ The resources
         ],
         "posturePolicies": [
             {
-                "controlName": "Allowed hostPath" 
+                "controlID": "C-0060" 
             }
         ]
     }

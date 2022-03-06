@@ -16,7 +16,7 @@ import (
 var (
 	frameworkExample = `
   # Scan all frameworks and submit the results
-  kubescape scan --submit
+  kubescape scan framework all --submit
   
   # Scan the NSA framework
   kubescape scan framework nsa
@@ -30,15 +30,6 @@ var (
   # Scan kubernetes YAML manifest files
   kubescape scan framework nsa *.yaml
 
-  # Scan and save the results in the JSON format
-  kubescape scan --format json --output results.json
-
-  # Save scan results in JSON format
-  kubescape scan --format json --output results.json
-
-  # Display all resources
-  kubescape scan --verbose
-
   Run 'kubescape list frameworks' for the list of supported frameworks
 `
 )
@@ -51,8 +42,10 @@ var frameworkCmd = &cobra.Command{
 		if len(args) > 0 {
 			frameworks := strings.Split(args[0], ",")
 			if len(frameworks) > 1 {
-				if frameworks[1] == "" {
-					return fmt.Errorf("usage: <framework-0>,<framework-1>")
+				for _, framework := range frameworks {
+					if framework == "" {
+						return fmt.Errorf("usage: <framework-0>,<framework-1>")
+					}
 				}
 			}
 		} else {

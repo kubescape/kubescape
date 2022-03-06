@@ -8,9 +8,6 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/resultshandling/printer"
-	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
-
-	// printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
@@ -52,6 +49,13 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
+	if scanInfo.Submit {
+		// submit - Create tenant & Submit report
+		if err := tenantConfig.SetTenant(); err != nil {
+			logger.L().Error(err.Error())
+		}
+	}
+
 	// ================== version testing ======================================
 
 	v := cautils.NewIVersionCheckHandler()
@@ -83,11 +87,10 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(tenantConfig, scanInfo.Submit)
+	reportHandler := getReporter(tenantConfig, scanInfo.Submit, scanInfo.FrameworkScan, len(scanInfo.InputPatterns) == 0)
 
 	// setup printer
-	printerHandler := printerv1.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
-	// printerHandler = printerv2.GetPrinter(scanInfo.Format, scanInfo.VerboseMode)
+	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.FormatVersion, scanInfo.VerboseMode)
 	printerHandler.SetWriter(scanInfo.Output)
 
 	// ================== return interface ======================================
@@ -157,7 +160,7 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 	interfaces.report.DisplayReportURL()
 
 	if score > float32(scanInfo.FailThreshold) {
-		return fmt.Errorf("scan risk-score %.2f is above permitted threshold %d", score, scanInfo.FailThreshold)
+		return fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", score, scanInfo.FailThreshold)
 	}
 
 	return nil

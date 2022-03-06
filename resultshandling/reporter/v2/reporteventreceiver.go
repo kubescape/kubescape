@@ -11,7 +11,7 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -44,19 +44,20 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	finalizeReport(opaSessionObj)
 
 	if report.customerGUID == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
+		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
+
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
+		logger.L().Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
-	opaSessionObj.Report.ReportID = uuid.NewV4().String()
+	opaSessionObj.Report.ReportID = uuid.NewString()
 	opaSessionObj.Report.CustomerGUID = report.customerGUID
 	opaSessionObj.Report.ClusterName = report.clusterName
 
 	if err := report.prepareReport(opaSessionObj.Report); err != nil {
-		report.message = err.Error()
+		logger.L().Error("failed to publish results", helpers.Error(err))
 	} else {
 		report.generateMessage()
 	}
@@ -86,12 +87,6 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2
 	if err := report.sendResources(host, postureReport, &reportCounter, false); err != nil {
 		return err
 	}
-	// reportCounter++
-
-	// // send results
-	// if err := report.sendResults(host, postureReport, &reportCounter, true); err != nil {
-	// 	return err
-	// }
 
 	return nil
 }
@@ -155,38 +150,6 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
 }
 
-// func (report *ReportEventReceiver) sendResults(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
-// 	splittedPostureReport := setSubReport(postureReport)
-// 	counter := 0
-
-// 	for _, v := range postureReport.Results {
-// 		r, err := json.Marshal(v)
-// 		if err != nil {
-// 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
-// 		}
-
-// 		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
-
-// 			// send report
-// 			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
-// 				return err
-// 			}
-// 			*reportCounter++
-
-// 			// delete results
-// 			splittedPostureReport.Results = []resourcesresults.Result{}
-
-// 			// restart counter
-// 			counter = 0
-// 		}
-
-// 		counter += len(r)
-// 		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
-// 	}
-
-// 	return report.sendReport(host, splittedPostureReport, *reportCounter, isLastReport)
-// }
-
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
 		ReportNumber: counter,
@@ -209,7 +172,7 @@ func (report *ReportEventReceiver) generateMessage() {
 	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
-	if report.customerAdminEMail != "" { // data has been submitted
+	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
 		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
 	} else {
 		u.Path = "account/sign-up"
@@ -229,5 +192,7 @@ func (report *ReportEventReceiver) generateMessage() {
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {
-	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+	if report.message != "" {
+		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+	}
 }
