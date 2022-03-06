@@ -103,8 +103,10 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 #### Scan a running Kubernetes cluster and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
-kubescape scan --submit
+kubescape scan --submit --enable-host-scan
 ```
+
+> Read [here](https://hub.armo.cloud/docs/host-sensor) more about the `enable-host-scan` flag
 
 #### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
@@ -149,8 +151,11 @@ kubescape scan --verbose
 ```
 
 #### Output in `json` format
+
+> Add the `--format-version v2` flag 
+
 ```
-kubescape scan --format json  --format-version v2 --output results.json
+kubescape scan --format json --format-version v2 --output results.json
 ```
 
 #### Output in `junit xml` format
@@ -233,106 +238,29 @@ Official Docker image `quay.io/armosec/kubescape`
 docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan /app/example.yaml
 ```
 
+If you wish, you can [build the docker image on your own](build/README.md)
+
 # Submit data manually
 
 Use the `submit` command if you wish to submit data manually
 
 ## Submit scan results manually
 
-First, scan your cluster using the `json` format flag: `kubescape scan framework <name> --format json --output path/to/results.json`.
+> Support forward compatibility by using the `--format-version v2` flag
 
-Now you can submit the results to the Kubaescape SaaS version -
+First, scan your cluster using the `json` format flag: `kubescape scan framework <name> --format json --format-version v2 --output path/to/results.json`.
+
+Now you can submit the results to the Kubescape SaaS version -
 ```
 kubescape submit results path/to/results.json
 ```
-# How to build
-
-## Build using python (3.7^) script
-
-Kubescape can be built using:
-
-``` sh
-python build.py
-```
-
-Note: In order to built using the above script, one must set the environment
-variables in this script:
-
-+ RELEASE
-+ ArmoBEServer
-+ ArmoERServer
-+ ArmoWebsite
-+ ArmoAuthServer
-
-
-## Build using go
-
-Note: development (and the release process) is done with Go `1.17`
-
-1. Clone Project
-```
-git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
-```
-
-2. Build
-```
-go build -o kubescape .
-```
-
-3. Run
-```
-./kubescape scan --submit --enable-host-scan
-```
-
-4. Enjoy :zany_face:
-
-## Docker Build
-
-### Build your own Docker image
-
-1. Clone Project
-```
-git clone https://github.com/armosec/kubescape.git kubescape && cd "$_"
-```
-
-2. Build
-```
-docker build -t kubescape -f build/Dockerfile .
-```
-
 
 # Under the hood
-
-## Tests
-Kubescape is running the following tests according to what is defined by [Kubernetes Hardening Guidance by NSA and CISA](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/)
-* Non-root containers
-* Immutable container filesystem
-* Privileged containers
-* hostPID, hostIPC privileges
-* hostNetwork access
-* allowedHostPaths field
-* Protecting pod service account tokens
-* Resource policies
-* Control plane hardening
-* Exposed dashboard
-* Allow privilege escalation
-* Applications credentials in configuration files
-* Cluster-admin binding
-* Exec into container
-* Dangerous capabilities
-* Insecure capabilities
-* Linux hardening
-* Ingress and Egress blocked
-* Container hostPort
-* Network policies
-* Symlink Exchange Can Allow Host Filesystem Access (CVE-2021-25741)
-
-
 
 ## Technology
 Kubescape based on OPA engine: https://github.com/open-policy-agent/opa and ARMO's posture controls.
 
-The tools retrieves Kubernetes objects from the API server and runs a set of [regos snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io/).
+The tools retrieves Kubernetes objects from the API server and runs a set of [rego's snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io/).
 
 The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
 

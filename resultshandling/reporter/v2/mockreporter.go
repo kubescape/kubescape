@@ -11,12 +11,14 @@ import (
 const NO_SUBMIT_QUERY = "utm_source=GitHub&utm_medium=CLI&utm_campaign=no_submit"
 
 type ReportMock struct {
-	query string
+	query   string
+	message string
 }
 
-func NewReportMock(query string) *ReportMock {
+func NewReportMock(query, message string) *ReportMock {
 	return &ReportMock{
-		query: query,
+		query:   query,
+		message: message,
 	}
 }
 func (reportMock *ReportMock) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
@@ -36,7 +38,7 @@ func (reportMock *ReportMock) DisplayReportURL() {
 	}
 	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	message := sep + "\n"
-	message += "Scan results have not been submitted." + "\n"
+	message += "Scan results have not been submitted: " + reportMock.message + "\n"
 	message += "Sign up for free: "
 	message += u + "\n"
 	message += sep + "\n"
