@@ -91,6 +91,12 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 	return res, nil
 }
 
+// return list of LinuxKernelVariables
+func (hsh *HostSensorHandler) GetKernelVariables() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/LinuxKernelVariables", "LinuxKernelVariables")
+}
+
 // return list of OpenPortsList
 func (hsh *HostSensorHandler) GetOpenPortsList() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
@@ -191,6 +197,12 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	res = append(res, kcData...)
 	//
 	kcData, err = hsh.GetOpenPortsList()
+	if err != nil {
+		return kcData, err
+	}
+	res = append(res, kcData...)
+	// GetKernelVariables
+	kcData, err = hsh.GetKernelVariables()
 	if err != nil {
 		return kcData, err
 	}
