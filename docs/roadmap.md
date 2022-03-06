@@ -18,25 +18,25 @@ Items in Kubescape roadmap are split to 3 major groups based on the feature plan
 
 
 ## Planning 👷
-* **Integration with image registries**: we want to expand Kubescape to integrate with differnet image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities [Container registry integration](/docs/proposals/container-image-vulnerability-adaptor.md)
-* **Kubescape as a microservice**: create a REST API for Kubescape so it can run constantly in a cluster and other components like Prometheus can scrape results
-* **Kubescape CLI control over cluster operations**: add functionality to Kubescape CLI to trigger operations in Kubescape cluster components (example: trigger images scans and etc.)
-* **Produce md/HTML reports**: create scan reports for different output formats
-* **Git integration for pull requests**: create insightful GitHub actions for Kubescape
+* ###### **Integration with image registries**: we want to expand Kubescape to integrate with differnet image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities [Container registry integration](/docs/proposals/container-image-vulnerability-adaptor.md)
+* ###### **Kubescape as a microservice**: create a REST API for Kubescape so it can run constantly in a cluster and other components like Prometheus can scrape results
+* ###### **Kubescape CLI control over cluster operations**: add functionality to Kubescape CLI to trigger operations in Kubescape cluster components (example: trigger images scans and etc.)
+* ###### **Produce md/HTML reports**: create scan reports for different output formats
+* ###### **Git integration for pull requests**: create insightful GitHub actions for Kubescape
 
 ## Backlog 📅
-* **JSON path for HELM charts**: today Kubescape can point to issues in the Kubernetes object, we want to develop this feature so Kubescape will be able to point to the misconfigured source file (HELM)
-* **Create Kubescape HELM plugin**
-* **Kubescape based admission controller**: Implement admission controller API for Kubescape microservice to enable users to use Kubescape rules as policies
+* ###### **JSON path for HELM charts**: today Kubescape can point to issues in the Kubernetes object, we want to develop this feature so Kubescape will be able to point to the misconfigured source file (HELM)
+* ###### **Create Kubescape HELM plugin**
+* ###### **Kubescape based admission controller**: Implement admission controller API for Kubescape microservice to enable users to use Kubescape rules as policies
 
 ## Wishlist 💭
-* **Integrate with other Kubernetes CLI tools** use Kubescape as a YAML validator for `kubectl` and others.
-* **Kubernetes audit log integration**: connect Kubescape to audit log stream to enable it to produce more contextual security information based on how the API service is used.
-* **TUI for Kubescape**: interactive terminal based user interface which helps to analyze and fix issues
-* **Scanning images with GO for vulnerabilities**: Images scanners cannot determine which packages were used to build Go executables and we want to scan them for vulnerabilities
-* **Scanning Dockerfile-s for security best practices**: Scan image or Dockerfile to determine whether it is using security best practices (like root containers)
-* **Custom controls and rules**: enable users to define their own Rego base rules
-* **More CI/CD tool integration**: Jenkins and etc. 😀
+* ###### **Integrate with other Kubernetes CLI tools** use Kubescape as a YAML validator for `kubectl` and others.
+* ###### **Kubernetes audit log integration**: connect Kubescape to audit log stream to enable it to produce more contextual security information based on how the API service is used.
+* ###### **TUI for Kubescape**: interactive terminal based user interface which helps to analyze and fix issues
+* ###### **Scanning images with GO for vulnerabilities**: Images scanners cannot determine which packages were used to build Go executables and we want to scan them for vulnerabilities
+* ###### **Scanning Dockerfile-s for security best practices**: Scan image or Dockerfile to determine whether it is using security best practices (like root containers)
+* ###### **Custom controls and rules**: enable users to define their own Rego base rules
+* ###### **More CI/CD tool integration**: Jenkins and etc. 😀
 
 
 ## Completed features 🎓
