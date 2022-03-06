@@ -49,6 +49,13 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
+	if scanInfo.Submit {
+		// submit - Create tenant & Submit report
+		if err := tenantConfig.SetTenant(); err != nil {
+			logger.L().Error(err.Error())
+		}
+	}
+
 	// ================== version testing ======================================
 
 	v := cautils.NewIVersionCheckHandler()

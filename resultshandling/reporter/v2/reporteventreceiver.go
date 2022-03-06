@@ -172,7 +172,7 @@ func (report *ReportEventReceiver) generateMessage() {
 	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
-	if report.customerAdminEMail != "" { // data has been submitted
+	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
 		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
 	} else {
 		u.Path = "account/sign-up"

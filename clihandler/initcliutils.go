@@ -148,14 +148,8 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 			// Submit report
 			scanInfo.Submit = true
 		}
-	} else { // config not found in cache (not submitted)
-		if scanInfo.Submit {
-			// submit - Create tenant & Submit report
-			if err := tenantConfig.SetTenant(); err != nil {
-				logger.L().Error(err.Error())
-			}
-		}
 	}
+
 }
 
 // setPolicyGetter set the policy getter - local file/github release/ArmoAPI
