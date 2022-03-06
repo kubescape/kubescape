@@ -3,6 +3,7 @@ package resultshandling
 import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/resultshandling/printer"
 	printerv1 "github.com/armosec/kubescape/resultshandling/printer/v1"
 	printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
@@ -61,6 +62,7 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool) printer.IPr
 		case "v2":
 			return printerv2.NewJsonPrinter()
 		default:
+			logger.L().Warning("Deprecated format version. run with '--format-version' flag", helpers.String("your version", formatVersion), helpers.String("latest version", "v2"))
 			return printerv1.NewJsonPrinter()
 		}
 	case printer.JunitResultFormat:
