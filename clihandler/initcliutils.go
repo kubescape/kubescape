@@ -48,14 +48,22 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(tenantConfig cautils.ITenantConfig, submit bool) reporter.IReport {
-	if submit {
+func getReporter(tenantConfig cautils.ITenantConfig, submit, fwScan, clusterScan bool) reporter.IReport {
+	if submit && clusterScan {
 		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj())
 	}
-	if tenantConfig.GetAccountID() == "" {
-		return reporterv2.NewReportMock(reporterv2.NO_SUBMIT_QUERY)
+	if tenantConfig.GetAccountID() == "" && fwScan && clusterScan {
+		// Add link only when scanning a cluster using a framework
+		return reporterv2.NewReportMock(reporterv2.NO_SUBMIT_QUERY, "run kubescape with the '--submit' flag")
 	}
-	return reporterv2.NewReportMock("")
+	var message string
+	if !fwScan {
+		message = "Kubescape does not submit scan results when scanning controls"
+	}
+	if !clusterScan {
+		message = "Kubescape will submit scan results only when scanning a cluster (not YAML files)"
+	}
+	return reporterv2.NewReportMock("", message)
 }
 
 func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
