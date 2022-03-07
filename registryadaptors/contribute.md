@@ -53,7 +53,7 @@ The interface needs to cover the following functionalities:
 
 ## Go API proposal
 
-```
+```go
 
 /*type ContainerImageRegistryCredentials struct {
 	Password string
@@ -110,9 +110,9 @@ type IContainerImageVulnerabilityAdaptor interface {
 
 The objects received from the interface will be converted to an IMetadata compatible objects as following
 
-```
+```json
 {
-    "apiVersion": "image.vulnscan.com/v1",
+    "apiVersion": "armo.vuln.images/v1",
     "kind": "ImageVulnerabilities",
     "metadata": {
         "name": "nginx:latest"
@@ -128,9 +128,9 @@ The objects received from the interface will be converted to an IMetadata compat
 
 The rego results will be a combination of the k8s artifact and the list of relevant CVEs for the control
 
-```
+```json
 {
-    "apiVersion": "result.vulnscan.com/v1",
+    "apiVersion": "armo.vuln/v1",
     "kind": "Pod",
     "metadata": {
         "name": "nginx"

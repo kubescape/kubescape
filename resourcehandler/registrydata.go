@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	ImagevulnerabilitiesObjectGroup   = "image.vulnscan.com"
+	ImagevulnerabilitiesObjectGroup   = "armo.vuln.images"
 	ImagevulnerabilitiesObjectVersion = "v1"
 	ImagevulnerabilitiesObjectKind    = "ImageVulnerabilities"
 )
