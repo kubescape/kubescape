@@ -4,7 +4,7 @@ type PostScanRequest struct {
 	Format             string   `json:"format"`             // Format results (table, json, junit ...) - default json
 	ExcludedNamespaces []string `json:"excludedNamespaces"` // used for host sensor namespace
 	IncludeNamespaces  []string `json:"includeNamespaces"`  // DEPRECATED?
-	FailThreshold      uint16   `json:"failThreshold"`      // Failure score threshold
+	FailThreshold      float32  `json:"failThreshold"`      // Failure score threshold
 	Submit             bool     `json:"submit"`             // Submit results to Armo BE - default will
 	HostSensor         bool     `json:"hostSensor"`         // Deploy ARMO K8s host sensor to collect data from certain controls
 	KeepLocal          bool     `json:"keepLocal"`          // Do not submit results

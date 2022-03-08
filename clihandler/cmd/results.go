@@ -77,7 +77,7 @@ var resultsCmd = &cobra.Command{
 		var r reporter.IReport
 		switch formatVersion {
 		case "v2":
-			r = reporterv2.NewReportEventReceiver(clusterConfig.GetConfigObj())
+			r = reporterv2.NewReportEventReceiver(clusterConfig.GetConfigObj(), "")
 		default:
 			logger.L().Warning("Deprecated results version. run with '--format-version' flag", helpers.String("your version", formatVersion), helpers.String("latest version", "v2"))
 			r = reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())

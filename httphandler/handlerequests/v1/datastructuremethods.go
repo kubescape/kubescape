@@ -17,7 +17,7 @@ func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
 
 	scanInfo.Local = scanRequest.KeepLocal
 	scanInfo.Submit = scanRequest.Submit
-	scanInfo.HostSensor.SetBool(scanRequest.HostSensor)
+	scanInfo.HostSensorEnabled.SetBool(scanRequest.HostSensor)
 
 	return &scanInfo
 }

@@ -116,7 +116,7 @@ func setScanInfo() *cautils.ScanInfo {
 	scanInfo.Format = "prometheus"
 	scanInfo.ScanAll = true
 	scanInfo.FrameworkScan = true
-	scanInfo.HostSensor.Set(os.Getenv("KS_ENABLE_HOST_SENSOR"))
+	scanInfo.HostSensorEnabled.Set(os.Getenv("KS_ENABLE_HOST_SENSOR"))
 	scanInfo.Output = "results"
 	scanInfo.FailThreshold = 100
 	scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, reporthandling.KindFramework)
