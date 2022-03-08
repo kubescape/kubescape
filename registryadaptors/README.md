@@ -1,7 +1,7 @@
 # Integrate With Vulnerability Server
 
 There are some controls that check the relation between the kubernetes manifest and vulnerabilities.
-For these controls to work properly, it is necasery to 
+For these controls to work properly, it is necessary to 
 ## Supported Servers
 * Armosec
 
