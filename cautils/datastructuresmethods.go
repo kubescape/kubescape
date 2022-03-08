@@ -2,6 +2,7 @@ package cautils
 
 import (
 	pkgcautils "github.com/armosec/utils-go/utils"
+	"golang.org/x/mod/semver"
 
 	"github.com/armosec/opa-utils/reporthandling"
 )
@@ -50,14 +51,15 @@ func ruleWithArmoOpaDependency(attributes map[string]interface{}) bool {
 func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version string) bool {
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		if version != "" {
-			if from.(string) > BuildNumber {
+
+			if semver.Compare(from.(string), BuildNumber) > 0 {
 				return false
 			}
 		}
 	}
 	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
 		if version != "" {
-			if until.(string) <= BuildNumber {
+			if semver.Compare(BuildNumber, until.(string)) >= 0 {
 				return false
 			}
 		} else {

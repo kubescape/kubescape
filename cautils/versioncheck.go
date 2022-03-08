@@ -10,6 +10,7 @@ import (
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	pkgutils "github.com/armosec/utils-go/utils"
+	"golang.org/x/mod/semver"
 )
 
 const SKIP_VERSION_CHECK = "KUBESCAPE_SKIP_UPDATE_CHECK"
@@ -97,7 +98,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 	}
 
 	if latestVersion.ClientUpdate != "" {
-		if BuildNumber != "" && BuildNumber < latestVersion.ClientUpdate {
+		if BuildNumber != "" && semver.Compare(BuildNumber, latestVersion.ClientUpdate) >= 0 {
 			logger.L().Warning(warningMessage(latestVersion.ClientUpdate))
 		}
 	}
