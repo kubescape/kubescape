@@ -10,10 +10,12 @@ import (
 var completionCmdExamples = `
 
   # Enable BASH shell autocompletion 
-  echo 'source <(kubescape completion bash)' >> ~/.bashrc
+  $ source <(kubescape completion bash) 
+  $ echo 'source <(kubescape completion bash)' >> ~/.bashrc
 
   # Enable ZSH shell autocompletion 
-  echo 'source <(kubectl completion zsh)' >> "${fpath[1]}/_kubectl"
+  $ source <(kubectl completion zsh)
+  $ echo 'source <(kubectl completion zsh)' >> "${fpath[1]}/_kubectl"
 
 `
 var completionCmd = &cobra.Command{
