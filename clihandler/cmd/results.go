@@ -8,13 +8,18 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
+	"github.com/armosec/kubescape/resultshandling/reporter"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
+	reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
 	"github.com/armosec/opa-utils/reporthandling"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
+
+var formatVersion string
 
 type ResultsObject struct {
 	filePath     string
@@ -36,10 +41,9 @@ func (resultsObject *ResultsObject) SetResourcesReport() (*reporthandling.Postur
 	if err != nil {
 		return nil, err
 	}
-
 	return &reporthandling.PostureReport{
 		FrameworkReports:     frameworkReports,
-		ReportID:             uuid.NewV4().String(),
+		ReportID:             uuid.NewString(),
 		ReportGenerationTime: time.Now().UTC(),
 		CustomerGUID:         resultsObject.customerGUID,
 		ClusterName:          resultsObject.clusterName,
@@ -51,7 +55,7 @@ func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinter
 }
 
 var resultsCmd = &cobra.Command{
-	Use:   "results <json file>\nExample:\n$ kubescape submit results path/to/results.json",
+	Use:   "results <json file>\nExample:\n$ kubescape submit results path/to/results.json --format-version v2",
 	Short: "Submit a pre scanned results file. The file must be in json format",
 	Long:  ``,
 	RunE: func(cmd *cobra.Command, args []string) error {
@@ -63,11 +67,21 @@ var resultsCmd = &cobra.Command{
 
 		// get config
 		clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
+		if err := clusterConfig.SetTenant(); err != nil {
+			logger.L().Error("failed setting account ID", helpers.Error(err))
+		}
 
 		resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
 
 		// submit resources
-		r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())
+		var r reporter.IReport
+		switch formatVersion {
+		case "v2":
+			r = reporterv2.NewReportEventReceiver(clusterConfig.GetConfigObj())
+		default:
+			logger.L().Warning("Deprecated results version. run with '--format-version' flag", helpers.String("your version", formatVersion), helpers.String("latest version", "v2"))
+			r = reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())
+		}
 
 		submitInterfaces := cliinterfaces.SubmitInterfaces{
 			ClusterConfig: clusterConfig,
@@ -84,6 +98,7 @@ var resultsCmd = &cobra.Command{
 
 func init() {
 	submitCmd.AddCommand(resultsCmd)
+	resultsCmd.PersistentFlags().StringVar(&formatVersion, "format-version", "v1", "Output object can be differnet between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 }
 
 func loadResultsFromFile(filePath string) ([]reporthandling.FrameworkReport, error) {

@@ -1,6 +1,7 @@
 package clihandler
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -12,6 +13,12 @@ import (
 var listFunc = map[string]func(*cliobjects.ListPolicies) ([]string, error){
 	"controls":   listControls,
 	"frameworks": listFrameworks,
+	"exceptions": listExceptions,
+}
+
+var listFormatFunc = map[string]func(*cliobjects.ListPolicies, []string){
+	"pretty-print": prettyPrintListFormat,
+	"json":         jsonListFormat,
 }
 
 func ListSupportCommands() []string {
@@ -29,12 +36,8 @@ func CliList(listPolicies *cliobjects.ListPolicies) error {
 		}
 		sort.Strings(policies)
 
-		sep := "\n  * "
-		usageCmd := strings.TrimSuffix(listPolicies.Target, "s")
-		fmt.Printf("Supported %s:%s%s\n", listPolicies.Target, sep, strings.Join(policies, sep))
-		fmt.Printf("\nUseage:\n")
-		fmt.Printf("$ kubescape scan %s \"name\"\n", usageCmd)
-		fmt.Printf("$ kubescape scan %s \"name-0\",\"name-1\"\n\n", usageCmd)
+		listFormatFunc[listPolicies.Format](listPolicies, policies)
+
 		return nil
 	}
 	return fmt.Errorf("unknown command to download")
@@ -49,10 +52,37 @@ func listFrameworks(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 
 func listControls(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
+
 	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
 	l := getter.ListName
 	if listPolicies.ListIDs {
 		l = getter.ListID
 	}
 	return g.ListControls(l)
+}
+
+func listExceptions(listPolicies *cliobjects.ListPolicies) ([]string, error) {
+	// load tenant config
+	getTenantConfig(listPolicies.Account, "", getKubernetesApi())
+
+	var exceptionsNames []string
+	armoAPI := getExceptionsGetter("")
+	exceptions, err := armoAPI.GetExceptions("")
+	if err != nil {
+		return exceptionsNames, err
+	}
+	for i := range exceptions {
+		exceptionsNames = append(exceptionsNames, exceptions[i].Name)
+	}
+	return exceptionsNames, nil
+}
+
+func prettyPrintListFormat(listPolicies *cliobjects.ListPolicies, policies []string) {
+	sep := "\n  * "
+	fmt.Printf("Supported %s:%s%s\n", listPolicies.Target, sep, strings.Join(policies, sep))
+}
+
+func jsonListFormat(listPolicies *cliobjects.ListPolicies, policies []string) {
+	j, _ := json.MarshalIndent(policies, "", "  ")
+	fmt.Printf("%s\n", j)
 }

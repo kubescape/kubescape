@@ -1,4 +1,4 @@
-package resourcemapping
+package v2
 
 import (
 	"encoding/json"
@@ -27,15 +27,10 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-
-	postureReportStr, err := json.Marshal(opaSessionObj.Report)
-
+	finalizeJson(opaSessionObj)
+	r, err := json.Marshal(opaSessionObj.Report)
 	if err != nil {
-		logger.L().Fatal("failed to convert posture report object")
+		logger.L().Fatal("failed to Marshal posture report object")
 	}
-	jsonPrinter.writer.Write(postureReportStr)
-}
-
-func (jsonPrinter *JsonPrinter) FinalizeData(opaSessionObj *cautils.OPASessionObj) {
-	// finalizeReport(opaSessionObj)
+	jsonPrinter.writer.Write(r)
 }

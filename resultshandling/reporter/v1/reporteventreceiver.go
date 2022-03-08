@@ -13,7 +13,7 @@ import (
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
-	uuid "github.com/satori/go.uuid"
+	"github.com/google/uuid"
 )
 
 const MAX_REPORT_SIZE = 2097152 // 2 MB
@@ -44,15 +44,14 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	}
 
 	if report.customerGUID == "" {
-		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details"
+		report.message = "WARNING: Failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Please feel free to contact ARMO team for more details"
 		return nil
 	}
 	if report.clusterName == "" {
-		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS"
+		report.message = "WARNING: Failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS.Please feel free to contact ARMO team for more details"
 		return nil
 	}
-
-	opaSessionObj.PostureReport.ReportID = uuid.NewV4().String()
+	opaSessionObj.PostureReport.ReportID = uuid.NewString()
 	opaSessionObj.PostureReport.CustomerGUID = report.customerGUID
 	opaSessionObj.PostureReport.ClusterName = report.clusterName
 
@@ -144,7 +143,7 @@ func (report *ReportEventReceiver) generateMessage() {
 
 	if report.customerAdminEMail != "" {
 		logger.L().Debug("", helpers.String("account ID", report.customerGUID))
-		report.message = fmt.Sprintf("%s %s/risk/%s", message, u.String(), report.clusterName)
+		report.message = fmt.Sprintf("%s %s/configuration-scanning/%s", message, u.String(), report.clusterName)
 		return
 	}
 	u.Path = "account/sign-up"

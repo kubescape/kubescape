@@ -137,29 +137,6 @@ func ruleWithArmoOpaDependency(annotations map[string]interface{}) bool {
 	return false
 }
 
-// Checks that kubescape version is in range of use for this rule
-// In local build (BuildNumber = ""):
-// returns true only if rule doesn't have the "until" attribute
-func isRuleKubescapeVersionCompatible(rule *reporthandling.PolicyRule) bool {
-	if from, ok := rule.Attributes["useFromKubescapeVersion"]; ok {
-		if cautils.BuildNumber != "" {
-			if from.(string) > cautils.BuildNumber {
-				return false
-			}
-		}
-	}
-	if until, ok := rule.Attributes["useUntilKubescapeVersion"]; ok {
-		if cautils.BuildNumber != "" {
-			if until.(string) <= cautils.BuildNumber {
-				return false
-			}
-		} else {
-			return false
-		}
-	}
-	return true
-}
-
 func removeData(obj workloadinterface.IMetadata) {
 	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
 		return // remove data only from kubernetes objects
