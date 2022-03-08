@@ -13,8 +13,8 @@ require (
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
 	github.com/francoispqt/gojay v1.2.13
-	github.com/gorilla/mux v1.8.0
 	github.com/google/uuid v1.3.0
+	github.com/gorilla/mux v1.8.0
 	github.com/johnfercher/maroto v0.34.0
 	github.com/mattn/go-isatty v0.0.14
 	github.com/olekukonko/tablewriter v0.0.5

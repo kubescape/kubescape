@@ -7,10 +7,9 @@ import (
 	"net/http"
 	"sync"
 
-	uuid "github.com/satori/go.uuid"
-
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/google/uuid"
 )
 
 var OutputDir = "/results"
@@ -95,7 +94,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	handler.state.setBusy()
 
 	// generate id
-	scanID := uuid.NewV4().String()
+	scanID := uuid.NewString()
 	handler.state.setID(scanID)
 
 	if r.Method != http.MethodPost {
