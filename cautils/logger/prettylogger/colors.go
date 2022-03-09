@@ -29,3 +29,9 @@ func prefix(l helpers.Level) func(w io.Writer, format string, a ...interface{}) 
 	}
 	return message
 }
+
+func DisableColor(flag bool) {
+	if flag {
+		color.NoColor = true
+	}
+}
