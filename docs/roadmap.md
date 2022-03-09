@@ -60,7 +60,7 @@ The items in Kubescape roadmap are split to 3 major groups based on the feature 
 * Assisted remediation (telling where/what to fix)
 * Integration with Prometheus
 * Confiugration of controls (customizing rules for a given environment)
-* Installation in the cluster for continous monitoring
+* Installation in the cluster for continuous monitoring
 * Host scanner 
 * Cloud vendor API integration
 * Custom exceptions
