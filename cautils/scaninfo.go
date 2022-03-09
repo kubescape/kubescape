@@ -54,9 +54,11 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 }
 
 type RootInfo struct {
-	Logger   string // logger level
-	CacheDir string // cached dir
+	Logger       string // logger level
+	CacheDir     string // cached dir
+	DisableColor bool   // Disable Color
 }
+
 type ScanInfo struct {
 	Getters
 	PolicyIdentifier   []reporthandling.PolicyIdentifier
