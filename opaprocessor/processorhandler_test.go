@@ -32,13 +32,13 @@ func TestProcess(t *testing.T) {
 
 	// set opaSessionObj
 	opaSessionObj := cautils.NewOPASessionObjMock()
-	opaSessionObj.Frameworks = []reporthandling.Framework{*reporthandling.MockFrameworkA()}
-	policies := ConvertFrameworksToPolicies(opaSessionObj.Frameworks, "")
+	opaSessionObj.Policies = []reporthandling.Framework{*reporthandling.MockFrameworkA()}
+	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "")
 
 	opaSessionObj.K8SResources = &k8sResources
 	opaSessionObj.AllResources = allResources
 
-	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock()) // ,
 	opap.Process(policies)
 	opap.updateResults()
 	for _, f := range opap.PostureReport.FrameworkReports {
@@ -68,10 +68,10 @@ func TestProcessResourcesResult(t *testing.T) {
 
 	// set opaSessionObj
 	opaSessionObj := cautils.NewOPASessionObjMock()
-	opaSessionObj.Frameworks = frameworks
+	opaSessionObj.Policies = frameworks
 
-	policies := ConvertFrameworksToPolicies(opaSessionObj.Frameworks, "")
-	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Frameworks, policies)
+	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "")
+	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Policies, policies)
 
 	opaSessionObj.K8SResources = &k8sResources
 	opaSessionObj.AllResources[deployment.GetID()] = deployment

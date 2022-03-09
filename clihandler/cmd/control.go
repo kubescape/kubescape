@@ -81,11 +81,14 @@ var controlCmd = &cobra.Command{
 		}
 
 		scanInfo.FrameworkScan = false
-		scanInfo.Init()
-		cautils.SetSilentMode(scanInfo.Silent)
-		err := clihandler.ScanCliSetup(&scanInfo)
+
+		results, err := clihandler.Scan(&scanInfo)
 		if err != nil {
 			logger.L().Fatal(err.Error())
+		}
+		results.HandleResults()
+		if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
+			return fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", results.GetRiskScore(), scanInfo.FailThreshold)
 		}
 		return nil
 	},

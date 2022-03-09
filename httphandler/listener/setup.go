@@ -4,98 +4,75 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
 
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
+	handlerequestsv1 "github.com/armosec/kubescape/httphandler/handlerequests/v1"
 	"github.com/gorilla/mux"
 )
 
-type HTTPListener struct {
-	keyPair *tls.Certificate
-	// Listeners
-}
-
-func NewListener() *HTTPListener {
-	return &HTTPListener{
-		keyPair: nil,
-	}
-}
+const (
+	scanPath              = "/v1/scan"
+	resultsPath           = "/v1/results"
+	prometheusMmeticsPath = "/metrics"
+	livePath              = "/livez"
+	readyPath             = "/readyz"
+)
 
 // SetupHTTPListener set up listening http servers
-func (resthandler *HTTPListener) SetupHTTPListener() error {
-	err := resthandler.loadTLSKey("", "") // TODO - support key and crt files
+func SetupHTTPListener() error {
+	keyPair, err := loadTLSKey("", "") // TODO - support key and crt files
 	if err != nil {
 		return err
 	}
 	server := &http.Server{
-		Addr: fmt.Sprintf(":%s", "4000"), // TODO - support loading port from config/env
+		Addr: fmt.Sprintf(":%s", getPort()), // TODO - support loading port from config/env
 	}
-	if resthandler.keyPair != nil {
-		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*resthandler.keyPair}}
+	if keyPair != nil {
+		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
 	}
 
 	rtr := mux.NewRouter()
 	// rtr.HandleFunc(opapolicy.PostureRestAPIPathV1, resthandler.RestAPIReceiveNotification)
 
+	// listen
+	httpHandler := handlerequestsv1.NewHTTPHandler()
+
+	rtr.HandleFunc(prometheusMmeticsPath, httpHandler.Metrics)
+	rtr.HandleFunc(scanPath, httpHandler.Scan)
+	rtr.HandleFunc(resultsPath, httpHandler.Results)
+	rtr.HandleFunc(livePath, httpHandler.Live)
+	rtr.HandleFunc(readyPath, httpHandler.Ready)
+
 	server.Handler = rtr
 
-	logger.L().Info("") // TODO - set log message
-
-	// listen
-	if resthandler.keyPair != nil {
-		return server.ListenAndServeTLS("", "")
-	} else {
-		return server.ListenAndServe()
+	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()))
+	server.ListenAndServe()
+	if keyPair != nil {
+		logger.L().Fatal(server.ListenAndServeTLS("", "").Error())
 	}
+
+	logger.L().Fatal(server.ListenAndServe().Error())
+
+	return nil
 }
 
-// func (resthandler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
-// 	defer func() {
-// 		if err := recover(); err != nil {
-// 			glog.Error(err)
-// 			w.WriteHeader(http.StatusInternalServerError)
-// 			bErr, _ := json.Marshal(err)
-// 			w.Write(bErr)
-// 		}
-// 	}()
-// 	defer r.Body.Close()
-// 	var err error
-// 	returnValue := []byte("ok")
-
-// 	httpStatus := http.StatusOK
-// 	readBuffer, err := ioutil.ReadAll(r.Body)
-// 	if err != nil {
-// 		err = fmt.Errorf("Failed to read request body, reason: %s", err.Error())
-// 		w.WriteHeader(http.StatusBadRequest)
-// 		w.Write([]byte(err.Error()))
-// 		return
-// 	}
-// 	switch r.Method {
-// 	case http.MethodPost:
-// 		// handle post
-// 	case http.MethodGet:
-// 		// handle get
-// 	default:
-// 		httpStatus = http.StatusMethodNotAllowed
-// 		err = fmt.Errorf("Method %s no allowed", r.Method)
-// 	}
-// 	if err != nil {
-// 		returnValue = []byte(err.Error())
-// 		httpStatus = http.StatusBadRequest
-// 	}
-
-// 	w.WriteHeader(httpStatus)
-// 	w.Write(returnValue)
-// }
-
-func (resthandler *HTTPListener) loadTLSKey(certFile, keyFile string) error {
+func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 	if keyFile == "" || certFile == "" {
-		return nil
+		return nil, nil
 	}
 
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return fmt.Errorf("filed to load key pair: %v", err)
+		return nil, fmt.Errorf("filed to load key pair: %v", err)
 	}
-	resthandler.keyPair = &pair
-	return nil
+	return &pair, nil
+}
+
+func getPort() string {
+	if p := os.Getenv("KS_PORT"); p != "" {
+		return p
+	}
+	return "8080"
 }

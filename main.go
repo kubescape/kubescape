@@ -1,16 +1,13 @@
 package main
 
 import (
-	"os"
-
 	"github.com/armosec/kubescape/clihandler/cmd"
-	"github.com/armosec/kubescape/httphandler"
+	// "github.com/armosec/kubescape/httphandler/listener"
 )
 
 func main() {
-	if os.Getenv("KS_RUN_PROMETHEUS_SERVER") == "true" {
-		httphandler.PrometheusListener() // beta version
-	} else {
-		cmd.Execute()
-	}
+	cmd.Execute()
+
+	// // cmd.Execute()
+	// listener.SetupHTTPListener()
 }

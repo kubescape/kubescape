@@ -80,6 +80,9 @@ func init() {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host sensor DaemonSet. Use this flag cautiously")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v1", "Output object can be differnet between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 
+	// Deprecated flags - remove 1.May.2022
+	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
+
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemoSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support

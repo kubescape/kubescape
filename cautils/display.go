@@ -9,16 +9,6 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-var silent = false
-
-func SetSilentMode(s bool) {
-	silent = s
-}
-
-func IsSilent() bool {
-	return silent
-}
-
 var FailureDisplay = color.New(color.Bold, color.FgHiRed).FprintfFunc()
 var WarningDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
 var FailureTextDisplay = color.New(color.Faint, color.FgHiRed).FprintfFunc()
@@ -31,7 +21,7 @@ var DescriptionDisplay = color.New(color.Faint, color.FgWhite).FprintfFunc()
 var Spinner *spinner.Spinner
 
 func StartSpinner() {
-	if !IsSilent() && isatty.IsTerminal(os.Stdout.Fd()) {
+	if isatty.IsTerminal(os.Stdout.Fd()) {
 		Spinner = spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		Spinner.Start()
 	}
