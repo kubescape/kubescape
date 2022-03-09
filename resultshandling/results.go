@@ -1,6 +1,8 @@
 package resultshandling
 
 import (
+	"encoding/json"
+
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
@@ -9,51 +11,66 @@ import (
 	printerv2 "github.com/armosec/kubescape/resultshandling/printer/v2"
 
 	"github.com/armosec/kubescape/resultshandling/reporter"
-	"github.com/armosec/opa-utils/reporthandling"
 )
 
 type ResultsHandler struct {
-	opaSessionObj *chan *cautils.OPASessionObj
-	reporterObj   reporter.IReport
-	printerObj    printer.IPrinter
+	reporterObj reporter.IReport
+	printerObj  printer.IPrinter
+	scanData    *cautils.OPASessionObj
 }
 
-func NewResultsHandler(opaSessionObj *chan *cautils.OPASessionObj, reporterObj reporter.IReport, printerObj printer.IPrinter) *ResultsHandler {
+func NewResultsHandler(reporterObj reporter.IReport, printerObj printer.IPrinter) *ResultsHandler {
 	return &ResultsHandler{
-		opaSessionObj: opaSessionObj,
-		reporterObj:   reporterObj,
-		printerObj:    printerObj,
+		reporterObj: reporterObj,
+		printerObj:  printerObj,
 	}
 }
 
-func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) float32 {
+// GetScore return scan risk-score
+func (resultsHandler *ResultsHandler) GetRiskScore() float32 {
+	return resultsHandler.scanData.Report.SummaryDetails.Score
+}
 
-	opaSessionObj := <-*resultsHandler.opaSessionObj
+// GetData get scan/action related data (policies, resources, results, etc.). Call ToJson function if you wish the json representation of the data
+func (resultsHandler *ResultsHandler) GetData() *cautils.OPASessionObj {
+	return resultsHandler.scanData
+}
 
-	resultsHandler.printerObj.ActionPrint(opaSessionObj)
+// SetData set scan/action related data
+func (resultsHandler *ResultsHandler) SetData(data *cautils.OPASessionObj) {
+	resultsHandler.scanData = data
+}
 
-	if err := resultsHandler.reporterObj.ActionSendReport(opaSessionObj); err != nil {
+// GetPrinter get printer object
+func (resultsHandler *ResultsHandler) GetPrinter() printer.IPrinter {
+	return resultsHandler.printerObj
+}
+
+// GetReporter get reporter object
+func (resultsHandler *ResultsHandler) GetReporter() reporter.IReport {
+	return resultsHandler.reporterObj
+}
+
+// ToJson return results in json format
+func (resultsHandler *ResultsHandler) ToJson() ([]byte, error) {
+	return json.Marshal(printerv2.DataToJson(resultsHandler.scanData))
+}
+
+// HandleResults handle the scan results according to the pre defind interfaces
+func (resultsHandler *ResultsHandler) HandleResults() {
+
+	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
+
+	if err := resultsHandler.reporterObj.ActionSendReport(resultsHandler.scanData); err != nil {
 		logger.L().Error(err.Error())
 	}
 
-	score := opaSessionObj.Report.SummaryDetails.Score
-	resultsHandler.printerObj.Score(score)
+	resultsHandler.printerObj.Score(resultsHandler.GetRiskScore())
 
-	return score
+	resultsHandler.reporterObj.DisplayReportURL()
 }
 
-// CalculatePostureScore calculate final score
-func CalculatePostureScore(postureReport *reporthandling.PostureReport) float32 {
-	failedResources := []string{}
-	allResources := []string{}
-	for _, frameworkReport := range postureReport.FrameworkReports {
-		failedResources = reporthandling.GetUniqueResourcesIDs(append(failedResources, frameworkReport.ListResourcesIDs().GetFailedResources()...))
-		allResources = reporthandling.GetUniqueResourcesIDs(append(allResources, frameworkReport.ListResourcesIDs().GetAllResources()...))
-	}
-
-	return (float32(len(allResources)) - float32(len(failedResources))) / float32(len(allResources))
-}
-
+// NewPrinter defind output format
 func NewPrinter(printFormat, formatVersion string, verboseMode bool) printer.IPrinter {
 
 	switch printFormat {
