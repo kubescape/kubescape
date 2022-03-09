@@ -23,6 +23,8 @@ type ILogger interface {
 
 	SetWriter(w *os.File)
 	GetWriter() *os.File
+
+	DisableColor(flag bool)
 }
 
 var l ILogger
