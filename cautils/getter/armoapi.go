@@ -21,7 +21,7 @@ import (
 
 var (
 	// ATTENTION!!!
-	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFULL
+	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFUL
 	armoERURL   = "report.armo.cloud"
 	armoBEURL   = "api.armo.cloud"
 	armoFEURL   = "portal.armo.cloud"

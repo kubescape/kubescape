@@ -8,7 +8,7 @@
 * OPA engine: the [OPA](https://github.com/open-policy-agent/opa) rego interpreter 
 * Rules processor: Kubescape component, it enumerates and runs the controls while also preparing the all the input data that the controls need for running
 * Data sources: set of different modules providing data to the Rules processor so it can run the controls with them. Examples: Kubernetes objects, cloud vendor API objects and adding in this proposal the vulnerability infomration
-* Cloud Image Vulnerability adaption interface: the subject of this proposal, it gives a common interface for different registry/vulnerabilty vendors to adapt to.
+* Cloud Image Vulnerability adaption interface: the subject of this proposal, it gives a common interface for different registry/vulnerability vendors to adapt to.
 * CIV adaptors: specific implementation of the CIV interface, example Harbor adaption
 ```
  -----------------------
