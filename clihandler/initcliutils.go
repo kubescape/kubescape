@@ -122,7 +122,7 @@ func policyIdentifierNames(pi []reporthandling.PolicyIdentifier) string {
 	return policiesNames
 }
 
-// setSubmitBehavior - Setup the desired cluster behavior regarding submittion to the Armo BE
+// setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Armo BE
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*

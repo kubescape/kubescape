@@ -12,7 +12,7 @@ type V2ListRequest struct {
 	PageSize *int `json:"pageSize,omitempty"`
 	// One can leave it empty for 0, then call ValidatePageProperties
 	PageNum *int `json:"pageNum,omitempty"`
-	// The time window of the list to return. Default: since - begining og the time, until - now.
+	// The time window of the list to return. Default: since - beginning of the time, until - now.
 	Since *time.Time `json:"since,omitempty"`
 	Until *time.Time `json:"until,omitempty"`
 	// Which elements of the list to return, each field can hold multiple values separated by comma

@@ -81,11 +81,11 @@ func init() {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v1", "Output object can be differnet between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 
 	// hidden flags
-	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemoSet can not run pods on the nodes
+	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
 	// scanCmd.PersistentFlags().MarkHidden("format-version") // meant for testing different output approaches and not for common use
 
-	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valueable data from cluster nodes for certain controls. Yaml file: https://raw.githubusercontent.com/armosec/kubescape/master/hostsensorutils/hostsensor.yaml")
+	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://raw.githubusercontent.com/armosec/kubescape/master/hostsensorutils/hostsensor.yaml")
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 

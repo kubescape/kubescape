@@ -96,14 +96,14 @@ func listImagesTags(k8sResourcesMap *cautils.K8SResources, allResources map[stri
 			if resource, ok := allResources[resources[j]]; ok {
 				if resource.GetObjectType() == workloadinterface.TypeWorkloadObject {
 					workload := workloadinterface.NewWorkloadObj(resource.GetObject())
-					if contianers, err := workload.GetContainers(); err == nil {
-						for i := range contianers {
-							images = append(images, contianers[i].Image)
+					if containers, err := workload.GetContainers(); err == nil {
+						for i := range containers {
+							images = append(images, containers[i].Image)
 						}
 					}
-					if contianers, err := workload.GetInitContainers(); err == nil {
-						for i := range contianers {
-							images = append(images, contianers[i].Image)
+					if containers, err := workload.GetInitContainers(); err == nil {
+						for i := range containers {
+							images = append(images, containers[i].Image)
 						}
 					}
 				}
