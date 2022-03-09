@@ -26,6 +26,10 @@ func (pl *PrettyLogger) GetLevel() string     { return pl.level.String() }
 func (pl *PrettyLogger) SetWriter(w *os.File) { pl.writer = w }
 func (pl *PrettyLogger) GetWriter() *os.File  { return pl.writer }
 
+func (pl *PrettyLogger) DisableColor(flag bool) {
+	DisableColor(flag)
+}
+
 func (pl *PrettyLogger) SetLevel(level string) error {
 	pl.level = helpers.ToLevel(level)
 	if pl.level == helpers.UnknownLevel {

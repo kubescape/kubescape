@@ -56,6 +56,8 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
+	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
+
 }
 
 func initLogger() {
@@ -68,6 +70,9 @@ func initLoggerLevel() {
 	} else if l := os.Getenv("KS_LOGGER"); l != "" {
 		rootInfo.Logger = l
 	}
+
+	logger.L().DisableColor(rootInfo.DisableColor)
+
 	if err := logger.L().SetLevel(rootInfo.Logger); err != nil {
 		logger.L().Fatal(fmt.Sprintf("supported levels: %s", strings.Join(helpers.SupportedLevels(), "/")), helpers.Error(err))
 	}

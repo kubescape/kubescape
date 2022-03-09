@@ -36,6 +36,8 @@ func (zl *ZapLogger) GetLevel() string     { return zl.cfg.Level.Level().String(
 func (zl *ZapLogger) SetWriter(w *os.File) {}
 func (zl *ZapLogger) GetWriter() *os.File  { return nil }
 
+func (zl *ZapLogger) DisableColor(flag bool) {}
+
 func (zl *ZapLogger) SetLevel(level string) error {
 	l := zapcore.Level(1)
 	err := l.Set(level)
