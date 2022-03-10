@@ -84,7 +84,8 @@ type LocalConfig struct {
 	configObj  *ConfigObj
 }
 
-func NewLocalConfig(backendAPI getter.IBackend, customerGUID, clusterName string) *LocalConfig {
+func NewLocalConfig(
+	backendAPI getter.IBackend, customerGUID, clusterName string) *LocalConfig {
 	var configObj *ConfigObj
 
 	lc := &LocalConfig{
@@ -320,27 +321,6 @@ func GetValueFromConfigJson(key string) (string, error) {
 	} else {
 		return "", fmt.Errorf("value does not exist")
 	}
-
-}
-
-func SetKeyValueInConfigJson(key string, value string) error {
-	data, err := os.ReadFile(ConfigFileFullPath())
-	if err != nil {
-		return err
-	}
-	var obj map[string]interface{}
-	err = json.Unmarshal(data, &obj)
-
-	if err != nil {
-		return err
-	}
-	obj[key] = value
-	newData, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(ConfigFileFullPath(), newData, 0664)
 
 }
 

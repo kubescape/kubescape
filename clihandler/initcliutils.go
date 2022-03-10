@@ -48,9 +48,9 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(tenantConfig cautils.ITenantConfig, submit, fwScan, clusterScan bool) reporter.IReport {
+func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan, clusterScan bool) reporter.IReport {
 	if submit && clusterScan {
-		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj())
+		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID)
 	}
 	if tenantConfig.GetAccountID() == "" && fwScan && clusterScan {
 		// Add link only when scanning a cluster using a framework

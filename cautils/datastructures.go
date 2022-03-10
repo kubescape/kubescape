@@ -13,11 +13,11 @@ type K8SResources map[string][]string
 
 type OPASessionObj struct {
 	K8SResources    *K8SResources                          // input k8s objects
-	Frameworks      []reporthandling.Framework             // list of frameworks to scan
+	Policies        []reporthandling.Framework             // list of frameworks to scan
 	AllResources    map[string]workloadinterface.IMetadata // all scanned resources, map[<rtesource ID>]<resource>
 	ResourcesResult map[string]resourcesresults.Result     // resources scan results, map[<rtesource ID>]<resource result>
-	PostureReport   *reporthandling.PostureReport          // scan results v1
-	Report          *reporthandlingv2.PostureReport        // scan results v2
+	PostureReport   *reporthandling.PostureReport          // scan results v1 - Remove
+	Report          *reporthandlingv2.PostureReport        // scan results v2 - Remove
 	Exceptions      []armotypes.PostureExceptionPolicy     // list of exceptions to apply on scan results
 	RegoInputData   RegoInputData                          // input passed to rgo for scanning. map[<control name>][<input arguments>]
 }
@@ -25,7 +25,7 @@ type OPASessionObj struct {
 func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources) *OPASessionObj {
 	return &OPASessionObj{
 		Report:          &reporthandlingv2.PostureReport{},
-		Frameworks:      frameworks,
+		Policies:        frameworks,
 		K8SResources:    k8sResources,
 		AllResources:    make(map[string]workloadinterface.IMetadata),
 		ResourcesResult: make(map[string]resourcesresults.Result),
@@ -38,7 +38,7 @@ func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SRe
 
 func NewOPASessionObjMock() *OPASessionObj {
 	return &OPASessionObj{
-		Frameworks:      nil,
+		Policies:        nil,
 		K8SResources:    nil,
 		AllResources:    make(map[string]workloadinterface.IMetadata),
 		ResourcesResult: make(map[string]resourcesresults.Result),

@@ -1,12 +1,10 @@
-package cmd
+package scan
 
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
 	"github.com/spf13/cobra"
 )
-
-var scanInfo cautils.ScanInfo
 
 var scanCmdExamples = `
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defind frameworks 
@@ -28,38 +26,39 @@ var scanCmdExamples = `
   
 `
 
-// scanCmd represents the scan command
-var scanCmd = &cobra.Command{
-	Use:     "scan",
-	Short:   "Scan the current running cluster or yaml files",
-	Long:    `The action you want to perform`,
-	Example: scanCmdExamples,
-	Args: func(cmd *cobra.Command, args []string) error {
-		if len(args) > 0 {
-			if args[0] != "framework" && args[0] != "control" {
-				scanInfo.ScanAll = true
-				return frameworkCmd.RunE(cmd, append([]string{"all"}, args...))
+func GetScanCommand() *cobra.Command {
+	var scanInfo cautils.ScanInfo
+
+	// scanCmd represents the scan command
+	scanCmd := &cobra.Command{
+		Use:     "scan",
+		Short:   "Scan the current running cluster or yaml files",
+		Long:    `The action you want to perform`,
+		Example: scanCmdExamples,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				if args[0] != "framework" && args[0] != "control" {
+					scanInfo.ScanAll = true
+					return getFrameworkCmd(&scanInfo).RunE(cmd, append([]string{"all"}, args...))
+				}
 			}
-		}
-		return nil
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		if len(args) == 0 {
-			scanInfo.ScanAll = true
-			return frameworkCmd.RunE(cmd, []string{"all"})
-		}
-		return nil
-	},
-}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
 
-func frameworkInitConfig() {
-	k8sinterface.SetClusterContextName(scanInfo.KubeContext)
-}
-func init() {
-
-	cobra.OnInitialize(frameworkInitConfig)
-
-	rootCmd.AddCommand(scanCmd)
+			if len(args) == 0 {
+				scanInfo.ScanAll = true
+				return getFrameworkCmd(&scanInfo).RunE(cmd, []string{"all"})
+			}
+			return nil
+		},
+		PreRun: func(cmd *cobra.Command, args []string) {
+			k8sinterface.SetClusterContextName(scanInfo.KubeContext)
+		},
+		PostRun: func(cmd *cobra.Command, args []string) {
+			// TODO - revert context
+		},
+	}
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Account, "account", "", "", "ARMO portal account ID. Default will load account ID from configMap or config file")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
@@ -80,6 +79,9 @@ func init() {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host sensor DaemonSet. Use this flag cautiously")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v1", "Output object can be differnet between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 
+	// Deprecated flags - remove 1.May.2022
+	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
+
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
@@ -89,4 +91,8 @@ func init() {
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 
+	scanCmd.AddCommand(getControlCmd(&scanInfo))
+	scanCmd.AddCommand(getFrameworkCmd(&scanInfo))
+
+	return scanCmd
 }

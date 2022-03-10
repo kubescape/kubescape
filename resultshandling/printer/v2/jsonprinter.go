@@ -27,8 +27,7 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	finalizeJson(opaSessionObj)
-	r, err := json.Marshal(opaSessionObj.Report)
+	r, err := json.Marshal(DataToJson(opaSessionObj))
 	if err != nil {
 		logger.L().Fatal("failed to Marshal posture report object")
 	}

@@ -1,4 +1,4 @@
-package cmd
+package download
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ var (
 	downloadExample = `
   # Download all artifacts and save them in the default path (~/.kubescape)
   kubescape download artifacts
-  
+  download
   # Download all artifacts and save them in /tmp path
   kubescape download artifacts --output /tmp
   
@@ -38,44 +38,40 @@ var (
 
 `
 )
-var downloadCmd = &cobra.Command{
-	Use:     "download <policy> <policy name>",
-	Short:   fmt.Sprintf("Download %s", strings.Join(clihandler.DownloadSupportCommands(), ",")),
-	Long:    ``,
-	Example: downloadExample,
-	Args: func(cmd *cobra.Command, args []string) error {
-		supported := strings.Join(clihandler.DownloadSupportCommands(), ",")
-		if len(args) < 1 {
-			return fmt.Errorf("policy type required, supported: %v", supported)
-		}
-		if cautils.StringInSlice(clihandler.DownloadSupportCommands(), args[0]) == cautils.ValueNotFound {
-			return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
-		}
-		return nil
-	},
-	RunE: func(cmd *cobra.Command, args []string) error {
-		downloadInfo.Target = args[0]
-		if len(args) >= 2 {
-			downloadInfo.Name = args[1]
-		}
-		if err := clihandler.CliDownload(&downloadInfo); err != nil {
-			logger.L().Fatal(err.Error())
-		}
-		return nil
-	},
-}
 
-func init() {
-	cobra.OnInitialize(initDownload)
+func GeDownloadCmd() *cobra.Command {
+	downloadCmd := &cobra.Command{
+		Use:     "download <policy> <policy name>",
+		Short:   fmt.Sprintf("Download %s", strings.Join(clihandler.DownloadSupportCommands(), ",")),
+		Long:    ``,
+		Example: downloadExample,
+		Args: func(cmd *cobra.Command, args []string) error {
+			supported := strings.Join(clihandler.DownloadSupportCommands(), ",")
+			if len(args) < 1 {
+				return fmt.Errorf("policy type required, supported: %v", supported)
+			}
+			if cautils.StringInSlice(clihandler.DownloadSupportCommands(), args[0]) == cautils.ValueNotFound {
+				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
+			}
+			return nil
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
 
-	rootCmd.AddCommand(downloadCmd)
+			if filepath.Ext(downloadInfo.Path) == ".json" {
+				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
+			}
+			downloadInfo.Target = args[0]
+			if len(args) >= 2 {
+				downloadInfo.Name = args[1]
+			}
+			if err := clihandler.CliDownload(&downloadInfo); err != nil {
+				logger.L().Fatal(err.Error())
+			}
+			return nil
+		},
+	}
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
-}
-
-func initDownload() {
-	if filepath.Ext(downloadInfo.Path) == ".json" {
-		downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
-	}
+	return downloadCmd
 }

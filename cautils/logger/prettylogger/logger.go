@@ -8,6 +8,8 @@ import (
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 )
 
+const LoggerName string = "pretty"
+
 type PrettyLogger struct {
 	writer *os.File
 	level  helpers.Level
@@ -15,6 +17,7 @@ type PrettyLogger struct {
 }
 
 func NewPrettyLogger() *PrettyLogger {
+
 	return &PrettyLogger{
 		writer: os.Stderr, // default to stderr
 		level:  helpers.InfoLevel,
@@ -25,10 +28,7 @@ func NewPrettyLogger() *PrettyLogger {
 func (pl *PrettyLogger) GetLevel() string     { return pl.level.String() }
 func (pl *PrettyLogger) SetWriter(w *os.File) { pl.writer = w }
 func (pl *PrettyLogger) GetWriter() *os.File  { return pl.writer }
-
-func (pl *PrettyLogger) DisableColor(flag bool) {
-	DisableColor(flag)
-}
+func (pl *PrettyLogger) LoggerName() string   { return LoggerName }
 
 func (pl *PrettyLogger) SetLevel(level string) error {
 	pl.level = helpers.ToLevel(level)
@@ -73,7 +73,7 @@ func (pl *PrettyLogger) print(level helpers.Level, msg string, details ...helper
 func detailsToString(details []helpers.IDetails) string {
 	s := ""
 	for i := range details {
-		s += fmt.Sprintf("%s: %s", details[i].Key(), details[i].Value())
+		s += fmt.Sprintf("%s: %v", details[i].Key(), details[i].Value())
 		if i < len(details)-1 {
 			s += "; "
 		}

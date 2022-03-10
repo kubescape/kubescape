@@ -15,7 +15,6 @@ import (
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/open-policy-agent/opa/storage"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 
 	"github.com/armosec/opa-utils/resources"
@@ -25,59 +24,37 @@ import (
 
 const ScoreConfigPath = "/resources/config"
 
-type OPAProcessorHandler struct {
-	processedPolicy      *chan *cautils.OPASessionObj
-	reportResults        *chan *cautils.OPASessionObj
-	regoDependenciesData *resources.RegoDependenciesData
-}
-
 type OPAProcessor struct {
-	*cautils.OPASessionObj
 	regoDependenciesData *resources.RegoDependenciesData
+	*cautils.OPASessionObj
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData) *OPAProcessor {
-	if regoDependenciesData != nil && sessionObj != nil {
-		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
-	}
 	return &OPAProcessor{
 		OPASessionObj:        sessionObj,
 		regoDependenciesData: regoDependenciesData,
 	}
 }
+func (opap *OPAProcessor) ProcessRulesListenner() error {
 
-func NewOPAProcessorHandler(processedPolicy, reportResults *chan *cautils.OPASessionObj) *OPAProcessorHandler {
-	return &OPAProcessorHandler{
-		processedPolicy:      processedPolicy,
-		reportResults:        reportResults,
-		regoDependenciesData: resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), cautils.ClusterName),
+	policies := ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
+
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, policies)
+
+	// process
+	if err := opap.Process(policies); err != nil {
+		logger.L().Error(err.Error())
+		// Return error?
 	}
-}
 
-func (opaHandler *OPAProcessorHandler) ProcessRulesListenner() {
+	// edit results
+	opap.updateResults()
 
-	for {
-		opaSessionObj := <-*opaHandler.processedPolicy
-		opap := NewOPAProcessor(opaSessionObj, opaHandler.regoDependenciesData)
+	//TODO: review this location
+	scorewrapper := ksscore.NewScoreWrapper(opap.OPASessionObj)
+	scorewrapper.Calculate(ksscore.EPostureReportV2)
 
-		policies := ConvertFrameworksToPolicies(opap.Frameworks, cautils.BuildNumber)
-
-		ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Frameworks, policies)
-
-		// process
-		if err := opap.Process(policies); err != nil {
-			logger.L().Error(err.Error())
-		}
-
-		// edit results
-		opap.updateResults()
-
-		//TODO: review this location
-		scorewrapper := ksscore.NewScoreWrapper(opaSessionObj)
-		scorewrapper.Calculate(ksscore.EPostureReportV2)
-		// report
-		*opaHandler.reportResults <- opaSessionObj
-	}
+	return nil
 }
 
 func (opap *OPAProcessor) Process(policies *cautils.Policies) error {

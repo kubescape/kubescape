@@ -9,6 +9,15 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/clihandler/cmd/completion"
+	"github.com/armosec/kubescape/clihandler/cmd/config"
+	"github.com/armosec/kubescape/clihandler/cmd/delete"
+	"github.com/armosec/kubescape/clihandler/cmd/download"
+	"github.com/armosec/kubescape/clihandler/cmd/list"
+	"github.com/armosec/kubescape/clihandler/cmd/scan"
+	"github.com/armosec/kubescape/clihandler/cmd/submit"
+	"github.com/armosec/kubescape/clihandler/cmd/version"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -45,7 +54,6 @@ func Execute() {
 }
 
 func init() {
-
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
 	rootCmd.PersistentFlags().StringVar(&armoBEURLsDep, "environment", "", envFlagUsage)
@@ -54,16 +62,40 @@ func init() {
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
 
+	rootCmd.PersistentFlags().StringVar(&rootInfo.LoggerName, "logger-name", "", fmt.Sprintf("Logger name. Supported: %s [$KS_LOGGER_NAME]", strings.Join(logger.ListLoggersNames(), "/")))
+	rootCmd.PersistentFlags().MarkHidden("logger-name")
+
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
 
+	rootCmd.AddCommand(scan.GetScanCommand())
+	rootCmd.AddCommand(download.GeDownloadCmd())
+	rootCmd.AddCommand(delete.GetDeleteCmd())
+	rootCmd.AddCommand(list.GetListCmd())
+	rootCmd.AddCommand(submit.GetSubmitCmd())
+	rootCmd.AddCommand(completion.GetCompletionCmd())
+	rootCmd.AddCommand(version.GetVersionCmd())
+	rootCmd.AddCommand(config.GetConfigCmd())
 }
 
 func initLogger() {
-	if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
-		logger.InitializeLogger(l)
+	logger.DisableColor(rootInfo.DisableColor)
+
+	if rootInfo.LoggerName == "" {
+		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
+			rootInfo.LoggerName = l
+		} else {
+			if isatty.IsTerminal(os.Stdout.Fd()) {
+				rootInfo.LoggerName = "pretty"
+			} else {
+				rootInfo.LoggerName = "zap"
+			}
+		}
 	}
+
+	logger.InitLogger(rootInfo.LoggerName)
+
 }
 func initLoggerLevel() {
 	if rootInfo.Logger != helpers.InfoLevel.String() {
@@ -71,20 +103,18 @@ func initLoggerLevel() {
 		rootInfo.Logger = l
 	}
 
-	logger.L().DisableColor(rootInfo.DisableColor)
-
 	if err := logger.L().SetLevel(rootInfo.Logger); err != nil {
 		logger.L().Fatal(fmt.Sprintf("supported levels: %s", strings.Join(helpers.SupportedLevels(), "/")), helpers.Error(err))
 	}
 }
 
 func initCacheDir() {
-	if rootInfo.CacheDir != getter.DefaultLocalStore {
+	if rootInfo.CacheDir == getter.DefaultLocalStore {
 		getter.DefaultLocalStore = rootInfo.CacheDir
 	} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
 		getter.DefaultLocalStore = cacheDir
 	} else {
-		return // using default cache di location
+		return // using default cache dir location
 	}
 
 	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))

@@ -55,6 +55,7 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 
 type RootInfo struct {
 	Logger       string // logger level
+	LoggerName   string // logger name ("pretty"/"zap"/"none")
 	CacheDir     string // cached dir
 	DisableColor bool   // Disable Color
 }
@@ -77,6 +78,7 @@ type ScanInfo struct {
 	Silent             bool        // Silent mode - Do not print progress logs
 	FailThreshold      float32     // Failure score threshold
 	Submit             bool        // Submit results to Armo BE
+	ReportID           string      // Report id of the current scan
 	HostSensorEnabled  BoolPtrFlag // Deploy ARMO K8s host sensor to collect data from certain controls
 	HostSensorYamlPath string      // Path to hostsensor file
 	Local              bool        // Do not submit results

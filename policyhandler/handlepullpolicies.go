@@ -12,15 +12,15 @@ import (
 func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification, policiesAndResources *cautils.OPASessionObj) error {
 	logger.L().Info("Downloading/Loading policy definitions")
 
-	frameworks, err := policyHandler.getScanPolicies(notification)
+	policies, err := policyHandler.getScanPolicies(notification)
 	if err != nil {
 		return err
 	}
-	if len(frameworks) == 0 {
+	if len(policies) == 0 {
 		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(notification.Rules), ", "))
 	}
 
-	policiesAndResources.Frameworks = frameworks
+	policiesAndResources.Policies = policies
 
 	// get exceptions
 	exceptionPolicies, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.ClusterName)

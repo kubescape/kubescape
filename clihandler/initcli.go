@@ -20,6 +20,7 @@ import (
 	"github.com/armosec/kubescape/resultshandling"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/resources"
 	"github.com/mattn/go-isatty"
 )
 
@@ -87,7 +88,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(tenantConfig, scanInfo.Submit, scanInfo.FrameworkScan, len(scanInfo.InputPatterns) == 0)
+	reportHandler := getReporter(tenantConfig, scanInfo.ReportID, scanInfo.Submit, scanInfo.FrameworkScan, len(scanInfo.InputPatterns) == 0)
 
 	// setup printer
 	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.FormatVersion, scanInfo.VerboseMode)
@@ -104,14 +105,13 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	}
 }
 
-func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
+func Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	logger.L().Info("ARMO security scanner starting")
 
-	interfaces := getInterfaces(scanInfo)
-	// setPolicyGetter(scanInfo, interfaces.clusterConfig.GetCustomerGUID())
+	// ===================== Initialization =====================
+	scanInfo.Init() // initialize scan info
 
-	processNotification := make(chan *cautils.OPASessionObj)
-	reportResults := make(chan *cautils.OPASessionObj)
+	interfaces := getInterfaces(scanInfo)
 
 	cautils.ClusterName = interfaces.tenantConfig.GetClusterName() // TODO - Deprecated
 	cautils.CustomerGUID = interfaces.tenantConfig.GetAccountID()  // TODO - Deprecated
@@ -130,43 +130,41 @@ func ScanCliSetup(scanInfo *cautils.ScanInfo) error {
 		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.Getters.PolicyGetter), reporthandling.KindFramework)
 	}
 
-	//
+	// remove host scanner components
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
 			logger.L().Error("failed to tear down host sensor", helpers.Error(err))
 		}
 	}()
 
-	// cli handler setup
-	go func() {
-		// policy handler setup
-		policyHandler := policyhandler.NewPolicyHandler(&processNotification, interfaces.resourceHandler)
+	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.printerHandler)
 
-		if err := Scan(policyHandler, scanInfo); err != nil {
-			logger.L().Fatal(err.Error())
-		}
-	}()
-
-	// processor setup - rego run
-	go func() {
-		opaprocessorObj := opaprocessor.NewOPAProcessorHandler(&processNotification, &reportResults)
-		opaprocessorObj.ProcessRulesListenner()
-	}()
-
-	resultsHandling := resultshandling.NewResultsHandler(&reportResults, interfaces.report, interfaces.printerHandler)
-	score := resultsHandling.HandleResults(scanInfo)
-
-	// print report url
-	interfaces.report.DisplayReportURL()
-
-	if score > float32(scanInfo.FailThreshold) {
-		return fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", score, scanInfo.FailThreshold)
+	// ===================== policies & resources =====================
+	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
+	scanData, err := CollectResources(policyHandler, scanInfo)
+	if err != nil {
+		return resultsHandling, err
 	}
 
-	return nil
+	// ========================= opa testing =====================
+	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetClusterName())
+	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
+	if err := reportResults.ProcessRulesListenner(); err != nil {
+		// TODO - do something
+		return resultsHandling, err
+	}
+
+	// ========================= results handling =====================
+	resultsHandling.SetData(scanData)
+
+	// if resultsHandling.GetRiskScore() > float32(scanInfo.FailThreshold) {
+	// 	return resultsHandling, fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", resultsHandling.GetRiskScore(), scanInfo.FailThreshold)
+	// }
+
+	return resultsHandling, nil
 }
 
-func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) error {
+func CollectResources(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
 	policyNotification := &reporthandling.PolicyNotification{
 		Rules: scanInfo.PolicyIdentifier,
 		KubescapeNotification: reporthandling.KubescapeNotification{
@@ -176,14 +174,16 @@ func Scan(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo
 	}
 	switch policyNotification.KubescapeNotification.NotificationType {
 	case reporthandling.TypeExecPostureScan:
-		if err := policyHandler.HandleNotificationRequest(policyNotification, scanInfo); err != nil {
-			return err
+		collectedResources, err := policyHandler.CollectResources(policyNotification, scanInfo)
+		if err != nil {
+			return nil, err
 		}
+		return collectedResources, nil
 
 	default:
-		return fmt.Errorf("notification type '%s' Unknown", policyNotification.KubescapeNotification.NotificationType)
+		return nil, fmt.Errorf("notification type '%s' Unknown", policyNotification.KubescapeNotification.NotificationType)
 	}
-	return nil
+	return nil, nil
 }
 
 func askUserForHostSensor() bool {

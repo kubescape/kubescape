@@ -7,20 +7,28 @@ import (
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
 // finalizeV2Report finalize the results objects by copying data from map to lists
-func finalizeJson(opaSessionObj *cautils.OPASessionObj) {
-	if len(opaSessionObj.Report.Results) == 0 {
-		opaSessionObj.Report.Results = make([]resourcesresults.Result, len(opaSessionObj.ResourcesResult))
-		finalizeResults(opaSessionObj.Report.Results, opaSessionObj.ResourcesResult)
+func DataToJson(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
+	report := reporthandlingv2.PostureReport{
+		SummaryDetails:       data.Report.SummaryDetails,
+		ClusterAPIServerInfo: data.Report.ClusterAPIServerInfo,
+		ReportGenerationTime: data.Report.ReportGenerationTime,
+		Attributes:           data.Report.Attributes,
+		ClusterName:          data.Report.ClusterName,
+		CustomerGUID:         data.Report.CustomerGUID,
+		ClusterCloudProvider: data.Report.ClusterCloudProvider,
 	}
 
-	if len(opaSessionObj.Report.Resources) == 0 {
-		opaSessionObj.Report.Resources = make([]reporthandling.Resource, len(opaSessionObj.AllResources))
-		finalizeResources(opaSessionObj.Report.Resources, opaSessionObj.Report.Results, opaSessionObj.AllResources)
-	}
+	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
+	finalizeResults(report.Results, data.ResourcesResult)
 
+	report.Resources = make([]reporthandling.Resource, len(data.AllResources))
+	finalizeResources(report.Resources, report.Results, data.AllResources)
+
+	return &report
 }
 func finalizeResults(results []resourcesresults.Result, resourcesResult map[string]resourcesresults.Result) {
 	index := 0
