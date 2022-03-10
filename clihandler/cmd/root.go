@@ -9,6 +9,14 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/clihandler/cmd/completion"
+	"github.com/armosec/kubescape/clihandler/cmd/config"
+	"github.com/armosec/kubescape/clihandler/cmd/delete"
+	"github.com/armosec/kubescape/clihandler/cmd/download"
+	"github.com/armosec/kubescape/clihandler/cmd/list"
+	"github.com/armosec/kubescape/clihandler/cmd/scan"
+	"github.com/armosec/kubescape/clihandler/cmd/submit"
+	"github.com/armosec/kubescape/clihandler/cmd/version"
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
@@ -47,6 +55,15 @@ func Execute() {
 
 func init() {
 
+	rootCmd.AddCommand(scan.GetScanCommand())
+	rootCmd.AddCommand(download.GeDownloadCmd())
+	rootCmd.AddCommand(delete.GetDeleteCmd())
+	rootCmd.AddCommand(list.GetListCmd())
+	rootCmd.AddCommand(submit.GetSubmitCmd())
+	rootCmd.AddCommand(completion.GetCompletionCmd())
+	rootCmd.AddCommand(version.GetVersionCmd())
+	rootCmd.AddCommand(config.GetConfigCmd())
+
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
 	rootCmd.PersistentFlags().StringVar(&armoBEURLsDep, "environment", "", envFlagUsage)
@@ -55,7 +72,7 @@ func init() {
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
 
-	rootCmd.PersistentFlags().StringVarP(&rootInfo.LoggerName, "logger-name", "l", "", fmt.Sprintf("Logger name. Supported: %s [$KS_LOGGER_NAME]", strings.Join(logger.ListLoggersNames(), "/")))
+	rootCmd.PersistentFlags().StringVar(&rootInfo.LoggerName, "logger-name", "", fmt.Sprintf("Logger name. Supported: %s [$KS_LOGGER_NAME]", strings.Join(logger.ListLoggersNames(), "/")))
 	rootCmd.PersistentFlags().MarkHidden("logger-name")
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
