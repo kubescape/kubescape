@@ -55,6 +55,7 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 
 type RootInfo struct {
 	Logger       string // logger level
+	LoggerName   string // logger name ("pretty"/"zap"/"none")
 	CacheDir     string // cached dir
 	DisableColor bool   // Disable Color
 }

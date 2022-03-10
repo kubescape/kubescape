@@ -9,6 +9,7 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
 )
 
@@ -54,6 +55,9 @@ func init() {
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
 
+	rootCmd.PersistentFlags().StringVarP(&rootInfo.LoggerName, "logger-name", "l", "", fmt.Sprintf("Logger name. Supported: %s [$KS_LOGGER_NAME]", strings.Join(logger.ListLoggersNames(), "/")))
+	rootCmd.PersistentFlags().MarkHidden("logger-name")
+
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
@@ -61,9 +65,22 @@ func init() {
 }
 
 func initLogger() {
-	if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
-		logger.InitializeLogger(l)
+	logger.DisableColor(rootInfo.DisableColor)
+
+	if rootInfo.LoggerName == "" {
+		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
+			rootInfo.LoggerName = l
+		} else {
+			if isatty.IsTerminal(os.Stdout.Fd()) {
+				rootInfo.LoggerName = "pretty"
+			} else {
+				rootInfo.LoggerName = "zap"
+			}
+		}
 	}
+
+	logger.InitLogger(rootInfo.LoggerName)
+
 }
 func initLoggerLevel() {
 	if rootInfo.Logger != helpers.InfoLevel.String() {
@@ -71,20 +88,18 @@ func initLoggerLevel() {
 		rootInfo.Logger = l
 	}
 
-	logger.L().DisableColor(rootInfo.DisableColor)
-
 	if err := logger.L().SetLevel(rootInfo.Logger); err != nil {
 		logger.L().Fatal(fmt.Sprintf("supported levels: %s", strings.Join(helpers.SupportedLevels(), "/")), helpers.Error(err))
 	}
 }
 
 func initCacheDir() {
-	if rootInfo.CacheDir != getter.DefaultLocalStore {
+	if rootInfo.CacheDir == getter.DefaultLocalStore {
 		getter.DefaultLocalStore = rootInfo.CacheDir
 	} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
 		getter.DefaultLocalStore = cacheDir
 	} else {
-		return // using default cache di location
+		return // using default cache dir location
 	}
 
 	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))

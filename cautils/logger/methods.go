@@ -5,10 +5,9 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	"github.com/armosec/kubescape/cautils/logger/mocklogger"
+	"github.com/armosec/kubescape/cautils/logger/nonelogger"
 	"github.com/armosec/kubescape/cautils/logger/prettylogger"
 	"github.com/armosec/kubescape/cautils/logger/zaplogger"
-	"github.com/mattn/go-isatty"
 )
 
 type ILogger interface {
@@ -25,7 +24,7 @@ type ILogger interface {
 	SetWriter(w *os.File)
 	GetWriter() *os.File
 
-	DisableColor(flag bool)
+	LoggerName() string
 }
 
 var l ILogger
@@ -33,45 +32,50 @@ var l ILogger
 // Return initialized logger. If logger not initialized, will call InitializeLogger() with the default value
 func L() ILogger {
 	if l == nil {
-		InitializeLogger("")
+		InitDefaultLogger()
 	}
 	return l
 }
 
-/* InitializeLogger initialize desired logger
+/* InitLogger initialize desired logger
 
 Use:
-InitializeLogger("<logger name>")
+InitLogger("<logger name>")
 
-Supported logger names
+Supported logger names (call ListLoggersNames() for listing supported loggers)
 - "zap": Logger from package "go.uber.org/zap"
 - "pretty", "colorful": Human friendly colorful logger
-- "mock", "empty", "ignore": Logger will be totally ignored
-
-e.g.
-InitializeLogger("mock") -> will initialize the mock logger
+- "none", "mock", "empty", "ignore": Logger will not print anything
 
 Default:
-If isatty.IsTerminal(os.Stdout.Fd()):
-	"pretty"
-else
-	"zap"
+- "pretty"
+
+e.g.
+InitLogger("none") -> will initialize the mock logger
 
 */
-func InitializeLogger(loggerName string) {
+func InitLogger(loggerName string) {
 
 	switch strings.ToLower(loggerName) {
-	case "zap":
+	case zaplogger.LoggerName:
 		l = zaplogger.NewZapLogger()
-	case "pretty", "colorful":
+	case prettylogger.LoggerName, "colorful":
 		l = prettylogger.NewPrettyLogger()
-	case "mock", "empty", "ignore":
-		l = mocklogger.NewMockLogger()
+	case nonelogger.LoggerName, "mock", "empty", "ignore":
+		l = nonelogger.NewNoneLogger()
 	default:
-		if isatty.IsTerminal(os.Stdout.Fd()) {
-			l = prettylogger.NewPrettyLogger()
-		} else {
-			l = zaplogger.NewZapLogger()
-		}
+		InitDefaultLogger()
 	}
+}
+
+func InitDefaultLogger() {
+	l = prettylogger.NewPrettyLogger()
+}
+
+func DisableColor(flag bool) {
+	prettylogger.DisableColor(flag)
+}
+
+func ListLoggersNames() []string {
+	return []string{prettylogger.LoggerName, zaplogger.LoggerName, nonelogger.LoggerName}
 }
