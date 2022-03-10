@@ -8,13 +8,14 @@ import (
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
+	"github.com/armosec/kubescape/clihandler/cliobjects"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/spf13/cobra"
 )
 
 // getRBACCmd represents the RBAC command
-func getRBACCmd() *cobra.Command {
+func getRBACCmd(submitInfo *cliobjects.Submit) *cobra.Command {
 	return &cobra.Command{
 		Use:   "rbac \nExample:\n$ kubescape submit rbac",
 		Short: "Submit cluster's Role-Based Access Control(RBAC)",

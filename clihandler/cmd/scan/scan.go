@@ -39,7 +39,7 @@ func GetScanCommand() *cobra.Command {
 			if len(args) > 0 {
 				if args[0] != "framework" && args[0] != "control" {
 					scanInfo.ScanAll = true
-					return getFrameworkCmd().RunE(cmd, append([]string{"all"}, args...))
+					return getFrameworkCmd(&scanInfo).RunE(cmd, append([]string{"all"}, args...))
 				}
 			}
 			return nil
@@ -48,7 +48,7 @@ func GetScanCommand() *cobra.Command {
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
-				return getFrameworkCmd().RunE(cmd, []string{"all"})
+				return getFrameworkCmd(&scanInfo).RunE(cmd, []string{"all"})
 			}
 			return nil
 		},
@@ -56,7 +56,7 @@ func GetScanCommand() *cobra.Command {
 			k8sinterface.SetClusterContextName(scanInfo.KubeContext)
 		},
 		PostRun: func(cmd *cobra.Command, args []string) {
-			k8sinterface.SetClusterContextName(scanInfo.KubeContext)
+			// TODO - revert context
 		},
 	}
 
@@ -91,8 +91,8 @@ func GetScanCommand() *cobra.Command {
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 
-	scanCmd.AddCommand(getControlCmd())
-	scanCmd.AddCommand(getFrameworkCmd())
+	scanCmd.AddCommand(getControlCmd(&scanInfo))
+	scanCmd.AddCommand(getFrameworkCmd(&scanInfo))
 
 	return scanCmd
 }

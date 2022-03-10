@@ -34,7 +34,7 @@ var (
 `
 )
 
-func getFrameworkCmd() *cobra.Command {
+func getFrameworkCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 
 	return &cobra.Command{
 		Use:     "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
@@ -57,9 +57,8 @@ func getFrameworkCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var scanInfo cautils.ScanInfo
 
-			flagValidationFramework(&scanInfo)
+			flagValidationFramework(scanInfo)
 			scanInfo.FrameworkScan = true
 
 			var frameworks []string
@@ -94,7 +93,7 @@ func getFrameworkCmd() *cobra.Command {
 
 			scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
 
-			results, err := clihandler.Scan(&scanInfo)
+			results, err := clihandler.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}

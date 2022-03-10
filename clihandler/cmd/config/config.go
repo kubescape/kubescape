@@ -38,7 +38,7 @@ func GetConfigCmd() *cobra.Command {
 
 	configCmd.AddCommand(getDeleteCmd())
 	configCmd.AddCommand(getSetCmd())
-	configCmd.AddCommand(getSetCmd())
+	configCmd.AddCommand(getViewCmd())
 
 	return configCmd
 }

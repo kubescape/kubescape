@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/clihandler"
 	"github.com/armosec/kubescape/clihandler/cliinterfaces"
+	"github.com/armosec/kubescape/clihandler/cliobjects"
 	"github.com/armosec/kubescape/resultshandling/reporter"
 	reporterv1 "github.com/armosec/kubescape/resultshandling/reporter/v1"
 	reporterv2 "github.com/armosec/kubescape/resultshandling/reporter/v2"
@@ -54,7 +55,7 @@ func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinter
 	return map[string]workloadinterface.IMetadata{}, nil
 }
 
-func getResultsCmd() *cobra.Command {
+func getResultsCmd(submitInfo *cliobjects.Submit) *cobra.Command {
 	var resultsCmd = &cobra.Command{
 		Use:   "results <json file>\nExample:\n$ kubescape submit results path/to/results.json --format-version v2",
 		Short: "Submit a pre scanned results file. The file must be in json format",

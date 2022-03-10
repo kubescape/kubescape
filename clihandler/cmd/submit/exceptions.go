@@ -5,10 +5,11 @@ import (
 
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/clihandler"
+	"github.com/armosec/kubescape/clihandler/cliobjects"
 	"github.com/spf13/cobra"
 )
 
-func getExceptionsCmd() *cobra.Command {
+func getExceptionsCmd(submitInfo *cliobjects.Submit) *cobra.Command {
 	return &cobra.Command{
 		Use:   "exceptions <full path to exceptins file>",
 		Short: "Submit exceptions to the Kubescape SaaS version",

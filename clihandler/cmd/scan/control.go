@@ -32,7 +32,7 @@ var (
 )
 
 // controlCmd represents the control command
-func getControlCmd() *cobra.Command {
+func getControlCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 	return &cobra.Command{
 		Use:     "control <control names list>/<control ids list>",
 		Short:   "The controls you wish to use. Run 'kubescape list controls' for the list of supported controls",
@@ -53,7 +53,6 @@ func getControlCmd() *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var scanInfo cautils.ScanInfo
 
 			// flagValidationControl(scanInfo)
 			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
@@ -85,7 +84,7 @@ func getControlCmd() *cobra.Command {
 
 			scanInfo.FrameworkScan = false
 
-			results, err := clihandler.Scan(&scanInfo)
+			results, err := clihandler.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}

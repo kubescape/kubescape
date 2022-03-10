@@ -54,16 +54,6 @@ func Execute() {
 }
 
 func init() {
-
-	rootCmd.AddCommand(scan.GetScanCommand())
-	rootCmd.AddCommand(download.GeDownloadCmd())
-	rootCmd.AddCommand(delete.GetDeleteCmd())
-	rootCmd.AddCommand(list.GetListCmd())
-	rootCmd.AddCommand(submit.GetSubmitCmd())
-	rootCmd.AddCommand(completion.GetCompletionCmd())
-	rootCmd.AddCommand(version.GetVersionCmd())
-	rootCmd.AddCommand(config.GetConfigCmd())
-
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
 	rootCmd.PersistentFlags().StringVar(&armoBEURLsDep, "environment", "", envFlagUsage)
@@ -79,6 +69,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
 
+	rootCmd.AddCommand(scan.GetScanCommand())
+	rootCmd.AddCommand(download.GeDownloadCmd())
+	rootCmd.AddCommand(delete.GetDeleteCmd())
+	rootCmd.AddCommand(list.GetListCmd())
+	rootCmd.AddCommand(submit.GetSubmitCmd())
+	rootCmd.AddCommand(completion.GetCompletionCmd())
+	rootCmd.AddCommand(version.GetVersionCmd())
+	rootCmd.AddCommand(config.GetConfigCmd())
 }
 
 func initLogger() {
