@@ -3,12 +3,12 @@
 ```go
 
 // initialize kubescape
-ks := core.NewKubescape() 
+ks := core.NewKubescape()
 
 // scan cluster
-results, err := ks.Scan()
+results, err := ks.Scan(&cautils.ScanInfo{})
 
-// convert scan results to json 
-jsonRes, err := results.ToJson() 
+// convert scan results to json
+jsonRes, err := results.ToJson()
 
 ```

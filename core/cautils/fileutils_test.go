@@ -11,7 +11,7 @@ import (
 
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
-	return filepath.Join(filepath.Dir(o), "examples/online-boutique/*")
+	return filepath.Join(filepath.Dir(o), "../examples/online-boutique/*")
 }
 
 func TestListFiles(t *testing.T) {
