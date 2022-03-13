@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -73,14 +73,14 @@ type ScanInfo struct {
 	Format             string                            // Format results (table, json, junit ...)
 	Output             string                            // Store results in an output file, Output file name
 	FormatVersion      string                            // Output object can be differnet between versions, this is for testing and backward compatibility
-	ExcludedNamespaces string                            // used for host sensor namespace
+	ExcludedNamespaces string                            // used for host scanner namespace
 	IncludeNamespaces  string                            // DEPRECATED?
 	InputPatterns      []string                          // Yaml files input patterns
 	Silent             bool                              // Silent mode - Do not print progress logs
 	FailThreshold      float32                           // Failure score threshold
 	Submit             bool                              // Submit results to Armo BE
 	ReportID           string                            // Report id of the current scan
-	HostSensorEnabled  BoolPtrFlag                       // Deploy ARMO K8s host sensor to collect data from certain controls
+	HostSensorEnabled  BoolPtrFlag                       // Deploy ARMO K8s host scanner to collect data from certain controls
 	HostSensorYamlPath string                            // Path to hostsensor file
 	Local              bool                              // Do not submit results
 	Account            string                            // account ID

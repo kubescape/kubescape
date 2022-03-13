@@ -5,7 +5,7 @@ import (
 
 	"github.com/armosec/opa-utils/score"
 
-	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/core/cautils"
 )
 
 /* provides a wrapper for scoreUtils, since there's no common interface between postureReportV1 and PostureReportV2

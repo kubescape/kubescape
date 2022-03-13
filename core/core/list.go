@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/getter"
 	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 )
 

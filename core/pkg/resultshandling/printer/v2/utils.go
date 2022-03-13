@@ -2,9 +2,9 @@ package v2
 
 import (
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"

@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/meta"
 	"github.com/armosec/kubescape/core/meta/cliinterfaces"
 	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"

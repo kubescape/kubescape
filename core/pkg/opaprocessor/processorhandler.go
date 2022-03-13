@@ -6,8 +6,9 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/pkg/score"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -61,7 +62,7 @@ func (opap *OPAProcessor) ProcessRulesListenner() error {
 }
 
 func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
-	logger.L().Info(fmt.Sprintf("Scanning cluster %s", cautils.ClusterName))
+	logger.L().Info("Scanning", helpers.String("cluster", cautils.ClusterName))
 
 	cautils.StartSpinner()
 
@@ -88,7 +89,8 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 	opap.Report.ReportGenerationTime = time.Now().UTC()
 
 	cautils.StopSpinner()
-	logger.L().Success(fmt.Sprintf("Done scanning cluster %s", cautils.ClusterName))
+	logger.L().Success("Done scanning", helpers.String("cluster", cautils.ClusterName))
+
 	return errs
 }
 

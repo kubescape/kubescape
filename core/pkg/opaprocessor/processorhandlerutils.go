@@ -3,8 +3,8 @@ package opaprocessor
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"

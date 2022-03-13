@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	pkgutils "github.com/armosec/utils-go/utils"
 	"golang.org/x/mod/semver"
 )

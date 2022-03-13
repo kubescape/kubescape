@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/meta"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"

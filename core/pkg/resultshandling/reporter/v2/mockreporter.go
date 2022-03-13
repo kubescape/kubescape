@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
 )
 
 const NO_SUBMIT_QUERY = "utm_source=GitHub&utm_medium=CLI&utm_campaign=no_submit"

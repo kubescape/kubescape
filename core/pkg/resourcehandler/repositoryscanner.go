@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/getter"
 )
 
 type IRepository interface {

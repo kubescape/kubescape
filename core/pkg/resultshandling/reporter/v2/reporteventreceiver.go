@@ -7,10 +7,10 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/google/uuid"
 
 	"github.com/armosec/opa-utils/reporthandling"
@@ -84,16 +84,14 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2
 	host := hostToString(report.eventReceiverURL, postureReport.ReportID)
 
 	cautils.StartSpinner()
-	defer cautils.StopSpinner()
 
 	reportCounter := 0
 
 	// send resources
-	if err := report.sendResources(host, postureReport, &reportCounter, false); err != nil {
-		return err
-	}
+	err := report.sendResources(host, postureReport, &reportCounter, false)
 
-	return nil
+	cautils.StopSpinner()
+	return err
 }
 
 func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {

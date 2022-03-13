@@ -5,8 +5,8 @@ import (
 	"os"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
 	"github.com/armosec/opa-utils/reporthandling"
 )

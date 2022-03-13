@@ -3,7 +3,6 @@ package opaprocessor
 import (
 	"testing"
 
-	"github.com/armosec/kubescape/mocks"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/armosec/opa-utils/reporthandling"

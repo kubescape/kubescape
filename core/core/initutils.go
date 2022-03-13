@@ -5,10 +5,10 @@ import (
 	"os"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
 	"github.com/armosec/kubescape/core/pkg/resourcehandler"
 	"github.com/armosec/kubescape/core/pkg/resultshandling/reporter"
@@ -82,7 +82,7 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	}
 
 	hasHostSensorControls := true
-	// we need to determined which controls needs host sensor
+	// we need to determined which controls needs host scanner
 	if scanInfo.HostSensorEnabled.Get() == nil && hasHostSensorControls {
 		scanInfo.HostSensorEnabled.SetBool(false) // default - do not run host scanner
 		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag")
@@ -90,7 +90,7 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	if hostSensorVal := scanInfo.HostSensorEnabled.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
-			logger.L().Warning(fmt.Sprintf("failed to create host sensor: %s", err.Error()))
+			logger.L().Warning(fmt.Sprintf("failed to create host scanner: %s", err.Error()))
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
 		return hostSensorHandler

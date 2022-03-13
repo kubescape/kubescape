@@ -2,11 +2,11 @@ package v1
 
 type PostScanRequest struct {
 	Format             string   `json:"format"`             // Format results (table, json, junit ...) - default json
-	ExcludedNamespaces []string `json:"excludedNamespaces"` // used for host sensor namespace
+	ExcludedNamespaces []string `json:"excludedNamespaces"` // used for host scanner namespace
 	IncludeNamespaces  []string `json:"includeNamespaces"`  // DEPRECATED?
 	FailThreshold      float32  `json:"failThreshold"`      // Failure score threshold
 	Submit             bool     `json:"submit"`             // Submit results to Armo BE - default will
-	HostScanner        bool     `json:"hostScanner"`        // Deploy ARMO K8s host sensor to collect data from certain controls
+	HostScanner        bool     `json:"hostScanner"`        // Deploy ARMO K8s host scanner to collect data from certain controls
 	KeepLocal          bool     `json:"keepLocal"`          // Do not submit results
 	Account            string   `json:"account"`            // account ID
 	Logger             string   `json:"-"`                  // logger level - debug/info/error - default is debug

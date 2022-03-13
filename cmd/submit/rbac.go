@@ -2,10 +2,10 @@ package submit
 
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/meta"
 	"github.com/armosec/kubescape/core/meta/cliinterfaces"
 	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"

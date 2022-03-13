@@ -5,7 +5,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 )
 
 const LoggerName string = "pretty"

@@ -8,10 +8,10 @@ import (
 	"os"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/google/uuid"
 )
@@ -75,17 +75,19 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandling.P
 	host := hostToString(report.eventReceiverURL, postureReport.ReportID)
 
 	cautils.StartSpinner()
-	defer cautils.StopSpinner()
 
 	// send framework results
 	if err := report.sendReport(host, postureReport); err != nil {
+		cautils.StopSpinner()
 		return err
 	}
 
 	// send resources
 	if err := report.sendResources(host, postureReport, allResources); err != nil {
+		cautils.StopSpinner()
 		return err
 	}
+	cautils.StopSpinner()
 	report.generateMessage()
 
 	return nil

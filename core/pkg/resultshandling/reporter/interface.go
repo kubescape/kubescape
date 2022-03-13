@@ -1,6 +1,6 @@
 package reporter
 
-import "github.com/armosec/kubescape/cautils"
+import "github.com/armosec/kubescape/core/cautils"
 
 type IReport interface {
 	ActionSendReport(opaSessionObj *cautils.OPASessionObj) error

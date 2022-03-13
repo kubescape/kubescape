@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -61,6 +61,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 
 	// pull k8s recourses
 	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
+		cautils.StopSpinner()
 		return k8sResourcesMap, allResources, err
 	}
 
@@ -69,7 +70,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.F
 	}
 
 	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
-		logger.L().Warning("failed to collect host sensor resources", helpers.Error(err))
+		logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
@@ -95,7 +96,6 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 }
 
 func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
-	logger.L().Debug("Accessing Kubernetes objects")
 
 	var errs error
 	for groupResource := range *k8sResources {
@@ -181,7 +181,7 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 // 	return nil
 // }
 func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
-	logger.L().Debug("Collecting host sensor resources")
+	logger.L().Debug("Collecting host scanner resources")
 
 	hostResources, err := k8sHandler.hostSensorHandler.CollectResources()
 	if err != nil {

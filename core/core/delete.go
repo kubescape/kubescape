@@ -3,9 +3,9 @@ package core
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 )
 

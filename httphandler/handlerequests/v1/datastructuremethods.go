@@ -3,7 +3,7 @@ package v1
 import (
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/core/cautils"
 )
 
 func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {

@@ -6,10 +6,10 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
 	"github.com/armosec/kubescape/core/pkg/opaprocessor"
 	"github.com/armosec/kubescape/core/pkg/policyhandler"
@@ -60,11 +60,11 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	v := cautils.NewIVersionCheckHandler()
 	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
 
-	// ================== setup host sensor object ======================================
+	// ================== setup host scanner object ======================================
 
 	hostSensorHandler := getHostSensorHandler(scanInfo, k8s)
 	if err := hostSensorHandler.Init(); err != nil {
-		logger.L().Error("failed to init host sensor", helpers.Error(err))
+		logger.L().Error("failed to init host scanner", helpers.Error(err))
 		hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
 	}
 	// excluding hostsensor namespace
@@ -131,7 +131,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// remove host scanner components
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Error("failed to tear down host sensor", helpers.Error(err))
+			logger.L().Error("failed to tear down host scanner", helpers.Error(err))
 		}
 	}()
 

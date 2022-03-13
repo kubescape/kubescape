@@ -1,7 +1,7 @@
 package meta
 
 import (
-	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/meta/cliinterfaces"
 	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/armosec/kubescape/core/pkg/resultshandling"

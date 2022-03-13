@@ -5,10 +5,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/cmd/completion"
 	"github.com/armosec/kubescape/cmd/config"
 	"github.com/armosec/kubescape/cmd/delete"
@@ -17,6 +13,10 @@ import (
 	"github.com/armosec/kubescape/cmd/scan"
 	"github.com/armosec/kubescape/cmd/submit"
 	"github.com/armosec/kubescape/cmd/version"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/core"
 	"github.com/armosec/kubescape/core/meta"
 

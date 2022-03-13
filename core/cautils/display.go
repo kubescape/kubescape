@@ -4,7 +4,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/briandowns/spinner"
+	spinnerpkg "github.com/briandowns/spinner"
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
 )
@@ -18,18 +18,24 @@ var SimpleDisplay = color.New().FprintfFunc()
 var SuccessDisplay = color.New(color.Bold, color.FgHiGreen).FprintfFunc()
 var DescriptionDisplay = color.New(color.Faint, color.FgWhite).FprintfFunc()
 
-var Spinner *spinner.Spinner
+var spinner *spinnerpkg.Spinner
 
 func StartSpinner() {
+	if spinner != nil {
+		if !spinner.Active() {
+			spinner.Start()
+		}
+		return
+	}
 	if isatty.IsTerminal(os.Stdout.Fd()) {
-		Spinner = spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
-		Spinner.Start()
+		spinner = spinnerpkg.New(spinnerpkg.CharSets[7], 100*time.Millisecond) // Build our new spinner
+		spinner.Start()
 	}
 }
 
 func StopSpinner() {
-	if Spinner == nil {
+	if spinner == nil || !spinner.Active() {
 		return
 	}
-	Spinner.Stop()
+	spinner.Stop()
 }

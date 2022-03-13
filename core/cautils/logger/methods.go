@@ -4,10 +4,10 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils/logger/helpers"
-	"github.com/armosec/kubescape/cautils/logger/nonelogger"
-	"github.com/armosec/kubescape/cautils/logger/prettylogger"
-	"github.com/armosec/kubescape/cautils/logger/zaplogger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/logger/nonelogger"
+	"github.com/armosec/kubescape/core/cautils/logger/prettylogger"
+	"github.com/armosec/kubescape/core/cautils/logger/zaplogger"
 )
 
 type ILogger interface {

@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/core"
 	"github.com/armosec/kubescape/core/meta"
 	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"

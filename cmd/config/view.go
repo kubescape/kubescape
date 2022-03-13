@@ -3,7 +3,7 @@ package config
 import (
 	"os"
 
-	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/meta"
 	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
