@@ -6,12 +6,12 @@ import (
 	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/clihandler"
+	"github.com/armosec/kubescape/core/core"
 )
 
 func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
-	result, err := clihandler.Scan(scanInfo)
+	result, err := core.Scan(scanInfo)
 	if err != nil {
 		f, e := os.Open(filepath.Join(FailedOutputDir, scanID))
 		if e != nil {

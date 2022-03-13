@@ -8,7 +8,7 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	"github.com/armosec/kubescape/clihandler"
+	"github.com/armosec/kubescape/core/core"
 	"github.com/google/uuid"
 )
 
@@ -27,7 +27,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	// trigger scanning
 	logger.L().Info(handler.state.getID(), helpers.String("action", "triggering scan"), helpers.Time())
-	results, err := clihandler.Scan(getPrometheusDefaultScanCommand(handler.state.getID()))
+	results, err := core.Scan(getPrometheusDefaultScanCommand(handler.state.getID()))
 	logger.L().Info(handler.state.getID(), helpers.String("action", "done scanning"), helpers.Time())
 
 	if err != nil {

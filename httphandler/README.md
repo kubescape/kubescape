@@ -1,4 +1,4 @@
-# Run kubescape as a microservice
+# Kubescape HTTP Handler Package
 
 > This is a beta version, we might make some changes before publishing the official Prometheus support
 
