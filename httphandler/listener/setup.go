@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	handlerequestsv1 "github.com/armosec/kubescape/httphandler/handlerequests/v1"
 	"github.com/gorilla/mux"
 )
@@ -15,7 +15,7 @@ import (
 const (
 	scanPath              = "/v1/scan"
 	resultsPath           = "/v1/results"
-	prometheusMmeticsPath = "/metrics"
+	prometheusMmeticsPath = "/v1/metrics"
 	livePath              = "/livez"
 	readyPath             = "/readyz"
 )
@@ -50,12 +50,9 @@ func SetupHTTPListener() error {
 	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()))
 	server.ListenAndServe()
 	if keyPair != nil {
-		logger.L().Fatal(server.ListenAndServeTLS("", "").Error())
+		return server.ListenAndServeTLS("", "")
 	}
-
-	logger.L().Fatal(server.ListenAndServe().Error())
-
-	return nil
+	return server.ListenAndServe()
 }
 
 func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {

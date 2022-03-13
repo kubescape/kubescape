@@ -33,9 +33,15 @@ jobs:
         uses: actions/setup-go@v2
         with:
           go-version: 1.17
+    
+      - name: Test cmd pkg
+        run: cd cmd && go test -v ./...
+      
+      - name: Test core pkg
+        run: cd core && go test -v ./...
 
-      - name: Test
-        run: go test -v ./...
+      - name: Test httphandler pkg
+        run: cd httphandler && go test -v ./...
 
       - name: Build
         env:

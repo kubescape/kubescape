@@ -5,13 +5,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/armosec/kubescape/cautils"
-	"github.com/armosec/kubescape/clihandler"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/core"
 )
 
 func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
-	result, err := clihandler.Scan(scanInfo)
+	ks := core.NewKubescape()
+	result, err := ks.Scan(scanInfo)
 	if err != nil {
 		f, e := os.Open(filepath.Join(FailedOutputDir, scanID))
 		if e != nil {
@@ -27,7 +28,6 @@ func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
 		err = fmt.Errorf("failed to parse results to json, reason: %s", err.Error())
 	}
 	return b, err
-
 }
 
 func readResultsFile(fileID string) ([]byte, error) {
@@ -82,9 +82,19 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 	// *** end ***
 
 	// *** start ***
+	// Set default format
+	if scanInfo.Format == "" {
+		scanInfo.Format = "json"
+	}
+	scanInfo.FormatVersion = "v2" // latest version
+	// *** end ***
+
+	// *** start ***
 	// DO NOT CHANGE
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
+
+	scanInfo.Init()
 
 	return scanInfo
 }

@@ -3,7 +3,7 @@ package v1
 import (
 	"strings"
 
-	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/core/cautils"
 )
 
 func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
@@ -17,7 +17,7 @@ func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
 
 	scanInfo.Local = scanRequest.KeepLocal
 	scanInfo.Submit = scanRequest.Submit
-	scanInfo.HostSensorEnabled.SetBool(scanRequest.HostSensor)
+	scanInfo.HostSensorEnabled.SetBool(scanRequest.HostScanner)
 
 	return &scanInfo
 }

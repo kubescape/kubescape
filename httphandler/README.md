@@ -1,8 +1,6 @@
-# Run kubescape as a microservice
+# Kubescape HTTP Handler Package
 
 > This is a beta version, we might make some changes before publishing the official Prometheus support
-
-**Set environment `KS_MICROSERVICE=true`**
 
 Running `kubescape` will start up a webserver on port `8080` which will serve the following paths: 
 
@@ -14,7 +12,7 @@ Running `kubescape` will start up a webserver on port `8080` which will serve th
 * DELETE `/v1/results` - Delete kubescape scan results from storage If empty will delete latest results
 * * query `id=<string>`: Delete ID of specific results 
 * * query `all`: Delete all cached results
-* GET/POST `/metrics` - will trigger cluster scan. will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
+* GET/POST `/v1/metrics` - will trigger cluster scan. will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
 * `/livez` - will respond 200 is server is alive
 * `/readyz` - will respond 200 if server can receive requests 
 
@@ -23,7 +21,15 @@ Running `kubescape` will start up a webserver on port `8080` which will serve th
 POST /v1/results
 body:
 ```json
-
+{
+    "format": "",               // results format [default: json] (same as 'kubescape scan --format')
+    "excludedNamespaces": null, // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
+    "includeNamespaces": null,  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
+    "submit": false,            // submit results to Kubescape cloud (same as 'kubescape scan --submit')
+    "hostScanner": false,       // deploy kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
+    "keepLocal": false,         // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
+    "account": ""               // account ID (same as 'kubescape scan --account')
+}
 ```
 
 e.g.:
@@ -31,8 +37,8 @@ e.g.:
 ```bash
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"account":"42ec914f-74e6-4bcb-8e69-5edd819d9b15","hostSensor":true}' \
-  http://127.0.0.1:5000/v1/scan
+  --data '{"account":"XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX","hostScanner":true, "submit":true}' \
+  http://127.0.0.1:8080/v1/scan
 ```
 ## Installation into kubernetes
 

@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/cautils/logger/helpers"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/google/uuid"
 )
 
-var OutputDir = "/results"
-var FailedOutputDir = "/failed"
+var OutputDir = "./results"
+var FailedOutputDir = "./failed"
 
 type HTTPHandler struct {
 	state *serverState
@@ -82,6 +82,8 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	var wg sync.WaitGroup
 	if returnResults {
 		wg.Add(1)
+	} else {
+		wg.Add(0)
 	}
 
 	go func() {
@@ -94,28 +96,21 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			logger.L().Error("scanning failed", helpers.String("ID", scanID), helpers.Error(err))
 			if returnResults {
 				response = []byte(err.Error())
+				w.WriteHeader(http.StatusInternalServerError)
 			}
 		} else {
+			logger.L().Success("done scanning", helpers.String("ID", scanID))
 			if returnResults {
 				w.Header().Set("Content-Type", "application/json")
 				response = results
+				wg.Done()
 			}
-			logger.L().Success("done scanning", helpers.String("ID", scanID))
 		}
-
-		// // saveing the scan status/result in 'response' object only when waiting for results
-		// if returnResults {
-		// 	w.Header().Set("Content-Type", "application/json")
-		// 	response = results
-		// }
-		wg.Done()
 		handler.state.setNotBusy()
 	}()
 
 	wg.Wait()
-
 	w.Write(response)
-	w.WriteHeader(http.StatusOK)
 }
 func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	defer func() {
