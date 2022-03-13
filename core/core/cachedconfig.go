@@ -2,12 +2,11 @@ package core
 
 import (
 	"fmt"
-	"io"
 
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 )
 
-func SetCachedConfig(setConfig *cliobjects.SetConfig) error {
+func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 
 	tenant := getTenantConfig("", "", getKubernetesApi())
 
@@ -24,16 +23,14 @@ func SetCachedConfig(setConfig *cliobjects.SetConfig) error {
 	return tenant.UpdateCachedConfig()
 }
 
-// os.Stderr
-
 // View cached configurations
-func ViewCachedConfig(writer io.Writer) error {
+func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 	tenant := getTenantConfig("", "", getKubernetesApi()) // change k8sinterface
-	fmt.Fprintf(writer, "%s\n", tenant.GetConfigObj().Config())
+	fmt.Fprintf(viewConfig.Writer, "%s\n", tenant.GetConfigObj().Config())
 	return nil
 }
 
-func DeleteCachedConfig() error {
+func (ks *Kubescape) DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error {
 
 	tenant := getTenantConfig("", "", getKubernetesApi()) // change k8sinterface
 	return tenant.DeleteCachedConfig()

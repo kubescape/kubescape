@@ -17,6 +17,7 @@ import (
 	"github.com/armosec/kubescape/cmd/scan"
 	"github.com/armosec/kubescape/cmd/submit"
 	"github.com/armosec/kubescape/cmd/version"
+	"github.com/armosec/kubescape/core/core"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -71,15 +72,17 @@ func getRootCmd() *cobra.Command {
 	initEnvironment(&rootInfo)
 	initCacheDir(&rootInfo)
 
+	ks := core.NewKubescape()
+
 	// Supported commands
-	rootCmd.AddCommand(scan.GetScanCommand())
-	rootCmd.AddCommand(download.GeDownloadCmd())
-	rootCmd.AddCommand(delete.GetDeleteCmd())
-	rootCmd.AddCommand(list.GetListCmd())
-	rootCmd.AddCommand(submit.GetSubmitCmd())
+	rootCmd.AddCommand(scan.GetScanCommand(ks))
+	rootCmd.AddCommand(download.GeDownloadCmd(ks))
+	rootCmd.AddCommand(delete.GetDeleteCmd(ks))
+	rootCmd.AddCommand(list.GetListCmd(ks))
+	rootCmd.AddCommand(submit.GetSubmitCmd(ks))
 	rootCmd.AddCommand(completion.GetCompletionCmd())
 	rootCmd.AddCommand(version.GetVersionCmd())
-	rootCmd.AddCommand(config.GetConfigCmd())
+	rootCmd.AddCommand(config.GetConfigCmd(ks))
 
 	return rootCmd
 }

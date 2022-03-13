@@ -7,16 +7,16 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/getter"
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 )
 
-var listFunc = map[string]func(*cliobjects.ListPolicies) ([]string, error){
+var listFunc = map[string]func(*metav1.ListPolicies) ([]string, error){
 	"controls":   listControls,
 	"frameworks": listFrameworks,
 	"exceptions": listExceptions,
 }
 
-var listFormatFunc = map[string]func(*cliobjects.ListPolicies, []string){
+var listFormatFunc = map[string]func(*metav1.ListPolicies, []string){
 	"pretty-print": prettyPrintListFormat,
 	"json":         jsonListFormat,
 }
@@ -28,7 +28,7 @@ func ListSupportActions() []string {
 	}
 	return commands
 }
-func List(listPolicies *cliobjects.ListPolicies) error {
+func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 	if f, ok := listFunc[listPolicies.Target]; ok {
 		policies, err := f(listPolicies)
 		if err != nil {
@@ -43,14 +43,14 @@ func List(listPolicies *cliobjects.ListPolicies) error {
 	return fmt.Errorf("unknown command to download")
 }
 
-func listFrameworks(listPolicies *cliobjects.ListPolicies) ([]string, error) {
+func listFrameworks(listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
 	g := getPolicyGetter(nil, tenant.GetAccountID(), true, nil)
 
 	return listFrameworksNames(g), nil
 }
 
-func listControls(listPolicies *cliobjects.ListPolicies) ([]string, error) {
+func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
 
 	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
@@ -61,8 +61,8 @@ func listControls(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 	return g.ListControls(l)
 }
 
-func listExceptions(listPolicies *cliobjects.ListPolicies) ([]string, error) {
-	// load tenant config
+func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
+	// load tenant metav1
 	getTenantConfig(listPolicies.Account, "", getKubernetesApi())
 
 	var exceptionsNames []string
@@ -77,12 +77,12 @@ func listExceptions(listPolicies *cliobjects.ListPolicies) ([]string, error) {
 	return exceptionsNames, nil
 }
 
-func prettyPrintListFormat(listPolicies *cliobjects.ListPolicies, policies []string) {
+func prettyPrintListFormat(listPolicies *metav1.ListPolicies, policies []string) {
 	sep := "\n  * "
 	fmt.Printf("Supported %s:%s%s\n", listPolicies.Target, sep, strings.Join(policies, sep))
 }
 
-func jsonListFormat(listPolicies *cliobjects.ListPolicies, policies []string) {
+func jsonListFormat(listPolicies *metav1.ListPolicies, policies []string) {
 	j, _ := json.MarshalIndent(policies, "", "  ")
 	fmt.Printf("%s\n", j)
 }

@@ -9,9 +9,9 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/core"
-	"github.com/armosec/kubescape/core/metadata/cliinterfaces"
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	"github.com/armosec/kubescape/core/meta"
+	"github.com/armosec/kubescape/core/meta/cliinterfaces"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/armosec/kubescape/core/pkg/resultshandling/reporter"
 	reporterv1 "github.com/armosec/kubescape/core/pkg/resultshandling/reporter/v1"
 	reporterv2 "github.com/armosec/kubescape/core/pkg/resultshandling/reporter/v2"
@@ -56,7 +56,7 @@ func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinter
 	return map[string]workloadinterface.IMetadata{}, nil
 }
 
-func getResultsCmd(submitInfo *cliobjects.Submit) *cobra.Command {
+func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 	var resultsCmd = &cobra.Command{
 		Use:   "results <json file>\nExample:\n$ kubescape submit results path/to/results.json --format-version v2",
 		Short: "Submit a pre scanned results file. The file must be in json format",
@@ -92,7 +92,7 @@ func getResultsCmd(submitInfo *cliobjects.Submit) *cobra.Command {
 				Reporter:      r,
 			}
 
-			if err := core.Submit(submitInterfaces); err != nil {
+			if err := ks.Submit(submitInterfaces); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

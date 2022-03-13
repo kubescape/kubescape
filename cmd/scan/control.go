@@ -8,7 +8,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/core/core"
+	"github.com/armosec/kubescape/core/meta"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"
 )
@@ -32,7 +32,7 @@ var (
 )
 
 // controlCmd represents the control command
-func getControlCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
+func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	return &cobra.Command{
 		Use:     "control <control names list>/<control ids list>",
 		Short:   "The controls you wish to use. Run 'kubescape list controls' for the list of supported controls",
@@ -84,7 +84,7 @@ func getControlCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 
 			scanInfo.FrameworkScan = false
 
-			results, err := core.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}

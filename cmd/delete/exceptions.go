@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/core/core"
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	"github.com/armosec/kubescape/core/meta"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
-func getExceptionsCmd(deleteInfo *cliobjects.Delete) *cobra.Command {
+func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command {
 	return &cobra.Command{
 		Use:     "exceptions <exception name>",
 		Short:   "Delete exceptions from Kubescape SaaS version. Run 'kubescape list exceptions' for all exceptions names",
@@ -26,7 +26,7 @@ func getExceptionsCmd(deleteInfo *cliobjects.Delete) *cobra.Command {
 			if len(exceptionsNames) == 0 {
 				logger.L().Fatal("missing exceptions names")
 			}
-			if err := core.DeleteExceptions(deleteInfo.Account, exceptionsNames); err != nil {
+			if err := ks.DeleteExceptions(&v1.DeleteExceptions{Account: deleteInfo.Account, Exceptions: exceptionsNames}); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 		},

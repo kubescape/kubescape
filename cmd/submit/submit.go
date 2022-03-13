@@ -1,7 +1,8 @@
 package submit
 
 import (
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	"github.com/armosec/kubescape/core/meta"
+	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -9,8 +10,8 @@ var submitCmdExamples = `
 
 `
 
-func GetSubmitCmd() *cobra.Command {
-	var submitInfo cliobjects.Submit
+func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
+	var submitInfo metav1.Submit
 
 	submitCmd := &cobra.Command{
 		Use:   "submit <command>",
@@ -21,9 +22,9 @@ func GetSubmitCmd() *cobra.Command {
 	}
 	submitCmd.PersistentFlags().StringVarP(&submitInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 
-	submitCmd.AddCommand(getExceptionsCmd(&submitInfo))
-	submitCmd.AddCommand(getResultsCmd(&submitInfo))
-	submitCmd.AddCommand(getRBACCmd(&submitInfo))
+	submitCmd.AddCommand(getExceptionsCmd(ks, &submitInfo))
+	submitCmd.AddCommand(getResultsCmd(ks, &submitInfo))
+	submitCmd.AddCommand(getRBACCmd(ks, &submitInfo))
 
 	return submitCmd
 }

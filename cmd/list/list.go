@@ -7,7 +7,8 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/core/core"
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	"github.com/armosec/kubescape/core/meta"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -30,8 +31,8 @@ var (
 `
 )
 
-func GetListCmd() *cobra.Command {
-	var listPolicies = cliobjects.ListPolicies{}
+func GetListCmd(ks meta.IKubescape) *cobra.Command {
+	var listPolicies = v1.ListPolicies{}
 
 	listCmd := &cobra.Command{
 		Use:     "list <policy> [flags]",
@@ -52,7 +53,7 @@ func GetListCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			listPolicies.Target = args[0]
 
-			if err := core.List(&listPolicies); err != nil {
+			if err := ks.List(&listPolicies); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

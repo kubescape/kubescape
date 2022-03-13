@@ -8,7 +8,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/core/core"
+	"github.com/armosec/kubescape/core/meta"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/spf13/cobra"
 )
@@ -34,7 +34,7 @@ var (
 `
 )
 
-func getFrameworkCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
+func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 
 	return &cobra.Command{
 		Use:     "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
@@ -93,7 +93,7 @@ func getFrameworkCmd(scanInfo *cautils.ScanInfo) *cobra.Command {
 
 			scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
 
-			results, err := core.Scan(scanInfo)
+			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}

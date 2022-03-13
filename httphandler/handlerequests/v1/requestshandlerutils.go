@@ -11,7 +11,8 @@ import (
 
 func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
-	result, err := core.Scan(scanInfo)
+	ks := core.NewKubescape()
+	result, err := ks.Scan(scanInfo)
 	if err != nil {
 		f, e := os.Open(filepath.Join(FailedOutputDir, scanID))
 		if e != nil {

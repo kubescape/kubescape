@@ -6,10 +6,10 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/metadata/cliinterfaces"
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	"github.com/armosec/kubescape/core/meta"
+	"github.com/armosec/kubescape/core/meta/cliinterfaces"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 
-	"github.com/armosec/kubescape/core/core"
 	reporterv1 "github.com/armosec/kubescape/core/pkg/resultshandling/reporter/v1"
 
 	"github.com/armosec/rbac-utils/rbacscanner"
@@ -17,7 +17,7 @@ import (
 )
 
 // getRBACCmd represents the RBAC command
-func getRBACCmd(submitInfo *cliobjects.Submit) *cobra.Command {
+func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 	return &cobra.Command{
 		Use:   "rbac \nExample:\n$ kubescape submit rbac",
 		Short: "Submit cluster's Role-Based Access Control(RBAC)",
@@ -44,7 +44,7 @@ func getRBACCmd(submitInfo *cliobjects.Submit) *cobra.Command {
 				Reporter:      r,
 			}
 
-			if err := core.Submit(submitInterfaces); err != nil {
+			if err := ks.Submit(submitInterfaces); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

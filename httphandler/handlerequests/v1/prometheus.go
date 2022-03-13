@@ -27,7 +27,8 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 	// trigger scanning
 	logger.L().Info(handler.state.getID(), helpers.String("action", "triggering scan"), helpers.Time())
-	results, err := core.Scan(getPrometheusDefaultScanCommand(handler.state.getID()))
+	ks := core.NewKubescape()
+	results, err := ks.Scan(getPrometheusDefaultScanCommand(handler.state.getID()))
 	logger.L().Info(handler.state.getID(), helpers.String("action", "done scanning"), helpers.Time())
 
 	if err != nil {

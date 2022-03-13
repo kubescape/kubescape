@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/armosec/kubescape/core/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,7 @@ var (
 `
 )
 
-func GetConfigCmd() *cobra.Command {
+func GetConfigCmd(ks meta.IKubescape) *cobra.Command {
 
 	// configCmd represents the config command
 	configCmd := &cobra.Command{
@@ -36,9 +37,9 @@ func GetConfigCmd() *cobra.Command {
 		Example: configExample,
 	}
 
-	configCmd.AddCommand(getDeleteCmd())
-	configCmd.AddCommand(getSetCmd())
-	configCmd.AddCommand(getViewCmd())
+	configCmd.AddCommand(getDeleteCmd(ks))
+	configCmd.AddCommand(getSetCmd(ks))
+	configCmd.AddCommand(getViewCmd(ks))
 
 	return configCmd
 }

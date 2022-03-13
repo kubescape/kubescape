@@ -1,4 +1,4 @@
-package cliobjects
+package v1
 
 type Submit struct {
 	Account string

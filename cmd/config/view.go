@@ -4,11 +4,12 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/core/core"
+	"github.com/armosec/kubescape/core/meta"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
-func getViewCmd() *cobra.Command {
+func getViewCmd(ks meta.IKubescape) *cobra.Command {
 
 	// configCmd represents the config command
 	return &cobra.Command{
@@ -16,7 +17,7 @@ func getViewCmd() *cobra.Command {
 		Short: "View cached configurations",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := core.ViewCachedConfig(os.Stdout); err != nil {
+			if err := ks.ViewCachedConfig(&v1.ViewConfig{Writer: os.Stdout}); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 		},

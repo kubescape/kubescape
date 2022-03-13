@@ -3,6 +3,7 @@ package scan
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/core/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +27,7 @@ var scanCmdExamples = `
   
 `
 
-func GetScanCommand() *cobra.Command {
+func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
 
 	// scanCmd represents the scan command
@@ -39,7 +40,7 @@ func GetScanCommand() *cobra.Command {
 			if len(args) > 0 {
 				if args[0] != "framework" && args[0] != "control" {
 					scanInfo.ScanAll = true
-					return getFrameworkCmd(&scanInfo).RunE(cmd, append([]string{"all"}, args...))
+					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{"all"}, args...))
 				}
 			}
 			return nil
@@ -48,7 +49,7 @@ func GetScanCommand() *cobra.Command {
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
-				return getFrameworkCmd(&scanInfo).RunE(cmd, []string{"all"})
+				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{"all"})
 			}
 			return nil
 		},
@@ -91,8 +92,8 @@ func GetScanCommand() *cobra.Command {
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 
-	scanCmd.AddCommand(getControlCmd(&scanInfo))
-	scanCmd.AddCommand(getFrameworkCmd(&scanInfo))
+	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
+	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
 
 	return scanCmd
 }

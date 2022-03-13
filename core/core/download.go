@@ -6,13 +6,13 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
+	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 )
 
-var downloadFunc = map[string]func(*cautils.DownloadInfo) error{
+var downloadFunc = map[string]func(*metav1.DownloadInfo) error{
 	"controls-inputs": downloadConfigInputs,
 	"exceptions":      downloadExceptions,
 	"control":         downloadControl,
@@ -28,7 +28,7 @@ func DownloadSupportCommands() []string {
 	return commands
 }
 
-func Download(downloadInfo *cautils.DownloadInfo) error {
+func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
 	setPathandFilename(downloadInfo)
 	if err := downloadArtifact(downloadInfo, downloadFunc); err != nil {
 		return err
@@ -36,7 +36,7 @@ func Download(downloadInfo *cautils.DownloadInfo) error {
 	return nil
 }
 
-func downloadArtifact(downloadInfo *cautils.DownloadInfo, downloadArtifactFunc map[string]func(*cautils.DownloadInfo) error) error {
+func downloadArtifact(downloadInfo *metav1.DownloadInfo, downloadArtifactFunc map[string]func(*metav1.DownloadInfo) error) error {
 	if f, ok := downloadArtifactFunc[downloadInfo.Target]; ok {
 		if err := f(downloadInfo); err != nil {
 			return err
@@ -46,7 +46,7 @@ func downloadArtifact(downloadInfo *cautils.DownloadInfo, downloadArtifactFunc m
 	return fmt.Errorf("unknown command to download")
 }
 
-func setPathandFilename(downloadInfo *cautils.DownloadInfo) {
+func setPathandFilename(downloadInfo *metav1.DownloadInfo) {
 	if downloadInfo.Path == "" {
 		downloadInfo.Path = getter.GetDefaultPath("")
 	} else {
@@ -60,22 +60,22 @@ func setPathandFilename(downloadInfo *cautils.DownloadInfo) {
 	}
 }
 
-func downloadArtifacts(downloadInfo *cautils.DownloadInfo) error {
+func downloadArtifacts(downloadInfo *metav1.DownloadInfo) error {
 	downloadInfo.FileName = ""
-	var artifacts = map[string]func(*cautils.DownloadInfo) error{
+	var artifacts = map[string]func(*metav1.DownloadInfo) error{
 		"controls-inputs": downloadConfigInputs,
 		"exceptions":      downloadExceptions,
 		"framework":       downloadFramework,
 	}
 	for artifact := range artifacts {
-		if err := downloadArtifact(&cautils.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
+		if err := downloadArtifact(&metav1.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
 			logger.L().Error("error downloading", helpers.String("artifact", artifact), helpers.Error(err))
 		}
 	}
 	return nil
 }
 
-func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
+func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
 	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetAccountID(), nil)
@@ -95,7 +95,7 @@ func downloadConfigInputs(downloadInfo *cautils.DownloadInfo) error {
 	return nil
 }
 
-func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
+func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 	var err error
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
@@ -119,7 +119,7 @@ func downloadExceptions(downloadInfo *cautils.DownloadInfo) error {
 	return nil
 }
 
-func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
+func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
@@ -158,7 +158,7 @@ func downloadFramework(downloadInfo *cautils.DownloadInfo) error {
 	return nil
 }
 
-func downloadControl(downloadInfo *cautils.DownloadInfo) error {
+func downloadControl(downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 

@@ -1,7 +1,8 @@
 package delete
 
 import (
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	"github.com/armosec/kubescape/core/meta"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -13,8 +14,8 @@ var deleteExceptionsExamples = `
   kubescape delete exceptions "first exception;second exception;third exception"
 `
 
-func GetDeleteCmd() *cobra.Command {
-	var deleteInfo cliobjects.Delete
+func GetDeleteCmd(ks meta.IKubescape) *cobra.Command {
+	var deleteInfo v1.Delete
 
 	var deleteCmd = &cobra.Command{
 		Use:   "delete <command>",
@@ -25,7 +26,7 @@ func GetDeleteCmd() *cobra.Command {
 	}
 	deleteCmd.PersistentFlags().StringVarP(&deleteInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
 
-	deleteCmd.AddCommand(getExceptionsCmd(&deleteInfo))
+	deleteCmd.AddCommand(getExceptionsCmd(ks, &deleteInfo))
 
 	return deleteCmd
 }

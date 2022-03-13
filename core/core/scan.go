@@ -103,7 +103,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	}
 }
 
-func Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
+func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	logger.L().Info("ARMO security scanner starting")
 
 	// ===================== Initialization =====================

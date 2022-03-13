@@ -8,6 +8,8 @@ import (
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/core/core"
+	"github.com/armosec/kubescape/core/meta"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -37,8 +39,8 @@ var (
 `
 )
 
-func GeDownloadCmd() *cobra.Command {
-	var downloadInfo = cautils.DownloadInfo{}
+func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
+	var downloadInfo = v1.DownloadInfo{}
 
 	downloadCmd := &cobra.Command{
 		Use:     "download <policy> <policy name>",
@@ -64,7 +66,7 @@ func GeDownloadCmd() *cobra.Command {
 			if len(args) >= 2 {
 				downloadInfo.Name = args[1]
 			}
-			if err := core.Download(&downloadInfo); err != nil {
+			if err := ks.Download(&downloadInfo); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

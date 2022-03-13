@@ -5,12 +5,12 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/cautils/logger"
-	"github.com/armosec/kubescape/core/core"
-	"github.com/armosec/kubescape/core/metadata/cliobjects"
+	"github.com/armosec/kubescape/core/meta"
+	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
-func getSetCmd() *cobra.Command {
+func getSetCmd(ks meta.IKubescape) *cobra.Command {
 
 	// configCmd represents the config command
 	configSetCmd := &cobra.Command{
@@ -23,7 +23,7 @@ func getSetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := core.SetCachedConfig(setConfig); err != nil {
+			if err := ks.SetCachedConfig(setConfig); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil
@@ -32,13 +32,13 @@ func getSetCmd() *cobra.Command {
 	return configSetCmd
 }
 
-var supportConfigSet = map[string]func(*cliobjects.SetConfig, string){
-	"accountID": func(s *cliobjects.SetConfig, account string) { s.Account = account },
-	"clientID":  func(s *cliobjects.SetConfig, clientID string) { s.ClientID = clientID },
-	"secretKey": func(s *cliobjects.SetConfig, secretKey string) { s.SecretKey = secretKey },
+var supportConfigSet = map[string]func(*metav1.SetConfig, string){
+	"accountID": func(s *metav1.SetConfig, account string) { s.Account = account },
+	"clientID":  func(s *metav1.SetConfig, clientID string) { s.ClientID = clientID },
+	"secretKey": func(s *metav1.SetConfig, secretKey string) { s.SecretKey = secretKey },
 }
 
-func stringKeysToSlice(m map[string]func(*cliobjects.SetConfig, string)) []string {
+func stringKeysToSlice(m map[string]func(*metav1.SetConfig, string)) []string {
 	l := []string{}
 	for i := range m {
 		l = append(l, i)
@@ -46,7 +46,7 @@ func stringKeysToSlice(m map[string]func(*cliobjects.SetConfig, string)) []strin
 	return l
 }
 
-func parseSetArgs(args []string) (*cliobjects.SetConfig, error) {
+func parseSetArgs(args []string) (*metav1.SetConfig, error) {
 	var key string
 	var value string
 	if len(args) == 1 {
@@ -58,7 +58,7 @@ func parseSetArgs(args []string) (*cliobjects.SetConfig, error) {
 		key = args[0]
 		value = args[1]
 	}
-	setConfig := &cliobjects.SetConfig{}
+	setConfig := &metav1.SetConfig{}
 
 	if setConfigFunc, ok := supportConfigSet[key]; ok {
 		setConfigFunc(setConfig, value)

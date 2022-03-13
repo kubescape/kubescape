@@ -6,12 +6,13 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
+	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
 )
 
-func DeleteExceptions(accountID string, exceptions []string) error {
+func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error {
 
 	// load cached config
-	getTenantConfig(accountID, "", getKubernetesApi())
+	getTenantConfig(delExceptions.Account, "", getKubernetesApi())
 
 	// login kubescape SaaS
 	armoAPI := getter.GetArmoAPIConnector()
@@ -19,8 +20,8 @@ func DeleteExceptions(accountID string, exceptions []string) error {
 		return err
 	}
 
-	for i := range exceptions {
-		exceptionName := exceptions[i]
+	for i := range delExceptions.Exceptions {
+		exceptionName := delExceptions.Exceptions[i]
 		if exceptionName == "" {
 			continue
 		}

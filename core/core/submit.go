@@ -5,10 +5,10 @@ import (
 	"github.com/armosec/kubescape/cautils/getter"
 	"github.com/armosec/kubescape/cautils/logger"
 	"github.com/armosec/kubescape/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/metadata/cliinterfaces"
+	"github.com/armosec/kubescape/core/meta/cliinterfaces"
 )
 
-func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
+func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 
 	// list resources
 	postureReport, err := submitInterfaces.SubmitObjects.SetResourcesReport()
@@ -29,7 +29,7 @@ func Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 	return nil
 }
 
-func SubmitExceptions(accountID, excPath string) error {
+func (ks *Kubescape) SubmitExceptions(accountID, excPath string) error {
 	logger.L().Info("submitting exceptions", helpers.String("path", excPath))
 
 	// load cached config
