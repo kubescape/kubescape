@@ -3,6 +3,7 @@ package printer
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
@@ -25,9 +26,12 @@ type IPrinter interface {
 }
 
 func GetWriter(outputFile string) *os.File {
-	os.Remove(outputFile)
 	if outputFile != "" {
-		f, err := os.OpenFile(outputFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err != nil {
+			logger.L().Error(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
+			return os.Stdout
+		}
+		f, err := os.Create(outputFile)
 		if err != nil {
 			logger.L().Error(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout

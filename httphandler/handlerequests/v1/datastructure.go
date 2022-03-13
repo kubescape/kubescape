@@ -6,7 +6,7 @@ type PostScanRequest struct {
 	IncludeNamespaces  []string `json:"includeNamespaces"`  // DEPRECATED?
 	FailThreshold      float32  `json:"failThreshold"`      // Failure score threshold
 	Submit             bool     `json:"submit"`             // Submit results to Armo BE - default will
-	HostSensor         bool     `json:"hostSensor"`         // Deploy ARMO K8s host sensor to collect data from certain controls
+	HostScanner        bool     `json:"hostScanner"`        // Deploy ARMO K8s host sensor to collect data from certain controls
 	KeepLocal          bool     `json:"keepLocal"`          // Do not submit results
 	Account            string   `json:"account"`            // account ID
 	Logger             string   `json:"-"`                  // logger level - debug/info/error - default is debug

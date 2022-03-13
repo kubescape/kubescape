@@ -25,7 +25,7 @@ func DataToJson(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
 	finalizeResults(report.Results, data.ResourcesResult)
 
-	report.Resources = make([]reporthandling.Resource, len(data.AllResources))
+	report.Resources = make([]reporthandling.Resource, 0) // do not initialize slice length
 	finalizeResources(report.Resources, report.Results, data.AllResources)
 
 	return &report
@@ -39,15 +39,12 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 }
 
 func finalizeResources(resources []reporthandling.Resource, results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) {
-	index := 0
 	for i := range results {
 		if obj, ok := allResources[results[i].ResourceID]; ok {
 			r := *reporthandling.NewResource(obj.GetObject())
 			r.ResourceID = results[i].ResourceID
-			resources[index] = r
+			resources = append(resources, r)
 		}
-
-		index++
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/kubescape/cautils"
 	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
 )
 
@@ -32,4 +33,9 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 		logger.L().Fatal("failed to Marshal posture report object")
 	}
 	jsonPrinter.writer.Write(r)
+
+	logOUtputFile(jsonPrinter.writer.Name())
+	if _, err := jsonPrinter.writer.Write(r); err != nil {
+		logger.L().Error("failed to write results", helpers.Error(err))
+	}
 }

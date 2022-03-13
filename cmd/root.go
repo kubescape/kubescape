@@ -18,6 +18,7 @@ import (
 	"github.com/armosec/kubescape/cmd/submit"
 	"github.com/armosec/kubescape/cmd/version"
 	"github.com/armosec/kubescape/core/core"
+	"github.com/armosec/kubescape/core/meta"
 
 	"github.com/mattn/go-isatty"
 	"github.com/spf13/cobra"
@@ -42,7 +43,13 @@ var ksExamples = `
   kubescape config view
 `
 
-func getRootCmd() *cobra.Command {
+func NewDefaultKubescapeCommand() *cobra.Command {
+	ks := core.NewKubescape()
+
+	return getRootCmd(ks)
+}
+
+func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	var rootInfo cautils.RootInfo
 
 	rootCmd := &cobra.Command{
@@ -72,8 +79,6 @@ func getRootCmd() *cobra.Command {
 	initEnvironment(&rootInfo)
 	initCacheDir(&rootInfo)
 
-	ks := core.NewKubescape()
-
 	// Supported commands
 	rootCmd.AddCommand(scan.GetScanCommand(ks))
 	rootCmd.AddCommand(download.GeDownloadCmd(ks))
@@ -87,9 +92,25 @@ func getRootCmd() *cobra.Command {
 	return rootCmd
 }
 
+// func main() {
+// 	ks := NewDefaultKubescapeCommand()
+// 	ks.Execute()
+// 	// // cmd.Execute()
+// 	// listener.SetupHTTPListener()
+// }
+
 func Execute() {
-	rootCmd := getRootCmd()
-	rootCmd.Execute()
+	ks := NewDefaultKubescapeCommand()
+	// ks.DisableAutoGenTag = true
+	// identity := func(s string) string { return s }
+	// emptyStr := func(s string) string { return "" }
+	// fileLocation := doc.GenFileLocationHierarchy
+
+	// err := doc.GenMarkdownTreeCustom(ks, "/home/david/go/src/playground", emptyStr, identity, fileLocation)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
+	ks.Execute()
 }
 
 func initLogger(rootInfo *cautils.RootInfo) {

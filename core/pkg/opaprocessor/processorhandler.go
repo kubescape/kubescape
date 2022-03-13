@@ -30,6 +30,9 @@ type OPAProcessor struct {
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData) *OPAProcessor {
+	if regoDependenciesData != nil && sessionObj != nil {
+		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
+	}
 	return &OPAProcessor{
 		OPASessionObj:        sessionObj,
 		regoDependenciesData: regoDependenciesData,

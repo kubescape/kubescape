@@ -111,8 +111,9 @@ func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionO
 	}
 
 	logOUtputFile(junitPrinter.writer.Name())
-
-	junitPrinter.writer.Write(postureReportStr)
+	if _, err := junitPrinter.writer.Write(postureReportStr); err != nil {
+		logger.L().Error("failed to write results", helpers.Error(err))
+	}
 }
 
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {

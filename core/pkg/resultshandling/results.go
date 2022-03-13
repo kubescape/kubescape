@@ -78,7 +78,7 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool) printer.IPr
 		case "v2":
 			return printerv2.NewJsonPrinter()
 		default:
-			logger.L().Warning("Deprecated format version. run with '--format-version' flag", helpers.String("your version", formatVersion), helpers.String("latest version", "v2"))
+			logger.L().Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
 			return printerv1.NewJsonPrinter()
 		}
 	case printer.JunitResultFormat:

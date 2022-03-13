@@ -33,7 +33,7 @@ func GetConfigCmd(ks meta.IKubescape) *cobra.Command {
 	// configCmd represents the config command
 	configCmd := &cobra.Command{
 		Use:     "config",
-		Short:   "handle cached configurations",
+		Short:   "Handle cached configurations",
 		Example: configExample,
 	}
 

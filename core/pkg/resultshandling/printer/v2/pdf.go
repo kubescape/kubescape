@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/armosec/kubescape/cautils"
+	"github.com/armosec/kubescape/cautils/logger"
+	"github.com/armosec/kubescape/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/johnfercher/maroto/pkg/color"
@@ -65,10 +67,14 @@ func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 	// Extrat output buffer.
 	outBuff, err := m.Output()
 	if err != nil {
-		fmt.Println("Could not save PDF:", err)
-		os.Exit(1)
+		logger.L().Error("failed to generate pdf format", helpers.Error(err))
+		return
 	}
-	pdfPrinter.writer.Write(outBuff.Bytes())
+
+	logOUtputFile(pdfPrinter.writer.Name())
+	if _, err := pdfPrinter.writer.Write(outBuff.Bytes()); err != nil {
+		logger.L().Error("failed to write results", helpers.Error(err))
+	}
 }
 
 // Print Kubescape logo and report date.

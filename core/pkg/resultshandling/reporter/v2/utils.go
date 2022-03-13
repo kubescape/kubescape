@@ -19,7 +19,7 @@ func finalizeReport(opaSessionObj *cautils.OPASessionObj) {
 	}
 
 	if len(opaSessionObj.Report.Resources) == 0 {
-		opaSessionObj.Report.Resources = make([]reporthandling.Resource, len(opaSessionObj.AllResources))
+		opaSessionObj.Report.Resources = make([]reporthandling.Resource, 0) // do not set slice length
 		finalizeResources(opaSessionObj.Report.Resources, opaSessionObj.AllResources)
 		opaSessionObj.AllResources = nil
 	}
@@ -34,15 +34,12 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 }
 
 func finalizeResources(resources []reporthandling.Resource, allResources map[string]workloadinterface.IMetadata) {
-	index := 0
 	for resourceID := range allResources {
 		if obj, ok := allResources[resourceID]; ok {
 			r := *reporthandling.NewResource(obj.GetObject())
 			r.ResourceID = resourceID
-			resources[index] = r
+			resources = append(resources, r)
 		}
-
-		index++
 	}
 }
 

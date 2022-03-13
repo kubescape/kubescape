@@ -31,8 +31,8 @@ e.g.:
 ```bash
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"account":"42ec914f-74e6-4bcb-8e69-5edd819d9b15","hostSensor":true}' \
-  http://127.0.0.1:5000/v1/scan
+  --data '{"account":"42ec914f-74e6-4bcb-8e69-5edd819d9b15","hostScanner":true}' \
+  http://127.0.0.1:8080/v1/scan
 ```
 ## Installation into kubernetes
 
