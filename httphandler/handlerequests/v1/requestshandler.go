@@ -128,7 +128,6 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	if scanID = r.URL.Query().Get("scanID"); scanID == "" {
 		scanID = handler.state.getLatestID()
 	}
-	logger.L().Info("requesting results", helpers.String("ID", scanID))
 
 	if handler.state.isBusy() { // if requested ID is still scanning
 		if scanID == handler.state.getID() {
@@ -141,6 +140,8 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
+		logger.L().Info("requesting results", helpers.String("ID", scanID))
+
 		if r.URL.Query().Has("remove") {
 			defer removeResultsFile(scanID)
 		}
@@ -152,6 +153,8 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		}
 	case http.MethodDelete:
+		logger.L().Info("deleting results", helpers.String("ID", scanID))
+
 		if r.URL.Query().Has("all") {
 			removeResultDirs()
 		} else {

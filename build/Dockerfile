@@ -17,13 +17,14 @@ RUN pip3 install --no-cache --upgrade pip setuptools
 
 WORKDIR /work
 ADD . .
+WORKDIR /work/httphandler
 
 RUN python build.py
 
 RUN ls -ltr build/ubuntu-latest
 
 FROM alpine
-COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kubescape
+COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/kubescape
 
 # # Download the frameworks. Use the "--use-default" flag when running kubescape
 # RUN kubescape download framework nsa && kubescape download framework mitre

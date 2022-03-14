@@ -11,6 +11,7 @@ import (
 
 func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
+
 	ks := core.NewKubescape()
 	result, err := ks.Scan(scanInfo)
 	if err != nil {
@@ -34,7 +35,7 @@ func readResultsFile(fileID string) ([]byte, error) {
 	if fileName := searchFile(fileID); fileName != "" {
 		return os.ReadFile(fileName)
 	}
-	return nil, fmt.Errorf("file not found")
+	return nil, fmt.Errorf("file %s not found", fileID)
 }
 
 func removeResultDirs() {
@@ -59,7 +60,7 @@ func searchFile(fileID string) string {
 
 func findFile(targetDir string, fileName string) (string, error) {
 
-	matches, err := filepath.Glob(targetDir + fileName)
+	matches, err := filepath.Glob(filepath.Join(targetDir, fileName))
 	if err != nil {
 		return "", err
 	}

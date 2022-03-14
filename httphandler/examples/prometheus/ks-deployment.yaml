@@ -51,6 +51,7 @@ spec:
   type: NodePort
   ports:
     - port: 8080
+      name: http
       targetPort: 8080
       protocol: TCP
   selector:
@@ -76,26 +77,30 @@ spec:
       serviceAccountName: kubescape-discovery
       containers:
       - name: kubescape
-        # livenessProbe:
-        #   httpGet:
-        #     path: /livez
-        #     port: 8080
-        #   initialDelaySeconds: 3
-        #   periodSeconds: 3
-        # readinessProbe:
-        #   httpGet:
-        #     path: /readyz
-        #     port: 8080
-        #   initialDelaySeconds: 3
-        #   periodSeconds: 3
-        image: quay.io/armosec/kubescape:prometheus.v1
+        livenessProbe:
+          httpGet:
+            path: /livez
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 3
+        image: quay.io/armosec/kubescape:prometheus.v2
         env:
-        - name: KS_RUN_PROMETHEUS_SERVER
-          value: "true"
         - name: KS_DEFAULT_CONFIGMAP_NAMESPACE
           value: "ks-scanner"
+        - name: "KS_SKIP_UPDATE_CHECK" # do not check latest version
+          value: "true"
+        - name: KS_ENABLE_HOST_SCANNER # enable host scanner -> https://hub.armo.cloud/docs/host-sensor
+          value: "false"               # TODO - add permissions to rbac 
         ports:
         - containerPort: 8080
+          name: http
+          protocol: TCP
         command:
         - kubescape
         resources:

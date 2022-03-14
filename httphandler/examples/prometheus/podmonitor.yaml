@@ -1,0 +1,15 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kubescape
+  namespace: ks-scanner
+  labels:
+    app: kubescape
+spec:
+  selector:
+    matchLabels:
+      app: kubescape
+  podMetricsEndpoints:
+  - port: http
+    interval: 120s
+    scrapeTimeout: 120s
