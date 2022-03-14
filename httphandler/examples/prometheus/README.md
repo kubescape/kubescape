@@ -2,7 +2,7 @@
 
 1. Deploy kubescape
     ```bash
-    kubectl apply -f https://raw.githubusercontent.com/armosec/kubescape/master/httphandler/examples/prometheus/kubescape.yaml
+    kubectl apply -f ks-deployment.yaml
     ```
     > **NOTE** Make sure the configurations suit your cluster (e.g. `serviceType`, etc.)
 
@@ -14,6 +14,6 @@
     ```
 3. Deploy pod monitor
     ```bash
-    kubectl apply -f https://raw.githubusercontent.com/armosec/kubescape/master/httphandler/examples/prometheus/kubescape.yaml
+    kubectl apply -f podmonitor.yaml
     ```
 
