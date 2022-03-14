@@ -50,10 +50,11 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 func getPrometheusDefaultScanCommand(scanID string) *cautils.ScanInfo {
 	scanInfo := cautils.ScanInfo{}
 	scanInfo.FrameworkScan = true
-	scanInfo.ScanAll = true                                            // scan all frameworks
-	scanInfo.ReportID = scanID                                         // scan ID
-	scanInfo.HostSensorEnabled.Set(os.Getenv("KS_ENABLE_HOST_SENSOR")) // enable host scanner
-	scanInfo.FailThreshold = 100                                       // Do not fail scanning
-	// scanInfo.Format = "prometheus" 								   // results format
+	scanInfo.ScanAll = true                                             // scan all frameworks
+	scanInfo.ReportID = scanID                                          // scan ID
+	scanInfo.HostSensorEnabled.Set(os.Getenv("KS_ENABLE_HOST_SCANNER")) // enable host scanner
+	scanInfo.FailThreshold = 100                                        // Do not fail scanning
+	scanInfo.Format = "prometheus"                                      // results format
+	scanInfo.Local = true                                               // Do not publish results to Kubescape SaaS
 	return &scanInfo
 }

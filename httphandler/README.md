@@ -5,7 +5,7 @@
 Running `kubescape` will start up a webserver on port `8080` which will serve the following paths: 
 
 * POST `/v1/scan` - Trigger a kubescape scan. The server will return an ID and will execute the scanning asynchronously 
-* * `synchronously`: scan synchronously (return results and not ID). Use only in small clusters are with an increased timeout
+* * `wait`: scan synchronously (return results and not ID). Use only in small clusters are with an increased timeout
 * GET `/v1/results` -  Request kubescape scan results
 * * query `id=<string>` -> ID returned when triggering the scan action. If empty will return latest results
 * * query `remove` -> Remove results from storage after reading the results
@@ -20,15 +20,15 @@ Running `kubescape` will start up a webserver on port `8080` which will serve th
 
 POST /v1/results
 body:
-```json
+```
 {
-    "format": "",               // results format [default: json] (same as 'kubescape scan --format')
-    "excludedNamespaces": null, // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
-    "includeNamespaces": null,  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
-    "submit": false,            // submit results to Kubescape cloud (same as 'kubescape scan --submit')
-    "hostScanner": false,       // deploy kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
-    "keepLocal": false,         // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
-    "account": ""               // account ID (same as 'kubescape scan --account')
+    "format": <str>,               // results format [default: json] (same as 'kubescape scan --format')
+    "excludedNamespaces": <[]str>, // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
+    "includeNamespaces": <[]str>,  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
+    "submit": <bool>,              // submit results to Kubescape cloud (same as 'kubescape scan --submit')
+    "hostScanner": <bool>,         // deploy kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
+    "keepLocal": <bool>,           // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
+    "account": <str>               // account ID (same as 'kubescape scan --account')
 }
 ```
 
@@ -37,11 +37,10 @@ e.g.:
 ```bash
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"account":"XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX","hostScanner":true, "submit":true}' \
+  --data '{"hostScanner":true, "submit":true}' \
   http://127.0.0.1:8080/v1/scan
 ```
-## Installation into kubernetes
+## Examples
 
-The [yaml](ks-prometheus-support.yaml) file will deploy one instance of kubescape (with all relevant dependencies) to run on your cluster
-
-**NOTE** Make sure the configurations suit your cluster (e.g. `serviceType`, namespace, etc.)
+* [Prometheus](examples/prometheus/README.md)
+* [Microservice](examples/microservice/README.md)

@@ -20,12 +20,10 @@ def getBuildDir():
     currentPlatform = platform.system()
     buildDir = "build/"
 
-    if currentPlatform == "Windows": buildDir += "windows-latest"
-    elif currentPlatform == "Linux": buildDir += "ubuntu-latest"
-    elif currentPlatform == "Darwin": buildDir += "macos-latest"
-    else: raise OSError("Platform %s is not supported!" % (currentPlatform))
-
-    return buildDir
+    if currentPlatform == "Windows": return os.path.join(buildDir, "windows-latest") 
+    if currentPlatform == "Linux": return os.path.join(buildDir, "ubuntu-latest")  
+    if currentPlatform == "Darwin": return os.path.join(buildDir, "macos-latest")  
+    raise OSError("Platform %s is not supported!" % (currentPlatform))
 
 def getPackageName():
     packageName = "kubescape"

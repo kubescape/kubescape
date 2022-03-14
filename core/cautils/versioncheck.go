@@ -13,7 +13,8 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const SKIP_VERSION_CHECK = "KUBESCAPE_SKIP_UPDATE_CHECK"
+const SKIP_VERSION_CHECK_DEPRECATED = "KUBESCAPE_SKIP_UPDATE_CHECK"
+const SKIP_VERSION_CHECK = "KS_SKIP_UPDATE_CHECK"
 
 var BuildNumber string
 
@@ -28,6 +29,8 @@ func NewIVersionCheckHandler() IVersionCheckHandler {
 		logger.L().Warning("unknown build number, this might affect your scan results. Please make sure you are updated to latest version")
 	}
 	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && pkgutils.StringToBool(v) {
+		return NewVersionCheckHandlerMock()
+	} else if v, ok := os.LookupEnv(SKIP_VERSION_CHECK_DEPRECATED); ok && pkgutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
 	}
 	return NewVersionCheckHandler()
