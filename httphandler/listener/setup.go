@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	handlerequestsv1 "github.com/armosec/kubescape/httphandler/handlerequests/v1"
@@ -47,7 +48,7 @@ func SetupHTTPListener() error {
 
 	server.Handler = rtr
 
-	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()))
+	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", cautils.BuildNumber))
 	server.ListenAndServe()
 	if keyPair != nil {
 		return server.ListenAndServeTLS("", "")

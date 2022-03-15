@@ -128,7 +128,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 	var testSuites []JUnitTestSuite
 
 	// control scan
-	if len(results.Report.SummaryDetails.ListFrameworks().All()) == 0 {
+	if len(results.Report.SummaryDetails.ListFrameworks()) == 0 {
 		testSuite := JUnitTestSuite{}
 		testSuite.Failures = results.Report.SummaryDetails.NumberOfControls().Failed()
 		testSuite.Timestamp = results.Report.ReportGenerationTime.String()
@@ -147,7 +147,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 		testSuite.ID = i
 		testSuite.Name = f.Name
 		testSuite.Properties = properties(f.Score)
-		testSuite.TestCases = testsCases(results, f.ListControls(), f.GetName())
+		testSuite.TestCases = testsCases(results, f.GetControls(), f.GetName())
 		testSuites = append(testSuites, testSuite)
 	}
 
@@ -176,7 +176,7 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			testCaseFailure := JUnitFailure{}
 			testCaseFailure.Type = "Control"
 			// testCaseFailure.Contents =
-			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), getControlURL(control.GetID()), strings.Join(resourcesStr, "\n"))
+			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), getControlLink(control.GetID()), strings.Join(resourcesStr, "\n"))
 
 			testCase.Failure = &testCaseFailure
 		} else if control.GetStatus().IsSkipped() {
