@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
 )
 
 func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
@@ -14,6 +15,10 @@ func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
 	scanInfo.FailThreshold = scanRequest.FailThreshold // TODO - handle default
 
 	scanInfo.Format = scanRequest.Format // TODO - handle default
+
+	if scanRequest.UseCachedArtifacts {
+		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
+	}
 
 	scanInfo.Local = scanRequest.KeepLocal
 	scanInfo.Submit = scanRequest.Submit

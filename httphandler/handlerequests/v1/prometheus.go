@@ -27,12 +27,13 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	handler.state.setBusy()
 	defer handler.state.setNotBusy()
 
-	handler.state.setID(uuid.NewString())
-	resultsFile := handler.state.getID() + ".junit"
+	scanID := uuid.NewString()
+	handler.state.setID(scanID)
+
 	// trigger scanning
 	logger.L().Info(handler.state.getID(), helpers.String("action", "triggering scan"), helpers.Time())
 	ks := core.NewKubescape()
-	results, err := ks.Scan(getPrometheusDefaultScanCommand(handler.state.getID(), resultsFile))
+	results, err := ks.Scan(getPrometheusDefaultScanCommand(scanID))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf("failed to complete scan. reason: %s", err.Error())))
@@ -41,20 +42,20 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	results.HandleResults()
 	logger.L().Info(handler.state.getID(), helpers.String("action", "done scanning"), helpers.Time())
 
-	f, err := os.ReadFile(resultsFile)
+	f, err := os.ReadFile(scanID)
 	// res, err := results.ToJson()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf("failed read results from file. reason: %s", err.Error())))
 		return
 	}
-	os.Remove(resultsFile)
+	os.Remove(scanID)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(f)
 }
 
-func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanInfo {
+func getPrometheusDefaultScanCommand(scanID string) *cautils.ScanInfo {
 	scanInfo := cautils.ScanInfo{}
 	scanInfo.FrameworkScan = true
 	scanInfo.ScanAll = true                                             // scan all frameworks
@@ -62,12 +63,11 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanIn
 	scanInfo.HostSensorEnabled.Set(os.Getenv("KS_ENABLE_HOST_SCANNER")) // enable host scanner
 	scanInfo.FailThreshold = 100                                        // Do not fail scanning
 	scanInfo.Format = "prometheus"                                      // results format
-	scanInfo.Output = resultsFile                                       // results output
+	scanInfo.Output = scanID                                            // results output
 	scanInfo.Local = true                                               // Do not publish results to Kubescape SaaS
 	if !downloadArtifactsEveryScan() {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
-	scanInfo.Init()
 	return &scanInfo
 }
 func downloadArtifactsEveryScan() bool {
