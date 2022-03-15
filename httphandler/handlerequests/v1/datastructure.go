@@ -9,6 +9,7 @@ type PostScanRequest struct {
 	HostScanner        bool     `json:"hostScanner"`        // Deploy ARMO K8s host scanner to collect data from certain controls
 	KeepLocal          bool     `json:"keepLocal"`          // Do not submit results
 	Account            string   `json:"account"`            // account ID
+	UseCachedArtifacts bool     `json:"useCachedArtifacts"` // Use the cached artifacts instead of downloading
 	Logger             string   `json:"-"`                  // logger level - debug/info/error - default is debug
 	TargetType         string   `json:"-"`                  // framework/control - default is framework
 	TargetNames        []string `json:"-"`                  // default is all

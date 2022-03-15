@@ -30,10 +30,14 @@ RUN python build.py
 RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts
 
 FROM alpine
+
+RUN addgroup -S ks && adduser -S ks -G ks
+USER ks
+
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/kubescape
 COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kscli
 
-RUN mkdir $HOME/.kubescape && chmod 777 -R $HOME/.kubescape 
-COPY --from=builder /work/artifacts/ $HOME/.kubescape
+RUN mkdir /home/ks/.kubescape && chmod 777 -R /home/ks/.kubescape 
+COPY --from=builder /work/artifacts/ /home/ks/.kubescape
 
 ENTRYPOINT ["kubescape"]
