@@ -95,7 +95,5 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
 
-	scanInfo.Init()
-
 	return scanInfo
 }

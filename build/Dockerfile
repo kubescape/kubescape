@@ -31,6 +31,7 @@ RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts
 
 FROM alpine
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/kubescape
+COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kscli
 
 RUN mkdir $HOME/.kubescape && chmod 777 -R $HOME/.kubescape 
 COPY --from=builder /work/artifacts/ $HOME/.kubescape
