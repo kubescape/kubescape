@@ -133,15 +133,6 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, localExceptionsFilename)
 }
 
-func (scanInfo *ScanInfo) setUseExceptions() {
-	if scanInfo.UseExceptions != "" {
-		// load exceptions from file
-		scanInfo.ExceptionsGetter = getter.NewLoadPolicy([]string{scanInfo.UseExceptions})
-	} else {
-		scanInfo.ExceptionsGetter = getter.GetArmoAPIConnector()
-	}
-}
-
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		for _, policy := range scanInfo.PolicyIdentifier {

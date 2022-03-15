@@ -60,7 +60,7 @@ func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 
 	m := pdf.NewMaroto(consts.Portrait, consts.A4)
 	pdfPrinter.printHeader(m)
-	pdfPrinter.printFramework(m, opaSessionObj.Report.SummaryDetails.ListFrameworks().All())
+	pdfPrinter.printFramework(m, opaSessionObj.Report.SummaryDetails.ListFrameworks())
 	pdfPrinter.printTable(m, &opaSessionObj.Report.SummaryDetails)
 	pdfPrinter.printFinalResult(m, &opaSessionObj.Report.SummaryDetails)
 
@@ -115,7 +115,7 @@ func (pdfPrinter *PdfPrinter) printHeader(m pdf.Maroto) {
 }
 
 // Print pdf frameworks after pdf header.
-func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IPolicies) {
+func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IFrameworkSummary) {
 	m.Row(10, func() {
 		m.Text(frameworksScoresToString(frameworks), props.Text{
 			Align:  consts.Center,

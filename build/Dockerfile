@@ -17,16 +17,22 @@ RUN pip3 install --no-cache --upgrade pip setuptools
 
 WORKDIR /work
 ADD . .
-WORKDIR /work/httphandler
 
+# build kubescape server
+WORKDIR /work/httphandler
+RUN python build.py
+RUN ls -ltr build/ubuntu-latest
+
+# build kubescape cmd
+WORKDIR /work/cmd
 RUN python build.py
 
-RUN ls -ltr build/ubuntu-latest
+RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts
 
 FROM alpine
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/kubescape
 
-# # Download the frameworks. Use the "--use-default" flag when running kubescape
-# RUN kubescape download framework nsa && kubescape download framework mitre
+RUN mkdir $HOME/.kubescape && chmod 777 -R $HOME/.kubescape 
+COPY --from=builder /work/artifacts/ $HOME/.kubescape
 
 ENTRYPOINT ["kubescape"]

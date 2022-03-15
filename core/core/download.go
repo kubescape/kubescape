@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -30,6 +31,9 @@ func DownloadSupportCommands() []string {
 
 func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
 	setPathandFilename(downloadInfo)
+	if err := os.MkdirAll(downloadInfo.Path, os.ModePerm); err != nil {
+		return err
+	}
 	if err := downloadArtifact(downloadInfo, downloadFunc); err != nil {
 		return err
 	}
@@ -85,6 +89,9 @@ func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
 	}
 	if downloadInfo.FileName == "" {
 		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
+	}
+	if controlInputs == nil {
+		return fmt.Errorf("failed to download controlInputs - received an empty objects")
 	}
 	// save in file
 	err = getter.SaveInFile(controlInputs, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
@@ -148,6 +155,9 @@ func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 		if err != nil {
 			return err
 		}
+		if framework == nil {
+			return fmt.Errorf("failed to download framework - received an empty objects")
+		}
 		downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 		err = getter.SaveInFile(framework, downloadTo)
 		if err != nil {
@@ -174,6 +184,9 @@ func downloadControl(downloadInfo *metav1.DownloadInfo) error {
 	controls, err := g.GetControl(downloadInfo.Name)
 	if err != nil {
 		return err
+	}
+	if controls == nil {
+		return fmt.Errorf("failed to download control - received an empty objects")
 	}
 	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 	err = getter.SaveInFile(controls, downloadTo)

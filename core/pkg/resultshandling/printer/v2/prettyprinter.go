@@ -75,7 +75,7 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 
 }
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
-	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), getControlURL(controlSummary.GetID()))
+	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), getControlLink(controlSummary.GetID()))
 	switch controlSummary.GetStatus().Status() {
 	case apis.StatusSkipped:
 		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
@@ -188,10 +188,10 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.Render()
 
 	// For control scan framework will be nil
-	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks().All()))
+	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
 }
 
-func frameworksScoresToString(frameworks []reportsummary.IPolicies) string {
+func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
 			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
@@ -217,6 +217,6 @@ func frameworksScoresToString(frameworks []reportsummary.IPolicies) string {
 // 	sort.Strings(controlNames)
 // 	return controlNames
 // }
-func getControlURL(controlID string) string {
+func getControlLink(controlID string) string {
 	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
 }

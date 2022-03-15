@@ -112,10 +112,10 @@ func TestProcessResourcesResult(t *testing.T) {
 	assert.Equal(t, 0, len(summaryDetails.ListResourcesIDs().Passed()))
 
 	// test control listing
-	assert.Equal(t, len(res.ListControlsIDs(nil).All()), len(summaryDetails.ListControls().All()))
-	assert.Equal(t, len(res.ListControlsIDs(nil).Passed()), len(summaryDetails.ListControls().Passed()))
-	assert.Equal(t, len(res.ListControlsIDs(nil).Failed()), len(summaryDetails.ListControls().Failed()))
-	assert.Equal(t, len(res.ListControlsIDs(nil).Excluded()), len(summaryDetails.ListControls().Excluded()))
+	assert.Equal(t, len(res.ListControlsIDs(nil).All()), summaryDetails.NumberOfControls().All())
+	assert.Equal(t, len(res.ListControlsIDs(nil).Passed()), summaryDetails.NumberOfControls().Passed())
+	assert.Equal(t, len(res.ListControlsIDs(nil).Failed()), summaryDetails.NumberOfControls().Failed())
+	assert.Equal(t, len(res.ListControlsIDs(nil).Excluded()), summaryDetails.NumberOfControls().Excluded())
 	assert.True(t, summaryDetails.GetStatus().IsFailed())
 
 	opaSessionObj.Exceptions = []armotypes.PostureExceptionPolicy{*mocks.MockExceptionAllKinds(&armotypes.PosturePolicy{FrameworkName: frameworks[0].Name})}
