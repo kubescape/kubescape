@@ -21,13 +21,13 @@ const (
 )
 
 func (mrs *mRiskScore) string() string {
-	r := fmt.Sprintf("resourcesCountPassed: \"%d\"", mrs.resourcesCountPassed) + ", "
-	r += fmt.Sprintf("resourcesCountFailed: \"%d\"", mrs.resourcesCountFailed) + ", "
+	r := fmt.Sprintf("resourcesCountFailed: \"%d\"", mrs.resourcesCountFailed) + ", "
 	r += fmt.Sprintf("resourcesCountExcluded: \"%d\"", mrs.resourcesCountExcluded) + ", "
-	r += fmt.Sprintf("controlsCountPassed: \"%d\"", mrs.controlsCountPassed) + ", "
+	r += fmt.Sprintf("resourcesCountPassed: \"%d\"", mrs.resourcesCountPassed) + ", "
+	r += fmt.Sprintf("controlsCountFailed: \"%d\"", mrs.controlsCountFailed) + ", "
 	r += fmt.Sprintf("controlsCountExcluded: \"%d\"", mrs.controlsCountExcluded) + ", "
+	r += fmt.Sprintf("controlsCountPassed: \"%d\"", mrs.controlsCountPassed) + ", "
 	r += fmt.Sprintf("controlsCountSkipped: \"%d\"", mrs.controlsCountSkipped) + ", "
-	r += fmt.Sprintf("controlsCountFailed: \"%d\"", mrs.controlsCountFailed)
 	return r
 }
 func (mrs *mRiskScore) value() int {
@@ -37,12 +37,12 @@ func (mrs *mRiskScore) value() int {
 func (mcrs *mControlRiskScore) string() string {
 	r := fmt.Sprintf("controlName: \"%s\"", mcrs.controlName) + ", "
 	r += fmt.Sprintf("controlID: \"%s\"", mcrs.controlID) + ", "
-	r += fmt.Sprintf("link: \"%s\"", mcrs.link) + ", "
 	r += fmt.Sprintf("severity: \"%s\"", mcrs.severity) + ", "
-	r += fmt.Sprintf("remediation: \"%s\"", mcrs.remediation) + ", "
-	r += fmt.Sprintf("resourcesCountPassed: \"%d\"", mcrs.resourcesCountPassed) + ", "
 	r += fmt.Sprintf("resourcesCountFailed: \"%d\"", mcrs.resourcesCountFailed) + ", "
-	r += fmt.Sprintf("resourcesCountExcluded: \"%d\"", mcrs.resourcesCountExcluded)
+	r += fmt.Sprintf("resourcesCountExcluded: \"%d\"", mcrs.resourcesCountExcluded) + ", "
+	r += fmt.Sprintf("resourcesCountPassed: \"%d\"", mcrs.resourcesCountPassed) + ", "
+	r += fmt.Sprintf("link: \"%s\"", mcrs.link) + ", "
+	r += fmt.Sprintf("remediation: \"%s\"", mcrs.remediation)
 	return r
 }
 func (mcrs *mControlRiskScore) value() int {
@@ -51,23 +51,23 @@ func (mcrs *mControlRiskScore) value() int {
 
 func (mfrs *mFrameworkRiskScore) string() string {
 	r := fmt.Sprintf("frameworkName: \"%s\"", mfrs.frameworkName) + ", "
-	r += fmt.Sprintf("resourcesCountPassed: \"%d\"", mfrs.resourcesCountPassed) + ", "
 	r += fmt.Sprintf("resourcesCountFailed: \"%d\"", mfrs.resourcesCountFailed) + ", "
 	r += fmt.Sprintf("resourcesCountExcluded: \"%d\"", mfrs.resourcesCountExcluded) + ", "
-	r += fmt.Sprintf("controlsCountPassed: \"%d\"", mfrs.controlsCountPassed) + ", "
-	r += fmt.Sprintf("controlsCountExcluded: \"%d\"", mfrs.controlsCountExcluded) + ", "
-	r += fmt.Sprintf("controlsCountSkipped: \"%d\"", mfrs.controlsCountSkipped) + ", "
+	r += fmt.Sprintf("resourcesCountPassed: \"%d\"", mfrs.resourcesCountPassed) + ", "
 	r += fmt.Sprintf("controlsCountFailed: \"%d\"", mfrs.controlsCountFailed)
+	r += fmt.Sprintf("controlsCountExcluded: \"%d\"", mfrs.controlsCountExcluded) + ", "
+	r += fmt.Sprintf("controlsCountPassed: \"%d\"", mfrs.controlsCountPassed) + ", "
+	r += fmt.Sprintf("controlsCountSkipped: \"%d\"", mfrs.controlsCountSkipped) + ", "
 	return r
 }
 func (mfrs *mFrameworkRiskScore) value() int {
 	return mfrs.riskScore
 }
 func (mrc *mResourceControls) string() string {
-	r := fmt.Sprintf("name: \"%s\"", mrc.name) + ", "
-	r += fmt.Sprintf("controlID: \"%s\"", mrc.namespace) + ", "
-	r += fmt.Sprintf("link: \"%s\"", mrc.apiVersion) + ", "
-	r += fmt.Sprintf("severity: \"%s\"", mrc.kind)
+	r := fmt.Sprintf("apiVersion: \"%s\"", mrc.apiVersion) + ", "
+	r += fmt.Sprintf("kind: \"%s\"", mrc.kind) + ", "
+	r += fmt.Sprintf("namespace: \"%s\"", mrc.namespace) + ", "
+	r += fmt.Sprintf("name: \"%s\"", mrc.name)
 	return r
 }
 func (mrc *mResourceControls) value() int {
@@ -81,19 +81,19 @@ func (m *Metrics) String() string {
 
 	r := toRowInMetrics(metricsScore, m.rs.string(), m.rs.value())
 	for i := range m.listControls {
-		r += toRowInMetrics(metricsScore, m.listControls[i].string(), m.listControls[i].value())
+		r += toRowInMetrics(metricsControlScore, m.listControls[i].string(), m.listControls[i].value())
 	}
 	for i := range m.listFrameworks {
-		r += toRowInMetrics(metricsScore, m.listFrameworks[i].string(), m.listFrameworks[i].value())
-	}
-	for i := range m.listResourcesControlsExcluded {
-		r += toRowInMetrics(metricsScore, m.listResourcesControlsExcluded[i].string(), m.listResourcesControlsExcluded[i].value())
+		r += toRowInMetrics(metricsFrameworkScore, m.listFrameworks[i].string(), m.listFrameworks[i].value())
 	}
 	for i := range m.listResourcesControlsFiled {
-		r += toRowInMetrics(metricsScore, m.listResourcesControlsFiled[i].string(), m.listResourcesControlsFiled[i].value())
+		r += toRowInMetrics(metricsresourceFailed, m.listResourcesControlsFiled[i].string(), m.listResourcesControlsFiled[i].value())
+	}
+	for i := range m.listResourcesControlsExcluded {
+		r += toRowInMetrics(metricsresourceExcluded, m.listResourcesControlsExcluded[i].string(), m.listResourcesControlsExcluded[i].value())
 	}
 	for i := range m.listResourcesControlsPassed {
-		r += toRowInMetrics(metricsScore, m.listResourcesControlsPassed[i].string(), m.listResourcesControlsPassed[i].value())
+		r += toRowInMetrics(metricsresourcePassed, m.listResourcesControlsPassed[i].string(), m.listResourcesControlsPassed[i].value())
 	}
 	return r
 }
@@ -236,13 +236,17 @@ func (m *Metrics) setResourcesCounters(
 		mrc.name = r.GetName()
 
 		// append
-		mrc.controls = passed
-		m.listResourcesControlsPassed = append(m.listResourcesControlsPassed, mrc)
-
-		mrc.controls = failed
-		m.listResourcesControlsFiled = append(m.listResourcesControlsFiled, mrc)
-
-		mrc.controls = excluded
-		m.listResourcesControlsExcluded = append(m.listResourcesControlsExcluded, mrc)
+		if passed > 0 {
+			mrc.controls = passed
+			m.listResourcesControlsPassed = append(m.listResourcesControlsPassed, mrc)
+		}
+		if failed > 0 {
+			mrc.controls = failed
+			m.listResourcesControlsFiled = append(m.listResourcesControlsFiled, mrc)
+		}
+		if excluded > 0 {
+			mrc.controls = excluded
+			m.listResourcesControlsExcluded = append(m.listResourcesControlsExcluded, mrc)
+		}
 	}
 }
