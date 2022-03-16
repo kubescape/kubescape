@@ -193,11 +193,11 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.SetFooter(generateFooter(summaryDetails))
 
 	// summaryTable.SetFooter(generateFooter())
+	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
 	summaryTable.Render()
 
 	prettyPrinter.printInfo(infoToPrintInfoMap)
 	// For control scan framework will be nil
-	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
 }
 
 func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfoMap map[string]string) {
@@ -209,11 +209,11 @@ func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfoMap map[string]stri
 func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
+			return fmt.Sprintf("\nFRAMEWORK %s\n", frameworks[0].GetName())
 			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
 		}
 	} else if len(frameworks) > 1 {
-		p := "FRAMEWORKS: "
+		p := "\nFRAMEWORKS: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
 			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())
