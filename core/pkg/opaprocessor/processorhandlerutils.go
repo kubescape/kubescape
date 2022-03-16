@@ -48,7 +48,7 @@ func (opap *OPAProcessor) updateResults() {
 
 	// set result summary
 	// map control to error
-	controlToInfoMap := mapControlToError(opap.ResourceToControlsMap, opap.ErrorMap)
+	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 	// for f := range opap.PostureReport.FrameworkReports {
 	// 	// set exceptions
@@ -62,9 +62,9 @@ func (opap *OPAProcessor) updateResults() {
 	// }
 }
 
-func mapControlToError(mapResourceToControls map[string][]string, errorMap map[string]apis.StatusInfo) map[string]apis.StatusInfo {
+func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo) map[string]apis.StatusInfo {
 	controlToInfoMap := make(map[string]apis.StatusInfo)
-	for resource, statusInfo := range errorMap {
+	for resource, statusInfo := range infoMap {
 		controls := mapResourceToControls[resource]
 		for _, control := range controls {
 			controlToInfoMap[control] = statusInfo

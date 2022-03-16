@@ -25,7 +25,7 @@ type OPASessionObj struct {
 	Exceptions            []armotypes.PostureExceptionPolicy     // list of exceptions to apply on scan results
 	RegoInputData         RegoInputData                          // input passed to rgo for scanning. map[<control name>][<input arguments>]
 	Metadata              *reporthandlingv2.Metadata
-	ErrorMap              map[string]apis.StatusInfo // Map errors of resources to StatusInfo
+	InfoMap               map[string]apis.StatusInfo // Map errors of resources to StatusInfo
 	ResourceToControlsMap map[string][]string        // map[<apigroup/apiversion/resource>] = [<control_IDs>]
 }
 
@@ -36,7 +36,7 @@ func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SRe
 		K8SResources:          k8sResources,
 		AllResources:          make(map[string]workloadinterface.IMetadata),
 		ResourcesResult:       make(map[string]resourcesresults.Result),
-		ErrorMap:              make(map[string]apis.StatusInfo),
+		InfoMap:               make(map[string]apis.StatusInfo),
 		ResourceToControlsMap: make(map[string][]string),
 		PostureReport: &reporthandling.PostureReport{
 			ClusterName:  ClusterName,

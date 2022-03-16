@@ -63,7 +63,7 @@ func (policyHandler *PolicyHandler) getResources(notification *reporthandling.Po
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
 	setOpaSessionObj(opaSessionObj, scanInfo)
 
-	resourcesMap, allResources, armoResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &notification.Designators, scanInfo)
+	resourcesMap, allResources, armoResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &notification.Designators)
 	if err != nil {
 		return err
 	}

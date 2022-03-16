@@ -25,10 +25,10 @@ var (
 	}
 )
 
-func addInfoToMap(resource string, errorMap map[string]apis.StatusInfo, err error) {
+func addInfoToMap(resource string, infoMap map[string]apis.StatusInfo, err error) {
 	group, version := k8sinterface.SplitApiVersion(MapResourceToApiGroup[resource])
 	r := k8sinterface.JoinResourceTriplets(group, version, KubeletConfiguration)
-	errorMap[r] = apis.StatusInfo{
+	infoMap[r] = apis.StatusInfo{
 		InnerStatus: apis.StatusSkipped,
 		InnerInfo:   err.Error(),
 	}

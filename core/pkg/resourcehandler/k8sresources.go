@@ -44,7 +44,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -89,16 +89,16 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	hostResources := cautils.MapHostResources(armoResourceMap)
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
-		if *scanInfo.HostSensorEnabled.Get() {
-			if err := k8sHandler.collectHostResources(allResources, armoResourceMap, sessionObj.ErrorMap); err != nil {
+		if sessionObj.Metadata.ScanMetadata.HostScanner {
+			if err := k8sHandler.collectHostResources(allResources, armoResourceMap, sessionObj.InfoMap); err != nil {
 				logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
-				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.ErrorMap)
+				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 			} else if k8sHandler.hostSensorHandler == nil {
 				// using hostSensor mock
-				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.ErrorMap)
+				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			}
 		} else {
-			cautils.SetInfoMapForResources("enable-host-scan flag not used", hostResources, sessionObj.ErrorMap)
+			cautils.SetInfoMapForResources("enable-host-scan flag not used", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -111,7 +111,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	if len(cloudResources) > 0 {
 		provider, err := getCloudProviderDescription(allResources, armoResourceMap)
 		if err != nil {
-			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.ErrorMap)
+			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
 		}
 		if provider != "" {
