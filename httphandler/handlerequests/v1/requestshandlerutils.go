@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 
+	pkgcautils "github.com/armosec/utils-go/utils"
+
 	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/kubescape/core/core"
 )
 
@@ -96,4 +99,34 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 	// *** end ***
 
 	return scanInfo
+}
+
+func defaultScanInfo() *cautils.ScanInfo {
+	scanInfo := &cautils.ScanInfo{}
+	scanInfo.Account = envToString("KS_ACCOUNT", "")                              // publish results to Kubescape SaaS
+	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")        // namespace to exclude
+	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")         // namespace to include
+	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")               // output format version
+	scanInfo.Format = envToString("KS_FORMAT", "json")                            // default output should be json
+	scanInfo.Submit = envToBool("KS_SUBMIT", false)                               // publish results to Kubescape SaaS
+	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", true)) // enable host scanner
+	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                            // do not publish results to Kubescape SaaS
+	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
+		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
+	}
+	return scanInfo
+}
+
+func envToBool(env string, defaultValue bool) bool {
+	if d, ok := os.LookupEnv(env); ok {
+		return pkgcautils.StringToBool(d)
+	}
+	return defaultValue
+}
+
+func envToString(env string, defaultValue string) string {
+	if d, ok := os.LookupEnv(env); ok {
+		return d
+	}
+	return defaultValue
 }

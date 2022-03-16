@@ -6,11 +6,9 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/core"
-	pkgcautils "github.com/armosec/utils-go/utils"
 	"github.com/google/uuid"
 )
 
@@ -56,23 +54,13 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 }
 
 func getPrometheusDefaultScanCommand(scanID string) *cautils.ScanInfo {
-	scanInfo := cautils.ScanInfo{}
+	scanInfo := defaultScanInfo()
 	scanInfo.FrameworkScan = true
-	scanInfo.ScanAll = true                                             // scan all frameworks
-	scanInfo.ReportID = scanID                                          // scan ID
-	scanInfo.HostSensorEnabled.Set(os.Getenv("KS_ENABLE_HOST_SCANNER")) // enable host scanner
-	scanInfo.FailThreshold = 100                                        // Do not fail scanning
-	scanInfo.Format = "prometheus"                                      // results format
-	scanInfo.Output = scanID                                            // results output
-	scanInfo.Local = true                                               // Do not publish results to Kubescape SaaS
-	if !downloadArtifactsEveryScan() {
-		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
-	}
-	return &scanInfo
-}
-func downloadArtifactsEveryScan() bool {
-	if d, ok := os.LookupEnv("KS_DOWNLOAD_ARTIFACTS"); ok {
-		return pkgcautils.StringToBool(d)
-	}
-	return false
+	scanInfo.ScanAll = true                                                        // scan all frameworks
+	scanInfo.ReportID = scanID                                                     // scan ID
+	scanInfo.FailThreshold = 100                                                   // Do not fail scanning
+	scanInfo.Output = scanID                                                       // results output
+	scanInfo.Format = envToString("KS_FORMAT", "prometheus")                       // default output should be json
+	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", false)) // enable host scanner
+	return scanInfo
 }

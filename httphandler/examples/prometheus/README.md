@@ -10,11 +10,11 @@
     ```bash
     helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
     helm repo update
-    kubectl create namescape prometheus
+    kubectl create namespace prometheus
     helm install -n prometheus kube-prometheus-stack prometheus-community/kube-prometheus-stack --set prometheus.prometheusSpec.podMonitorSelectorNilUsesHelmValues=false,prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
     ```
 3. Deploy pod monitor
     ```bash
     kubectl apply -f podmonitor.yaml
     ```
-
+ 

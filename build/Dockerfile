@@ -33,6 +33,7 @@ FROM alpine
 
 RUN addgroup -S ks && adduser -S ks -G ks
 USER ks
+WORKDIR /home/ks/
 
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/kubescape
 COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kscli
