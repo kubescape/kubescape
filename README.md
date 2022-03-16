@@ -12,7 +12,11 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 
 </br>
 
+# CLI Interface:
 <img src="docs/demo.gif">
+
+# Web Interface:
+<img src="docs/ARMO-header-2022.gif">
 
 # TL;DR
 ## Install:

@@ -18,8 +18,14 @@ jobs:
         with:
           go-version: 1.17
           
-      - name: Test
-        run: go test -v ./...
+      - name: Test cmd pkg
+        run: cd cmd && go test -v ./...
+      
+      - name: Test core pkg
+        run: cd core && go test -v ./...
+
+      - name: Test httphandler pkg
+        run: cd httphandler && go test -v ./...
 
       - name: Build
         env:
@@ -29,7 +35,7 @@ jobs:
           ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 0
-        run: python3 --version && python3 build.py
+        run: cd cmd && python3 --version && python3 build.py
       
       - name: Smoke Testing
         env:
