@@ -2,7 +2,9 @@ package policyhandler
 
 import (
 	"fmt"
+	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/pkg/resourcehandler"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -45,16 +47,40 @@ func (policyHandler *PolicyHandler) CollectResources(notification *reporthandlin
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
+func scanInfoToScanMetadata(opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) {
+	opaSessionObj.Metadata.ClusterMetadata.ContextName = k8sinterface.GetCurrentContext().Cluster
+	opaSessionObj.Metadata.ScanMetadata.Format = scanInfo.Format
+	opaSessionObj.Metadata.ScanMetadata.Submit = scanInfo.Submit
+	if len(scanInfo.ExcludedNamespaces) > 1 {
+		opaSessionObj.Metadata.ScanMetadata.ExcludedNamespaces = strings.Split(scanInfo.ExcludedNamespaces[1:], ",")
+	}
+	// scan type
+	if len(scanInfo.PolicyIdentifier) > 0 {
+		opaSessionObj.Metadata.ScanMetadata.TargetType = string(scanInfo.PolicyIdentifier[0].Kind)
+	}
+	// append frameworks
+	for _, policy := range scanInfo.PolicyIdentifier {
+		opaSessionObj.Metadata.ScanMetadata.TargetNames = append(opaSessionObj.Metadata.ScanMetadata.TargetNames, policy.Name)
+	}
+	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
+	opaSessionObj.Metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
+	opaSessionObj.Metadata.ScanMetadata.HostScanner = *scanInfo.HostSensorEnabled.Get()
+	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
+	opaSessionObj.Metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
+}
 
+func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
-	resourcesMap, allResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj.Policies, &notification.Designators)
+	scanInfoToScanMetadata(opaSessionObj, scanInfo)
+
+	resourcesMap, allResources, armoResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &notification.Designators)
 	if err != nil {
 		return err
 	}
 
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
+	opaSessionObj.ArmoResource = armoResources
 
 	return nil
 }

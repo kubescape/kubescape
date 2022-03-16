@@ -6,6 +6,7 @@ import (
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
@@ -36,6 +37,20 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 		results[index] = resourcesResult[resourceID]
 		index++
 	}
+}
+
+func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) map[string]string {
+	infoToPrintInfoMap := make(map[string]string)
+	starCount := "*"
+	for _, control := range controls {
+		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
+			if _, ok := infoToPrintInfoMap[control.GetStatus().Info()]; !ok {
+				infoToPrintInfoMap[control.GetStatus().Info()] = starCount
+				starCount += starCount
+			}
+		}
+	}
+	return infoToPrintInfoMap
 }
 
 func finalizeResources(resources []reporthandling.Resource, results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) {

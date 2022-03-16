@@ -83,10 +83,17 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 		cautils.FailureDisplay(prettyPrinter.writer, "failed %v\n", emoji.SadButRelievedFace)
 	case apis.StatusExcluded:
 		cautils.WarningDisplay(prettyPrinter.writer, "excluded %v\n", emoji.NeutralFace)
+	case apis.StatusIrrelevant:
+		cautils.SuccessDisplay(prettyPrinter.writer, "irrelevant %v\n", emoji.ConfusedFace)
+	case apis.StatusError:
+		cautils.WarningDisplay(prettyPrinter.writer, "error %v\n", emoji.ConfusedFace)
 	default:
 		cautils.SuccessDisplay(prettyPrinter.writer, "passed %v\n", emoji.ThumbsUp)
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.GetDescription())
+	if controlSummary.GetStatus().Info() != "" {
+		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
+	}
 }
 func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
 
@@ -166,6 +173,7 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()))
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().All()))
 	row = append(row, fmt.Sprintf("%.2f%s", summaryDetails.Score, "%"))
+	row = append(row, " ")
 
 	return row
 }
@@ -175,30 +183,37 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(getControlTableHeaders())
 	summaryTable.SetHeaderLine(true)
-	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
 	summaryTable.SetColumnAlignment(alignments)
-
+	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i])))
+		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]), infoToPrintInfoMap))
 	}
 
 	summaryTable.SetFooter(generateFooter(summaryDetails))
 
 	// summaryTable.SetFooter(generateFooter())
+	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
 	summaryTable.Render()
 
+	prettyPrinter.printInfo(infoToPrintInfoMap)
 	// For control scan framework will be nil
-	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
+}
+
+func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfoMap map[string]string) {
+	for info, stars := range infoToPrintInfoMap {
+		cautils.WarningDisplay(prettyPrinter.writer, fmt.Sprintf("%s - %s\n", stars, info))
+	}
 }
 
 func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
+			return fmt.Sprintf("\nFRAMEWORK %s\n", frameworks[0].GetName())
 			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
 		}
 	} else if len(frameworks) > 1 {
-		p := "FRAMEWORKS: "
+		p := "\nFRAMEWORKS: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
 			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())

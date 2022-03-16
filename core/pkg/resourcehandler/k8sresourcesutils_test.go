@@ -13,7 +13,7 @@ func TestGetK8sResources(t *testing.T) {
 func TestSetResourceMap(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 	framework := reporthandling.MockFrameworkA()
-	k8sResources := setResourceMap([]reporthandling.Framework{*framework})
+	k8sResources := setK8sResourceMap([]reporthandling.Framework{*framework})
 	resources := k8sinterface.ResourceGroupToString("*", "v1", "Pod")
 	if len(resources) == 0 {
 		t.Error("expected resources")
@@ -43,9 +43,9 @@ func TestInsertK8sResources(t *testing.T) {
 		APIVersions: []string{"v1"},
 		Resources:   []string{"secrets"},
 	}
-	insertK8sResources(k8sResources, match1)
-	insertK8sResources(k8sResources, match2)
-	insertK8sResources(k8sResources, match3)
+	insertResources(k8sResources, match1)
+	insertResources(k8sResources, match2)
+	insertResources(k8sResources, match3)
 
 	apiGroup1, ok := k8sResources["apps"]
 	if !ok {

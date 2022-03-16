@@ -34,7 +34,7 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	return registryAdaptors, nil
 }
 
-func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) error {
+func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) error {
 	logger.L().Debug("Collecting images vulnerabilities")
 
 	// list cluster images
@@ -64,7 +64,7 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	for i := range metaObjs {
 		allResources[metaObjs[i].GetID()] = metaObjs[i]
 	}
-	(*k8sResourcesMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
+	(*armoResourceMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
 
 	return nil
 }
