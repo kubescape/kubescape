@@ -202,7 +202,7 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 
 func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfoMap map[string]string) {
 	for info, stars := range infoToPrintInfoMap {
-		cautils.WarningDisplay(prettyPrinter.writer, fmt.Sprintf("%s -  %s\n", stars, info))
+		cautils.WarningDisplay(prettyPrinter.writer, fmt.Sprintf("%s - %s\n", stars, info))
 	}
 }
 
