@@ -60,6 +60,7 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	opaSessionObj.Report.ReportID = uuid.NewString()
 	opaSessionObj.Report.CustomerGUID = report.customerGUID
 	opaSessionObj.Report.ClusterName = report.clusterName
+	opaSessionObj.Report.Metadata = *opaSessionObj.Metadata
 
 	if err := report.prepareReport(opaSessionObj.Report); err != nil {
 		logger.L().Error("failed to publish results", helpers.Error(err))

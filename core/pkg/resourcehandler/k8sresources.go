@@ -10,7 +10,7 @@ import (
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/opa-utils/reporthandling/apis"
 
 	"github.com/armosec/k8s-interface/cloudsupport"
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -44,46 +44,85 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
 	logger.L().Info("Accessing Kubernetes objects")
 
 	cautils.StartSpinner()
-
+	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	k8sResourcesMap := setResourceMap(frameworks)
+	k8sResourcesMap := setK8sResourceMap(sessionObj.Policies)
 
 	// get namespace and labels from designator (ignore cluster labels)
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
 
 	// pull k8s recourses
+	armoResourceMap := setArmoResourceMap(sessionObj.Policies, resourceToControl)
+
+	// map of armo resources to control_ids
+	sessionObj.ResourceToControlsMap = resourceToControl
+
 	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, err
+		return k8sResourcesMap, allResources, armoResourceMap, err
 	}
 
-	if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources); err != nil {
-		logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
+	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
+
+	if err != nil {
+		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
+	} else {
+		sessionObj.Metadata.ClusterMetadata.NumberOfWorkerNodes = numberOfWorkerNodes
 	}
 
-	if err := k8sHandler.collectHostResources(allResources, k8sResourcesMap); err != nil {
-		logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
+	imgVulnResources := cautils.MapImageVulnResources(armoResourceMap)
+	// check that controls use image vulnerability resources
+	if len(imgVulnResources) > 0 {
+		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, armoResourceMap); err != nil {
+			logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
+		}
+	}
+
+	hostResources := cautils.MapHostResources(armoResourceMap)
+	// check that controls use host sensor resources
+	if len(hostResources) > 0 {
+		if *scanInfo.HostSensorEnabled.Get() {
+			if err := k8sHandler.collectHostResources(allResources, armoResourceMap, sessionObj.ErrorMap); err != nil {
+				logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
+				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.ErrorMap)
+			} else if k8sHandler.hostSensorHandler == nil {
+				// using hostSensor mock
+				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.ErrorMap)
+			}
+		} else {
+			cautils.SetInfoMapForResources("enable-host-scan flag not used", hostResources, sessionObj.ErrorMap)
+		}
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
 		logger.L().Warning("failed to collect rbac resources", helpers.Error(err))
 	}
-	if err := getCloudProviderDescription(allResources, k8sResourcesMap); err != nil {
-		logger.L().Warning("failed to collect cloud data", helpers.Error(err))
+
+	cloudResources := cautils.MapCloudResources(armoResourceMap)
+	// check that controls use cloud resources
+	if len(cloudResources) > 0 {
+		provider, err := getCloudProviderDescription(allResources, armoResourceMap)
+		if err != nil {
+			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.ErrorMap)
+			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
+		}
+		if provider != "" {
+			sessionObj.Metadata.ClusterMetadata.CloudProvider = provider
+		}
 	}
 
 	cautils.StopSpinner()
 	logger.L().Success("Accessed to Kubernetes objects")
 
-	return k8sResourcesMap, allResources, nil
+	return k8sResourcesMap, allResources, armoResourceMap, nil
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
@@ -180,10 +219,9 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 // 	}
 // 	return nil
 // }
-func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
+func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources, errorMap map[string]apis.StatusInfo) error {
 	logger.L().Debug("Collecting host scanner resources")
-
-	hostResources, err := k8sHandler.hostSensorHandler.CollectResources()
+	hostResources, err := k8sHandler.hostSensorHandler.CollectResources(errorMap)
 	if err != nil {
 		return err
 	}
@@ -193,11 +231,11 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 		groupResource := k8sinterface.JoinResourceTriplets(group, version, hostResources[rscIdx].GetKind())
 		allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
 
-		grpResourceList, ok := (*resourcesMap)[groupResource]
+		grpResourceList, ok := (*armoResourceMap)[groupResource]
 		if !ok {
 			grpResourceList = make([]string, 0)
 		}
-		(*resourcesMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
+		(*armoResourceMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 	}
 	return nil
 }
@@ -218,20 +256,19 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
-func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, k8sResourcesMap *cautils.K8SResources) error {
+func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (string, error) {
 	logger.L().Debug("Collecting cloud data")
-
 	cloudProvider := initCloudProvider()
 	cluster := cloudProvider.getKubeCluster()
 	clusterName := cloudProvider.getKubeClusterName()
 	provider := getCloudProvider()
 	region, err := cloudProvider.getRegion(cluster, provider)
 	if err != nil {
-		return err
+		return provider, err
 	}
 	project, err := cloudProvider.getProject(cluster, provider)
 	if err != nil {
-		return err
+		return provider, err
 	}
 
 	if provider != "" {
@@ -242,17 +279,29 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 			// Return error with useful info on how to configure credentials for getting cloud provider info
 			switch provider {
 			case "gke":
-				return fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
+				return provider, fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
 			case "eks":
-				return fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
+				return provider, fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
 			case "aks":
-				return fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
+				return provider, fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
 			}
-			return err
+			return provider, err
 		}
 		allResources[wl.GetID()] = wl
-		(*k8sResourcesMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+		(*armoResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
-	return nil
+	return provider, nil
 
+}
+
+func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
+	// labels used for control plane
+	listOptions := metav1.ListOptions{
+		LabelSelector: "!node-role.kubernetes.io/control-plane,!node-role.kubernetes.io/master",
+	}
+	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.TODO(), listOptions)
+	if err != nil {
+		return 0, err
+	}
+	return len(nodesList.Items), nil
 }

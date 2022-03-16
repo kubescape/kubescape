@@ -11,8 +11,7 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 	if len(opaSessionObj.PostureReport.FrameworkReports) > 0 {
 		return // report already converted
 	}
-
-	opaSessionObj.PostureReport.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
+	//	opaSessionObj.PostureReport.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
 
 	frameworks := []reporthandling.FrameworkReport{}
 
