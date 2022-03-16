@@ -23,6 +23,10 @@ type FixedIn struct {
 	ImgTag  string `json:"imageTag"`
 	Version string `json:"version"`
 }
+type Categories struct {
+	IsRCE bool `json:"isRce"`
+}
+
 type Vulnerability struct {
 	Name               string      `json:"name"`
 	RelatedPackageName string      `json:"packageName"`
@@ -36,6 +40,7 @@ type Vulnerability struct {
 	UrgentCount        int         `json:"urgent"`
 	NeglectedCount     int         `json:"neglected"`
 	HealthStatus       string      `json:"healthStatus"`
+	Categories         Categories  `json:"categories"`
 }
 
 type ContainerImageVulnerabilityReport struct {

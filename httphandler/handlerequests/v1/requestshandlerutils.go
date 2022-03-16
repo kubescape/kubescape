@@ -80,12 +80,6 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 	scanInfo.ReportID = scanID
 
 	// *** start ***
-	// TODO - support frameworks/controls and support scanning single frameworks/controls
-	scanInfo.FrameworkScan = true
-	scanInfo.ScanAll = true
-	// *** end ***
-
-	// *** start ***
 	// Set default format
 	if scanInfo.Format == "" {
 		scanInfo.Format = "json"
@@ -103,6 +97,7 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 
 func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo := &cautils.ScanInfo{}
+	scanInfo.FailThreshold = 100
 	scanInfo.Account = envToString("KS_ACCOUNT", "")                              // publish results to Kubescape SaaS
 	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")        // namespace to exclude
 	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")         // namespace to include

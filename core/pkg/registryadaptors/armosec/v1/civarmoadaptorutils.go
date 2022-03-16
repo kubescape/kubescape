@@ -60,6 +60,9 @@ func responseObjectToVulnerabilities(vulnerabilitiesList containerscan.Vulnerabi
 		vulnerabilities[i].Relevancy = vulnerabilityEntry.Relevancy
 		vulnerabilities[i].Severity = vulnerabilityEntry.Severity
 		vulnerabilities[i].UrgentCount = vulnerabilityEntry.UrgentCount
+		vulnerabilities[i].Categories = registryvulnerabilities.Categories{
+			IsRCE: vulnerabilityEntry.Categories.IsRCE,
+		}
 	}
 	return vulnerabilities
 }
