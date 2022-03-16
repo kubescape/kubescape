@@ -7,7 +7,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-func generateRow(controlSummary reportsummary.IControlSummary) []string {
+func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfoMap map[string]string) []string {
 	row := []string{controlSummary.GetName()}
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
@@ -15,8 +15,14 @@ func generateRow(controlSummary reportsummary.IControlSummary) []string {
 
 	if !controlSummary.GetStatus().IsSkipped() {
 		row = append(row, fmt.Sprintf("%d", int(controlSummary.GetScore()))+"%")
+		row = append(row, "")
 	} else {
-		row = append(row, "skipped")
+		row = append(row, string(controlSummary.GetStatus().Status()))
+		if controlSummary.GetStatus().IsSkipped() {
+			row = append(row, infoToPrintInfoMap[controlSummary.GetStatus().Info()])
+		} else {
+			row = append(row, "")
+		}
 	}
 	return row
 }
@@ -32,5 +38,5 @@ func getSortedControlsNames(controls reportsummary.ControlSummaries) []string {
 }
 
 func getControlTableHeaders() []string {
-	return []string{"CONTROL NAME", "FAILED RESOURCES", "EXCLUDED RESOURCES", "ALL RESOURCES", "% RISK-SCORE"}
+	return []string{"CONTROL NAME", "FAILED RESOURCES", "EXCLUDED RESOURCES", "ALL RESOURCES", "% RISK-SCORE", "INFO"}
 }

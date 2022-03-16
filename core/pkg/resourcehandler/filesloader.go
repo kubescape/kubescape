@@ -10,7 +10,6 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // FileResourceHandler handle resources from files and URLs
@@ -27,19 +26,20 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling.Framework, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
 
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	k8sResources := setResourceMap(frameworks)
+	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
+	var armoResources *cautils.ArmoResources
 
 	workloads := []workloadinterface.IMetadata{}
 
 	// load resource from local file system
 	w, err := cautils.LoadResourcesFromFiles(fileHandler.inputPatterns)
 	if err != nil {
-		return nil, allResources, err
+		return nil, allResources, nil, err
 	}
 	if w != nil {
 		workloads = append(workloads, w...)
@@ -48,14 +48,14 @@ func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling
 	// load resources from url
 	w, err = loadResourcesFromUrl(fileHandler.inputPatterns)
 	if err != nil {
-		return nil, allResources, err
+		return nil, allResources, nil, err
 	}
 	if w != nil {
 		workloads = append(workloads, w...)
 	}
 
 	if len(workloads) == 0 {
-		return nil, allResources, fmt.Errorf("empty list of workloads - no workloads found")
+		return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
 	}
 
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
@@ -73,11 +73,11 @@ func (fileHandler *FileResourceHandler) GetResources(frameworks []reporthandling
 		}
 	}
 
-	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources); err != nil {
+	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, armoResources); err != nil {
 		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect images vulnerabilities: %s\n", err.Error())
 	}
 
-	return k8sResources, allResources, nil
+	return k8sResources, allResources, armoResources, nil
 
 }
 

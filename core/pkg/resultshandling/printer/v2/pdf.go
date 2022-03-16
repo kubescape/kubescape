@@ -54,15 +54,37 @@ func (pdfPrinter *PdfPrinter) SetWriter(outputFile string) {
 func (pdfPrinter *PdfPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", int(score))
 }
+func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap map[string]string) {
+	emptyRowCounter := 1
+	for key, val := range infoMap {
+		if val != "" {
+			m.Row(5, func() {
+				m.Col(1, func() {
+					m.Text(fmt.Sprintf("%v", val))
+				})
+				m.Col(12, func() {
+					m.Text(fmt.Sprintf("%v", key))
+				})
+			})
+			if emptyRowCounter < len(infoMap) {
+				m.Row(2.5, func() {})
+				emptyRowCounter++
+			}
+		}
+	}
+
+}
 
 func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	pdfPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls)
 
+	infoToPrintInfoMap := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
 	m := pdf.NewMaroto(consts.Portrait, consts.A4)
 	pdfPrinter.printHeader(m)
 	pdfPrinter.printFramework(m, opaSessionObj.Report.SummaryDetails.ListFrameworks())
 	pdfPrinter.printTable(m, &opaSessionObj.Report.SummaryDetails)
 	pdfPrinter.printFinalResult(m, &opaSessionObj.Report.SummaryDetails)
+	pdfPrinter.printInfo(m, &opaSessionObj.Report.SummaryDetails, infoToPrintInfoMap)
 
 	// Extrat output buffer.
 	outBuff, err := m.Output()
@@ -129,12 +151,13 @@ func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsu
 // Create pdf table
 func (pdfPrinter *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails) {
 	headers := getControlTableHeaders()
+	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
 	controls := make([][]string, len(pdfPrinter.sortedControlNames))
 	for i := range controls {
 		controls[i] = make([]string, len(headers))
 	}
 	for i := 0; i < len(pdfPrinter.sortedControlNames); i++ {
-		controls[i] = generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, pdfPrinter.sortedControlNames[i]))
+		controls[i] = generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, pdfPrinter.sortedControlNames[i]), infoToPrintInfoMap)
 	}
 
 	m.TableList(headers, controls, props.TableList{
