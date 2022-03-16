@@ -8,6 +8,6 @@ import (
 type IHostSensor interface {
 	Init() error
 	TearDown() error
-	CollectResources(map[string]apis.StatusInfo) ([]hostsensor.HostSensorDataEnvelope, error)
+	CollectResources() ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error)
 	GetNamespace() string
 }

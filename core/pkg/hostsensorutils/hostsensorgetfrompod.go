@@ -157,10 +157,11 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSenso
 	return res, err
 }
 
-func (hsh *HostSensorHandler) CollectResources(infoMap map[string]apis.StatusInfo) ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	res := make([]hostsensor.HostSensorDataEnvelope, 0)
+	infoMap := make(map[string]apis.StatusInfo)
 	if hsh.DaemonSet == nil {
-		return res, nil
+		return res, nil, nil
 	}
 	var kcData []hostsensor.HostSensorDataEnvelope
 	var err error
@@ -170,49 +171,63 @@ func (hsh *HostSensorHandler) CollectResources(infoMap map[string]apis.StatusInf
 		addInfoToMap(KubeletConfiguration, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
-	res = append(res, kcData...)
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
 	//
 	kcData, err = hsh.GetKubeletCommandLine()
 	if err != nil {
 		addInfoToMap(KubeletCommandLine, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
-	res = append(res, kcData...)
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
 	//
 	kcData, err = hsh.GetOsReleaseFile()
 	if err != nil {
 		addInfoToMap(OsReleaseFile, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
-	res = append(res, kcData...)
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
 	//
 	kcData, err = hsh.GetKernelVersion()
 	if err != nil {
 		addInfoToMap(KernelVersion, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
-	res = append(res, kcData...)
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
 	//
 	kcData, err = hsh.GetLinuxSecurityHardeningStatus()
 	if err != nil {
 		addInfoToMap(LinuxSecurityHardeningStatus, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
-	res = append(res, kcData...)
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
 	//
 	kcData, err = hsh.GetOpenPortsList()
 	if err != nil {
 		addInfoToMap(OpenPortsList, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
-	res = append(res, kcData...)
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
 	// GetKernelVariables
 	kcData, err = hsh.GetKernelVariables()
 	if err != nil {
 		addInfoToMap(LinuxKernelVariables, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
-	res = append(res, kcData...)
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
 	logger.L().Debug("Done reading information from host scanner")
-	return res, nil
+	return res, infoMap, nil
 }

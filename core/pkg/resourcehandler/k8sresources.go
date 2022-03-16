@@ -90,12 +90,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
-			if err := k8sHandler.collectHostResources(allResources, armoResourceMap, sessionObj.InfoMap); err != nil {
+			infoMap, err := k8sHandler.collectHostResources(allResources, armoResourceMap)
+			if err != nil {
 				logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
 				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 			} else if k8sHandler.hostSensorHandler == nil {
 				// using hostSensor mock
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
+			} else {
+				sessionObj.InfoMap = infoMap
 			}
 		} else {
 			cautils.SetInfoMapForResources("enable-host-scan flag not used", hostResources, sessionObj.InfoMap)
@@ -219,11 +222,11 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 // 	}
 // 	return nil
 // }
-func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources, errorMap map[string]apis.StatusInfo) error {
+func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (map[string]apis.StatusInfo, error) {
 	logger.L().Debug("Collecting host scanner resources")
-	hostResources, err := k8sHandler.hostSensorHandler.CollectResources(errorMap)
+	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for rscIdx := range hostResources {
@@ -237,7 +240,7 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 		}
 		(*armoResourceMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 	}
-	return nil
+	return infoMap, nil
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
@@ -303,5 +306,9 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return len(nodesList.Items), nil
+	nodesNumber := 0
+	if nodesList != nil {
+		nodesNumber = len(nodesList.Items)
+	}
+	return nodesNumber, nil
 }
