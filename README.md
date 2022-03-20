@@ -1,8 +1,7 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
+<br>
 
-[![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
-
+![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg) ![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/armosec/kubescape) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/armosec/kubescape)
 
 
 Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer and image vulnerabilities scanning. 
@@ -260,7 +259,9 @@ kubescape submit results path/to/results.json
 
 # Integrations
 
-## VS Code Extension ![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/kubescape.kubescape)
+## VS Code Extension 
+
+![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/kubescape.kubescape?label=VScode) ![Open VSX](https://img.shields.io/open-vsx/dt/kubescape/kubescape?label=openVSX&color=yellowgreen)
 
 Scan the YAML files while writing them using the [vs code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
 
