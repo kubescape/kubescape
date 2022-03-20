@@ -81,7 +81,7 @@ func initEnvironment() {
 		armoERURL := urlSlices[0] // mandatory
 		armoBEURL := urlSlices[1] // mandatory
 		armoFEURL := urlSlices[2] // mandatory
-		if len(urlSlices) <= 4 {
+		if len(urlSlices) >= 4 {
 			armoAUTHURL = urlSlices[3]
 		}
 		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL))
