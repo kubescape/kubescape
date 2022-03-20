@@ -64,7 +64,7 @@ func scanInfoToScanMetadata(opaSessionObj *cautils.OPASessionObj, scanInfo *caut
 	}
 	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	opaSessionObj.Metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
-	opaSessionObj.Metadata.ScanMetadata.HostScanner = *scanInfo.HostSensorEnabled.Get()
+	opaSessionObj.Metadata.ScanMetadata.HostScanner = *(scanInfo.HostSensorEnabled.Get())
 	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	opaSessionObj.Metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
 }

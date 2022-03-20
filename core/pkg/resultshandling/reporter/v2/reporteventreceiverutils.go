@@ -44,6 +44,7 @@ func setSubReport(postureReport *reporthandlingv2.PostureReport) *reporthandling
 		ClusterCloudProvider: postureReport.ClusterCloudProvider,
 		JobID:                postureReport.JobID,
 		ClusterAPIServerInfo: postureReport.ClusterAPIServerInfo,
+		Metadata:             postureReport.Metadata,
 	}
 }
 func iMetaToResource(obj workloadinterface.IMetadata) *reporthandling.Resource {
