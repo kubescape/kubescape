@@ -229,7 +229,6 @@ kubescape download framework nsa --output /path/nsa.json
 kubescape scan framework nsa --use-from /path/nsa.json
 ```
 
-
 ## Scan Periodically using Helm - Contributed by [@yonahd](https://github.com/yonahd)  
 [Please follow the instructions here](https://hub.armo.cloud/docs/installation-of-armo-in-cluster)
 [helm chart repo](https://github.com/armosec/armo-helm)
@@ -258,6 +257,12 @@ Now you can submit the results to the Kubescape SaaS version -
 ```
 kubescape submit results path/to/results.json
 ```
+
+# Integrations
+
+## VS Code Extension ![Visual Studio Marketplace Installs](https://img.shields.io/visual-studio-marketplace/i/kubescape.kubescape)
+
+Scan the YAML files while writing them using the [vs code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
 
 # Under the hood
 
