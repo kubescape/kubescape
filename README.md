@@ -1,7 +1,7 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 <br>
 
-![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg) ![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/armosec/kubescape) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/armosec/kubescape)
+![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg) ![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/armosec/kubescape?label=release&color=blue) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/armosec/kubescape?color=yellow)
 
 
 Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer and image vulnerabilities scanning. 
@@ -14,8 +14,8 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 # CLI Interface:
 <img src="docs/demo.gif">
 
-# Web Interface:
-<img src="docs/ARMO-header-2022.gif">
+<!-- # [Web Interface:](https://portal.armo.cloud/)
+<img src="docs/ARMO-header-2022.gif"> -->
 
 # TL;DR
 ## Install:

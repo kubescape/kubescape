@@ -32,7 +32,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
-	var armoResources *cautils.ArmoResources
+	armoResources := &cautils.ArmoResources{}
 
 	workloads := []workloadinterface.IMetadata{}
 
