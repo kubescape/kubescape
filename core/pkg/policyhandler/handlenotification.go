@@ -2,7 +2,6 @@ package policyhandler
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils"
@@ -47,30 +46,9 @@ func (policyHandler *PolicyHandler) CollectResources(notification *reporthandlin
 	return opaSessionObj, nil
 }
 
-func scanInfoToScanMetadata(opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) {
-	opaSessionObj.Metadata.ClusterMetadata.ContextName = k8sinterface.GetCurrentContext().Cluster
-	opaSessionObj.Metadata.ScanMetadata.Format = scanInfo.Format
-	opaSessionObj.Metadata.ScanMetadata.Submit = scanInfo.Submit
-	if len(scanInfo.ExcludedNamespaces) > 1 {
-		opaSessionObj.Metadata.ScanMetadata.ExcludedNamespaces = strings.Split(scanInfo.ExcludedNamespaces[1:], ",")
-	}
-	// scan type
-	if len(scanInfo.PolicyIdentifier) > 0 {
-		opaSessionObj.Metadata.ScanMetadata.TargetType = string(scanInfo.PolicyIdentifier[0].Kind)
-	}
-	// append frameworks
-	for _, policy := range scanInfo.PolicyIdentifier {
-		opaSessionObj.Metadata.ScanMetadata.TargetNames = append(opaSessionObj.Metadata.ScanMetadata.TargetNames, policy.Name)
-	}
-	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
-	opaSessionObj.Metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
-	opaSessionObj.Metadata.ScanMetadata.HostScanner = *(scanInfo.HostSensorEnabled.Get())
-	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
-	opaSessionObj.Metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
-}
-
 func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
+
 	scanInfoToScanMetadata(opaSessionObj, scanInfo)
 
 	resourcesMap, allResources, armoResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &notification.Designators)
@@ -83,4 +61,32 @@ func (policyHandler *PolicyHandler) getResources(notification *reporthandling.Po
 	opaSessionObj.ArmoResource = armoResources
 
 	return nil
+}
+
+func scanInfoToScanMetadata(opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) {
+	opaSessionObj.Metadata.ClusterMetadata.ContextName = k8sinterface.GetClusterName()
+	opaSessionObj.Metadata.ScanMetadata.Format = scanInfo.Format
+	opaSessionObj.Metadata.ScanMetadata.Submit = scanInfo.Submit
+
+	// TODO - Add excluded and included namespaces
+	// if len(scanInfo.ExcludedNamespaces) > 1 {
+	// 	opaSessionObj.Metadata.ScanMetadata.ExcludedNamespaces = strings.Split(scanInfo.ExcludedNamespaces[1:], ",")
+	// }
+	// if len(scanInfo.IncludeNamespaces) > 1 {
+	// 	opaSessionObj.Metadata.ScanMetadata.IncludeNamespaces = strings.Split(scanInfo.IncludeNamespaces[1:], ",")
+	// }
+
+	// scan type
+	if len(scanInfo.PolicyIdentifier) > 0 {
+		opaSessionObj.Metadata.ScanMetadata.TargetType = string(scanInfo.PolicyIdentifier[0].Kind)
+	}
+	// append frameworks
+	for _, policy := range scanInfo.PolicyIdentifier {
+		opaSessionObj.Metadata.ScanMetadata.TargetNames = append(opaSessionObj.Metadata.ScanMetadata.TargetNames, policy.Name)
+	}
+	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
+	opaSessionObj.Metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
+	opaSessionObj.Metadata.ScanMetadata.HostScanner = scanInfo.HostSensorEnabled.GetBool()
+	opaSessionObj.Metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
+	opaSessionObj.Metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
 }

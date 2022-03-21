@@ -38,6 +38,12 @@ func (bpf *BoolPtrFlag) String() string {
 func (bpf *BoolPtrFlag) Get() *bool {
 	return bpf.valPtr
 }
+func (bpf *BoolPtrFlag) GetBool() bool {
+	if bpf.valPtr == nil {
+		return false
+	}
+	return *bpf.valPtr
+}
 
 func (bpf *BoolPtrFlag) SetBool(val bool) {
 	bpf.valPtr = &val
