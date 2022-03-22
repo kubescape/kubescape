@@ -1,7 +1,8 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
-<br>
 
-![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg) ![GitHub tag (latest by date)](https://img.shields.io/github/v/tag/armosec/kubescape?label=release&color=blue) ![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/armosec/kubescape?color=yellow)
+[![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
+
 
 
 Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer and image vulnerabilities scanning. 
@@ -11,11 +12,19 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 
 </br>
 
-# CLI Interface:
+# Kubescape Covarage
+<img src="docs/ksfromcodetodeploy.png">
+
+</br>
+
+
+# Kubescape CLI:
 <img src="docs/demo.gif">
 
-<!-- # [Web Interface:](https://portal.armo.cloud/)
-<img src="docs/ARMO-header-2022.gif"> -->
+</br>
+
+# Kubescape overview:
+<img src="docs/ARMO-header-2022.gif">
 
 # TL;DR
 ## Install:
@@ -228,6 +237,7 @@ kubescape download framework nsa --output /path/nsa.json
 kubescape scan framework nsa --use-from /path/nsa.json
 ```
 
+
 ## Scan Periodically using Helm - Contributed by [@yonahd](https://github.com/yonahd)  
 [Please follow the instructions here](https://hub.armo.cloud/docs/installation-of-armo-in-cluster)
 [helm chart repo](https://github.com/armosec/armo-helm)
@@ -256,14 +266,6 @@ Now you can submit the results to the Kubescape SaaS version -
 ```
 kubescape submit results path/to/results.json
 ```
-
-# Integrations
-
-## VS Code Extension 
-
-![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/kubescape.kubescape?label=VScode) ![Open VSX](https://img.shields.io/open-vsx/dt/kubescape/kubescape?label=openVSX&color=yellowgreen)
-
-Scan the YAML files while writing them using the [vs code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
 
 # Under the hood
 
