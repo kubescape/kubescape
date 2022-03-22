@@ -26,7 +26,6 @@ func DataToJson(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
 	finalizeResults(report.Results, data.ResourcesResult)
 
-	report.Resources = make([]reporthandling.Resource, 0) // do not initialize slice length
 	report.Resources = finalizeResources(report.Results, data.AllResources)
 
 	return &report
