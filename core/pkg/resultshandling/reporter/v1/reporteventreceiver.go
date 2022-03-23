@@ -157,6 +157,9 @@ func (report *ReportEventReceiver) generateMessage() {
 	report.message = fmt.Sprintf("%s %s", message, u.String())
 }
 
+func (report *ReportEventReceiver) GetURL() string {
+	return getter.GetArmoAPIConnector().GetFrontendURL()
+}
 func (report *ReportEventReceiver) DisplayReportURL() {
 	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 }

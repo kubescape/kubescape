@@ -7,4 +7,5 @@ type IReport interface {
 	SetCustomerGUID(customerGUID string)
 	SetClusterName(clusterName string)
 	DisplayReportURL()
+	GetURL() string
 }

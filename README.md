@@ -12,10 +12,10 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 
 </br>
 
-# Kubescape Covarage
+<!-- # Kubescape Coverage
 <img src="docs/ksfromcodetodeploy.png">
 
-</br>
+</br> -->
 
 
 # Kubescape CLI:
@@ -23,8 +23,8 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 
 </br>
 
-# Kubescape overview:
-<img src="docs/ARMO-header-2022.gif">
+<!-- # Kubescape overview:
+<img src="docs/ARMO-header-2022.gif"> -->
 
 # TL;DR
 ## Install:
@@ -266,6 +266,16 @@ Now you can submit the results to the Kubescape SaaS version -
 ```
 kubescape submit results path/to/results.json
 ```
+
+
+# Integrations
+
+## VS Code Extension 
+
+![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/kubescape.kubescape?label=VScode) ![Open VSX](https://img.shields.io/open-vsx/dt/kubescape/kubescape?label=openVSX&color=yellowgreen)
+
+Scan the YAML files while writing them using the [vs code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
+
 
 # Under the hood
 
