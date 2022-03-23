@@ -47,7 +47,6 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 
 	if report.customerGUID == "" {
 		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
-
 		return nil
 	}
 	if report.clusterName == "" {
@@ -62,14 +61,17 @@ func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASe
 	opaSessionObj.Report.ClusterName = report.clusterName
 	opaSessionObj.Report.Metadata = *opaSessionObj.Metadata
 
-	if err := report.prepareReport(opaSessionObj.Report); err != nil {
-		logger.L().Error("failed to publish results", helpers.Error(err))
-	} else {
+	err := report.prepareReport(opaSessionObj.Report)
+	if err == nil {
 		report.generateMessage()
+	} else {
+		logger.L().Debug(err.Error()) // print original error only in debug mode
+		err = fmt.Errorf("failed to submit scan results. url: '%s'", report.GetURL())
 	}
+
 	logger.L().Debug("", helpers.String("account ID", report.customerGUID))
 
-	return nil
+	return err
 }
 
 func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
@@ -95,6 +97,24 @@ func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2
 	return err
 }
 
+func (report *ReportEventReceiver) GetURL() string {
+	u := url.URL{}
+	u.Scheme = "https"
+	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
+
+	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
+		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+	} else {
+		u.Path = "account/sign-up"
+		q := u.Query()
+		q.Add("invitationToken", report.token)
+		q.Add("customerGUID", report.customerGUID)
+
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
+
+}
 func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
 	splittedPostureReport := setSubReport(postureReport)
 	counter := 0
@@ -171,26 +191,12 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 }
 
 func (report *ReportEventReceiver) generateMessage() {
-
-	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
-
-	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
-		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
-	} else {
-		u.Path = "account/sign-up"
-		q := u.Query()
-		q.Add("invitationToken", report.token)
-		q.Add("customerGUID", report.customerGUID)
-
-		u.RawQuery = q.Encode()
-	}
+	report.message = ""
 
 	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
 	report.message = sep
 	report.message += "   << WOW! Now you can see the scan results on the web >>\n\n"
-	report.message += fmt.Sprintf("   %s\n", u.String())
+	report.message += fmt.Sprintf("   %s\n", report.GetURL())
 	report.message += sep
 
 }

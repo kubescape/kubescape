@@ -15,12 +15,10 @@ func finalizeReport(opaSessionObj *cautils.OPASessionObj) {
 	if len(opaSessionObj.Report.Results) == 0 {
 		opaSessionObj.Report.Results = make([]resourcesresults.Result, len(opaSessionObj.ResourcesResult))
 		finalizeResults(opaSessionObj.Report.Results, opaSessionObj.ResourcesResult)
-		opaSessionObj.ResourcesResult = nil
 	}
 
 	if len(opaSessionObj.Report.Resources) == 0 {
 		opaSessionObj.Report.Resources = finalizeResources(opaSessionObj.AllResources)
-		opaSessionObj.AllResources = nil
 	}
 
 }

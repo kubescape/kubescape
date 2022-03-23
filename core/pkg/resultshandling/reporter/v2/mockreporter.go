@@ -31,6 +31,10 @@ func (reportMock *ReportMock) SetCustomerGUID(customerGUID string) {
 func (reportMock *ReportMock) SetClusterName(clusterName string) {
 }
 
+func (reportMock *ReportMock) GetURL() string {
+	return getter.GetArmoAPIConnector().GetFrontendURL()
+}
+
 func (reportMock *ReportMock) DisplayReportURL() {
 	u := fmt.Sprintf("https://%s/account/login", getter.GetArmoAPIConnector().GetFrontendURL())
 	if reportMock.query != "" {
