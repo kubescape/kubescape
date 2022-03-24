@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -40,6 +41,7 @@ type GitHubRepository struct {
 	repo   string //
 	branch string
 	path   string
+	token  string
 	isFile bool
 	tree   tree
 }
@@ -49,8 +51,8 @@ type githubDefaultBranchAPI struct {
 
 func NewGitHubRepository() *GitHubRepository {
 	return &GitHubRepository{
-		host: "github.com",
-		// name: rep,
+		host:  "github.com",
+		token: os.Getenv("GITHUB_TOKEN"),
 	}
 }
 
@@ -165,7 +167,7 @@ func (g *GitHubRepository) setBranch(branchOptional string) error {
 	if g.branch != "" {
 		return nil
 	}
-	body, err := getter.HttpGetter(&http.Client{}, g.defaultBranchAPI(), nil)
+	body, err := getter.HttpGetter(&http.Client{}, g.defaultBranchAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}
@@ -185,9 +187,14 @@ func joinOwnerNRepo(owner, repo string) string {
 func (g *GitHubRepository) defaultBranchAPI() string {
 	return fmt.Sprintf("https://api.github.com/repos/%s", joinOwnerNRepo(g.owner, g.repo))
 }
-
+func (g *GitHubRepository) getHeaders() map[string]string {
+	if g.token == "" {
+		return nil
+	}
+	return map[string]string{"Authorization": fmt.Sprintf("token %s", g.token)}
+}
 func (g *GitHubRepository) setTree() error {
-	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI(), nil)
+	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}
