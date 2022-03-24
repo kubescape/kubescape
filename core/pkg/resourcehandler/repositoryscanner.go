@@ -17,7 +17,9 @@ type IRepository interface {
 
 	setBranch(string) error
 	setTree() error
+	setIsFile(bool)
 
+	getIsFile() bool
 	getBranch() string
 	getTree() tree
 
@@ -83,21 +85,6 @@ func getHost(fullURL string) (string, error) {
 	return parsedURL.Host, nil
 }
 
-// func parseHostAndRepoName(fullURL string) (string, string, error) {
-// 	parsedURL, err := giturls.Parse(fullURL)
-// 	if err != nil {
-// 		return "", "", err
-// 	}
-
-// 	host := parsedURL.Host
-
-// 	splittedRepo := strings.FieldsFunc(parsedURL.Path, func(c rune) bool { return c == '/' })
-// 	if len(splittedRepo) < 2 {
-// 		return "", "", fmt.Errorf("expecting <user>/<repo> in url path, received: '%s'", parsedURL.Path)
-// 	}
-// 	return host, fmt.Sprintf("%s/%s", splittedRepo[0], splittedRepo[1]), nil
-// }
-
 func getRepository(fullURL string) (IRepository, error) {
 	hostUrl, err := getHost(fullURL)
 	if err != nil {
@@ -106,8 +93,11 @@ func getRepository(fullURL string) (IRepository, error) {
 
 	var repo IRepository
 	switch hostUrl {
-	case "github.com", "raw.githubusercontent.com":
+	case "github.com":
 		repo = NewGitHubRepository()
+	case "raw.githubusercontent.com":
+		repo = NewGitHubRepository()
+		repo.setIsFile(true)
 	default:
 		return nil, fmt.Errorf("unknown repository host: %s", hostUrl)
 	}
@@ -120,41 +110,51 @@ func (g *GitHubRepository) parse(fullURL string) error {
 	if err != nil {
 		return err
 	}
+	index := 0
 
 	splittedRepo := strings.FieldsFunc(parsedURL.Path, func(c rune) bool { return c == '/' })
 	if len(splittedRepo) < 2 {
 		return fmt.Errorf("expecting <user>/<repo> in url path, received: '%s'", parsedURL.Path)
 	}
-	g.owner = splittedRepo[0]
-	g.repo = splittedRepo[1]
+	g.owner = splittedRepo[index]
+	index += 1
+	g.repo = splittedRepo[index]
+	index += 1
 
 	// root of repo
-	if len(splittedRepo) < 4 {
+	if len(splittedRepo) < index+1 {
 		return nil
 	}
 
 	// is file or dir
-	switch splittedRepo[2] {
+	switch splittedRepo[index] {
 	case "blob":
 		g.isFile = true
+		index += 1
 	case "tree":
 		g.isFile = false
-	default:
-		// Unknown - failed to parse
-		return nil
+		index += 1
 	}
-	g.branch = splittedRepo[3]
 
-	if len(splittedRepo) < 5 {
+	if len(splittedRepo) < index+1 {
 		return nil
 	}
-	g.path = strings.Join(splittedRepo[4:], "/")
+
+	g.branch = splittedRepo[index]
+	index += 1
+
+	if len(splittedRepo) < index+1 {
+		return nil
+	}
+	g.path = strings.Join(splittedRepo[index:], "/")
 
 	return nil
 }
 
-func (g *GitHubRepository) getBranch() string { return g.branch }
-func (g *GitHubRepository) getTree() tree     { return g.tree }
+func (g *GitHubRepository) getBranch() string     { return g.branch }
+func (g *GitHubRepository) getTree() tree         { return g.tree }
+func (g *GitHubRepository) setIsFile(isFile bool) { g.isFile = isFile }
+func (g *GitHubRepository) getIsFile() bool       { return g.isFile }
 
 func (g *GitHubRepository) setBranch(branchOptional string) error {
 	// Checks whether the repository type is a master or another type.
@@ -212,7 +212,11 @@ func (g *GitHubRepository) treeAPI() string {
 func (g *GitHubRepository) getFilesFromTree(filesExtensions []string) []string {
 	var urls []string
 	if g.isFile {
-		return []string{fmt.Sprintf("%s/%s", g.rowYamlUrl(), g.path)}
+		if slices.Contains(filesExtensions, getFileExtension(g.path)) {
+			return []string{fmt.Sprintf("%s/%s", g.rowYamlUrl(), g.path)}
+		} else {
+			return []string{}
+		}
 	}
 	for _, path := range g.tree.InnerTrees {
 		if g.path != "" && !strings.HasPrefix(path.Path, g.path) {
