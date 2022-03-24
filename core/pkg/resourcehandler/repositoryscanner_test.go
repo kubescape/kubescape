@@ -10,7 +10,7 @@ var (
 	urlA = "https://github.com/armosec/kubescape"
 	urlB = "https://github.com/armosec/kubescape/blob/master/examples/online-boutique/adservice.yaml"
 	urlC = "https://github.com/armosec/kubescape/tree/master/examples/online-boutique"
-	// urlD = "https://raw.githubusercontent.com/armosec/kubescape/master/examples/online-boutique/adservice.yaml"
+	urlD = "https://raw.githubusercontent.com/armosec/kubescape/master/examples/online-boutique/adservice.yaml"
 )
 
 func TestScanRepository(t *testing.T) {
@@ -29,11 +29,11 @@ func TestScanRepository(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Less(t, 0, len(files))
 	}
-	// {
-	// 	files, err := ScanRepository(urlD, "")
-	// 	assert.NoError(t, err)
-	// 	assert.Equal(t, 1, len(files))
-	// }
+	{
+		files, err := ScanRepository(urlD, "")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(files))
+	}
 
 }
 
@@ -53,9 +53,12 @@ func TestGetHost(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, "github.com", host)
 	}
+	{
+		host, err := getHost(urlD)
+		assert.NoError(t, err)
+		assert.Equal(t, "raw.githubusercontent.com", host)
+	}
 }
-
-// 		repo = NewGitHubRepository(repoName)
 
 func TestGithubSetBranch(t *testing.T) {
 	{
@@ -124,7 +127,7 @@ func TestGithubParse(t *testing.T) {
 		assert.Equal(t, "examples/online-boutique/adservice.yaml", gh.path)
 		assert.True(t, gh.isFile)
 		assert.Equal(t, 1, len(gh.getFilesFromTree([]string{"yaml"})))
-		assert.Equal(t, 1, len(gh.getFilesFromTree([]string{"yml"})))
+		assert.Equal(t, 0, len(gh.getFilesFromTree([]string{"yml"})))
 	}
 	{
 		gh := NewGitHubRepository()
