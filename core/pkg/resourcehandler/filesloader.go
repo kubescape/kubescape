@@ -64,6 +64,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	if len(workloads) == 0 {
 		return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
 	}
+	sessionObj.ResourceSource = workloadIDToSource
 
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
 	mappedResources := mapResources(workloads)

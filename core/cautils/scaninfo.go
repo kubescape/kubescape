@@ -8,10 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
 const (
@@ -78,7 +80,7 @@ type ScanInfo struct {
 	Silent             bool                              // Silent mode - Do not print progress logs
 	FailThreshold      float32                           // Failure score threshold
 	Submit             bool                              // Submit results to Armo BE
-	ReportID           string                            // Report id of the current scan
+	ScanID             string                            // Report id of the current scan
 	HostSensorEnabled  BoolPtrFlag                       // Deploy ARMO K8s host scanner to collect data from certain controls
 	HostSensorYamlPath string                            // Path to hostsensor file
 	Local              bool                              // Do not submit results
@@ -186,4 +188,42 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 		}
 	}
 	return false
+}
+
+func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
+	metadata := &reporthandlingv2.Metadata{}
+
+	metadata.ClusterMetadata.ContextName = k8sinterface.GetClusterName()
+	metadata.ScanMetadata.Format = scanInfo.Format
+	metadata.ScanMetadata.Submit = scanInfo.Submit
+
+	// TODO - Add excluded and included namespaces
+	// if len(scanInfo.ExcludedNamespaces) > 1 {
+	// 	opaSessionObj.Metadata.ScanMetadata.ExcludedNamespaces = strings.Split(scanInfo.ExcludedNamespaces[1:], ",")
+	// }
+	// if len(scanInfo.IncludeNamespaces) > 1 {
+	// 	opaSessionObj.Metadata.ScanMetadata.IncludeNamespaces = strings.Split(scanInfo.IncludeNamespaces[1:], ",")
+	// }
+
+	// scan type
+	if len(scanInfo.PolicyIdentifier) > 0 {
+		metadata.ScanMetadata.TargetType = string(scanInfo.PolicyIdentifier[0].Kind)
+	}
+	// append frameworks
+	for _, policy := range scanInfo.PolicyIdentifier {
+		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Name)
+	}
+
+	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
+	metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
+	metadata.ScanMetadata.HostScanner = scanInfo.HostSensorEnabled.GetBool()
+	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
+	metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
+
+	metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
+	if scanInfo.GetScanningEnvironment() == ScanLocalFiles {
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Files
+	}
+
+	return metadata
 }

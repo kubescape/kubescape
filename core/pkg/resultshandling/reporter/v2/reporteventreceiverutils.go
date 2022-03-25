@@ -4,6 +4,7 @@ import (
 	"net/url"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
@@ -33,18 +34,17 @@ func hostToString(host *url.URL, reportID string) string {
 	return host.String()
 }
 
-func setSubReport(postureReport *reporthandlingv2.PostureReport) *reporthandlingv2.PostureReport {
+func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	return &reporthandlingv2.PostureReport{
-		CustomerGUID:         postureReport.CustomerGUID,
-		ClusterName:          postureReport.ClusterName,
-		ReportID:             postureReport.ReportID,
-		ReportGenerationTime: postureReport.ReportGenerationTime,
-		SummaryDetails:       postureReport.SummaryDetails,
-		Attributes:           postureReport.Attributes,
-		ClusterCloudProvider: postureReport.ClusterCloudProvider,
-		JobID:                postureReport.JobID,
-		ClusterAPIServerInfo: postureReport.ClusterAPIServerInfo,
-		Metadata:             postureReport.Metadata,
+		CustomerGUID:         report.customerGUID,
+		ClusterName:          report.clusterName,
+		ReportID:             report.reportID,
+		ReportGenerationTime: opaSessionObj.Report.ReportGenerationTime,
+		SummaryDetails:       opaSessionObj.Report.SummaryDetails,
+		Attributes:           opaSessionObj.Report.Attributes,
+		ClusterCloudProvider: opaSessionObj.Report.ClusterCloudProvider,
+		ClusterAPIServerInfo: opaSessionObj.Report.ClusterAPIServerInfo,
+		Metadata:             *opaSessionObj.Metadata,
 	}
 }
 func iMetaToResource(obj workloadinterface.IMetadata) *reporthandling.Resource {

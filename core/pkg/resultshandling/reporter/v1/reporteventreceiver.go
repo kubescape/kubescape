@@ -38,7 +38,7 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj) *ReportEventReceive
 	}
 }
 
-func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
+func (report *ReportEventReceiver) Submit(opaSessionObj *cautils.OPASessionObj) error {
 	if opaSessionObj.PostureReport == nil && opaSessionObj.Report != nil {
 		cautils.ReportV2ToV1(opaSessionObj)
 	}

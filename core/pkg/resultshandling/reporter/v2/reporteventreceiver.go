@@ -11,7 +11,6 @@ import (
 	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/google/uuid"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -42,26 +41,19 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string) *R
 	}
 }
 
-func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
-	finalizeReport(opaSessionObj)
+func (report *ReportEventReceiver) Submit(opaSessionObj *cautils.OPASessionObj) error {
 
 	if report.customerGUID == "" {
 		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
 		return nil
 	}
+	// if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
 	if report.clusterName == "" {
 		logger.L().Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
-	if opaSessionObj.Report.ReportID == "" {
-		opaSessionObj.Report.ReportID = uuid.NewString()
-	}
-	opaSessionObj.Report.ReportID = uuid.NewString()
-	opaSessionObj.Report.CustomerGUID = report.customerGUID
-	opaSessionObj.Report.ClusterName = report.clusterName
-	opaSessionObj.Report.Metadata = *opaSessionObj.Metadata
 
-	err := report.prepareReport(opaSessionObj.Report)
+	err := report.prepareReport(opaSessionObj)
 	if err == nil {
 		report.generateMessage()
 	} else {
@@ -82,16 +74,14 @@ func (report *ReportEventReceiver) SetClusterName(clusterName string) {
 	report.clusterName = cautils.AdoptClusterName(clusterName) // clean cluster name
 }
 
-func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2.PostureReport) error {
+func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
 	report.initEventReceiverURL()
-	host := hostToString(report.eventReceiverURL, postureReport.ReportID)
+	host := hostToString(report.eventReceiverURL, report.reportID)
 
 	cautils.StartSpinner()
 
-	reportCounter := 0
-
 	// send resources
-	err := report.sendResources(host, postureReport, &reportCounter, false)
+	err := report.sendResources(host, opaSessionObj)
 
 	cautils.StopSpinner()
 	return err
@@ -115,11 +105,12 @@ func (report *ReportEventReceiver) GetURL() string {
 	return u.String()
 
 }
-func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
-	splittedPostureReport := setSubReport(postureReport)
+func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cautils.OPASessionObj) error {
+	splittedPostureReport := report.setSubReport(opaSessionObj)
 	counter := 0
+	reportCounter := 0
 
-	for _, v := range postureReport.Resources {
+	for _, v := range opaSessionObj.Report.Resources {
 		r, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.ResourceID, err)
@@ -128,10 +119,10 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
 
 			// send report
-			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
+			if err := report.sendReport(host, splittedPostureReport, reportCounter, false); err != nil {
 				return err
 			}
-			*reportCounter++
+			reportCounter++
 
 			// delete resources
 			splittedPostureReport.Resources = []reporthandling.Resource{}
@@ -145,7 +136,7 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		splittedPostureReport.Resources = append(splittedPostureReport.Resources, v)
 	}
 
-	for _, v := range postureReport.Results {
+	for _, v := range opaSessionObj.Report.Results {
 		r, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
@@ -154,10 +145,10 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Results) > 0 {
 
 			// send report
-			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
+			if err := report.sendReport(host, splittedPostureReport, reportCounter, false); err != nil {
 				return err
 			}
-			*reportCounter++
+			reportCounter++
 
 			// delete results
 			splittedPostureReport.Results = []resourcesresults.Result{}
@@ -171,7 +162,7 @@ func (report *ReportEventReceiver) sendResources(host string, postureReport *rep
 		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
 	}
 
-	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
+	return report.sendReport(host, splittedPostureReport, reportCounter, true)
 }
 
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
