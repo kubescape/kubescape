@@ -194,6 +194,10 @@ func (g *GitHubRepository) getHeaders() map[string]string {
 	return map[string]string{"Authorization": fmt.Sprintf("token %s", g.token)}
 }
 func (g *GitHubRepository) setTree() error {
+	if g.isFile {
+		return nil
+	}
+
 	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI(), g.getHeaders())
 	if err != nil {
 		return err

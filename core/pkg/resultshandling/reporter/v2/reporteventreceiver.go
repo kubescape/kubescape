@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/kubescape/core/cautils/logger"
@@ -109,62 +110,73 @@ func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cau
 	splittedPostureReport := report.setSubReport(opaSessionObj)
 	counter := 0
 	reportCounter := 0
-
-	for _, v := range opaSessionObj.Report.Resources {
-		r, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.ResourceID, err)
-		}
-
-		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
-
-			// send report
-			if err := report.sendReport(host, splittedPostureReport, reportCounter, false); err != nil {
-				return err
-			}
-			reportCounter++
-
-			// delete resources
-			splittedPostureReport.Resources = []reporthandling.Resource{}
-			splittedPostureReport.Results = []resourcesresults.Result{}
-
-			// restart counter
-			counter = 0
-		}
-
-		counter += len(r)
-		splittedPostureReport.Resources = append(splittedPostureReport.Resources, v)
+	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, &counter, &reportCounter, host); err != nil {
+		return err
+	}
+	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
+		return err
 	}
 
-	for _, v := range opaSessionObj.Report.Results {
+	return report.sendReport(host, splittedPostureReport, reportCounter, true)
+}
+func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
+	for _, v := range results {
 		r, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
 		}
 
-		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Results) > 0 {
+		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
 
 			// send report
-			if err := report.sendReport(host, splittedPostureReport, reportCounter, false); err != nil {
+			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
 				return err
 			}
-			reportCounter++
+			*reportCounter++
 
 			// delete results
-			splittedPostureReport.Results = []resourcesresults.Result{}
-			splittedPostureReport.Resources = []reporthandling.Resource{}
+			reportObj.Results = []resourcesresults.Result{}
+			reportObj.Resources = []reporthandling.Resource{}
 
 			// restart counter
-			counter = 0
+			*counter = 0
 		}
 
-		counter += len(r)
-		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
+		*counter += len(r)
+		reportObj.Results = append(reportObj.Results, v)
 	}
-
-	return report.sendReport(host, splittedPostureReport, reportCounter, true)
+	return nil
 }
 
+func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, counter, reportCounter *int, host string) error {
+	for resourceID, v := range allResources {
+		resource := reporthandling.NewResourceIMetadata(v)
+		r, err := json.Marshal(resource)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", resourceID, err)
+		}
+
+		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
+
+			// send report
+			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
+				return err
+			}
+			*reportCounter++
+
+			// delete resources
+			reportObj.Resources = []reporthandling.Resource{}
+			reportObj.Results = []resourcesresults.Result{}
+
+			// restart counter
+			*counter = 0
+		}
+
+		*counter += len(r)
+		reportObj.Resources = append(reportObj.Resources, *resource)
+	}
+	return nil
+}
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
 		ReportNumber: counter,
