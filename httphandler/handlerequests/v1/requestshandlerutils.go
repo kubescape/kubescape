@@ -77,7 +77,7 @@ func findFile(targetDir string, fileName string) (string, error) {
 func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanInfo {
 
 	scanInfo := scanRequest.ToScanInfo()
-	scanInfo.ReportID = scanID
+	scanInfo.ScanID = scanID
 
 	// *** start ***
 	// Set default format
