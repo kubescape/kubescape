@@ -20,7 +20,7 @@ func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) err
 		return err
 	}
 	// report
-	if err := submitInterfaces.Reporter.ActionSendReport(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
+	if err := submitInterfaces.Reporter.Submit(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
 		return err
 	}
 	logger.L().Success("Data has been submitted successfully")

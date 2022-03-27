@@ -60,7 +60,7 @@ func (resultsHandler *ResultsHandler) HandleResults() {
 
 	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
 
-	if err := resultsHandler.reporterObj.ActionSendReport(resultsHandler.scanData); err != nil {
+	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
 		logger.L().Error(err.Error())
 	}
 

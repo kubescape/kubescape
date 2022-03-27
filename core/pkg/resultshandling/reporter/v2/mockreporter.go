@@ -21,7 +21,7 @@ func NewReportMock(query, message string) *ReportMock {
 		message: message,
 	}
 }
-func (reportMock *ReportMock) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
+func (reportMock *ReportMock) Submit(opaSessionObj *cautils.OPASessionObj) error {
 	return nil
 }
 

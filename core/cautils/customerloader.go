@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -135,7 +136,10 @@ func (lc *LocalConfig) UpdateCachedConfig() error {
 }
 
 func (lc *LocalConfig) DeleteCachedConfig() error {
-	return DeleteConfigFile()
+	if err := DeleteConfigFile(); err != nil {
+		logger.L().Warning(err.Error())
+	}
+	return nil
 }
 
 func getTenantConfigFromBE(backendAPI getter.IBackend, configObj *ConfigObj) error {
@@ -257,10 +261,10 @@ func (c *ClusterConfig) UpdateCachedConfig() error {
 
 func (c *ClusterConfig) DeleteCachedConfig() error {
 	if err := c.deleteConfigMap(); err != nil {
-		return err
+		logger.L().Warning(err.Error())
 	}
 	if err := DeleteConfigFile(); err != nil {
-		return err
+		logger.L().Warning(err.Error())
 	}
 	return nil
 }

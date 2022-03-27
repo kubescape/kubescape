@@ -12,7 +12,7 @@ import (
 	"github.com/armosec/kubescape/core/cautils/logger"
 )
 
-func loadResourcesFromUrl(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
+func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
 	urls := listUrls(inputPatterns)
 	if len(urls) == 0 {
 		return nil, nil
@@ -29,14 +29,10 @@ func listUrls(patterns []string) []string {
 	urls := []string{}
 	for i := range patterns {
 		if strings.HasPrefix(patterns[i], "http") {
-			if !cautils.IsYaml(patterns[i]) && !cautils.IsJson(patterns[i]) { // if url of repo
-				if yamls, err := ScanRepository(patterns[i], ""); err == nil { // TODO - support branch
-					urls = append(urls, yamls...)
-				} else {
-					logger.L().Error(err.Error())
-				}
-			} else { // url of single file
-				urls = append(urls, patterns[i])
+			if yamls, err := ScanRepository(patterns[i], ""); err == nil { // TODO - support branch
+				urls = append(urls, yamls...)
+			} else {
+				logger.L().Error(err.Error())
 			}
 		}
 	}
@@ -44,8 +40,8 @@ func listUrls(patterns []string) []string {
 	return urls
 }
 
-func downloadFiles(urls []string) ([]workloadinterface.IMetadata, []error) {
-	workloads := []workloadinterface.IMetadata{}
+func downloadFiles(urls []string) (map[string][]workloadinterface.IMetadata, []error) {
+	workloads := make(map[string][]workloadinterface.IMetadata, 0)
 	errs := []error{}
 	for i := range urls {
 		f, err := downloadFile(urls[i])
@@ -56,7 +52,12 @@ func downloadFiles(urls []string) ([]workloadinterface.IMetadata, []error) {
 		w, e := cautils.ReadFile(f, cautils.GetFileFormat(urls[i]))
 		errs = append(errs, e...)
 		if w != nil {
-			workloads = append(workloads, w...)
+			if _, ok := workloads[urls[i]]; !ok {
+				workloads[urls[i]] = make([]workloadinterface.IMetadata, 0)
+			}
+			wSlice := workloads[urls[i]]
+			wSlice = append(wSlice, w...)
+			workloads[urls[i]] = wSlice
 		}
 	}
 	return workloads, errs

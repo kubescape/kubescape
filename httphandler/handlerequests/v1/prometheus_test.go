@@ -11,7 +11,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 	scanID := "1234"
 	scanInfo := getPrometheusDefaultScanCommand(scanID)
 
-	assert.Equal(t, scanID, scanInfo.ReportID)
+	assert.Equal(t, scanID, scanInfo.ScanID)
 	assert.Equal(t, scanID, scanInfo.Output)
 	assert.Equal(t, "prometheus", scanInfo.Format)
 	// assert.False(t, *scanInfo.HostSensorEnabled.Get())

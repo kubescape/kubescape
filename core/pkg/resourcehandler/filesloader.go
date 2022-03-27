@@ -32,6 +32,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
+	workloadIDToSource := make(map[string]string, 0)
 	armoResources := &cautils.ArmoResources{}
 
 	workloads := []workloadinterface.IMetadata{}
@@ -41,8 +42,11 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	if err != nil {
 		return nil, allResources, nil, err
 	}
-	if w != nil {
-		workloads = append(workloads, w...)
+	for source, ws := range w {
+		workloads = append(workloads, ws...)
+		for i := range ws {
+			workloadIDToSource[ws[i].GetID()] = source
+		}
 	}
 
 	// load resources from url
@@ -50,13 +54,17 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	if err != nil {
 		return nil, allResources, nil, err
 	}
-	if w != nil {
-		workloads = append(workloads, w...)
+	for source, ws := range w {
+		workloads = append(workloads, ws...)
+		for i := range ws {
+			workloadIDToSource[ws[i].GetID()] = source
+		}
 	}
 
 	if len(workloads) == 0 {
 		return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
 	}
+	sessionObj.ResourceSource = workloadIDToSource
 
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
 	mappedResources := mapResources(workloads)
