@@ -185,35 +185,37 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.SetHeaderLine(true)
 	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
 	summaryTable.SetColumnAlignment(alignments)
-	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
+	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
 	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]), infoToPrintInfoMap))
+		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]), infoToPrintInfo))
 	}
 
 	summaryTable.SetFooter(generateFooter(summaryDetails))
 
-	// summaryTable.SetFooter(generateFooter())
-	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
 	summaryTable.Render()
 
-	prettyPrinter.printInfo(infoToPrintInfoMap)
-	// For control scan framework will be nil
+	// When scanning controls the framework list will be empty
+	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
+
+	prettyPrinter.printInfo(infoToPrintInfo)
+
 }
 
-func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfoMap map[string]string) {
-	for info, stars := range infoToPrintInfoMap {
-		cautils.WarningDisplay(prettyPrinter.writer, fmt.Sprintf("%s - %s\n", stars, info))
+func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfo []infoStars) {
+	fmt.Println()
+	for i := range infoToPrintInfo {
+		cautils.InfoDisplay(prettyPrinter.writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].stars, infoToPrintInfo[i].info))
 	}
 }
 
 func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("\nFRAMEWORK %s\n", frameworks[0].GetName())
+			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
 			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
 		}
 	} else if len(frameworks) > 1 {
-		p := "\nFRAMEWORKS: "
+		p := "FRAMEWORKS: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
 			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())

@@ -7,7 +7,7 @@ import (
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfoMap map[string]string) []string {
+func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) []string {
 	row := []string{controlSummary.GetName()}
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
 	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
@@ -19,7 +19,14 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfoMa
 	} else {
 		row = append(row, string(controlSummary.GetStatus().Status()))
 		if controlSummary.GetStatus().IsSkipped() {
-			row = append(row, infoToPrintInfoMap[controlSummary.GetStatus().Info()])
+			stars := ""
+			for i := range infoToPrintInfo {
+				if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
+					stars = infoToPrintInfo[i].stars
+					break
+				}
+			}
+			row = append(row, stars)
 		} else {
 			row = append(row, "")
 		}

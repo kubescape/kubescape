@@ -54,16 +54,16 @@ func (pdfPrinter *PdfPrinter) SetWriter(outputFile string) {
 func (pdfPrinter *PdfPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", int(score))
 }
-func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap map[string]string) {
+func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap []infoStars) {
 	emptyRowCounter := 1
-	for key, val := range infoMap {
-		if val != "" {
+	for i := range infoMap {
+		if infoMap[i].info != "" {
 			m.Row(5, func() {
 				m.Col(1, func() {
-					m.Text(fmt.Sprintf("%v", val))
+					m.Text(fmt.Sprintf("%v", infoMap[i].info))
 				})
 				m.Col(12, func() {
-					m.Text(fmt.Sprintf("%v", key))
+					m.Text(fmt.Sprintf("%v", infoMap[i].stars))
 				})
 			})
 			if emptyRowCounter < len(infoMap) {
@@ -78,13 +78,13 @@ func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsumm
 func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	pdfPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls)
 
-	infoToPrintInfoMap := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
+	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
 	m := pdf.NewMaroto(consts.Portrait, consts.A4)
 	pdfPrinter.printHeader(m)
 	pdfPrinter.printFramework(m, opaSessionObj.Report.SummaryDetails.ListFrameworks())
 	pdfPrinter.printTable(m, &opaSessionObj.Report.SummaryDetails)
 	pdfPrinter.printFinalResult(m, &opaSessionObj.Report.SummaryDetails)
-	pdfPrinter.printInfo(m, &opaSessionObj.Report.SummaryDetails, infoToPrintInfoMap)
+	pdfPrinter.printInfo(m, &opaSessionObj.Report.SummaryDetails, infoToPrintInfo)
 
 	// Extrat output buffer.
 	outBuff, err := m.Output()

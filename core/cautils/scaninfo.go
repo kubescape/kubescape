@@ -14,6 +14,7 @@ import (
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	"github.com/google/uuid"
 )
 
 const (
@@ -100,6 +101,9 @@ func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setOutputFile()
 	scanInfo.setUseArtifactsFrom()
+	if scanInfo.ScanID == "" {
+		scanInfo.ScanID = uuid.NewString()
+	}
 }
 
 func (scanInfo *ScanInfo) setUseArtifactsFrom() {

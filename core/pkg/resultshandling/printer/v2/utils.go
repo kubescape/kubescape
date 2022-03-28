@@ -38,18 +38,28 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 	}
 }
 
-func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) map[string]string {
-	infoToPrintInfoMap := make(map[string]string)
+type infoStars struct {
+	stars string
+	info  string
+}
+
+func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
+	infoToPrintInfo := []infoStars{}
+	infoToPrintInfoMap := map[string]interface{}{}
 	starCount := "*"
 	for _, control := range controls {
 		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
 			if _, ok := infoToPrintInfoMap[control.GetStatus().Info()]; !ok {
-				infoToPrintInfoMap[control.GetStatus().Info()] = starCount
+				infoToPrintInfo = append(infoToPrintInfo, infoStars{
+					info:  control.GetStatus().Info(),
+					stars: starCount,
+				})
 				starCount += starCount
+				infoToPrintInfoMap[control.GetStatus().Info()] = nil
 			}
 		}
 	}
-	return infoToPrintInfoMap
+	return infoToPrintInfo
 }
 
 func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) []reporthandling.Resource {
