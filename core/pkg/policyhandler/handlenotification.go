@@ -38,7 +38,7 @@ func (policyHandler *PolicyHandler) CollectResources(notification *reporthandlin
 	if err != nil {
 		return opaSessionObj, err
 	}
-	if opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0 {
+	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
 		return opaSessionObj, fmt.Errorf("empty list of resources")
 	}
 
@@ -64,7 +64,7 @@ func (policyHandler *PolicyHandler) getResources(notification *reporthandling.Po
 }
 
 func scanInfoToScanMetadata(opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) {
-	opaSessionObj.Metadata.ClusterMetadata.ContextName = k8sinterface.GetClusterName()
+	opaSessionObj.Metadata.ClusterMetadata.ContextName = k8sinterface.GetClusterContext()
 	opaSessionObj.Metadata.ScanMetadata.Format = scanInfo.Format
 	opaSessionObj.Metadata.ScanMetadata.Submit = scanInfo.Submit
 

@@ -261,32 +261,24 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (string, error) {
 	logger.L().Debug("Collecting cloud data")
-	cloudProvider := initCloudProvider()
-	cluster := cloudProvider.getKubeCluster()
-	clusterName := cloudProvider.getKubeClusterName()
-	provider := getCloudProvider()
-	region, err := cloudProvider.getRegion(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
-	project, err := cloudProvider.getProject(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
+
+	clusterName := cautils.ClusterName
+
+	provider := cloudsupport.GetCloudProvider(clusterName)
 
 	if provider != "" {
-		logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
+		logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
-		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
+		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider)
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info
 			switch provider {
 			case "gke":
-				return provider, fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
+				return provider, fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", clusterName)
 			case "eks":
-				return provider, fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
+				return provider, fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", clusterName)
 			case "aks":
-				return provider, fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
+				return provider, fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", clusterName, err.Error())
 			}
 			return provider, err
 		}
