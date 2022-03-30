@@ -21,7 +21,7 @@ func NewReportMock(query, message string) *ReportMock {
 		message: message,
 	}
 }
-func (reportMock *ReportMock) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
+func (reportMock *ReportMock) Submit(opaSessionObj *cautils.OPASessionObj) error {
 	return nil
 }
 
@@ -29,6 +29,10 @@ func (reportMock *ReportMock) SetCustomerGUID(customerGUID string) {
 }
 
 func (reportMock *ReportMock) SetClusterName(clusterName string) {
+}
+
+func (reportMock *ReportMock) GetURL() string {
+	return getter.GetArmoAPIConnector().GetFrontendURL()
 }
 
 func (reportMock *ReportMock) DisplayReportURL() {

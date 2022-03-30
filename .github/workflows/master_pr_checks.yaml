@@ -23,6 +23,8 @@ jobs:
         run: cd cmd && go test -v ./...
       
       - name: Test core pkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: cd core && go test -v ./...
 
       - name: Test httphandler pkg

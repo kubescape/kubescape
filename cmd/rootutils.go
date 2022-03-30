@@ -44,7 +44,7 @@ func initLoggerLevel() {
 }
 
 func initCacheDir() {
-	if rootInfo.CacheDir == getter.DefaultLocalStore {
+	if rootInfo.CacheDir != getter.DefaultLocalStore {
 		getter.DefaultLocalStore = rootInfo.CacheDir
 	} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
 		getter.DefaultLocalStore = cacheDir

@@ -9,7 +9,7 @@ replace github.com/armosec/k8s-interface => /home/daniel/go/src/k8s-interface
 require (
 	github.com/armosec/k8s-interface v0.0.68
 	github.com/armosec/kubescape/core v0.0.0-00010101000000-000000000000
-	github.com/armosec/opa-utils v0.0.125
+	github.com/armosec/opa-utils v0.0.127
 	github.com/armosec/rbac-utils v0.0.14
 	github.com/google/uuid v1.3.0
 	github.com/mattn/go-isatty v0.0.14
@@ -97,6 +97,7 @@ require (
 	github.com/rcrowley/go-metrics v0.0.0-20200313005456-10cdbea86bc0 // indirect
 	github.com/ruudk/golang-pdf417 v0.0.0-20181029194003-1af4ab5afa58 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/whilp/git-urls v1.0.0 // indirect
 	github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb // indirect
 	github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 // indirect
 	github.com/yashtewari/glob-intersection v0.0.0-20180916065949-5c77d914dd0b // indirect

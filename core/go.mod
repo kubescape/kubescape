@@ -7,7 +7,7 @@ replace github.com/armosec/k8s-interface => /home/daniel/go/src/k8s-interface
 require (
 	github.com/armosec/armoapi-go v0.0.58
 	github.com/armosec/k8s-interface v0.0.68
-	github.com/armosec/opa-utils v0.0.125
+	github.com/armosec/opa-utils v0.0.127
 	github.com/armosec/rbac-utils v0.0.14
 	github.com/armosec/utils-go v0.0.3
 	github.com/armosec/utils-k8s-go v0.0.3
@@ -21,6 +21,7 @@ require (
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/open-policy-agent/opa v0.38.0
 	github.com/stretchr/testify v1.7.0
+	github.com/whilp/git-urls v1.0.0
 	go.uber.org/zap v1.21.0
 	golang.org/x/mod v0.5.1
 	gopkg.in/yaml.v2 v2.4.0

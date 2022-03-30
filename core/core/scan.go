@@ -5,6 +5,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/google/uuid"
 
 	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/getter"
@@ -31,6 +32,9 @@ type componentInterfaces struct {
 }
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
+	if scanInfo.ScanID == "" {
+		scanInfo.ScanID = uuid.NewString()
+	}
 
 	// ================== setup k8s interface object ======================================
 	var k8s *k8sinterface.KubernetesApi
@@ -86,7 +90,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(tenantConfig, scanInfo.ReportID, scanInfo.Submit, scanInfo.FrameworkScan, len(scanInfo.InputPatterns) == 0)
+	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, len(scanInfo.InputPatterns) == 0)
 
 	// setup printer
 	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.FormatVersion, scanInfo.VerboseMode)
