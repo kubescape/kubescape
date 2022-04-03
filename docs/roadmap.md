@@ -5,33 +5,33 @@
 Kubescape roadmap items are labeled based on where the feature is used and by their maturity.
 
 The features serve different stages of the workflow of the users:
-* **Development phase** (writing Kubernetes manifests) - example: VS Code extension is used while editing YAMLs
+* **Development phase** (writing Kubernetes manifests) - example: The VS Code extension is used while editing YAMLs.
 * **CI phase** (integrating manifests to GIT repo) - example: GitHub action validating HELM charts on PRs
-* **CD phase** (deploying applications in Kubernetes) - example: running cluster scan after a new deployment
-* **Monitoring phase** (scanning application in Kubernetes) - example: Prometheus scraping the cluster security risk 
+* **CD phase** (deploying applications in Kubernetes) - example: running a cluster scan after a new deployment
+* **Monitoring phase** (scanning application in Kubernetes) - example: Prometheus scraping the cluster security risk
 
-The items in Kubescape roadmap are split to 3 major groups based on the feature planning maturity:
+The items in the Kubescape roadmap are split into 3 major groups based on the feature planning maturity:
 
-* [Planning](#planning) - we have tickets open for these issues with more or less clear vision of design
-* [Backlog](#backlog)  - feature which were discussed at a high level but are not ready for development 
-* [Wishlist](#wishlist) -  features we are dreaming of 😀 and want to push them gradually forward 
+* [Planning](#planning) - we have tickets open for these issues with a more or less clear vision of design.
+* [Backlog](#backlog)  -  features that were discussed at a high level but are not ready for development 
+* [Wishlist](#wishlist) -  features we are dreaming of in 😀 and want to push them gradually forward
 
 
 ## Planning 👷
 * ##### Integration with image registries 
-  We want to expand Kubescape to integrate with differnet image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities [Container registry integration](/docs/proposals/container-image-vulnerability-adaptor.md)
+ We want to expand Kubescape to integrate with different image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities. Container registry integration
 * ##### Kubescape as a microservice 
-  Create a REST API for Kubescape so it can run constantly in a cluster and other components like Prometheus can scrape results
+  Create a REST API for Kubescape so it can constantly run in a cluster, and other components like Prometheus can scrape results.
 * ##### Kubescape CLI control over cluster operations 
-  Add functionality to Kubescape CLI to trigger operations in Kubescape cluster components (example: trigger images scans and etc.)
+  Add functionality to Kubescape CLI to trigger operations in Kubescape cluster components (example: trigger image scans, etc.)
 * ##### Produce md/HTML reports 
-  Create scan reports for different output formats
+  Create scan reports for different output formats.
 * ##### Git integration for pull requests 
   Create insightful GitHub actions for Kubescape
 
 ## Backlog 📅
 * ##### JSON path for HELM charts 
-  Today Kubescape can point to issues in the Kubernetes object, we want to develop this feature so Kubescape will be able to point to the misconfigured source file (HELM)
+  Today, Kubescape can point to issues in the Kubernetes object. We want to develop this feature so Kubescape will be able to point to the misconfigured source file (HELM).
 * ##### Create Kubescape HELM plugin
 * ##### Kubescape based admission controller 
   Implement admission controller API for Kubescape microservice to enable users to use Kubescape rules as policies
