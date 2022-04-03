@@ -172,6 +172,7 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed()))
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()))
 	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().All()))
+	row = append(row, " ")
 	row = append(row, fmt.Sprintf("%.2f%s", summaryDetails.Score, "%"))
 	row = append(row, " ")
 
