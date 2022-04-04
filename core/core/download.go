@@ -130,7 +130,7 @@ func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
-	g := getPolicyGetter(nil, tenant.GetAccountID(), true, nil)
+	g := getPolicyGetter(nil, tenant.GetTennatEmail(), true, nil)
 
 	if downloadInfo.Name == "" {
 		// if framework name not specified - download all frameworks
@@ -172,7 +172,7 @@ func downloadControl(downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
-	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
+	g := getPolicyGetter(nil, tenant.GetTennatEmail(), false, nil)
 
 	if downloadInfo.Name == "" {
 		// TODO - support
