@@ -77,13 +77,7 @@ func findFile(targetDir string, fileName string) (string, error) {
 func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanInfo {
 
 	scanInfo := scanRequest.ToScanInfo()
-	scanInfo.ReportID = scanID
-
-	// *** start ***
-	// TODO - support frameworks/controls and support scanning single frameworks/controls
-	scanInfo.FrameworkScan = true
-	scanInfo.ScanAll = true
-	// *** end ***
+	scanInfo.ScanID = scanID
 
 	// *** start ***
 	// Set default format
@@ -103,6 +97,7 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 
 func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo := &cautils.ScanInfo{}
+	scanInfo.FailThreshold = 100
 	scanInfo.Account = envToString("KS_ACCOUNT", "")                              // publish results to Kubescape SaaS
 	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")        // namespace to exclude
 	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")         // namespace to include

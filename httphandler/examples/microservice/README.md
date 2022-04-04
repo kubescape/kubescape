@@ -2,7 +2,7 @@
 
 1. Deploy kubescape microservice
     ```bash
-    kubectl apply -f https://raw.githubusercontent.com/armosec/kubescape/master/httphandler/examples/prometheus/kubescape.yaml
+    kubectl apply -f ks-deployment.yaml
     ```
     > **NOTE** Make sure the configurations suit your cluster (e.g. `serviceType`, namespace, etc.)
 

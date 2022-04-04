@@ -5,7 +5,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
@@ -13,12 +12,9 @@ import (
 	"github.com/mattn/go-isatty"
 )
 
-var armoBEURLs = ""
-var armoBEURLsDep = ""
-
 const envFlagUsage = "Send report results to specific URL. Format:<ReportReceiver>,<Backend>,<Frontend>.\n\t\tExample:report.armo.cloud,api.armo.cloud,portal.armo.cloud"
 
-func initLogger(rootInfo *cautils.RootInfo) {
+func initLogger() {
 	logger.DisableColor(rootInfo.DisableColor)
 
 	if rootInfo.LoggerName == "" {
@@ -36,8 +32,8 @@ func initLogger(rootInfo *cautils.RootInfo) {
 	logger.InitLogger(rootInfo.LoggerName)
 
 }
-func initLoggerLevel(rootInfo *cautils.RootInfo) {
-	if rootInfo.Logger != helpers.InfoLevel.String() {
+func initLoggerLevel() {
+	if rootInfo.Logger == helpers.InfoLevel.String() {
 	} else if l := os.Getenv("KS_LOGGER"); l != "" {
 		rootInfo.Logger = l
 	}
@@ -47,8 +43,8 @@ func initLoggerLevel(rootInfo *cautils.RootInfo) {
 	}
 }
 
-func initCacheDir(rootInfo *cautils.RootInfo) {
-	if rootInfo.CacheDir == getter.DefaultLocalStore {
+func initCacheDir() {
+	if rootInfo.CacheDir != getter.DefaultLocalStore {
 		getter.DefaultLocalStore = rootInfo.CacheDir
 	} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
 		getter.DefaultLocalStore = cacheDir
@@ -58,11 +54,11 @@ func initCacheDir(rootInfo *cautils.RootInfo) {
 
 	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 }
-func initEnvironment(rootInfo *cautils.RootInfo) {
-	if armoBEURLsDep != "" {
-		armoBEURLs = armoBEURLsDep
+func initEnvironment() {
+	if rootInfo.ArmoBEURLs == "" {
+		rootInfo.ArmoBEURLs = rootInfo.ArmoBEURLsDep
 	}
-	urlSlices := strings.Split(armoBEURLs, ",")
+	urlSlices := strings.Split(rootInfo.ArmoBEURLs, ",")
 	if len(urlSlices) != 1 && len(urlSlices) < 3 {
 		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
 	}
@@ -85,7 +81,7 @@ func initEnvironment(rootInfo *cautils.RootInfo) {
 		armoERURL := urlSlices[0] // mandatory
 		armoBEURL := urlSlices[1] // mandatory
 		armoFEURL := urlSlices[2] // mandatory
-		if len(urlSlices) <= 4 {
+		if len(urlSlices) >= 4 {
 			armoAUTHURL = urlSlices[3]
 		}
 		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL))

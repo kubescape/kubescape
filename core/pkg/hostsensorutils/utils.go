@@ -16,19 +16,19 @@ var (
 
 	MapResourceToApiGroup = map[string]string{
 		KubeletConfiguration:         "hostdata.kubescape.cloud/v1beta0",
-		OsReleaseFile:                "hostdata.kubescape.cloud/v1beta0/OsReleaseFile",
-		KubeletCommandLine:           "hostdata.kubescape.cloud/v1beta0/KubeletCommandLine",
-		KernelVersion:                "hostdata.kubescape.cloud/v1beta0/KernelVersion",
-		LinuxSecurityHardeningStatus: "hostdata.kubescape.cloud/v1beta0/LinuxSecurityHardeningStatus",
-		OpenPortsList:                "hostdata.kubescape.cloud/v1beta0/OpenPortsList",
-		LinuxKernelVariables:         "hostdata.kubescape.cloud/v1beta0/LinuxKernelVariables",
+		OsReleaseFile:                "hostdata.kubescape.cloud/v1beta0",
+		KubeletCommandLine:           "hostdata.kubescape.cloud/v1beta0",
+		KernelVersion:                "hostdata.kubescape.cloud/v1beta0",
+		LinuxSecurityHardeningStatus: "hostdata.kubescape.cloud/v1beta0",
+		OpenPortsList:                "hostdata.kubescape.cloud/v1beta0",
+		LinuxKernelVariables:         "hostdata.kubescape.cloud/v1beta0",
 	}
 )
 
-func addInfoToMap(resource string, errorMap map[string]apis.StatusInfo, err error) {
+func addInfoToMap(resource string, infoMap map[string]apis.StatusInfo, err error) {
 	group, version := k8sinterface.SplitApiVersion(MapResourceToApiGroup[resource])
-	r := k8sinterface.JoinResourceTriplets(group, version, KubeletConfiguration)
-	errorMap[r] = apis.StatusInfo{
+	r := k8sinterface.JoinResourceTriplets(group, version, resource)
+	infoMap[r] = apis.StatusInfo{
 		InnerStatus: apis.StatusSkipped,
 		InnerInfo:   err.Error(),
 	}
