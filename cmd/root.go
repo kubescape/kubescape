@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cmd/completion"
@@ -87,6 +86,6 @@ func main() {
 	ks := NewDefaultKubescapeCommand()
 	err := ks.Execute()
 	if err != nil {
-		os.Exit(1)
+		logger.L().Fatal(err.Error())
 	}
 }
