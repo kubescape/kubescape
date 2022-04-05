@@ -8,6 +8,6 @@ import (
 )
 
 type IResourceHandler interface {
-	GetResources(*cautils.OPASessionObj, *armotypes.PortalDesignator, *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error)
+	GetResources(*cautils.OPASessionObj, *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error)
 	GetClusterAPIServerInfo() *version.Info
 }

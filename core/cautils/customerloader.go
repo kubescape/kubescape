@@ -11,6 +11,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/core/cautils/logger"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -66,7 +67,7 @@ type ITenantConfig interface {
 	DeleteCachedConfig() error
 
 	// getters
-	GetClusterName() string
+	GetClusterContext() string
 	GetAccountID() string
 	GetConfigObj() *ConfigObj
 	// GetBackendAPI() getter.IBackend
@@ -116,10 +117,10 @@ func NewLocalConfig(
 	return lc
 }
 
-func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
-func (lc *LocalConfig) GetAccountID() string     { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetClusterName() string   { return lc.configObj.ClusterName }
-func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
+func (lc *LocalConfig) GetConfigObj() *ConfigObj  { return lc.configObj }
+func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountID }
+func (lc *LocalConfig) GetClusterContext() string { return lc.configObj.ClusterName }
+func (lc *LocalConfig) IsConfigFound() bool       { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
 	// ARMO tenant GUID
@@ -135,7 +136,10 @@ func (lc *LocalConfig) UpdateCachedConfig() error {
 }
 
 func (lc *LocalConfig) DeleteCachedConfig() error {
-	return DeleteConfigFile()
+	if err := DeleteConfigFile(); err != nil {
+		logger.L().Warning(err.Error())
+	}
+	return nil
 }
 
 func getTenantConfigFromBE(backendAPI getter.IBackend, configObj *ConfigObj) error {
@@ -213,7 +217,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	getAccountFromEnv(c.configObj)
 
 	if c.configObj.ClusterName == "" {
-		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetClusterName())
+		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetClusterContext())
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
@@ -257,14 +261,14 @@ func (c *ClusterConfig) UpdateCachedConfig() error {
 
 func (c *ClusterConfig) DeleteCachedConfig() error {
 	if err := c.deleteConfigMap(); err != nil {
-		return err
+		logger.L().Warning(err.Error())
 	}
 	if err := DeleteConfigFile(); err != nil {
-		return err
+		logger.L().Warning(err.Error())
 	}
 	return nil
 }
-func (c *ClusterConfig) GetClusterName() string {
+func (c *ClusterConfig) GetClusterContext() string {
 	return c.configObj.ClusterName
 }
 

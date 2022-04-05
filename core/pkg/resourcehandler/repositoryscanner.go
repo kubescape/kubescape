@@ -4,15 +4,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/armosec/kubescape/core/cautils/getter"
+	giturls "github.com/whilp/git-urls"
+	"k8s.io/utils/strings/slices"
 )
 
 type IRepository interface {
+	parse(fullURL string) error
+
 	setBranch(string) error
 	setTree() error
-	getYamlFromTree() []string
+	setIsFile(bool)
+
+	getIsFile() bool
+	getBranch() string
+	getTree() tree
+
+	getFilesFromTree([]string) []string
 }
 
 type innerTree struct {
@@ -23,19 +35,24 @@ type tree struct {
 }
 
 type GitHubRepository struct {
+	// name   string // <org>/<repo>
 	host   string
-	name   string // <org>/<repo>
+	owner  string //
+	repo   string //
 	branch string
+	path   string
+	token  string
+	isFile bool
 	tree   tree
 }
 type githubDefaultBranchAPI struct {
 	DefaultBranch string `json:"default_branch"`
 }
 
-func NewGitHubRepository(rep string) *GitHubRepository {
+func NewGitHubRepository() *GitHubRepository {
 	return &GitHubRepository{
-		host: "github",
-		name: rep,
+		host:  "github.com",
+		token: os.Getenv("GITHUB_TOKEN"),
 	}
 }
 
@@ -45,79 +62,143 @@ func ScanRepository(command string, branchOptional string) ([]string, error) {
 		return nil, err
 	}
 
-	err = repo.setBranch(branchOptional)
-	if err != nil {
+	if err := repo.parse(command); err != nil {
 		return nil, err
 	}
 
-	err = repo.setTree()
-	if err != nil {
+	if err := repo.setBranch(branchOptional); err != nil {
+		return nil, err
+	}
+
+	if err := repo.setTree(); err != nil {
 		return nil, err
 	}
 
 	// get all paths that are of the yaml type, and build them into a valid url
-	return repo.getYamlFromTree(), nil
+	return repo.getFilesFromTree([]string{"yaml", "yml", "json"}), nil
 }
 
-func getHostAndRepoName(url string) (string, string, error) {
-	splitUrl := strings.Split(url, "/")
-
-	if len(splitUrl) != 5 {
-		return "", "", fmt.Errorf("failed to pars url: %s", url)
+func getHost(fullURL string) (string, error) {
+	parsedURL, err := giturls.Parse(fullURL)
+	if err != nil {
+		return "", err
 	}
 
-	hostUrl := splitUrl[2]                                               // github.com, gitlab.com, etc.
-	repository := splitUrl[3] + "/" + strings.Split(splitUrl[4], ".")[0] // user/reposetory
-
-	return hostUrl, repository, nil
+	return parsedURL.Host, nil
 }
 
-func getRepository(url string) (IRepository, error) {
-	hostUrl, repoName, err := getHostAndRepoName(url)
+func getRepository(fullURL string) (IRepository, error) {
+	hostUrl, err := getHost(fullURL)
 	if err != nil {
 		return nil, err
 	}
 
 	var repo IRepository
-	switch repoHost := strings.Split(hostUrl, ".")[0]; repoHost {
-	case "github":
-		repo = NewGitHubRepository(repoName)
+	switch hostUrl {
+	case "github.com":
+		repo = NewGitHubRepository()
+	case "raw.githubusercontent.com":
+		repo = NewGitHubRepository()
+		repo.setIsFile(true)
 	default:
-		return nil, fmt.Errorf("unknown repository host: %s", repoHost)
+		return nil, fmt.Errorf("unknown repository host: %s", hostUrl)
 	}
 
 	// Returns the host-url, and the part of the user and repository from the url
 	return repo, nil
 }
+func (g *GitHubRepository) parse(fullURL string) error {
+	parsedURL, err := giturls.Parse(fullURL)
+	if err != nil {
+		return err
+	}
+	index := 0
+
+	splittedRepo := strings.FieldsFunc(parsedURL.Path, func(c rune) bool { return c == '/' })
+	if len(splittedRepo) < 2 {
+		return fmt.Errorf("expecting <user>/<repo> in url path, received: '%s'", parsedURL.Path)
+	}
+	g.owner = splittedRepo[index]
+	index += 1
+	g.repo = splittedRepo[index]
+	index += 1
+
+	// root of repo
+	if len(splittedRepo) < index+1 {
+		return nil
+	}
+
+	// is file or dir
+	switch splittedRepo[index] {
+	case "blob":
+		g.isFile = true
+		index += 1
+	case "tree":
+		g.isFile = false
+		index += 1
+	}
+
+	if len(splittedRepo) < index+1 {
+		return nil
+	}
+
+	g.branch = splittedRepo[index]
+	index += 1
+
+	if len(splittedRepo) < index+1 {
+		return nil
+	}
+	g.path = strings.Join(splittedRepo[index:], "/")
+
+	return nil
+}
+
+func (g *GitHubRepository) getBranch() string     { return g.branch }
+func (g *GitHubRepository) getTree() tree         { return g.tree }
+func (g *GitHubRepository) setIsFile(isFile bool) { g.isFile = isFile }
+func (g *GitHubRepository) getIsFile() bool       { return g.isFile }
 
 func (g *GitHubRepository) setBranch(branchOptional string) error {
 	// Checks whether the repository type is a master or another type.
 	// By default it is "master", unless the branchOptional came with a value
-	if branchOptional == "" {
-
-		body, err := getter.HttpGetter(&http.Client{}, g.defaultBranchAPI(), nil)
-		if err != nil {
-			return err
-		}
-
-		var data githubDefaultBranchAPI
-		err = json.Unmarshal([]byte(body), &data)
-		if err != nil {
-			return err
-		}
-		g.branch = data.DefaultBranch
-	} else {
+	if branchOptional != "" {
 		g.branch = branchOptional
 	}
+	if g.branch != "" {
+		return nil
+	}
+	body, err := getter.HttpGetter(&http.Client{}, g.defaultBranchAPI(), g.getHeaders())
+	if err != nil {
+		return err
+	}
+
+	var data githubDefaultBranchAPI
+	err = json.Unmarshal([]byte(body), &data)
+	if err != nil {
+		return err
+	}
+	g.branch = data.DefaultBranch
 	return nil
 }
 
-func (g *GitHubRepository) defaultBranchAPI() string {
-	return fmt.Sprintf("https://api.github.com/repos/%s", g.name)
+func joinOwnerNRepo(owner, repo string) string {
+	return fmt.Sprintf("%s/%s", owner, repo)
 }
-
+func (g *GitHubRepository) defaultBranchAPI() string {
+	return fmt.Sprintf("https://api.github.com/repos/%s", joinOwnerNRepo(g.owner, g.repo))
+}
+func (g *GitHubRepository) getHeaders() map[string]string {
+	if g.token == "" {
+		return nil
+	}
+	return map[string]string{"Authorization": fmt.Sprintf("token %s", g.token)}
+}
 func (g *GitHubRepository) setTree() error {
-	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI(), nil)
+	if g.isFile {
+		return nil
+	}
+
+	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}
@@ -135,14 +216,24 @@ func (g *GitHubRepository) setTree() error {
 }
 
 func (g *GitHubRepository) treeAPI() string {
-	return fmt.Sprintf("https://api.github.com/repos/%s/git/trees/%s?recursive=1", g.name, g.branch)
+	return fmt.Sprintf("https://api.github.com/repos/%s/git/trees/%s?recursive=1", joinOwnerNRepo(g.owner, g.repo), g.branch)
 }
 
 // return a list of yaml for a given repository tree
-func (g *GitHubRepository) getYamlFromTree() []string {
+func (g *GitHubRepository) getFilesFromTree(filesExtensions []string) []string {
 	var urls []string
+	if g.isFile {
+		if slices.Contains(filesExtensions, getFileExtension(g.path)) {
+			return []string{fmt.Sprintf("%s/%s", g.rowYamlUrl(), g.path)}
+		} else {
+			return []string{}
+		}
+	}
 	for _, path := range g.tree.InnerTrees {
-		if strings.HasSuffix(path.Path, ".yaml") {
+		if g.path != "" && !strings.HasPrefix(path.Path, g.path) {
+			continue
+		}
+		if slices.Contains(filesExtensions, getFileExtension(path.Path)) {
 			urls = append(urls, fmt.Sprintf("%s/%s", g.rowYamlUrl(), path.Path))
 		}
 	}
@@ -150,5 +241,9 @@ func (g *GitHubRepository) getYamlFromTree() []string {
 }
 
 func (g *GitHubRepository) rowYamlUrl() string {
-	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s", g.name, g.branch)
+	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s", joinOwnerNRepo(g.owner, g.repo), g.branch)
+}
+
+func getFileExtension(path string) string {
+	return strings.TrimPrefix(filepath.Ext(path), ".")
 }

@@ -23,6 +23,20 @@ func TestListFiles(t *testing.T) {
 	assert.Equal(t, 12, len(files))
 }
 
+func TestLoadResourcesFromFiles(t *testing.T) {
+	workloads, err := LoadResourcesFromFiles([]string{onlineBoutiquePath()})
+	assert.NoError(t, err)
+	assert.Equal(t, 12, len(workloads))
+
+	for i, w := range workloads {
+		switch filepath.Base(i) {
+		case "adservice.yaml":
+			assert.Equal(t, 2, len(w))
+			assert.Equal(t, "apps/v1//Deployment/adservice", w[0].GetID())
+			assert.Equal(t, "/v1//Service/adservice", w[1].GetID())
+		}
+	}
+}
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles([]string{onlineBoutiquePath()})
 	_, err := loadFiles(files)

@@ -44,7 +44,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -89,16 +89,19 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	hostResources := cautils.MapHostResources(armoResourceMap)
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
-		if *scanInfo.HostSensorEnabled.Get() {
-			if err := k8sHandler.collectHostResources(allResources, armoResourceMap, sessionObj.ErrorMap); err != nil {
+		if sessionObj.Metadata.ScanMetadata.HostScanner {
+			infoMap, err := k8sHandler.collectHostResources(allResources, armoResourceMap)
+			if err != nil {
 				logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
-				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.ErrorMap)
+				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 			} else if k8sHandler.hostSensorHandler == nil {
 				// using hostSensor mock
-				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.ErrorMap)
+				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
+			} else {
+				sessionObj.InfoMap = infoMap
 			}
 		} else {
-			cautils.SetInfoMapForResources("enable-host-scan flag not used", hostResources, sessionObj.ErrorMap)
+			cautils.SetInfoMapForResources("enable-host-scan flag not used", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -111,7 +114,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	if len(cloudResources) > 0 {
 		provider, err := getCloudProviderDescription(allResources, armoResourceMap)
 		if err != nil {
-			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.ErrorMap)
+			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
 		}
 		if provider != "" {
@@ -219,11 +222,11 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 // 	}
 // 	return nil
 // }
-func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources, errorMap map[string]apis.StatusInfo) error {
+func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (map[string]apis.StatusInfo, error) {
 	logger.L().Debug("Collecting host scanner resources")
-	hostResources, err := k8sHandler.hostSensorHandler.CollectResources(errorMap)
+	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for rscIdx := range hostResources {
@@ -237,7 +240,7 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 		}
 		(*armoResourceMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 	}
-	return nil
+	return infoMap, nil
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
@@ -258,32 +261,24 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (string, error) {
 	logger.L().Debug("Collecting cloud data")
-	cloudProvider := initCloudProvider()
-	cluster := cloudProvider.getKubeCluster()
-	clusterName := cloudProvider.getKubeClusterName()
-	provider := getCloudProvider()
-	region, err := cloudProvider.getRegion(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
-	project, err := cloudProvider.getProject(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
+
+	clusterName := cautils.ClusterName
+
+	provider := cloudsupport.GetCloudProvider(clusterName)
 
 	if provider != "" {
-		logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
+		logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
-		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
+		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider)
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info
 			switch provider {
 			case "gke":
-				return provider, fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
+				return provider, fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", clusterName)
 			case "eks":
-				return provider, fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
+				return provider, fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", clusterName)
 			case "aks":
-				return provider, fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
+				return provider, fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", clusterName, err.Error())
 			}
 			return provider, err
 		}
@@ -303,5 +298,9 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return len(nodesList.Items), nil
+	nodesNumber := 0
+	if nodesList != nil {
+		nodesNumber = len(nodesList.Items)
+	}
+	return nodesNumber, nil
 }

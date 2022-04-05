@@ -26,8 +26,7 @@ func DataToJson(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
 	finalizeResults(report.Results, data.ResourcesResult)
 
-	report.Resources = make([]reporthandling.Resource, 0) // do not initialize slice length
-	finalizeResources(report.Resources, report.Results, data.AllResources)
+	report.Resources = finalizeResources(report.Results, data.AllResources)
 
 	return &report
 }
@@ -53,7 +52,8 @@ func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) map[string]stri
 	return infoToPrintInfoMap
 }
 
-func finalizeResources(resources []reporthandling.Resource, results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) {
+func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) []reporthandling.Resource {
+	resources := make([]reporthandling.Resource, 0)
 	for i := range results {
 		if obj, ok := allResources[results[i].ResourceID]; ok {
 			r := *reporthandling.NewResource(obj.GetObject())
@@ -61,6 +61,7 @@ func finalizeResources(resources []reporthandling.Resource, results []resourcesr
 			resources = append(resources, r)
 		}
 	}
+	return resources
 }
 
 func logOUtputFile(fileName string) {

@@ -15,7 +15,7 @@ var (
 	ClusterDescribe = "ClusterDescribe"
 
 	MapResourceToApiGroupCloud = map[string][]string{
-		ClusterDescribe: {"container.googleapis.com/v1", "eks.amazonaws.com/v1"}}
+		ClusterDescribe: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}}
 )
 
 func setK8sResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResources {

@@ -18,10 +18,10 @@ var (
 	CloudResources = []string{"ClusterDescribe"}
 )
 
-func MapHostResources(armoResourceMap *ArmoResources) []string {
+func MapArmoResource(armoResourceMap *ArmoResources, resources []string) []string {
 	var hostResources []string
 	for k := range *armoResourceMap {
-		for _, resource := range HostSensorResources {
+		for _, resource := range resources {
 			if strings.Contains(k, resource) {
 				hostResources = append(hostResources, k)
 			}
@@ -30,28 +30,16 @@ func MapHostResources(armoResourceMap *ArmoResources) []string {
 	return hostResources
 }
 
+func MapHostResources(armoResourceMap *ArmoResources) []string {
+	return MapArmoResource(armoResourceMap, HostSensorResources)
+}
+
 func MapImageVulnResources(armoResourceMap *ArmoResources) []string {
-	var imgVulnResources []string
-	for k := range *armoResourceMap {
-		for _, resource := range HostSensorResources {
-			if strings.Contains(k, resource) {
-				imgVulnResources = append(ImageVulnResources, k)
-			}
-		}
-	}
-	return imgVulnResources
+	return MapArmoResource(armoResourceMap, ImageVulnResources)
 }
 
 func MapCloudResources(armoResourceMap *ArmoResources) []string {
-	var cloudResources []string
-	for k := range *armoResourceMap {
-		for _, resource := range CloudResources {
-			if strings.Contains(k, resource) {
-				cloudResources = append(cloudResources, k)
-			}
-		}
-	}
-	return cloudResources
+	return MapArmoResource(armoResourceMap, CloudResources)
 }
 
 func SetInfoMapForResources(info string, resources []string, errorMap map[string]apis.StatusInfo) {
@@ -62,11 +50,3 @@ func SetInfoMapForResources(info string, resources []string, errorMap map[string
 		}
 	}
 }
-
-// func PullResources(allResources map[string]workloadinterface.IMetadata) {
-
-// 	mapHostResources(allResources)
-// 	mapCloudResources(allResources)
-// 	return allResources
-
-// }

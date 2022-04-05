@@ -7,11 +7,11 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/getter"
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/google/uuid"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -42,34 +42,29 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string) *R
 	}
 }
 
-func (report *ReportEventReceiver) ActionSendReport(opaSessionObj *cautils.OPASessionObj) error {
-	finalizeReport(opaSessionObj)
+func (report *ReportEventReceiver) Submit(opaSessionObj *cautils.OPASessionObj) error {
 
 	if report.customerGUID == "" {
 		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
-
 		return nil
 	}
+	// if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
 	if report.clusterName == "" {
 		logger.L().Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
-	if opaSessionObj.Report.ReportID == "" {
-		opaSessionObj.Report.ReportID = uuid.NewString()
-	}
-	opaSessionObj.Report.ReportID = uuid.NewString()
-	opaSessionObj.Report.CustomerGUID = report.customerGUID
-	opaSessionObj.Report.ClusterName = report.clusterName
-	opaSessionObj.Report.Metadata = *opaSessionObj.Metadata
 
-	if err := report.prepareReport(opaSessionObj.Report); err != nil {
-		logger.L().Error("failed to publish results", helpers.Error(err))
-	} else {
+	err := report.prepareReport(opaSessionObj)
+	if err == nil {
 		report.generateMessage()
+	} else {
+		logger.L().Debug(err.Error()) // print original error only in debug mode
+		err = fmt.Errorf("failed to submit scan results. url: '%s'", report.GetURL())
 	}
+
 	logger.L().Debug("", helpers.String("account ID", report.customerGUID))
 
-	return nil
+	return err
 }
 
 func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
@@ -80,80 +75,108 @@ func (report *ReportEventReceiver) SetClusterName(clusterName string) {
 	report.clusterName = cautils.AdoptClusterName(clusterName) // clean cluster name
 }
 
-func (report *ReportEventReceiver) prepareReport(postureReport *reporthandlingv2.PostureReport) error {
+func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
 	report.initEventReceiverURL()
-	host := hostToString(report.eventReceiverURL, postureReport.ReportID)
+	host := hostToString(report.eventReceiverURL, report.reportID)
 
 	cautils.StartSpinner()
 
-	reportCounter := 0
-
 	// send resources
-	err := report.sendResources(host, postureReport, &reportCounter, false)
+	err := report.sendResources(host, opaSessionObj)
 
 	cautils.StopSpinner()
 	return err
 }
 
-func (report *ReportEventReceiver) sendResources(host string, postureReport *reporthandlingv2.PostureReport, reportCounter *int, isLastReport bool) error {
-	splittedPostureReport := setSubReport(postureReport)
+func (report *ReportEventReceiver) GetURL() string {
+	u := url.URL{}
+	u.Scheme = "https"
+	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
+
+	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
+		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+	} else {
+		u.Path = "account/sign-up"
+		q := u.Query()
+		q.Add("invitationToken", report.token)
+		q.Add("customerGUID", report.customerGUID)
+
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
+
+}
+func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cautils.OPASessionObj) error {
+	splittedPostureReport := report.setSubReport(opaSessionObj)
 	counter := 0
-
-	for _, v := range postureReport.Resources {
-		r, err := json.Marshal(v)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.ResourceID, err)
-		}
-
-		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Resources) > 0 {
-
-			// send report
-			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
-				return err
-			}
-			*reportCounter++
-
-			// delete resources
-			splittedPostureReport.Resources = []reporthandling.Resource{}
-			splittedPostureReport.Results = []resourcesresults.Result{}
-
-			// restart counter
-			counter = 0
-		}
-
-		counter += len(r)
-		splittedPostureReport.Resources = append(splittedPostureReport.Resources, v)
+	reportCounter := 0
+	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, &counter, &reportCounter, host); err != nil {
+		return err
+	}
+	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
+		return err
 	}
 
-	for _, v := range postureReport.Results {
+	return report.sendReport(host, splittedPostureReport, reportCounter, true)
+}
+func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
+	for _, v := range results {
 		r, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
 		}
 
-		if counter+len(r) >= MAX_REPORT_SIZE && len(splittedPostureReport.Results) > 0 {
+		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
 
 			// send report
-			if err := report.sendReport(host, splittedPostureReport, *reportCounter, false); err != nil {
+			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
 				return err
 			}
 			*reportCounter++
 
 			// delete results
-			splittedPostureReport.Results = []resourcesresults.Result{}
-			splittedPostureReport.Resources = []reporthandling.Resource{}
+			reportObj.Results = []resourcesresults.Result{}
+			reportObj.Resources = []reporthandling.Resource{}
 
 			// restart counter
-			counter = 0
+			*counter = 0
 		}
 
-		counter += len(r)
-		splittedPostureReport.Results = append(splittedPostureReport.Results, v)
+		*counter += len(r)
+		reportObj.Results = append(reportObj.Results, v)
 	}
-
-	return report.sendReport(host, splittedPostureReport, *reportCounter, true)
+	return nil
 }
 
+func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, counter, reportCounter *int, host string) error {
+	for resourceID, v := range allResources {
+		resource := reporthandling.NewResourceIMetadata(v)
+		r, err := json.Marshal(resource)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", resourceID, err)
+		}
+
+		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
+
+			// send report
+			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
+				return err
+			}
+			*reportCounter++
+
+			// delete resources
+			reportObj.Resources = []reporthandling.Resource{}
+			reportObj.Results = []resourcesresults.Result{}
+
+			// restart counter
+			*counter = 0
+		}
+
+		*counter += len(r)
+		reportObj.Resources = append(reportObj.Resources, *resource)
+	}
+	return nil
+}
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
 		ReportNumber: counter,
@@ -171,26 +194,12 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 }
 
 func (report *ReportEventReceiver) generateMessage() {
-
-	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
-
-	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
-		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
-	} else {
-		u.Path = "account/sign-up"
-		q := u.Query()
-		q.Add("invitationToken", report.token)
-		q.Add("customerGUID", report.customerGUID)
-
-		u.RawQuery = q.Encode()
-	}
+	report.message = ""
 
 	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
 	report.message = sep
 	report.message += "   << WOW! Now you can see the scan results on the web >>\n\n"
-	report.message += fmt.Sprintf("   %s\n", u.String())
+	report.message += fmt.Sprintf("   %s\n", report.GetURL())
 	report.message += sep
 
 }

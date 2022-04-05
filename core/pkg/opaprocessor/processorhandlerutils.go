@@ -1,10 +1,9 @@
 package opaprocessor
 
 import (
-	"fmt"
-
 	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
@@ -48,7 +47,7 @@ func (opap *OPAProcessor) updateResults() {
 
 	// set result summary
 	// map control to error
-	controlToInfoMap := mapControlToError(opap.ResourceToControlsMap, opap.ErrorMap)
+	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 	// for f := range opap.PostureReport.FrameworkReports {
 	// 	// set exceptions
@@ -62,9 +61,9 @@ func (opap *OPAProcessor) updateResults() {
 	// }
 }
 
-func mapControlToError(mapResourceToControls map[string][]string, errorMap map[string]apis.StatusInfo) map[string]apis.StatusInfo {
+func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo) map[string]apis.StatusInfo {
 	controlToInfoMap := make(map[string]apis.StatusInfo)
-	for resource, statusInfo := range errorMap {
+	for resource, statusInfo := range infoMap {
 		controls := mapResourceToControls[resource]
 		for _, control := range controls {
 			controlToInfoMap[control] = statusInfo
@@ -90,9 +89,9 @@ func getArmoObjects(k8sResources *cautils.ArmoResources, allResources map[string
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
-							if k8sObj == nil {
-								logger.L().Debug(fmt.Sprintf("resource '%s' is nil, probably failed to pull the resource", groupResource))
-							}
+							// if k8sObj == nil {
+							// 	logger.L().Debug(fmt.Sprintf("resource '%s' is nil, probably failed to pull the resource", groupResource))
+							// }
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
@@ -117,7 +116,7 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
 							if k8sObj == nil {
-								logger.L().Debug(fmt.Sprintf("resource '%s' is nil, probably failed to pull the resource", groupResource))
+								logger.L().Debug("skipping", helpers.String("resource", groupResource))
 							}
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])

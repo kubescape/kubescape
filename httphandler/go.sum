@@ -109,8 +109,13 @@ github.com/armosec/k8s-interface v0.0.66/go.mod h1:vwprS8qn/iowd5yf0JHpqDsLA5I8W
 github.com/armosec/k8s-interface v0.0.68 h1:6CtSakISiI47YHkxh+Va9FzZQIBkWa6g9sbiNxq1Zkk=
 github.com/armosec/k8s-interface v0.0.68/go.mod h1:PeWn41C2uenZi+xfZdyFF/zG5wXACA00htQyknDUWDE=
 github.com/armosec/opa-utils v0.0.64/go.mod h1:6tQP8UDq2EvEfSqh8vrUdr/9QVSCG4sJfju1SXQOn4c=
+<<<<<<< HEAD
 github.com/armosec/opa-utils v0.0.119 h1:sUPJgz1WRXgGIlyypposNuB/EHJm9SqvIbwS54SREvY=
 github.com/armosec/opa-utils v0.0.119/go.mod h1:gap+EaLG5rnyqvIRGxtdNDC9y7VvoGNm90zK8Ls7avQ=
+=======
+github.com/armosec/opa-utils v0.0.127 h1:uVyH/+pjpiA0oBO6QODjtdCiPgHx7KQ/TcxxkPvAl4c=
+github.com/armosec/opa-utils v0.0.127/go.mod h1:gap+EaLG5rnyqvIRGxtdNDC9y7VvoGNm90zK8Ls7avQ=
+>>>>>>> dev
 github.com/armosec/rbac-utils v0.0.1/go.mod h1:pQ8CBiij8kSKV7aeZm9FMvtZN28VgA7LZcYyTWimq40=
 github.com/armosec/rbac-utils v0.0.14 h1:CKYKcgqJEXWF2Hen/B1pVGtS3nDAG1wp9dDv6oNtq90=
 github.com/armosec/rbac-utils v0.0.14/go.mod h1:Ex/IdGWhGv9HZq6Hs8N/ApzCKSIvpNe/ETqDfnuyah0=
@@ -772,6 +777,8 @@ github.com/tv42/httpunix v0.0.0-20150427012821-b75d8614f926/go.mod h1:9ESjWnEqri
 github.com/ugorji/go/codec v0.0.0-20181204163529-d75b2dcb6bc8/go.mod h1:VFNgLljTbGfSG7qAOspJ7OScBnGdDN/yBr0sguwnwf0=
 github.com/viant/assertly v0.4.8/go.mod h1:aGifi++jvCrUaklKEKT0BU95igDNaqkvz+49uaYMPRU=
 github.com/viant/toolbox v0.24.0/go.mod h1:OxMCG57V0PXuIP2HNQrtJf2CjqdmbrOx5EkMILuUhzM=
+github.com/whilp/git-urls v1.0.0 h1:95f6UMWN5FKW71ECsXRUd3FVYiXdrE7aX4NZKcPmIjU=
+github.com/whilp/git-urls v1.0.0/go.mod h1:J16SAmobsqc3Qcy98brfl5f5+e0clUvg1krgwk/qCfE=
 github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb h1:zGWFAtiMcyryUHoUjUJX0/lt1H2+i2Ka2n+D3DImSNo=
 github.com/xeipuuv/gojsonpointer v0.0.0-20190905194746-02993c407bfb/go.mod h1:N2zxlSyiKSe5eX1tZViRH5QA0qijqEDrYZiPEAiq3wU=
 github.com/xeipuuv/gojsonreference v0.0.0-20180127040603-bd5ef7bd5415 h1:EzJWgHovont7NscjpAxXsDA8S8BMYve8Y5+7cuRE7R0=
