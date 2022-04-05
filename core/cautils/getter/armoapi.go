@@ -233,7 +233,14 @@ func (armoAPI *ArmoAPI) GetAccountConfig(clusterName string) (*armotypes.Custome
 	}
 
 	if err = JSONDecoder(respStr).Decode(&accountConfig); err != nil {
-		return nil, err
+		// try with default scope
+		respStr, err = armoAPI.Get(armoAPI.getAccountConfigDefault(clusterName), nil)
+		if err != nil {
+			return nil, err
+		}
+		if err = JSONDecoder(respStr).Decode(&accountConfig); err != nil {
+			return nil, err
+		}
 	}
 
 	return accountConfig, nil

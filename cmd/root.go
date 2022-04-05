@@ -84,5 +84,8 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 func main() {
 	ks := NewDefaultKubescapeCommand()
-	ks.Execute()
+	err := ks.Execute()
+	if err != nil {
+		logger.L().Fatal(err.Error())
+	}
 }
