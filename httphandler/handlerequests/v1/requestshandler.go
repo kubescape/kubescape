@@ -110,6 +110,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	wg.Wait()
+	w.WriteHeader(http.StatusOK)
 	w.Write(response)
 }
 func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
@@ -132,8 +133,8 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	if handler.state.isBusy() { // if requested ID is still scanning
 		if scanID == handler.state.getID() {
 			logger.L().Info("scan in process", helpers.String("ID", scanID))
-			w.Write([]byte(handler.state.getID()))
 			w.WriteHeader(http.StatusOK) // Should we return ok?
+			w.Write([]byte(handler.state.getID()))
 			return
 		}
 	}
@@ -146,11 +147,11 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 			defer removeResultsFile(scanID)
 		}
 		if res, err := readResultsFile(scanID); err != nil {
-			w.Write([]byte(err.Error()))
 			w.WriteHeader(http.StatusNoContent)
+			w.Write([]byte(err.Error()))
 		} else {
-			w.Write(res)
 			w.WriteHeader(http.StatusOK)
+			w.Write(res)
 		}
 	case http.MethodDelete:
 		logger.L().Info("deleting results", helpers.String("ID", scanID))

@@ -96,12 +96,6 @@ spec:
             fieldRef:
               apiVersion: v1
               fieldPath: metadata.namespace
-        - name: "KS_SKIP_UPDATE_CHECK" # do not check latest version
-          value: "true"
-        - name: KS_ENABLE_HOST_SCANNER # enable host scanner -> https://hub.armo.cloud/docs/host-sensor
-          value: "false"               # TODO - add permissions to rbac 
-        - name: KS_DOWNLOAD_ARTIFACTS  # When set to true the artifacts will be downloaded every scan execution
-          value: "false" 
         ports:
         - containerPort: 8080
           name: http

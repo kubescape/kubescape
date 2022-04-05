@@ -7,7 +7,6 @@ import (
 	apis "github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
-	v2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
@@ -20,29 +19,33 @@ type OPASessionObj struct {
 	Policies              []reporthandling.Framework             // list of frameworks to scan
 	AllResources          map[string]workloadinterface.IMetadata // all scanned resources, map[<rtesource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result     // resources scan results, map[<rtesource ID>]<resource result>
+	ResourceSource        map[string]string                      // resources sources, map[<rtesource ID>]<resource result>
 	PostureReport         *reporthandling.PostureReport          // scan results v1 - Remove
 	Report                *reporthandlingv2.PostureReport        // scan results v2 - Remove
 	Exceptions            []armotypes.PostureExceptionPolicy     // list of exceptions to apply on scan results
 	RegoInputData         RegoInputData                          // input passed to rgo for scanning. map[<control name>][<input arguments>]
 	Metadata              *reporthandlingv2.Metadata
-	ErrorMap              map[string]apis.StatusInfo // Map errors of resources to StatusInfo
+	InfoMap               map[string]apis.StatusInfo // Map errors of resources to StatusInfo
 	ResourceToControlsMap map[string][]string        // map[<apigroup/apiversion/resource>] = [<control_IDs>]
+	SessionID             string                     // SessionID
 }
 
-func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources) *OPASessionObj {
+func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {
 	return &OPASessionObj{
 		Report:                &reporthandlingv2.PostureReport{},
 		Policies:              frameworks,
 		K8SResources:          k8sResources,
 		AllResources:          make(map[string]workloadinterface.IMetadata),
 		ResourcesResult:       make(map[string]resourcesresults.Result),
-		ErrorMap:              make(map[string]apis.StatusInfo),
+		InfoMap:               make(map[string]apis.StatusInfo),
 		ResourceToControlsMap: make(map[string][]string),
+		ResourceSource:        make(map[string]string),
+		SessionID:             scanInfo.ScanID,
 		PostureReport: &reporthandling.PostureReport{
 			ClusterName:  ClusterName,
 			CustomerGUID: CustomerGUID,
 		},
-		Metadata: &v2.Metadata{},
+		Metadata: scanInfoToScanMetadata(scanInfo),
 	}
 }
 

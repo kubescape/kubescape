@@ -26,7 +26,7 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func LoadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetadata, error) {
+func LoadResourcesFromFiles(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
 	files, errs := listFiles(inputPatterns)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
@@ -42,8 +42,8 @@ func LoadResourcesFromFiles(inputPatterns []string) ([]workloadinterface.IMetada
 	return workloads, nil
 }
 
-func loadFiles(filePaths []string) ([]workloadinterface.IMetadata, []error) {
-	workloads := []workloadinterface.IMetadata{}
+func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
+	workloads := make(map[string][]workloadinterface.IMetadata, 0)
 	errs := []error{}
 	for i := range filePaths {
 		f, err := loadFile(filePaths[i])
@@ -54,7 +54,12 @@ func loadFiles(filePaths []string) ([]workloadinterface.IMetadata, []error) {
 		w, e := ReadFile(f, GetFileFormat(filePaths[i]))
 		errs = append(errs, e...)
 		if w != nil {
-			workloads = append(workloads, w...)
+			if _, ok := workloads[filePaths[i]]; !ok {
+				workloads[filePaths[i]] = []workloadinterface.IMetadata{}
+			}
+			wSlice := workloads[filePaths[i]]
+			wSlice = append(wSlice, w...)
+			workloads[filePaths[i]] = wSlice
 		}
 	}
 	return workloads, errs

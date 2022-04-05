@@ -57,7 +57,7 @@ func getPrometheusDefaultScanCommand(scanID string) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
 	scanInfo.FrameworkScan = true
 	scanInfo.ScanAll = true                                                        // scan all frameworks
-	scanInfo.ReportID = scanID                                                     // scan ID
+	scanInfo.ScanID = scanID                                                       // scan ID
 	scanInfo.FailThreshold = 100                                                   // Do not fail scanning
 	scanInfo.Output = scanID                                                       // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus")                       // default output should be json

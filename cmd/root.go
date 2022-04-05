@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/armosec/kubescape/cmd/completion"
@@ -21,6 +22,8 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+var rootInfo cautils.RootInfo
 
 var ksExamples = `
   # Scan command
@@ -43,7 +46,6 @@ func NewDefaultKubescapeCommand() *cobra.Command {
 }
 
 func getRootCmd(ks meta.IKubescape) *cobra.Command {
-	var rootInfo cautils.RootInfo
 
 	rootCmd := &cobra.Command{
 		Use:     "kubescape",
@@ -53,8 +55,8 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		Example: ksExamples,
 	}
 
-	rootCmd.PersistentFlags().StringVar(&armoBEURLsDep, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&armoBEURLs, "env", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLsDep, "environment", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLs, "env", "", envFlagUsage)
 	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
@@ -66,11 +68,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
 
-	// Initialize
-	initLogger(&rootInfo)
-	initLoggerLevel(&rootInfo)
-	initEnvironment(&rootInfo)
-	initCacheDir(&rootInfo)
+	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
 	// Supported commands
 	rootCmd.AddCommand(scan.GetScanCommand(ks))
@@ -87,5 +85,8 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 func main() {
 	ks := NewDefaultKubescapeCommand()
-	ks.Execute()
+	err := ks.Execute()
+	if err != nil {
+		os.Exit(1)
+	}
 }
