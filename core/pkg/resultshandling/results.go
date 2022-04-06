@@ -56,17 +56,19 @@ func (resultsHandler *ResultsHandler) ToJson() ([]byte, error) {
 }
 
 // HandleResults handle the scan results according to the pre defind interfaces
-func (resultsHandler *ResultsHandler) HandleResults() {
+func (resultsHandler *ResultsHandler) HandleResults() error {
 
 	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
 
 	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
-		logger.L().Error(err.Error())
+		return err
 	}
 
 	resultsHandler.printerObj.Score(resultsHandler.GetRiskScore())
 
 	resultsHandler.reporterObj.DisplayReportURL()
+
+	return nil
 }
 
 // NewPrinter defind output format

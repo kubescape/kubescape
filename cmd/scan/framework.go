@@ -97,7 +97,10 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			results.HandleResults()
+			err = results.HandleResults()
+			if err != nil {
+				logger.L().Fatal(err.Error())
+			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				return fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", results.GetRiskScore(), scanInfo.FailThreshold)
 			}

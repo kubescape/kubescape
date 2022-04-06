@@ -280,15 +280,8 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info
-			switch provider {
-			case "gke":
-				return provider, fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
-			case "eks":
-				return provider, fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
-			case "aks":
-				return provider, fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
-			}
-			return provider, err
+			logger.L().Debug("failed to get descriptive information", helpers.Error(err))
+			return provider, fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armo.cloud/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
 		}
 		allResources[wl.GetID()] = wl
 		(*armoResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}

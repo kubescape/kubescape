@@ -73,6 +73,12 @@ func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
 	return u.String()
 }
 
+func (armoAPI *ArmoAPI) getAccountConfigDefault(clusterName string) string {
+	config := armoAPI.getAccountConfig(clusterName)
+	url := config + "&scope=default"
+	return url
+}
+
 func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	u := url.URL{}
 	u.Scheme = "https"
