@@ -41,10 +41,6 @@ func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessio
 	}
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlNames)
 
-	if !prettyPrinter.verboseMode {
-		cautils.SimpleDisplay(prettyPrinter.writer, "\n%s Run with '--verbose' flag for full scan details\n", emoji.Detective)
-	}
-
 }
 
 func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {

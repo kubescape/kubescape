@@ -10,6 +10,7 @@ import (
 	"github.com/armosec/kubescape/core/cautils/logger"
 	"github.com/armosec/kubescape/core/meta"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
 
@@ -97,9 +98,12 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			err = results.HandleResults()
-			if err != nil {
+
+			if err = results.HandleResults(); err != nil {
 				logger.L().Fatal(err.Error())
+			}
+			if !scanInfo.VerboseMode {
+				cautils.SimpleDisplay(os.Stderr, "\n%s Run with '--verbose' flag for full scan details\n", emoji.Detective)
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				return fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", results.GetRiskScore(), scanInfo.FailThreshold)
@@ -108,20 +112,6 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		},
 	}
 }
-
-// func init() {
-// 	scanCmd.AddCommand(frameworkCmd)
-// 	scanInfo = cautils.ScanInfo{}
-
-// }
-
-// func SetScanForFirstFramework(frameworks []string) []reporthandling.PolicyIdentifier {
-// 	newPolicy := reporthandling.PolicyIdentifier{}
-// 	newPolicy.Kind = reporthandling.KindFramework
-// 	newPolicy.Name = frameworks[0]
-// 	scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-// 	return scanInfo.PolicyIdentifier
-// }
 
 func flagValidationFramework(scanInfo *cautils.ScanInfo) {
 	if scanInfo.Submit && scanInfo.Local {

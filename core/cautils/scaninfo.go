@@ -101,11 +101,22 @@ func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setOutputFile()
 	scanInfo.setUseArtifactsFrom()
+	scanInfo.setInputPatterns()
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
-}
 
+}
+func (scanInfo *ScanInfo) setInputPatterns() {
+	for i := range scanInfo.InputPatterns {
+		if !filepath.IsAbs(scanInfo.InputPatterns[i]) {
+			if o, err := os.Getwd(); err != nil {
+				scanInfo.InputPatterns[i] = filepath.Join(o, scanInfo.InputPatterns[i])
+			}
+		}
+	}
+
+}
 func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	if scanInfo.UseArtifactsFrom == "" {
 		return
@@ -229,6 +240,8 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
 	}
 
+	setContextMetadata(&metadata.ContextMetadata, scanInfo.InputPatterns[0])
+
 	return metadata
 }
 
@@ -244,10 +257,28 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 	}
 
 	// if single file
-	if strings.HasPrefix(input, "http") { // TODO - check if can parse
+	if IsFile(input) {
+		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
+			FilePath: input,
+			HostName: getHostname(),
+		}
 		return
 	}
 
 	// if dir/glob
+	if !IsFile(input) {
+		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
+			BasePath: input,
+			HostName: getHostname(),
+		}
+		return
+	}
 
+}
+
+func getHostname() string {
+	if h, e := os.Hostname(); e != nil {
+		return h
+	}
+	return ""
 }
