@@ -17,10 +17,9 @@ import (
 )
 
 type PrettyPrinter struct {
-	formatVersion      string
-	writer             *os.File
-	verboseMode        bool
-	sortedControlNames []string
+	formatVersion string
+	writer        *os.File
+	verboseMode   bool
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
@@ -31,14 +30,20 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	prettyPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
-	if prettyPrinter.formatVersion == "v1" {
-		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
-	} else if prettyPrinter.formatVersion == "v2" {
-		prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
+	if prettyPrinter.verboseMode {
+		if prettyPrinter.formatVersion == "v1" {
+			prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlNames)
+		} else if prettyPrinter.formatVersion == "v2" {
+			prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
+		}
 	}
-	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails)
+	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlNames)
+
+	if !prettyPrinter.verboseMode {
+		cautils.SimpleDisplay(prettyPrinter.writer, "\n%s Run with '--verbose' flag for full scan details\n", emoji.Detective)
+	}
 
 }
 
@@ -49,13 +54,14 @@ func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
 func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 
-func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) {
-	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-
-		controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
-		prettyPrinter.printTitle(controlSummary)
-		prettyPrinter.printResources(controlSummary, allResources)
-		prettyPrinter.printSummary(prettyPrinter.sortedControlNames[i], controlSummary)
+func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlNames [][]string) {
+	for i := len(sortedControlNames) - 1; i >= 0; i-- {
+		for _, c := range sortedControlNames[i] {
+			controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
+			prettyPrinter.printTitle(controlSummary)
+			prettyPrinter.printResources(controlSummary, allResources)
+			prettyPrinter.printSummary(c, controlSummary)
+		}
 	}
 }
 
@@ -167,28 +173,33 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 }
 func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	// Control name | # failed resources | all resources | % success
-	row := []string{}
-	row = append(row, "Resource Summary") //fmt.Sprintf(""%d", numControlers"))
-	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed()))
-	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()))
-	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().All()))
-	row = append(row, " ")
-	row = append(row, fmt.Sprintf("%.2f%s", summaryDetails.Score, "%"))
-	row = append(row, " ")
+	row := make([]string, _rowLen)
+	row[columnName] = "Resource Summary"
+	row[columnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
+	row[columnCounterExclude] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded())
+	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
+	row[columnSeverity] = " "
+	row[columnRiskScore] = fmt.Sprintf("%.2f%s", summaryDetails.Score, "%")
+	row[columnInfo] = " "
 
 	return row
 }
-func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails) {
+func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(getControlTableHeaders())
 	summaryTable.SetHeaderLine(true)
-	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
-	summaryTable.SetColumnAlignment(alignments)
+	summaryTable.SetColumnAlignment(getColumnsAlignments())
+
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
-	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]), infoToPrintInfo))
+	for i := len(sortedControlNames) - 1; i >= 0; i-- {
+		for _, c := range sortedControlNames[i] {
+			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfo, prettyPrinter.verboseMode)
+			if len(row) > 0 {
+				summaryTable.Append(row)
+			}
+		}
 	}
 
 	summaryTable.SetFooter(generateFooter(summaryDetails))
@@ -227,14 +238,6 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 	return ""
 }
 
-// func getSortedControlsNames(controls []reportsummary.IPolicies) []string {
-// 	controlNames := make([]string, 0, len(controls))
-// 	for k := range controls {
-// 		controlNames = append(controlNames, controls[k].Get())
-// 	}
-// 	sort.Strings(controlNames)
-// 	return controlNames
-// }
 func getControlLink(controlID string) string {
 	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
 }

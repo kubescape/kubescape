@@ -226,8 +226,28 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 
 	metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 	if scanInfo.GetScanningEnvironment() == ScanLocalFiles {
-		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Files
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
 	}
 
 	return metadata
+}
+
+func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
+	// if cluster
+	if input == "" {
+		return
+	}
+
+	// if url
+	if strings.HasPrefix(input, "http") { // TODO - check if can parse
+		return
+	}
+
+	// if single file
+	if strings.HasPrefix(input, "http") { // TODO - check if can parse
+		return
+	}
+
+	// if dir/glob
+
 }
