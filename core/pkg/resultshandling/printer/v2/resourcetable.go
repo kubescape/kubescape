@@ -29,16 +29,18 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(prettyPrinter.writer, "\n#######################################################################################################\n")
+		fmt.Fprintf(prettyPrinter.writer, "\n"+getSperator("#")+"\n\n")
 
 		if source, ok := opaSessionObj.ResourceSource[resourceID]; ok {
 			fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", source)
 		}
-		fmt.Fprintf(prettyPrinter.writer, "%s/%s, Name: %s", resource.GetApiVersion(), resource.GetKind(), resource.GetName())
+		fmt.Fprintf(prettyPrinter.writer, "ApiVersion: %s\n", resource.GetApiVersion())
+		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", resource.GetKind())
+		fmt.Fprintf(prettyPrinter.writer, "Name: %s\n", resource.GetName())
 		if resource.GetNamespace() != "" {
-			fmt.Fprintf(prettyPrinter.writer, ", Namespace: %s", resource.GetNamespace())
+			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", resource.GetNamespace())
 		}
-		fmt.Fprintf(prettyPrinter.writer, "\n\n")
+		fmt.Fprintf(prettyPrinter.writer, "\n"+controlCountersForResource(result.ListControlsIDs(nil))+"\n\n")
 
 		summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 		summaryTable.SetAutoWrapText(true)

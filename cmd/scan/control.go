@@ -94,7 +94,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				logger.L().Fatal(err.Error())
 			}
 			if !scanInfo.VerboseMode {
-				cautils.SimpleDisplay(os.Stderr, "%s  Run with '--verbose' flag for full scan details\n\n", emoji.Detective)
+				cautils.SimpleDisplay(os.Stderr, "%s  Run with '--verbose'/'-v' flag for detailed resources view\n\n", emoji.Detective)
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))

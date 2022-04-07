@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/enescakir/emoji"
 	"github.com/olekukonko/tablewriter"
@@ -30,7 +31,7 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	fmt.Fprintf(prettyPrinter.writer, "\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n")
+	fmt.Fprintf(prettyPrinter.writer, "\n"+getSperator("^")+"\n")
 
 	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
@@ -183,7 +184,7 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 }
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
 
-	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlListSummary(summaryDetails)+"\n\n")
+	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n\n")
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
@@ -241,6 +242,17 @@ func getControlLink(controlID string) string {
 	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
 }
 
-func controlListSummary(summaryDetails *reportsummary.SummaryDetails) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d, Skipped: %d)", summaryDetails.NumberOfControls().All(), summaryDetails.NumberOfControls().Failed(), summaryDetails.NumberOfControls().Excluded(), summaryDetails.NumberOfControls().Skipped())
+func controlCountersForSummary(counters reportsummary.ICounters) string {
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d, Skipped: %d)", counters.All(), counters.Failed(), counters.Excluded(), counters.Skipped())
+}
+
+func controlCountersForResource(l *helpersv1.AllLists) string {
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", len(l.All()), len(l.Failed()), len(l.Excluded()))
+}
+func getSperator(sep string) string {
+	s := ""
+	for i := 0; i < 80; i++ {
+		s += sep
+	}
+	return s
 }
