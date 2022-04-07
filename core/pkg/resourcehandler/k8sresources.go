@@ -75,7 +75,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	if err != nil {
 		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
 	} else {
-		sessionObj.Metadata.ClusterMetadata.NumberOfWorkerNodes = numberOfWorkerNodes
+		if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
+			sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = numberOfWorkerNodes
+		}
 	}
 
 	imgVulnResources := cautils.MapImageVulnResources(armoResourceMap)
@@ -118,7 +120,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
 		}
 		if provider != "" {
-			sessionObj.Metadata.ClusterMetadata.CloudProvider = provider
+			if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
+				sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
+			}
 		}
 	}
 

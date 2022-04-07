@@ -11,7 +11,7 @@ var scanCmdExamples = `
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defind frameworks 
   
   # Scan current cluster with all frameworks
-  kubescape scan --submit --enable-host-scan
+  kubescape scan --submit --enable-host-scan --verbose
 
   # Scan kubernetes YAML manifest files
   kubescape scan *.yaml

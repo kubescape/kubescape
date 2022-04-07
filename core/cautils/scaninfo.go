@@ -101,22 +101,12 @@ func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setOutputFile()
 	scanInfo.setUseArtifactsFrom()
-	scanInfo.setInputPatterns()
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
 
 }
-func (scanInfo *ScanInfo) setInputPatterns() {
-	for i := range scanInfo.InputPatterns {
-		if !filepath.IsAbs(scanInfo.InputPatterns[i]) {
-			if o, err := os.Getwd(); err != nil {
-				scanInfo.InputPatterns[i] = filepath.Join(o, scanInfo.InputPatterns[i])
-			}
-		}
-	}
 
-}
 func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	if scanInfo.UseArtifactsFrom == "" {
 		return
@@ -208,7 +198,6 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ClusterMetadata.ContextName = k8sinterface.GetClusterName()
 	metadata.ScanMetadata.Format = scanInfo.Format
 	metadata.ScanMetadata.Submit = scanInfo.Submit
 
@@ -240,7 +229,11 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
 	}
 
-	setContextMetadata(&metadata.ContextMetadata, scanInfo.InputPatterns[0])
+	inputFiles := ""
+	if len(scanInfo.InputPatterns) > 0 {
+		inputFiles = scanInfo.InputPatterns[0]
+	}
+	setContextMetadata(&metadata.ContextMetadata, inputFiles)
 
 	return metadata
 }
@@ -248,12 +241,21 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
 	// if cluster
 	if input == "" {
+		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
+			ContextName: k8sinterface.GetClusterName(),
+		}
 		return
 	}
 
 	// if url
 	if strings.HasPrefix(input, "http") { // TODO - check if can parse
 		return
+	}
+
+	if !filepath.IsAbs(input) {
+		if o, err := os.Getwd(); err == nil {
+			input = filepath.Join(o, input)
+		}
 	}
 
 	// if single file
@@ -277,7 +279,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 }
 
 func getHostname() string {
-	if h, e := os.Hostname(); e != nil {
+	if h, e := os.Hostname(); e == nil {
 		return h
 	}
 	return ""

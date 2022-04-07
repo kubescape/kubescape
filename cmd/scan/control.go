@@ -8,8 +8,10 @@ import (
 
 	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/core/meta"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
 
@@ -66,7 +68,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
-						scanInfo.InputPatterns = args[1:]
+						scanInfo.InputPatterns = []string{args[1]}
 					} else { // store stdin to file - do NOT move to separate function !!
 						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
 						if err != nil {
@@ -88,36 +90,16 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			results.HandleResults()
+			if err := results.HandleResults(); err != nil {
+				logger.L().Fatal(err.Error())
+			}
+			if !scanInfo.VerboseMode {
+				cautils.SimpleDisplay(os.Stderr, "%s  Run with '--verbose' flag for full scan details\n\n", emoji.Detective)
+			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
-				return fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", results.GetRiskScore(), scanInfo.FailThreshold)
+				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
 			return nil
 		},
 	}
 }
-
-// func flagValidationControl() {
-// 	if 100 < scanInfo.FailThreshold {
-// 		logger.L().Fatal("bad argument: out of range threshold")
-// 	}
-// }
-
-// func setScanForFirstControl(scanInfo, controls []string) []reporthandling.PolicyIdentifier {
-// 	newPolicy := reporthandling.PolicyIdentifier{}
-// 	newPolicy.Kind = reporthandling.KindControl
-// 	newPolicy.Name = controls[0]
-// 	scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-// 	return scanInfo.PolicyIdentifier
-// }
-
-// func SetScanForGivenControls(scanInfo, controls []string) []reporthandling.PolicyIdentifier {
-// 	for _, control := range controls {
-// 		control := strings.TrimLeft(control, " ")
-// 		newPolicy := reporthandling.PolicyIdentifier{}
-// 		newPolicy.Kind = reporthandling.KindControl
-// 		newPolicy.Name = control
-// 		scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
-// 	}
-// 	return scanInfo.PolicyIdentifier
-// }
