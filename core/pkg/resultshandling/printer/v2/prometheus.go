@@ -29,7 +29,7 @@ func (prometheusPrinter *PrometheusPrinter) SetWriter(outputFile string) {
 }
 
 func (prometheusPrinter *PrometheusPrinter) Score(score float32) {
-	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", int(score))
+	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
 func (printer *PrometheusPrinter) generatePrometheusFormat(

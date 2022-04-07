@@ -9,6 +9,7 @@ require (
 	github.com/armosec/kubescape/core v0.0.0-00010101000000-000000000000
 	github.com/armosec/opa-utils v0.0.129
 	github.com/armosec/rbac-utils v0.0.14
+	github.com/enescakir/emoji v1.0.0
 	github.com/google/uuid v1.3.0
 	github.com/mattn/go-isatty v0.0.14
 	github.com/spf13/cobra v1.4.0
@@ -51,7 +52,6 @@ require (
 	github.com/docker/docker v20.10.9+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
-	github.com/enescakir/emoji v1.0.0 // indirect
 	github.com/envoyproxy/go-control-plane v0.10.1 // indirect
 	github.com/envoyproxy/protoc-gen-validate v0.6.2 // indirect
 	github.com/fatih/color v1.13.0 // indirect

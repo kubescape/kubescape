@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -272,12 +273,12 @@ func (mcrs *mControlRiskScore) set(resources reportsummary.ICounters) {
 }
 func (m *Metrics) setRiskScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
-	m.rs.riskScore = int(summaryDetails.GetScore())
+	m.rs.riskScore = cautils.Float32ToInt(summaryDetails.GetScore())
 
 	for _, fw := range summaryDetails.ListFrameworks() {
 		mfrs := mFrameworkRiskScore{
 			frameworkName: fw.GetName(),
-			riskScore:     int(fw.GetScore()),
+			riskScore:     cautils.Float32ToInt(fw.GetScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
 		m.listFrameworks = append(m.listFrameworks, mfrs)
@@ -287,7 +288,7 @@ func (m *Metrics) setRiskScores(summaryDetails *reportsummary.SummaryDetails) {
 		mcrs := mControlRiskScore{
 			controlName: control.GetName(),
 			controlID:   control.GetID(),
-			riskScore:   int(control.GetScore()),
+			riskScore:   cautils.Float32ToInt(control.GetScore()),
 			link:        getControlLink(control.GetID()),
 			severity:    apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation: control.GetRemediation(),

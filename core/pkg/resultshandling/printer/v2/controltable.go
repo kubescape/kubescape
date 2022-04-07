@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/fatih/color"
@@ -64,7 +65,7 @@ func getRiskScoreColumn(controlSummary reportsummary.IControlSummary) string {
 	if controlSummary.GetStatus().IsSkipped() {
 		return string(controlSummary.GetStatus().Status())
 	}
-	return fmt.Sprintf("%d", int(controlSummary.GetScore())) + "%"
+	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetScore())) + "%"
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
