@@ -30,13 +30,15 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	fmt.Fprintf(prettyPrinter.writer, "\n^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n")
+
 	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
 	if prettyPrinter.verboseMode {
 		if prettyPrinter.formatVersion == "v1" {
 			prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlNames)
 		} else if prettyPrinter.formatVersion == "v2" {
-			prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
+			prettyPrinter.resourceTable(opaSessionObj)
 		}
 	}
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlNames)
@@ -176,11 +178,12 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
 	row[columnSeverity] = " "
 	row[columnRiskScore] = fmt.Sprintf("%.2f%s", summaryDetails.Score, "%")
-	row[columnInfo] = " "
 
 	return row
 }
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
+
+	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlListSummary(summaryDetails)+"\n\n")
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
@@ -236,4 +239,8 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 
 func getControlLink(controlID string) string {
 	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
+}
+
+func controlListSummary(summaryDetails *reportsummary.SummaryDetails) string {
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d, Skipped: %d)", summaryDetails.NumberOfControls().All(), summaryDetails.NumberOfControls().Failed(), summaryDetails.NumberOfControls().Excluded(), summaryDetails.NumberOfControls().Skipped())
 }

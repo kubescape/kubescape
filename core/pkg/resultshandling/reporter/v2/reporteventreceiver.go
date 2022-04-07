@@ -92,6 +92,8 @@ func (report *ReportEventReceiver) GetURL() string {
 	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
+	q := u.Query()
+
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
 		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
 	} else {
@@ -99,9 +101,14 @@ func (report *ReportEventReceiver) GetURL() string {
 		q := u.Query()
 		q.Add("invitationToken", report.token)
 		q.Add("customerGUID", report.customerGUID)
-
-		u.RawQuery = q.Encode()
 	}
+
+	q.Add("utm_source", "GitHub")
+	q.Add("utm_medium", "CLI")
+	q.Add("utm_campaign", "Submit")
+
+	u.RawQuery = q.Encode()
+
 	return u.String()
 
 }

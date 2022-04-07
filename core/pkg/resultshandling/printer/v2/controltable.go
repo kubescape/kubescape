@@ -18,7 +18,6 @@ const (
 	columnCounterExclude = iota
 	columnCounterAll     = iota
 	columnRiskScore      = iota
-	columnInfo           = iota
 	_rowLen              = iota
 )
 
@@ -40,30 +39,23 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 	row[columnCounterExclude] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded())
 	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
-	row[columnRiskScore] = getRiskScoreColumn(controlSummary)
-	row[columnInfo] = getInfoColumn(controlSummary, infoToPrintInfo)
+	row[columnRiskScore] = getRiskScoreColumn(controlSummary, infoToPrintInfo)
 
 	return row
 }
 
 func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
-	if !controlSummary.GetStatus().IsSkipped() {
-		return ""
-	}
-
-	if controlSummary.GetStatus().IsSkipped() {
-		for i := range infoToPrintInfo {
-			if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
-				return infoToPrintInfo[i].stars
-			}
+	for i := range infoToPrintInfo {
+		if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
+			return infoToPrintInfo[i].stars
 		}
 	}
 	return ""
 }
 
-func getRiskScoreColumn(controlSummary reportsummary.IControlSummary) string {
+func getRiskScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
 	if controlSummary.GetStatus().IsSkipped() {
-		return string(controlSummary.GetStatus().Status())
+		return fmt.Sprintf("%s%s", controlSummary.GetStatus().Status(), getInfoColumn(controlSummary, infoToPrintInfo))
 	}
 	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetScore())) + "%"
 }
@@ -111,7 +103,6 @@ func getControlTableHeaders() []string {
 	headers[columnCounterAll] = "ALL RESOURCES"
 	headers[columnSeverity] = "SEVERITY"
 	headers[columnRiskScore] = "% RISK-SCORE"
-	headers[columnInfo] = "INFO"
 	return headers
 }
 
@@ -122,7 +113,6 @@ func getColumnsAlignments() []int {
 	alignments[columnCounterExclude] = tablewriter.ALIGN_CENTER
 	alignments[columnCounterAll] = tablewriter.ALIGN_CENTER
 	alignments[columnSeverity] = tablewriter.ALIGN_LEFT
-	alignments[columnRiskScore] = tablewriter.ALIGN_CENTER
 	alignments[columnRiskScore] = tablewriter.ALIGN_CENTER
 	return alignments
 }
