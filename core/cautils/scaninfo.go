@@ -199,6 +199,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
 	metadata.ScanMetadata.Format = scanInfo.Format
+	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit
 
 	// TODO - Add excluded and included namespaces

@@ -7,7 +7,7 @@ replace github.com/armosec/kubescape/core => ../core
 require (
 	github.com/armosec/k8s-interface v0.0.68
 	github.com/armosec/kubescape/core v0.0.0-00010101000000-000000000000
-	github.com/armosec/opa-utils v0.0.129
+	github.com/armosec/opa-utils v0.0.130
 	github.com/armosec/rbac-utils v0.0.14
 	github.com/enescakir/emoji v1.0.0
 	github.com/google/uuid v1.3.0
