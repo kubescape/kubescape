@@ -61,21 +61,17 @@ func getRiskScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrin
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
-	// if controlSummary.GetStatus().IsPassed() || controlSummary.GetStatus().IsSkipped() {
-	// 	return " "
-	// }
-	severity := apis.ControlSeverityToString(controlSummary.GetScoreFactor())
-	return color.New(getColor(severity), color.Bold).SprintFunc()(severity)
+	return color.New(getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
-func getColor(controlSeverity string) color.Attribute {
+func getColor(controlSeverity int) color.Attribute {
 	switch controlSeverity {
-	case "Critical":
+	case apis.SeverityCritical:
 		return color.FgRed
-	case "High":
+	case apis.SeverityHigh:
 		return color.FgYellow
-	case "Medium":
+	case apis.SeverityMedium:
 		return color.FgCyan
-	case "Low":
+	case apis.SeverityLow:
 		return color.FgWhite
 	default:
 		return color.FgWhite
