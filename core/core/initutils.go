@@ -2,7 +2,6 @@ package core
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils"
@@ -193,7 +192,7 @@ func getConfigInputsGetter(ControlsInputs string, accountID string, downloadRele
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
+		logger.L().Warning("failed to get config inputs from github release, this may affect the scanning results", helpers.Error(err))
 	}
 	return downloadReleasedPolicy
 }

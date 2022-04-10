@@ -3,7 +3,6 @@ package opaprocessor
 import (
 	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
@@ -116,7 +115,7 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
 							if k8sObj == nil {
-								logger.L().Debug("skipping", helpers.String("resource", groupResource))
+								// logger.L().Debug("skipping", helpers.String("resource", groupResource))
 							}
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])

@@ -2,7 +2,6 @@ package resourcehandler
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/workloadinterface"
@@ -10,6 +9,8 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 )
 
 // FileResourceHandler handle resources from files and URLs
@@ -82,7 +83,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	}
 
 	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, armoResources); err != nil {
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect images vulnerabilities: %s\n", err.Error())
+		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
 	}
 
 	return k8sResources, allResources, armoResources, nil
