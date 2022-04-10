@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/core"
-	"github.com/armosec/kubescape/core/meta"
-	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/core"
+	"github.com/armosec/kubescape/v2/core/meta"
+	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 

@@ -6,11 +6,11 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/cautils/logger/zaplogger"
-	handlerequestsv1 "github.com/armosec/kubescape/httphandler/handlerequests/v1"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/zaplogger"
+	handlerequestsv1 "github.com/armosec/kubescape/v2/httphandler/handlerequests/v1"
 	"github.com/gorilla/mux"
 )
 

@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
 )
 
 func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {

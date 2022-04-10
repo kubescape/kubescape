@@ -1,23 +1,23 @@
-package main
+package cmd
 
 import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/cmd/completion"
-	"github.com/armosec/kubescape/cmd/config"
-	"github.com/armosec/kubescape/cmd/delete"
-	"github.com/armosec/kubescape/cmd/download"
-	"github.com/armosec/kubescape/cmd/list"
-	"github.com/armosec/kubescape/cmd/scan"
-	"github.com/armosec/kubescape/cmd/submit"
-	"github.com/armosec/kubescape/cmd/version"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/core"
-	"github.com/armosec/kubescape/core/meta"
+	"github.com/armosec/kubescape/v2/cmd/completion"
+	"github.com/armosec/kubescape/v2/cmd/config"
+	"github.com/armosec/kubescape/v2/cmd/delete"
+	"github.com/armosec/kubescape/v2/cmd/download"
+	"github.com/armosec/kubescape/v2/cmd/list"
+	"github.com/armosec/kubescape/v2/cmd/scan"
+	"github.com/armosec/kubescape/v2/cmd/submit"
+	"github.com/armosec/kubescape/v2/cmd/version"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/core"
+	"github.com/armosec/kubescape/v2/core/meta"
 
 	"github.com/spf13/cobra"
 )
@@ -82,10 +82,10 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	return rootCmd
 }
 
-func main() {
-	ks := NewDefaultKubescapeCommand()
-	err := ks.Execute()
-	if err != nil {
-		logger.L().Fatal(err.Error())
-	}
-}
+// func main() {
+// 	ks := NewDefaultKubescapeCommand()
+// 	err := ks.Execute()
+// 	if err != nil {
+// 		logger.L().Fatal(err.Error())
+// 	}
+// }

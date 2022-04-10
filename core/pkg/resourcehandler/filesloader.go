@@ -8,9 +8,9 @@ import (
 	"k8s.io/apimachinery/pkg/version"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 )
 
 // FileResourceHandler handle resources from files and URLs

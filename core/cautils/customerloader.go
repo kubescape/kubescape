@@ -10,8 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	corev1 "k8s.io/api/core/v1"
 )
 

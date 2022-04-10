@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
