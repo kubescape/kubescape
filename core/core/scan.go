@@ -48,6 +48,11 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
+	// Do not submit yaml scanning
+	if len(scanInfo.InputPatterns) > 0 {
+		scanInfo.Submit = false
+	}
+
 	if scanInfo.Submit {
 		// submit - Create tenant & Submit report
 		if err := tenantConfig.SetTenant(); err != nil {

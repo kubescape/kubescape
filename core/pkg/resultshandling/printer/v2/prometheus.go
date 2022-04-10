@@ -39,7 +39,7 @@ func (printer *PrometheusPrinter) generatePrometheusFormat(
 
 	m := &Metrics{}
 	m.setRiskScores(summaryDetails)
-	m.setResourcesCounters(resources, results)
+	// m.setResourcesCounters(resources, results)
 
 	return m
 }

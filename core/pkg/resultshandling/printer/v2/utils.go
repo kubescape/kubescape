@@ -26,7 +26,7 @@ func DataToJson(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
 	finalizeResults(report.Results, data.ResourcesResult)
 
-	report.Resources = finalizeResources(report.Results, data.AllResources)
+	report.Resources = finalizeResources(report.Results, data.AllResources, data.ResourceSource)
 
 	return &report
 }
@@ -62,13 +62,15 @@ func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 	return infoToPrintInfo
 }
 
-func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) []reporthandling.Resource {
+func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]string) []reporthandling.Resource {
 	resources := make([]reporthandling.Resource, 0)
 	for i := range results {
 		if obj, ok := allResources[results[i].ResourceID]; ok {
-			r := *reporthandling.NewResource(obj.GetObject())
-			r.ResourceID = results[i].ResourceID
-			resources = append(resources, r)
+			resource := *reporthandling.NewResourceIMetadata(obj)
+			if r, ok := resourcesSource[results[i].ResourceID]; ok {
+				resource.SetSource(&reporthandling.Source{Path: r})
+			}
+			resources = append(resources, resource)
 		}
 	}
 	return resources
