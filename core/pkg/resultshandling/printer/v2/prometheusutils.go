@@ -2,8 +2,10 @@ package v2
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -12,88 +14,183 @@ import (
 type metricsName string
 
 const (
-	metricsFrameworkScore   metricsName = "kubescape_risk_score_framework"
-	metricsControlScore     metricsName = "kubescape_risk_score_control"
-	metricsScore            metricsName = "kubescape_risk_score"
-	metricsresourceFailed   metricsName = "kubescape_resource_controls_number_of_failed"
-	metricsresourcePassed   metricsName = "kubescape_resource_controls_number_of_passed"
-	metricsresourceExcluded metricsName = "kubescape_resource_controls_number_of_exclude"
+	ksMetrics        metricsName = "kubescape"
+	metricsCluster   metricsName = "cluster"
+	metricsScore     metricsName = "riskScore"
+	metricsCount     metricsName = "count"
+	metricsFailed    metricsName = "failed"
+	metricsExcluded  metricsName = "exclude"
+	metricsPassed    metricsName = "passed"
+	metricsControl   metricsName = "control"
+	metricsControls  metricsName = "controls"
+	metricsResource  metricsName = "resource"
+	metricsResources metricsName = "resources"
+	metricsFramework metricsName = "framework"
 )
 
-func (mrs *mRiskScore) string() string {
-	r := fmt.Sprintf("resourcesCountFailed=\"%d\"", mrs.resourcesCountFailed) + ","
-	r += fmt.Sprintf("resourcesCountExcluded=\"%d\"", mrs.resourcesCountExcluded) + ","
-	r += fmt.Sprintf("resourcesCountPassed=\"%d\"", mrs.resourcesCountPassed) + ","
-	r += fmt.Sprintf("controlsCountFailed=\"%d\"", mrs.controlsCountFailed) + ","
-	r += fmt.Sprintf("controlsCountExcluded=\"%d\"", mrs.controlsCountExcluded) + ","
-	r += fmt.Sprintf("controlsCountPassed=\"%d\"", mrs.controlsCountPassed) + ","
-	r += fmt.Sprintf("controlsCountSkipped=\"%d\"", mrs.controlsCountSkipped)
-	return r
+// ============================================ CLUSTER ============================================================
+func (mrs *mRiskScore) metrics() []string {
+	/*
+		##### Overall risk score
+		kubescape_cluster_riskScore{} <risk score>
+
+		###### Overall resources counters
+		kubescape_cluster_count_resources_failed{} <counter>
+		kubescape_cluster_count_resources_excluded{} <counter>
+		kubescape_cluster_count_resources_passed{} <counter>
+
+		###### Overall controls counters
+		kubescape_cluster_count_controls_failed{} <counter>
+		kubescape_cluster_count_controls_excluded{} <counter>
+		kubescape_cluster_count_controls_passed{} <counter>
+	*/
+
+	m := []string{}
+	// overall
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mrs.prefix(), metricsScore), mrs.labels(), mrs.riskScore))
+
+	// resources
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsResources, metricsFailed), mrs.labels(), mrs.resourcesCountFailed))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsResources, metricsExcluded), mrs.labels(), mrs.resourcesCountExcluded))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsResources, metricsPassed), mrs.labels(), mrs.resourcesCountPassed))
+
+	// controls
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsControl, metricsFailed), mrs.labels(), mrs.controlsCountFailed))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsControl, metricsExcluded), mrs.labels(), mrs.controlsCountExcluded))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsControl, metricsPassed), mrs.labels(), mrs.controlsCountPassed))
+
+	return m
 }
-func (mrs *mRiskScore) value() int {
-	return mrs.riskScore
+func (mrs *mRiskScore) labels() string {
+	return ""
 }
 
-func (mcrs *mControlRiskScore) string() string {
-	r := fmt.Sprintf("controlName=\"%s\"", mcrs.controlName) + ","
-	r += fmt.Sprintf("controlID=\"%s\"", mcrs.controlID) + ","
+func (mrs *mRiskScore) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsCluster)
+}
+
+// ============================================ CONTROL ============================================================
+
+func (mcrs *mControlRiskScore) metrics() []string {
+	/*
+		# Risk score
+		kubescape_control_riskScore{name="<control name>",url="<docs url>",severity="<control severity>"} <risk score>
+
+		# Resources counters
+		kubescape_control_count_resources_failed{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
+		kubescape_control_count_resources_excluded{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
+		kubescape_control_count_resources_passed{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
+	*/
+
+	m := []string{}
+	// overall
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mcrs.prefix(), metricsScore), mcrs.labels(), mcrs.riskScore))
+
+	// resources
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mcrs.prefix(), metricsCount, metricsResources, metricsFailed), mcrs.labels(), mcrs.resourcesCountFailed))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mcrs.prefix(), metricsCount, metricsResources, metricsExcluded), mcrs.labels(), mcrs.resourcesCountExcluded))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mcrs.prefix(), metricsCount, metricsResources, metricsPassed), mcrs.labels(), mcrs.resourcesCountPassed))
+
+	return m
+}
+func (mcrs *mControlRiskScore) labels() string {
+	r := fmt.Sprintf("name=\"%s\"", mcrs.controlName) + ","
 	r += fmt.Sprintf("severity=\"%s\"", mcrs.severity) + ","
-	r += fmt.Sprintf("resourcesCountFailed=\"%d\"", mcrs.resourcesCountFailed) + ","
-	r += fmt.Sprintf("resourcesCountExcluded=\"%d\"", mcrs.resourcesCountExcluded) + ","
-	r += fmt.Sprintf("resourcesCountPassed=\"%d\"", mcrs.resourcesCountPassed) + ","
-	r += fmt.Sprintf("link=\"%s\"", mcrs.link) + ","
-	r += fmt.Sprintf("remediation=\"%s\"", mcrs.remediation)
+	r += fmt.Sprintf("link=\"%s\"", mcrs.link)
 	return r
 }
-func (mcrs *mControlRiskScore) value() int {
-	return mcrs.riskScore
+func (mcrs *mControlRiskScore) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsControl)
 }
 
-func (mfrs *mFrameworkRiskScore) string() string {
-	r := fmt.Sprintf("frameworkName=\"%s\"", mfrs.frameworkName) + ","
-	r += fmt.Sprintf("resourcesCountFailed=\"%d\"", mfrs.resourcesCountFailed) + ","
-	r += fmt.Sprintf("resourcesCountExcluded=\"%d\"", mfrs.resourcesCountExcluded) + ","
-	r += fmt.Sprintf("resourcesCountPassed=\"%d\"", mfrs.resourcesCountPassed) + ","
-	r += fmt.Sprintf("controlsCountFailed=\"%d\"", mfrs.controlsCountFailed) + ","
-	r += fmt.Sprintf("controlsCountExcluded=\"%d\"", mfrs.controlsCountExcluded) + ","
-	r += fmt.Sprintf("controlsCountPassed=\"%d\"", mfrs.controlsCountPassed) + ","
-	r += fmt.Sprintf("controlsCountSkipped=\"%d\"", mfrs.controlsCountSkipped)
+// ============================================ FRAMEWORK ============================================================
+
+func (mfrs *mFrameworkRiskScore) metrics() []string {
+	/*
+		#### Frameworks metrics
+		kubescape_framework_riskScore{name="<framework name>"} <risk score>
+
+		###### Frameworks resources counters
+		kubescape_framework_count_resources_failed{} <counter>
+		kubescape_framework_count_resources_excluded{} <counter>
+		kubescape_framework_count_resources_passed{} <counter>
+
+		###### Frameworks controls counters
+		kubescape_framework_count_controls_failed{name="<framework name>"} <counter>
+		kubescape_framework_count_controls_excluded{name="<framework name>"} <counter>
+		kubescape_framework_count_controls_passed{name="<framework name>"} <counter>
+
+	*/
+
+	m := []string{}
+	// overall
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mfrs.prefix(), metricsScore), mfrs.labels(), mfrs.riskScore))
+
+	// resources
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsResources, metricsFailed), mfrs.labels(), mfrs.resourcesCountFailed))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsResources, metricsExcluded), mfrs.labels(), mfrs.resourcesCountExcluded))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsResources, metricsPassed), mfrs.labels(), mfrs.resourcesCountPassed))
+
+	// controls
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsControl, metricsFailed), mfrs.labels(), mfrs.controlsCountFailed))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsControl, metricsExcluded), mfrs.labels(), mfrs.controlsCountExcluded))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsControl, metricsPassed), mfrs.labels(), mfrs.controlsCountPassed))
+
+	return m
+}
+func (mfrs *mFrameworkRiskScore) labels() string {
+	r := fmt.Sprintf("name=\"%s\"", mfrs.frameworkName)
 	return r
 }
-func (mfrs *mFrameworkRiskScore) value() int {
-	return mfrs.riskScore
+func (mfrs *mFrameworkRiskScore) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsFramework)
 }
-func (mrc *mResourceControls) string() string {
+
+// ============================================ RESOURCES ============================================================
+
+func (mrc *mResources) metrics() []string {
+	/*
+		#### Resources metrics
+		kubescape_resource_count_controls_failed{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
+		kubescape_resource_count_controls_excluded{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
+	*/
+
+	m := []string{}
+
+	// controls
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsFailed), mrc.labels(), mrc.controlsCountFailed))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrc.prefix(), metricsCount, metricsControls, metricsExcluded), mrc.labels(), mrc.controlsCountExcluded))
+	return m
+}
+
+func (mrc *mResources) labels() string {
 	r := fmt.Sprintf("apiVersion=\"%s\"", mrc.apiVersion) + ","
 	r += fmt.Sprintf("kind=\"%s\"", mrc.kind) + ","
 	r += fmt.Sprintf("namespace=\"%s\"", mrc.namespace) + ","
 	r += fmt.Sprintf("name=\"%s\"", mrc.name)
 	return r
 }
-func (mrc *mResourceControls) value() int {
-	return mrc.controls
+func (mrc *mResources) prefix() string {
+	return fmt.Sprintf("%s_%s", ksMetrics, metricsResource)
 }
-func toRowInMetrics(name metricsName, row string, value int) string {
-	return fmt.Sprintf("%s{%s} %d\n", name, row, value)
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+func toRowInMetrics(name string, row string, value int) string {
+	return fmt.Sprintf("%s{%s} %d", name, row, value)
 
 }
 func (m *Metrics) String() string {
 
-	r := toRowInMetrics(metricsScore, m.rs.string(), m.rs.value())
+	r := strings.Join(m.rs.metrics(), "\n") + "\n"
 	for i := range m.listFrameworks {
-		r += toRowInMetrics(metricsFrameworkScore, m.listFrameworks[i].string(), m.listFrameworks[i].value())
+		r += strings.Join(m.listFrameworks[i].metrics(), "\n") + "\n"
 	}
 	for i := range m.listControls {
-		r += toRowInMetrics(metricsControlScore, m.listControls[i].string(), m.listControls[i].value())
+		r += strings.Join(m.listControls[i].metrics(), "\n") + "\n"
 	}
-	for i := range m.listResourcesControlsFiled {
-		r += toRowInMetrics(metricsresourceFailed, m.listResourcesControlsFiled[i].string(), m.listResourcesControlsFiled[i].value())
-	}
-	for i := range m.listResourcesControlsExcluded {
-		r += toRowInMetrics(metricsresourceExcluded, m.listResourcesControlsExcluded[i].string(), m.listResourcesControlsExcluded[i].value())
-	}
-	for i := range m.listResourcesControlsPassed {
-		r += toRowInMetrics(metricsresourcePassed, m.listResourcesControlsPassed[i].string(), m.listResourcesControlsPassed[i].value())
+	for i := range m.listResources {
+		r += strings.Join(m.listResources[i].metrics(), "\n") + "\n"
 	}
 	return r
 }
@@ -106,7 +203,7 @@ type mRiskScore struct {
 	controlsCountFailed    int
 	controlsCountExcluded  int
 	controlsCountSkipped   int
-	riskScore              int // metric
+	riskScore              int
 }
 
 type mControlRiskScore struct {
@@ -118,7 +215,7 @@ type mControlRiskScore struct {
 	resourcesCountPassed   int
 	resourcesCountFailed   int
 	resourcesCountExcluded int
-	riskScore              int // metric
+	riskScore              int
 }
 
 type mFrameworkRiskScore struct {
@@ -130,23 +227,23 @@ type mFrameworkRiskScore struct {
 	controlsCountFailed    int
 	controlsCountExcluded  int
 	controlsCountSkipped   int
-	riskScore              int // metric
+	riskScore              int
 }
 
-type mResourceControls struct {
-	name       string
-	namespace  string
-	apiVersion string
-	kind       string
-	controls   int // metric
+type mResources struct {
+	name                  string
+	namespace             string
+	apiVersion            string
+	kind                  string
+	controlsCountPassed   int
+	controlsCountFailed   int
+	controlsCountExcluded int
 }
 type Metrics struct {
-	rs                            mRiskScore
-	listFrameworks                []mFrameworkRiskScore
-	listControls                  []mControlRiskScore
-	listResourcesControlsFiled    []mResourceControls
-	listResourcesControlsPassed   []mResourceControls
-	listResourcesControlsExcluded []mResourceControls
+	rs             mRiskScore
+	listFrameworks []mFrameworkRiskScore
+	listControls   []mControlRiskScore
+	listResources  []mResources
 }
 
 func (mrs *mRiskScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
@@ -176,12 +273,12 @@ func (mcrs *mControlRiskScore) set(resources reportsummary.ICounters) {
 }
 func (m *Metrics) setRiskScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
-	m.rs.riskScore = int(summaryDetails.GetScore())
+	m.rs.riskScore = cautils.Float32ToInt(summaryDetails.GetScore())
 
 	for _, fw := range summaryDetails.ListFrameworks() {
 		mfrs := mFrameworkRiskScore{
 			frameworkName: fw.GetName(),
-			riskScore:     int(fw.GetScore()),
+			riskScore:     cautils.Float32ToInt(fw.GetScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
 		m.listFrameworks = append(m.listFrameworks, mfrs)
@@ -191,7 +288,7 @@ func (m *Metrics) setRiskScores(summaryDetails *reportsummary.SummaryDetails) {
 		mcrs := mControlRiskScore{
 			controlName: control.GetName(),
 			controlID:   control.GetID(),
-			riskScore:   int(control.GetScore()),
+			riskScore:   cautils.Float32ToInt(control.GetScore()),
 			link:        getControlLink(control.GetID()),
 			severity:    apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation: control.GetRemediation(),
@@ -229,24 +326,18 @@ func (m *Metrics) setResourcesCounters(
 		}
 		passed, excluded, failed := resourceControlStatusCounters(&result)
 
-		mrc := mResourceControls{}
+		mrc := mResources{}
 		mrc.apiVersion = r.GetApiVersion()
 		mrc.namespace = r.GetNamespace()
 		mrc.kind = r.GetKind()
 		mrc.name = r.GetName()
 
 		// append
-		if passed > 0 {
-			mrc.controls = passed
-			m.listResourcesControlsPassed = append(m.listResourcesControlsPassed, mrc)
-		}
-		if failed > 0 {
-			mrc.controls = failed
-			m.listResourcesControlsFiled = append(m.listResourcesControlsFiled, mrc)
-		}
-		if excluded > 0 {
-			mrc.controls = excluded
-			m.listResourcesControlsExcluded = append(m.listResourcesControlsExcluded, mrc)
-		}
+		mrc.controlsCountPassed = passed
+		mrc.controlsCountFailed = failed
+		mrc.controlsCountExcluded = excluded
+
+		m.listResources = append(m.listResources, mrc)
 	}
+
 }

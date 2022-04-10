@@ -14,6 +14,7 @@ import (
 	"github.com/armosec/kubescape/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	"github.com/google/uuid"
 )
 
 const (
@@ -100,6 +101,10 @@ func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
 	scanInfo.setOutputFile()
 	scanInfo.setUseArtifactsFrom()
+	if scanInfo.ScanID == "" {
+		scanInfo.ScanID = uuid.NewString()
+	}
+
 }
 
 func (scanInfo *ScanInfo) setUseArtifactsFrom() {
@@ -193,8 +198,8 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ClusterMetadata.ContextName = k8sinterface.GetClusterName()
 	metadata.ScanMetadata.Format = scanInfo.Format
+	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit
 
 	// TODO - Add excluded and included namespaces
@@ -222,8 +227,61 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 
 	metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 	if scanInfo.GetScanningEnvironment() == ScanLocalFiles {
-		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Files
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
 	}
 
+	inputFiles := ""
+	if len(scanInfo.InputPatterns) > 0 {
+		inputFiles = scanInfo.InputPatterns[0]
+	}
+	setContextMetadata(&metadata.ContextMetadata, inputFiles)
+
 	return metadata
+}
+
+func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
+	// if cluster
+	if input == "" {
+		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
+			ContextName: k8sinterface.GetClusterName(),
+		}
+		return
+	}
+
+	// if url
+	if strings.HasPrefix(input, "http") { // TODO - check if can parse
+		return
+	}
+
+	if !filepath.IsAbs(input) {
+		if o, err := os.Getwd(); err == nil {
+			input = filepath.Join(o, input)
+		}
+	}
+
+	// if single file
+	if IsFile(input) {
+		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
+			FilePath: input,
+			HostName: getHostname(),
+		}
+		return
+	}
+
+	// if dir/glob
+	if !IsFile(input) {
+		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
+			BasePath: input,
+			HostName: getHostname(),
+		}
+		return
+	}
+
+}
+
+func getHostname() string {
+	if h, e := os.Hostname(); e == nil {
+		return h
+	}
+	return ""
 }

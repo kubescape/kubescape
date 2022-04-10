@@ -38,7 +38,7 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan --submit --enable-host-scan
+kubescape scan --submit --enable-host-scan --format-version v2 --verbose
 ```
 
 <img src="docs/summary.png">
@@ -115,7 +115,7 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 #### Scan a running Kubernetes cluster and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
-kubescape scan --submit --enable-host-scan
+kubescape scan --submit --enable-host-scan  --verbose
 ```
 
 > Read [here](https://hub.armo.cloud/docs/host-sensor) more about the `enable-host-scan` flag

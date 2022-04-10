@@ -17,7 +17,7 @@ import (
 const (
 	scanPath              = "/v1/scan"
 	resultsPath           = "/v1/results"
-	prometheusMmeticsPath = "/metrics"
+	prometheusMmeticsPath = "/v1/metrics"
 	livePath              = "/livez"
 	readyPath             = "/readyz"
 )

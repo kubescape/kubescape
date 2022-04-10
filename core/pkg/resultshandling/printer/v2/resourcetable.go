@@ -5,58 +5,82 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
 )
 
-func (prettyPrinter *PrettyPrinter) resourceTable(results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata) {
+const (
+	resourceColumnSeverity = iota
+	resourceColumnName     = iota
+	resourceColumnURL      = iota
+	resourceColumnPath     = iota
+	_resourceRowLen        = iota
+)
 
-	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
-	summaryTable.SetAutoWrapText(true)
-	summaryTable.SetAutoMergeCells(true)
-	summaryTable.SetHeader(generateResourceHeader())
-	summaryTable.SetHeaderLine(true)
-	summaryTable.SetRowLine(true)
-	// summaryTable.SetFooter([]string{"", "", "Total", "", "$146.93"})
-	// For control scan framework will be nil
-	data := Matrix{}
-	for i := range results {
-		resource, ok := allResources[i]
+func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASessionObj) {
+
+	for resourceID, result := range opaSessionObj.ResourcesResult {
+		if !result.GetStatus(nil).IsFailed() {
+			continue
+		}
+		resource, ok := opaSessionObj.AllResources[resourceID]
 		if !ok {
 			continue
 		}
-		s := results[i]
-		if raw := generateResourceRows(resource, s.ListControls(), prettyPrinter.verboseMode); len(raw) > 0 {
+		fmt.Fprintf(prettyPrinter.writer, "\n"+getSperator("#")+"\n\n")
+
+		if source, ok := opaSessionObj.ResourceSource[resourceID]; ok {
+			fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", source)
+		}
+		fmt.Fprintf(prettyPrinter.writer, "ApiVersion: %s\n", resource.GetApiVersion())
+		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", resource.GetKind())
+		fmt.Fprintf(prettyPrinter.writer, "Name: %s\n", resource.GetName())
+		if resource.GetNamespace() != "" {
+			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", resource.GetNamespace())
+		}
+		fmt.Fprintf(prettyPrinter.writer, "\n"+controlCountersForResource(result.ListControlsIDs(nil))+"\n\n")
+
+		summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
+		summaryTable.SetAutoWrapText(true)
+		summaryTable.SetAutoMergeCells(true)
+		summaryTable.SetHeader(generateResourceHeader())
+		summaryTable.SetHeaderLine(true)
+		summaryTable.SetRowLine(true)
+		data := Matrix{}
+
+		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails); len(raw) > 0 {
 			data = append(data, raw...)
 		}
-	}
-	sort.Sort(data)
-	summaryTable.AppendBulk(data)
+		// For control scan framework will be nil
 
-	summaryTable.Render()
+		sort.Sort(data)
+		summaryTable.AppendBulk(data)
+
+		summaryTable.Render()
+	}
+
 }
 
-func generateResourceRows(resource workloadinterface.IMetadata, controls []resourcesresults.ResourceAssociatedControl, verboseMode bool) [][]string {
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails) [][]string {
 	rows := [][]string{}
 
 	for i := range controls {
+		row := make([]string, _resourceRowLen)
 
-		if controls[i].GetName() == "" {
-			continue
-		}
-		row := []string{}
-
-		if !verboseMode && controls[i].GetStatus(nil).IsPassed() {
+		if !controls[i].GetStatus(nil).IsFailed() {
 			continue
 		}
 
-		row = append(row, fmt.Sprintf("%s\nhttps://hub.armo.cloud/docs/%s", controls[i].GetName(), strings.ToLower(controls[i].GetID())))
-		row = append(row, resource.GetNamespace())
-		paths := failedPathsToString(&controls[i])
+		row[resourceColumnURL] = fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controls[i].GetID()))
+		row[resourceColumnPath] = strings.Join(failedPathsToString(&controls[i]), "\n")
+		row[resourceColumnName] = controls[i].GetName()
 
-		row = append(row, fmt.Sprintf("%s/%s\n%s", resource.GetKind(), resource.GetName(), strings.Join(paths, ";\n")))
-		row = append(row, string(controls[i].GetStatus(nil).Status()))
+		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, controls[i].GetName()); c != nil {
+			row[resourceColumnSeverity] = getSeverityColumn(c)
+		}
+
 		rows = append(rows, row)
 	}
 
@@ -64,7 +88,12 @@ func generateResourceRows(resource workloadinterface.IMetadata, controls []resou
 }
 
 func generateResourceHeader() []string {
-	return []string{"Control", "Namespace", "Kind/Name", "Statues"}
+	headers := make([]string, _resourceRowLen)
+	headers[resourceColumnSeverity] = "Severity"
+	headers[resourceColumnName] = "Control Name"
+	headers[resourceColumnURL] = "Docs"
+	headers[resourceColumnPath] = "Assistant Remediation"
+	return headers
 }
 
 type Matrix [][]string

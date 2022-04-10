@@ -4,64 +4,111 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/armosec/kubescape/core/cautils"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/fatih/color"
+	"github.com/olekukonko/tablewriter"
 )
 
-func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfoMap map[string]string) []string {
-	row := []string{controlSummary.GetName()}
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()))
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded()))
-	row = append(row, fmt.Sprintf("%d", controlSummary.NumberOfResources().All()))
+const (
+	columnSeverity       = iota
+	columnName           = iota
+	columnCounterFailed  = iota
+	columnCounterExclude = iota
+	columnCounterAll     = iota
+	columnRiskScore      = iota
+	_rowLen              = iota
+)
 
-	if controlSummary.GetStatus().IsPassed() {
-		row = append(row, color.CyanString("Passed"))
-	} else if controlSummary.GetStatus().IsSkipped() {
-		row = append(row, "skipped")
-	} else {
-		row = append(row, setColor(apis.ControlSeverityToString(controlSummary.GetScoreFactor())))
+func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
+	row := make([]string, _rowLen)
+
+	// ignore passed results
+	if !verbose && (controlSummary.GetStatus().IsPassed()) {
+		return []string{}
 	}
 
-	if !controlSummary.GetStatus().IsSkipped() {
-		row = append(row, fmt.Sprintf("%d", int(controlSummary.GetScore()))+"%")
-		row = append(row, "")
-	} else {
-		row = append(row, string(controlSummary.GetStatus().Status()))
-		if controlSummary.GetStatus().IsSkipped() {
-			row = append(row, infoToPrintInfoMap[controlSummary.GetStatus().Info()])
-		} else {
-			row = append(row, "")
-		}
+	// ignore irelevant results
+	if !verbose && (controlSummary.GetStatus().IsSkipped() && controlSummary.GetStatus().Status() == apis.StatusIrrelevant) {
+		return []string{}
 	}
+
+	row[columnSeverity] = getSeverityColumn(controlSummary)
+	row[columnName] = controlSummary.GetName()
+	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
+	row[columnCounterExclude] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded())
+	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
+	row[columnRiskScore] = getRiskScoreColumn(controlSummary, infoToPrintInfo)
+
 	return row
 }
 
-func setColor(controlSeverity string) string {
+func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
+	for i := range infoToPrintInfo {
+		if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
+			return infoToPrintInfo[i].stars
+		}
+	}
+	return ""
+}
+
+func getRiskScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
+	if controlSummary.GetStatus().IsSkipped() {
+		return fmt.Sprintf("%s%s", controlSummary.GetStatus().Status(), getInfoColumn(controlSummary, infoToPrintInfo))
+	}
+	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetScore())) + "%"
+}
+
+func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
+	return color.New(getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
+}
+func getColor(controlSeverity int) color.Attribute {
 	switch controlSeverity {
-	case "Critical":
-		return color.New(color.FgRed, color.Bold).Add(color.Underline).SprintFunc()(controlSeverity)
-	case "High":
-		return color.New(color.FgRed, color.Bold).SprintFunc()(controlSeverity)
-	case "Medium":
-		return color.New(color.FgYellow, color.Bold).SprintFunc()(controlSeverity)
-	case "Low":
-		return color.New(color.FgGreen, color.Bold).SprintFunc()(controlSeverity)
+	case apis.SeverityCritical:
+		return color.FgRed
+	case apis.SeverityHigh:
+		return color.FgYellow
+	case apis.SeverityMedium:
+		return color.FgCyan
+	case apis.SeverityLow:
+		return color.FgWhite
 	default:
-		return color.New(color.FgBlue, color.Bold).SprintFunc()(controlSeverity)
+		return color.FgWhite
 	}
 }
 
-func getSortedControlsNames(controls reportsummary.ControlSummaries) []string {
-	controlNames := make([]string, 0, len(controls))
+func getSortedControlsNames(controls reportsummary.ControlSummaries) [][]string {
+	controlNames := make([][]string, 5)
 	for k := range controls {
 		c := controls[k]
-		controlNames = append(controlNames, c.GetName())
+		i := apis.ControlSeverityToInt(c.GetScoreFactor())
+		controlNames[i] = append(controlNames[i], c.GetName())
 	}
-	sort.Strings(controlNames)
+	for i := range controlNames {
+		sort.Strings(controlNames[i])
+	}
 	return controlNames
 }
 
 func getControlTableHeaders() []string {
-	return []string{"CONTROL NAME", "FAILED RESOURCES", "EXCLUDED RESOURCES", "ALL RESOURCES", "SEVERITY", "% RISK-SCORE", "INFO"}
+	headers := make([]string, _rowLen)
+	headers[columnName] = "CONTROL NAME"
+	headers[columnCounterFailed] = "FAILED RESOURCES"
+	headers[columnCounterExclude] = "EXCLUDED RESOURCES"
+	headers[columnCounterAll] = "ALL RESOURCES"
+	headers[columnSeverity] = "SEVERITY"
+	headers[columnRiskScore] = "% RISK-SCORE"
+	return headers
+}
+
+func getColumnsAlignments() []int {
+	alignments := make([]int, _rowLen)
+	alignments[columnName] = tablewriter.ALIGN_LEFT
+	alignments[columnCounterFailed] = tablewriter.ALIGN_CENTER
+	alignments[columnCounterExclude] = tablewriter.ALIGN_CENTER
+	alignments[columnCounterAll] = tablewriter.ALIGN_CENTER
+	alignments[columnSeverity] = tablewriter.ALIGN_LEFT
+	alignments[columnRiskScore] = tablewriter.ALIGN_CENTER
+	return alignments
 }
