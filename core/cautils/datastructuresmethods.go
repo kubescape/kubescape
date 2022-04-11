@@ -51,18 +51,16 @@ func ruleWithArmoOpaDependency(attributes map[string]interface{}) bool {
 func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version string) bool {
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		if version != "" {
-
-			if semver.Compare(from.(string), BuildNumber) > 0 {
+			if semver.Compare(version, from.(string)) == -1 {
 				return false
 			}
 		}
 	}
 	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
-		if version != "" {
-			if semver.Compare(BuildNumber, until.(string)) >= 0 {
-				return false
-			}
-		} else {
+		if version == "" {
+			return false
+		}
+		if semver.Compare(version, until.(string)) >= 0 {
 			return false
 		}
 	}
