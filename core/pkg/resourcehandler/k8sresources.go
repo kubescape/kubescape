@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 

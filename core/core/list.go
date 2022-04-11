@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils/getter"
-	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	metav1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 )
 
 var listFunc = map[string]func(*metav1.ListPolicies) ([]string, error){

@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"

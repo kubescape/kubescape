@@ -4,8 +4,8 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/mocks"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/mocks"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/resources"

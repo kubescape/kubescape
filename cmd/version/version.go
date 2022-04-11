@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/spf13/cobra"
 )
 

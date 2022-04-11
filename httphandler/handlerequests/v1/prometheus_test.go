@@ -3,7 +3,7 @@ package v1
 import (
 	"testing"
 
-	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 )
 
