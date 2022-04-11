@@ -101,7 +101,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 	}
 
 	if latestVersion.ClientUpdate != "" {
-		if BuildNumber != "" && semver.Compare(BuildNumber, latestVersion.ClientUpdate) >= 0 {
+		if BuildNumber != "" && semver.Compare(BuildNumber, latestVersion.ClientUpdate) == -1 {
 			logger.L().Warning(warningMessage(latestVersion.ClientUpdate))
 		}
 	}
