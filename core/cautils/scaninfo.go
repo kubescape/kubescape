@@ -243,7 +243,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 	// if cluster
 	if input == "" {
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
-			ContextName: k8sinterface.GetClusterName(),
+			ContextName: k8sinterface.GetContextName(),
 		}
 		return
 	}

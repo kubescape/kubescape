@@ -67,7 +67,7 @@ type ITenantConfig interface {
 	DeleteCachedConfig() error
 
 	// getters
-	GetClusterName() string
+	GetContextName() string
 	GetAccountID() string
 	GetTennatEmail() string
 	GetConfigObj() *ConfigObj
@@ -121,7 +121,7 @@ func NewLocalConfig(
 func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
 func (lc *LocalConfig) GetTennatEmail() string   { return lc.configObj.CustomerAdminEMail }
 func (lc *LocalConfig) GetAccountID() string     { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetClusterName() string   { return lc.configObj.ClusterName }
+func (lc *LocalConfig) GetContextName() string   { return lc.configObj.ClusterName }
 func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
@@ -219,7 +219,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	getAccountFromEnv(c.configObj)
 
 	if c.configObj.ClusterName == "" {
-		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetClusterName())
+		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetContextName())
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
@@ -271,7 +271,7 @@ func (c *ClusterConfig) DeleteCachedConfig() error {
 	}
 	return nil
 }
-func (c *ClusterConfig) GetClusterName() string {
+func (c *ClusterConfig) GetContextName() string {
 	return c.configObj.ClusterName
 }
 

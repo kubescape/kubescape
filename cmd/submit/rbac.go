@@ -33,7 +33,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			}
 
 			// list RBAC
-			rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetAccountID(), clusterConfig.GetClusterName()))
+			rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetAccountID(), clusterConfig.GetContextName()))
 
 			// submit resources
 			r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())
