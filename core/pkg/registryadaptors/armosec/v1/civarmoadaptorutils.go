@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/armosec/kubescape/core/pkg/containerscan"
-	"github.com/armosec/kubescape/core/pkg/registryadaptors/registryvulnerabilities"
+	"github.com/armosec/kubescape/v2/core/pkg/containerscan"
+	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 )
 
 func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulnerabilities.ContainerImageIdentifier) (string, error) {

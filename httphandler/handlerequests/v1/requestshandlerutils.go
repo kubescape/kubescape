@@ -7,9 +7,9 @@ import (
 
 	pkgcautils "github.com/armosec/utils-go/utils"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/core"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/core"
 )
 
 func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {

@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils/getter"
-	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	metav1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 )
 
 var listFunc = map[string]func(*metav1.ListPolicies) ([]string, error){
@@ -45,7 +45,7 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 
 func listFrameworks(listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
-	g := getPolicyGetter(nil, tenant.GetAccountID(), true, nil)
+	g := getPolicyGetter(nil, tenant.GetTennatEmail(), true, nil)
 
 	return listFrameworksNames(g), nil
 }
@@ -53,7 +53,7 @@ func listFrameworks(listPolicies *metav1.ListPolicies) ([]string, error) {
 func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
 
-	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
+	g := getPolicyGetter(nil, tenant.GetTennatEmail(), false, nil)
 	l := getter.ListName
 	if listPolicies.ListIDs {
 		l = getter.ListID

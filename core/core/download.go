@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	metav1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	metav1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 )
 
 var downloadFunc = map[string]func(*metav1.DownloadInfo) error{
@@ -130,7 +130,7 @@ func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
-	g := getPolicyGetter(nil, tenant.GetAccountID(), true, nil)
+	g := getPolicyGetter(nil, tenant.GetTennatEmail(), true, nil)
 
 	if downloadInfo.Name == "" {
 		// if framework name not specified - download all frameworks
@@ -172,7 +172,7 @@ func downloadControl(downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
-	g := getPolicyGetter(nil, tenant.GetAccountID(), false, nil)
+	g := getPolicyGetter(nil, tenant.GetTennatEmail(), false, nil)
 
 	if downloadInfo.Name == "" {
 		// TODO - support

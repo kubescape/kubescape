@@ -3,8 +3,8 @@ package resourcehandler
 import (
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/reporthandling"
 	"k8s.io/utils/strings/slices"
 

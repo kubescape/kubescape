@@ -3,12 +3,12 @@ package resourcehandler
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	armosecadaptorv1 "github.com/armosec/kubescape/core/pkg/registryadaptors/armosec/v1"
-	"github.com/armosec/kubescape/core/pkg/registryadaptors/registryvulnerabilities"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	armosecadaptorv1 "github.com/armosec/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
+	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 
 	"github.com/armosec/opa-utils/shared"
 )

@@ -2,17 +2,16 @@ package core
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
-	"github.com/armosec/kubescape/core/pkg/resourcehandler"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/reporter"
-	reporterv2 "github.com/armosec/kubescape/core/pkg/resultshandling/reporter/v2"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
+	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
+	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
@@ -48,11 +47,11 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan, clusterScan bool) reporter.IReport {
-	if submit && clusterScan {
+func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool) reporter.IReport {
+	if submit {
 		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID)
 	}
-	if tenantConfig.GetAccountID() == "" && fwScan && clusterScan {
+	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework
 		return reporterv2.NewReportMock(reporterv2.NO_SUBMIT_QUERY, "run kubescape with the '--submit' flag")
 	}
@@ -60,9 +59,7 @@ func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fw
 	if !fwScan {
 		message = "Kubescape does not submit scan results when scanning controls"
 	}
-	if !clusterScan {
-		message = "Kubescape will submit scan results only when scanning a cluster (not YAML files)"
-	}
+
 	return reporterv2.NewReportMock("", message)
 }
 
@@ -153,11 +150,11 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 }
 
 // setPolicyGetter set the policy getter - local file/github release/ArmoAPI
-func getPolicyGetter(loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
-	if accountID != "" && frameworkScope {
+	if tennatEmail != "" && frameworkScope {
 		g := getter.GetArmoAPIConnector() // download policy from ARMO backend
 		return g
 	}
@@ -195,7 +192,7 @@ func getConfigInputsGetter(ControlsInputs string, accountID string, downloadRele
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to get config inputs from github release, this may affect the scanning results\n")
+		logger.L().Warning("failed to get config inputs from github release, this may affect the scanning results", helpers.Error(err))
 	}
 	return downloadReleasedPolicy
 }

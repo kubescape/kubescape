@@ -11,6 +11,6 @@ spec:
       app: kubescape
   podMetricsEndpoints:
   - port: http
-    # path: v1
+    path: /v1/metrics
     interval: 120s
     scrapeTimeout: 100s

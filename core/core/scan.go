@@ -5,19 +5,18 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/google/uuid"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
-	"github.com/armosec/kubescape/core/pkg/opaprocessor"
-	"github.com/armosec/kubescape/core/pkg/policyhandler"
-	"github.com/armosec/kubescape/core/pkg/resourcehandler"
-	"github.com/armosec/kubescape/core/pkg/resultshandling"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/reporter"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
+	"github.com/armosec/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/armosec/kubescape/v2/core/pkg/policyhandler"
+	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/resources"
@@ -32,9 +31,6 @@ type componentInterfaces struct {
 }
 
 func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
-	if scanInfo.ScanID == "" {
-		scanInfo.ScanID = uuid.NewString()
-	}
 
 	// ================== setup k8s interface object ======================================
 	var k8s *k8sinterface.KubernetesApi
@@ -51,6 +47,11 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
+
+	// Do not submit yaml scanning
+	if len(scanInfo.InputPatterns) > 0 {
+		scanInfo.Submit = false
+	}
 
 	if scanInfo.Submit {
 		// submit - Create tenant & Submit report
@@ -90,7 +91,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, len(scanInfo.InputPatterns) == 0)
+	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan)
 
 	// setup printer
 	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.FormatVersion, scanInfo.VerboseMode)
@@ -123,7 +124,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetTennatEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
 	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
 

@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	"sigs.k8s.io/yaml"

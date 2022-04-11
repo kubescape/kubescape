@@ -24,7 +24,7 @@ RUN python build.py
 RUN ls -ltr build/ubuntu-latest
 
 # build kubescape cmd
-WORKDIR /work/cmd
+WORKDIR /work
 RUN python build.py
 
 RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts

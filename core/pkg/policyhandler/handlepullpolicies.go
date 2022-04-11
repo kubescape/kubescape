@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -54,6 +56,11 @@ func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
+
+				cache := getter.GetDefaultPath(rule.Name + ".json")
+				if err := getter.SaveInFile(receivedFramework, cache); err != nil {
+					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
+				}
 			}
 		}
 	case reporthandling.KindControl: // Download controls
@@ -67,6 +74,11 @@ func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling
 			}
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
+
+				cache := getter.GetDefaultPath(rule.Name + ".json")
+				if err := getter.SaveInFile(receivedControl, cache); err != nil {
+					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
+				}
 			}
 		}
 		frameworks = append(frameworks, f)

@@ -3,13 +3,13 @@ package resultshandling
 import (
 	"encoding/json"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
-	printerv1 "github.com/armosec/kubescape/core/pkg/resultshandling/printer/v1"
-	printerv2 "github.com/armosec/kubescape/core/pkg/resultshandling/printer/v2"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/reporter"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
+	printerv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v1"
+	printerv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v2"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 )
 
 type ResultsHandler struct {

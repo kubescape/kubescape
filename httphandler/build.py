@@ -4,7 +4,7 @@ import hashlib
 import platform
 import subprocess
 
-BASE_GETTER_CONST = "github.com/armosec/kubescape/core/cautils/getter"
+BASE_GETTER_CONST = "github.com/armosec/kubescape/v2/core/cautils/getter"
 BE_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoBEURL"
 ER_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoERURL"
 WEBSITE_CONST     = BASE_GETTER_CONST + ".ArmoFEURL"
@@ -40,7 +40,7 @@ def main():
 
     # Set some variables
     packageName = getPackageName()
-    buildUrl = "github.com/armosec/kubescape/core/cautils.BuildNumber"
+    buildUrl = "github.com/armosec/kubescape/v2/core/cautils.BuildNumber"
     releaseVersion = os.getenv("RELEASE")
     ArmoBEServer = os.getenv("ArmoBEServer")
     ArmoERServer = os.getenv("ArmoERServer")

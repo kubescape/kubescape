@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	giturls "github.com/whilp/git-urls"
 	"k8s.io/utils/strings/slices"
 )
