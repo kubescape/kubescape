@@ -3,8 +3,8 @@ package v1
 import (
 	"encoding/json"
 
-	"github.com/armosec/kubescape/core/pkg/containerscan"
-	"github.com/armosec/kubescape/core/pkg/registryadaptors/registryvulnerabilities"
+	"github.com/armosec/kubescape/v2/core/pkg/containerscan"
+	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 )
 
 type ArmoCivAdaptorMock struct {

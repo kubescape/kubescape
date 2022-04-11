@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 
@@ -75,7 +75,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	if err != nil {
 		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
 	} else {
-		sessionObj.Metadata.ClusterMetadata.NumberOfWorkerNodes = numberOfWorkerNodes
+		if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
+			sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = numberOfWorkerNodes
+		}
 	}
 
 	imgVulnResources := cautils.MapImageVulnResources(armoResourceMap)
@@ -118,7 +120,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
 		}
 		if provider != "" {
-			sessionObj.Metadata.ClusterMetadata.CloudProvider = provider
+			if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
+				sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
+			}
 		}
 	}
 
@@ -261,34 +265,19 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (string, error) {
 	logger.L().Debug("Collecting cloud data")
-	cloudProvider := initCloudProvider()
-	cluster := cloudProvider.getKubeCluster()
-	clusterName := cloudProvider.getKubeClusterName()
-	provider := getCloudProvider()
-	region, err := cloudProvider.getRegion(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
-	project, err := cloudProvider.getProject(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
+
+	clusterName := cautils.ClusterName
+
+	provider := cloudsupport.GetCloudProvider(clusterName)
 
 	if provider != "" {
-		logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
+		logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
-		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
+		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider)
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info
-			switch provider {
-			case "gke":
-				return provider, fmt.Errorf("could not get descriptive information about gke cluster: %s using sdk client. See https://developers.google.com/accounts/docs/application-default-credentials for more information", cluster)
-			case "eks":
-				return provider, fmt.Errorf("could not get descriptive information about eks cluster: %s using sdk client. Check out how to configure credentials in https://docs.aws.amazon.com/sdk-for-go/api/", cluster)
-			case "aks":
-				return provider, fmt.Errorf("could not get descriptive information about aks cluster: %s. %v", cluster, err.Error())
-			}
-			return provider, err
+			logger.L().Debug("failed to get descriptive information", helpers.Error(err))
+			return provider, fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armo.cloud/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
 		}
 		allResources[wl.GetID()] = wl
 		(*armoResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}

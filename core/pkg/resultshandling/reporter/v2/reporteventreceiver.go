@@ -8,10 +8,10 @@ import (
 	"os"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -48,8 +48,7 @@ func (report *ReportEventReceiver) Submit(opaSessionObj *cautils.OPASessionObj) 
 		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
 		return nil
 	}
-	// if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
-	if report.clusterName == "" {
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
 		logger.L().Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
@@ -58,7 +57,7 @@ func (report *ReportEventReceiver) Submit(opaSessionObj *cautils.OPASessionObj) 
 	if err == nil {
 		report.generateMessage()
 	} else {
-		logger.L().Debug(err.Error()) // print original error only in debug mode
+
 		err = fmt.Errorf("failed to submit scan results. url: '%s'", report.GetURL())
 	}
 
@@ -93,16 +92,22 @@ func (report *ReportEventReceiver) GetURL() string {
 	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
 
+	q := u.Query()
+
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
 		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
 	} else {
 		u.Path = "account/sign-up"
-		q := u.Query()
 		q.Add("invitationToken", report.token)
 		q.Add("customerGUID", report.customerGUID)
-
-		u.RawQuery = q.Encode()
 	}
+
+	q.Add("utm_source", "GitHub")
+	q.Add("utm_medium", "CLI")
+	q.Add("utm_campaign", "Submit")
+
+	u.RawQuery = q.Encode()
+
 	return u.String()
 
 }
@@ -110,7 +115,7 @@ func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cau
 	splittedPostureReport := report.setSubReport(opaSessionObj)
 	counter := 0
 	reportCounter := 0
-	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, &counter, &reportCounter, host); err != nil {
+	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, &counter, &reportCounter, host); err != nil {
 		return err
 	}
 	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
@@ -148,9 +153,12 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
-func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, counter, reportCounter *int, host string) error {
+func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]string, counter, reportCounter *int, host string) error {
 	for resourceID, v := range allResources {
 		resource := reporthandling.NewResourceIMetadata(v)
+		if r, ok := resourcesSource[resourceID]; ok {
+			resource.SetSource(&reporthandling.Source{Path: r})
+		}
 		r, err := json.Marshal(resource)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", resourceID, err)

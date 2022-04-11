@@ -2,15 +2,15 @@ package submit
 
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/meta"
-	"github.com/armosec/kubescape/core/meta/cliinterfaces"
-	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/meta"
+	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
+	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 
-	reporterv1 "github.com/armosec/kubescape/core/pkg/resultshandling/reporter/v1"
+	reporterv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v1"
 
 	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/spf13/cobra"
@@ -33,7 +33,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			}
 
 			// list RBAC
-			rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetAccountID(), clusterConfig.GetClusterName()))
+			rbacObjects := cautils.NewRBACObjects(rbacscanner.NewRbacScannerFromK8sAPI(k8s, clusterConfig.GetAccountID(), clusterConfig.GetContextName()))
 
 			// submit resources
 			r := reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())

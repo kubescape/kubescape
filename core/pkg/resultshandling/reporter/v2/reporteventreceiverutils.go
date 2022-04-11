@@ -3,8 +3,8 @@ package v2
 import (
 	"net/url"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/google/uuid"
 )
@@ -43,8 +43,11 @@ func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessio
 		ClusterAPIServerInfo: opaSessionObj.Report.ClusterAPIServerInfo,
 	}
 	if opaSessionObj.Metadata != nil {
-		reportObj.ClusterCloudProvider = opaSessionObj.Metadata.ClusterMetadata.CloudProvider
 		reportObj.Metadata = *opaSessionObj.Metadata
+		if opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
+			reportObj.ClusterCloudProvider = opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider // DEPRECATED
+			reportObj.Metadata.ClusterMetadata = *opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata
+		}
 	}
 	return reportObj
 }

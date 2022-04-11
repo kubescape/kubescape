@@ -3,8 +3,8 @@ package resourcehandler
 import (
 	"strings"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/pkg/hostsensorutils"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/reporthandling"
 	"k8s.io/utils/strings/slices"
 
@@ -15,7 +15,7 @@ var (
 	ClusterDescribe = "ClusterDescribe"
 
 	MapResourceToApiGroupCloud = map[string][]string{
-		ClusterDescribe: {"container.googleapis.com/v1", "eks.amazonaws.com/v1"}}
+		ClusterDescribe: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}}
 )
 
 func setK8sResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResources {

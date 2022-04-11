@@ -2,8 +2,8 @@ package scan
 
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/meta"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -11,7 +11,7 @@ var scanCmdExamples = `
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defind frameworks 
   
   # Scan current cluster with all frameworks
-  kubescape scan --submit --enable-host-scan
+  kubescape scan --submit --enable-host-scan --verbose
 
   # Scan kubernetes YAML manifest files
   kubescape scan *.yaml
@@ -72,7 +72,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to ARMO backend. Use this flag if you ran with the '--submit' flag in the past and you do not want to submit your current scan results")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.VerboseMode, "verbose", false, "Display all of the input resources and not only failed resources")
+	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load local policy object from default path. If not used will download latest")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to ARMO management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")

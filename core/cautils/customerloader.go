@@ -10,8 +10,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -67,8 +67,9 @@ type ITenantConfig interface {
 	DeleteCachedConfig() error
 
 	// getters
-	GetClusterName() string
+	GetContextName() string
 	GetAccountID() string
+	GetTennatEmail() string
 	GetConfigObj() *ConfigObj
 	// GetBackendAPI() getter.IBackend
 	// GenerateURL()
@@ -118,8 +119,9 @@ func NewLocalConfig(
 }
 
 func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
+func (lc *LocalConfig) GetTennatEmail() string   { return lc.configObj.CustomerAdminEMail }
 func (lc *LocalConfig) GetAccountID() string     { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetClusterName() string   { return lc.configObj.ClusterName }
+func (lc *LocalConfig) GetContextName() string   { return lc.configObj.ClusterName }
 func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
@@ -217,7 +219,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	getAccountFromEnv(c.configObj)
 
 	if c.configObj.ClusterName == "" {
-		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetClusterName())
+		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetContextName())
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
@@ -232,6 +234,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 func (c *ClusterConfig) GetConfigObj() *ConfigObj { return c.configObj }
 func (c *ClusterConfig) GetDefaultNS() string     { return c.configMapNamespace }
 func (c *ClusterConfig) GetAccountID() string     { return c.configObj.AccountID }
+func (c *ClusterConfig) GetTennatEmail() string   { return c.configObj.CustomerAdminEMail }
 func (c *ClusterConfig) IsConfigFound() bool      { return existsConfigFile() || c.existsConfigMap() }
 
 func (c *ClusterConfig) SetTenant() error {
@@ -268,7 +271,7 @@ func (c *ClusterConfig) DeleteCachedConfig() error {
 	}
 	return nil
 }
-func (c *ClusterConfig) GetClusterName() string {
+func (c *ClusterConfig) GetContextName() string {
 	return c.configObj.ClusterName
 }
 

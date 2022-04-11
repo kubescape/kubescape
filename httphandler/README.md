@@ -12,7 +12,7 @@ Running `kubescape` will start up a webserver on port `8080` which will serve th
 * DELETE `/v1/results` - Delete kubescape scan results from storage. ~If empty will delete latest results~ (not supported)
 * * query `id=<string>`: Delete ID of specific results 
 * * query `all`: Delete all cached results
-* GET/POST `/metrics` - will trigger cluster scan. will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
+* GET/POST `/v1/metrics` - will trigger cluster scan. will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
 * `/livez` - will respond 200 is server is alive
 * `/readyz` - will respond 200 if server can receive requests 
 

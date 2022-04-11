@@ -3,13 +3,13 @@ package resultshandling
 import (
 	"encoding/json"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
-	printerv1 "github.com/armosec/kubescape/core/pkg/resultshandling/printer/v1"
-	printerv2 "github.com/armosec/kubescape/core/pkg/resultshandling/printer/v2"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/reporter"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
+	printerv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v1"
+	printerv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v2"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 )
 
 type ResultsHandler struct {
@@ -56,17 +56,19 @@ func (resultsHandler *ResultsHandler) ToJson() ([]byte, error) {
 }
 
 // HandleResults handle the scan results according to the pre defind interfaces
-func (resultsHandler *ResultsHandler) HandleResults() {
+func (resultsHandler *ResultsHandler) HandleResults() error {
 
 	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
 
 	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
-		logger.L().Error(err.Error())
+		return err
 	}
 
 	resultsHandler.printerObj.Score(resultsHandler.GetRiskScore())
 
 	resultsHandler.reporterObj.DisplayReportURL()
+
+	return nil
 }
 
 // NewPrinter defind output format

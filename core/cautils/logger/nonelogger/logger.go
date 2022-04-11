@@ -3,7 +3,7 @@ package nonelogger
 import (
 	"os"
 
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 )
 
 const LoggerName string = "none"

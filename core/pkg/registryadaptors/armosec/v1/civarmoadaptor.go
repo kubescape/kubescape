@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/containerscan"
-	"github.com/armosec/kubescape/core/pkg/registryadaptors/registryvulnerabilities"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/containerscan"
+	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 )
 
 func NewArmoAdaptor(armoAPI *getter.ArmoAPI) *ArmoCivAdaptor {

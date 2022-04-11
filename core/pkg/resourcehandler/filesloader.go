@@ -2,14 +2,15 @@ package resourcehandler
 
 import (
 	"fmt"
-	"os"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"k8s.io/apimachinery/pkg/version"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 )
 
 // FileResourceHandler handle resources from files and URLs
@@ -38,23 +39,24 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	workloads := []workloadinterface.IMetadata{}
 
 	// load resource from local file system
-	w, err := cautils.LoadResourcesFromFiles(fileHandler.inputPatterns)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(fileHandler.inputPatterns)
 	if err != nil {
 		return nil, allResources, nil, err
 	}
-	for source, ws := range w {
+	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = source
 		}
 	}
+	logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 
 	// load resources from url
-	w, err = loadResourcesFromUrl(fileHandler.inputPatterns)
+	sourceToWorkloads, err = loadResourcesFromUrl(fileHandler.inputPatterns)
 	if err != nil {
 		return nil, allResources, nil, err
 	}
-	for source, ws := range w {
+	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = source
@@ -64,6 +66,8 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	if len(workloads) == 0 {
 		return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
 	}
+	logger.L().Debug("files found in git repo", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
+
 	sessionObj.ResourceSource = workloadIDToSource
 
 	// map all resources: map["/group/version/kind"][]<k8s workloads>
@@ -82,7 +86,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	}
 
 	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, armoResources); err != nil {
-		cautils.WarningDisplay(os.Stderr, "Warning: failed to collect images vulnerabilities: %s\n", err.Error())
+		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
 	}
 
 	return k8sResources, allResources, armoResources, nil

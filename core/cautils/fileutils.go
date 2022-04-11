@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"gopkg.in/yaml.v2"
 )

@@ -5,10 +5,10 @@ import (
 	"os"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 )
@@ -29,7 +29,7 @@ func (prometheusPrinter *PrometheusPrinter) SetWriter(outputFile string) {
 }
 
 func (prometheusPrinter *PrometheusPrinter) Score(score float32) {
-	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", int(score))
+	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
 func (printer *PrometheusPrinter) generatePrometheusFormat(
@@ -39,7 +39,7 @@ func (printer *PrometheusPrinter) generatePrometheusFormat(
 
 	m := &Metrics{}
 	m.setRiskScores(summaryDetails)
-	m.setResourcesCounters(resources, results)
+	// m.setResourcesCounters(resources, results)
 
 	return m
 }

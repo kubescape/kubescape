@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/core/meta"
-	"github.com/armosec/kubescape/core/meta/cliinterfaces"
-	v1 "github.com/armosec/kubescape/core/meta/datastructures/v1"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/reporter"
-	reporterv1 "github.com/armosec/kubescape/core/pkg/resultshandling/reporter/v1"
-	reporterv2 "github.com/armosec/kubescape/core/pkg/resultshandling/reporter/v2"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/meta"
+	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
+	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
+	reporterv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v1"
+	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/google/uuid"
@@ -74,7 +74,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 				logger.L().Error("failed setting account ID", helpers.Error(err))
 			}
 
-			resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetClusterName(), args[0])
+			resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetContextName(), args[0])
 
 			// submit resources
 			var r reporter.IReport

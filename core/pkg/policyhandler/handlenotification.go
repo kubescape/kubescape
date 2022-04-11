@@ -3,8 +3,8 @@ package policyhandler
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/pkg/resourcehandler"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
@@ -38,7 +38,7 @@ func (policyHandler *PolicyHandler) CollectResources(notification *reporthandlin
 	if err != nil {
 		return opaSessionObj, err
 	}
-	if opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0 {
+	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
 		return opaSessionObj, fmt.Errorf("empty list of resources")
 	}
 

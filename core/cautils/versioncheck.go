@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/armosec/kubescape/core/cautils/getter"
-	"github.com/armosec/kubescape/core/cautils/logger"
-	"github.com/armosec/kubescape/core/cautils/logger/helpers"
+	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	pkgutils "github.com/armosec/utils-go/utils"
 	"golang.org/x/mod/semver"
 )
@@ -101,7 +101,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 	}
 
 	if latestVersion.ClientUpdate != "" {
-		if BuildNumber != "" && semver.Compare(BuildNumber, latestVersion.ClientUpdate) >= 0 {
+		if BuildNumber != "" && semver.Compare(BuildNumber, latestVersion.ClientUpdate) == -1 {
 			logger.L().Warning(warningMessage(latestVersion.ClientUpdate))
 		}
 	}

@@ -7,20 +7,20 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/core/cautils"
-	"github.com/armosec/kubescape/core/pkg/resultshandling/printer"
+	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/enescakir/emoji"
 	"github.com/olekukonko/tablewriter"
 )
 
 type PrettyPrinter struct {
-	formatVersion      string
-	writer             *os.File
-	verboseMode        bool
-	sortedControlNames []string
+	formatVersion string
+	writer        *os.File
+	verboseMode   bool
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
@@ -31,14 +31,14 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	prettyPrinter.sortedControlNames = getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+	fmt.Fprintf(prettyPrinter.writer, "\n"+getSperator("^")+"\n")
 
-	if prettyPrinter.formatVersion == "v1" {
-		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources)
-	} else if prettyPrinter.formatVersion == "v2" {
-		prettyPrinter.resourceTable(opaSessionObj.ResourcesResult, opaSessionObj.AllResources)
+	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+
+	if prettyPrinter.verboseMode {
+		prettyPrinter.resourceTable(opaSessionObj)
 	}
-	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails)
+	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlNames)
 
 }
 
@@ -49,13 +49,14 @@ func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
 func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 
-func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata) {
-	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-
-		controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
-		prettyPrinter.printTitle(controlSummary)
-		prettyPrinter.printResources(controlSummary, allResources)
-		prettyPrinter.printSummary(prettyPrinter.sortedControlNames[i], controlSummary)
+func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlNames [][]string) {
+	for i := len(sortedControlNames) - 1; i >= 0; i-- {
+		for _, c := range sortedControlNames[i] {
+			controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
+			prettyPrinter.printTitle(controlSummary)
+			prettyPrinter.printResources(controlSummary, allResources)
+			prettyPrinter.printSummary(c, controlSummary)
+		}
 	}
 }
 
@@ -167,53 +168,62 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 }
 func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	// Control name | # failed resources | all resources | % success
-	row := []string{}
-	row = append(row, "Resource Summary") //fmt.Sprintf(""%d", numControlers"))
-	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed()))
-	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()))
-	row = append(row, fmt.Sprintf("%d", summaryDetails.NumberOfResources().All()))
-	row = append(row, fmt.Sprintf("%.2f%s", summaryDetails.Score, "%"))
-	row = append(row, " ")
+	row := make([]string, _rowLen)
+	row[columnName] = "Resource Summary"
+	row[columnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
+	row[columnCounterExclude] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded())
+	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
+	row[columnSeverity] = " "
+	row[columnRiskScore] = fmt.Sprintf("%.2f%s", summaryDetails.Score, "%")
 
 	return row
 }
-func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails) {
+func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
+
+	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n\n")
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(getControlTableHeaders())
 	summaryTable.SetHeaderLine(true)
-	alignments := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
-	summaryTable.SetColumnAlignment(alignments)
-	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
-	for i := 0; i < len(prettyPrinter.sortedControlNames); i++ {
-		summaryTable.Append(generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, prettyPrinter.sortedControlNames[i]), infoToPrintInfoMap))
+	summaryTable.SetColumnAlignment(getColumnsAlignments())
+
+	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
+	for i := len(sortedControlNames) - 1; i >= 0; i-- {
+		for _, c := range sortedControlNames[i] {
+			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfo, prettyPrinter.verboseMode)
+			if len(row) > 0 {
+				summaryTable.Append(row)
+			}
+		}
 	}
 
 	summaryTable.SetFooter(generateFooter(summaryDetails))
 
-	// summaryTable.SetFooter(generateFooter())
-	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
 	summaryTable.Render()
 
-	prettyPrinter.printInfo(infoToPrintInfoMap)
-	// For control scan framework will be nil
+	// When scanning controls the framework list will be empty
+	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
+
+	prettyPrinter.printInfo(infoToPrintInfo)
+
 }
 
-func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfoMap map[string]string) {
-	for info, stars := range infoToPrintInfoMap {
-		cautils.WarningDisplay(prettyPrinter.writer, fmt.Sprintf("%s - %s\n", stars, info))
+func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfo []infoStars) {
+	fmt.Println()
+	for i := range infoToPrintInfo {
+		cautils.InfoDisplay(prettyPrinter.writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].stars, infoToPrintInfo[i].info))
 	}
 }
 
 func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("\nFRAMEWORK %s\n", frameworks[0].GetName())
+			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
 			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
 		}
 	} else if len(frameworks) > 1 {
-		p := "\nFRAMEWORKS: "
+		p := "FRAMEWORKS: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
 			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())
@@ -224,14 +234,21 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 	return ""
 }
 
-// func getSortedControlsNames(controls []reportsummary.IPolicies) []string {
-// 	controlNames := make([]string, 0, len(controls))
-// 	for k := range controls {
-// 		controlNames = append(controlNames, controls[k].Get())
-// 	}
-// 	sort.Strings(controlNames)
-// 	return controlNames
-// }
 func getControlLink(controlID string) string {
 	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
+}
+
+func controlCountersForSummary(counters reportsummary.ICounters) string {
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d, Skipped: %d)", counters.All(), counters.Failed(), counters.Excluded(), counters.Skipped())
+}
+
+func controlCountersForResource(l *helpersv1.AllLists) string {
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", len(l.All()), len(l.Failed()), len(l.Excluded()))
+}
+func getSperator(sep string) string {
+	s := ""
+	for i := 0; i < 80; i++ {
+		s += sep
+	}
+	return s
 }
