@@ -6,9 +6,7 @@ import (
 )
 
 func main() {
-	ks := cmd.NewDefaultKubescapeCommand()
-	err := ks.Execute()
-	if err != nil {
+	if err := cmd.Execute(); err != nil {
 		logger.L().Fatal(err.Error())
 	}
 }

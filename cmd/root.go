@@ -40,7 +40,6 @@ var ksExamples = `
 
 func NewDefaultKubescapeCommand() *cobra.Command {
 	ks := core.NewKubescape()
-
 	return getRootCmd(ks)
 }
 
@@ -82,10 +81,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	return rootCmd
 }
 
-// func main() {
-// 	ks := NewDefaultKubescapeCommand()
-// 	err := ks.Execute()
-// 	if err != nil {
-// 		logger.L().Fatal(err.Error())
-// 	}
-// }
+func Execute() error {
+	ks := NewDefaultKubescapeCommand()
+	return ks.Execute()
+}
