@@ -98,7 +98,6 @@ func (report *ReportEventReceiver) GetURL() string {
 		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
 	} else {
 		u.Path = "account/sign-up"
-		q := u.Query()
 		q.Add("invitationToken", report.token)
 		q.Add("customerGUID", report.customerGUID)
 	}
