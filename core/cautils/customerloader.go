@@ -67,7 +67,7 @@ type ITenantConfig interface {
 	DeleteCachedConfig() error
 
 	// getters
-	GetClusterContext() string
+	GetContextName() string
 	GetAccountID() string
 	GetConfigObj() *ConfigObj
 	// GetBackendAPI() getter.IBackend
@@ -117,10 +117,10 @@ func NewLocalConfig(
 	return lc
 }
 
-func (lc *LocalConfig) GetConfigObj() *ConfigObj  { return lc.configObj }
-func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetClusterContext() string { return lc.configObj.ClusterName }
-func (lc *LocalConfig) IsConfigFound() bool       { return existsConfigFile() }
+func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
+func (lc *LocalConfig) GetAccountID() string     { return lc.configObj.AccountID }
+func (lc *LocalConfig) GetContextName() string   { return lc.configObj.ClusterName }
+func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
 	// ARMO tenant GUID
@@ -268,7 +268,7 @@ func (c *ClusterConfig) DeleteCachedConfig() error {
 	}
 	return nil
 }
-func (c *ClusterConfig) GetClusterContext() string {
+func (c *ClusterConfig) GetContextName() string {
 	return c.configObj.ClusterName
 }
 

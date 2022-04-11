@@ -83,7 +83,7 @@ func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
 	tenant := getTenantConfig(downloadInfo.Account, "", getKubernetesApi())
 
 	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetAccountID(), nil)
-	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetClusterContext())
+	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 	exceptionsGetter := getExceptionsGetter("")
 	exceptions := []armotypes.PostureExceptionPolicy{}
 	if tenant.GetAccountID() != "" {
-		exceptions, err = exceptionsGetter.GetExceptions(tenant.GetClusterContext())
+		exceptions, err = exceptionsGetter.GetExceptions(tenant.GetContextName())
 		if err != nil {
 			return err
 		}
