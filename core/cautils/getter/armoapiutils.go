@@ -75,7 +75,7 @@ func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
 
 func (armoAPI *ArmoAPI) getAccountConfigDefault(clusterName string) string {
 	config := armoAPI.getAccountConfig(clusterName)
-	url := config + "&scope=default"
+	url := config + "&scope=customer"
 	return url
 }
 

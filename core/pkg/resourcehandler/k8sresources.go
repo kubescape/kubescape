@@ -261,23 +261,15 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (string, error) {
 	logger.L().Debug("Collecting cloud data")
-	cloudProvider := initCloudProvider()
-	cluster := cloudProvider.getKubeCluster()
-	clusterName := cloudProvider.getKubeClusterName()
-	provider := getCloudProvider()
-	region, err := cloudProvider.getRegion(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
-	project, err := cloudProvider.getProject(cluster, provider)
-	if err != nil {
-		return provider, err
-	}
+
+	clusterName := cautils.ClusterName
+
+	provider := cloudsupport.GetCloudProvider(clusterName)
 
 	if provider != "" {
-		logger.L().Debug("cloud", helpers.String("cluster", cluster), helpers.String("clusterName", clusterName), helpers.String("provider", provider), helpers.String("region", region), helpers.String("project", project))
+		logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
-		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider, region, project)
+		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider)
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info
 			logger.L().Debug("failed to get descriptive information", helpers.Error(err))

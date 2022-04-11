@@ -115,9 +115,9 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	interfaces := getInterfaces(scanInfo)
 
-	cautils.ClusterName = interfaces.tenantConfig.GetClusterName() // TODO - Deprecated
-	cautils.CustomerGUID = interfaces.tenantConfig.GetAccountID()  // TODO - Deprecated
-	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterName())
+	cautils.ClusterName = interfaces.tenantConfig.GetClusterContext() // TODO - Deprecated
+	cautils.CustomerGUID = interfaces.tenantConfig.GetAccountID()     // TODO - Deprecated
+	interfaces.report.SetClusterName(interfaces.tenantConfig.GetClusterContext())
 	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetAccountID())
 
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
@@ -149,7 +149,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	// ========================= opa testing =====================
-	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetClusterName())
+	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetClusterContext())
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
 	if err := reportResults.ProcessRulesListenner(); err != nil {
 		// TODO - do something

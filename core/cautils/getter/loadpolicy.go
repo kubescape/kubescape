@@ -137,6 +137,7 @@ func (lp *LoadPolicy) GetControlsInputs(clusterName string) (map[string][]string
 	if err = json.Unmarshal(f, &accountConfig.Settings.PostureControlInputs); err == nil {
 		return accountConfig.Settings.PostureControlInputs, nil
 	}
+	fmt.Println(err.Error())
 	return nil, err
 }
 

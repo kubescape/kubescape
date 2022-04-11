@@ -67,7 +67,7 @@ type ITenantConfig interface {
 	DeleteCachedConfig() error
 
 	// getters
-	GetClusterName() string
+	GetClusterContext() string
 	GetAccountID() string
 	GetConfigObj() *ConfigObj
 	// GetBackendAPI() getter.IBackend
@@ -117,10 +117,10 @@ func NewLocalConfig(
 	return lc
 }
 
-func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
-func (lc *LocalConfig) GetAccountID() string     { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetClusterName() string   { return lc.configObj.ClusterName }
-func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
+func (lc *LocalConfig) GetConfigObj() *ConfigObj  { return lc.configObj }
+func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountID }
+func (lc *LocalConfig) GetClusterContext() string { return lc.configObj.ClusterName }
+func (lc *LocalConfig) IsConfigFound() bool       { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
 	// ARMO tenant GUID
@@ -217,7 +217,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	getAccountFromEnv(c.configObj)
 
 	if c.configObj.ClusterName == "" {
-		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetClusterName())
+		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetContextName())
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
@@ -268,7 +268,7 @@ func (c *ClusterConfig) DeleteCachedConfig() error {
 	}
 	return nil
 }
-func (c *ClusterConfig) GetClusterName() string {
+func (c *ClusterConfig) GetClusterContext() string {
 	return c.configObj.ClusterName
 }
 
