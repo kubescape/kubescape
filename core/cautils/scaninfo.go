@@ -198,10 +198,7 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-<<<<<<< HEAD
 	metadata.ClusterMetadata.ContextName = k8sinterface.GetContextName()
-=======
->>>>>>> upstream/dev
 	metadata.ScanMetadata.Format = scanInfo.Format
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit
@@ -247,7 +244,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 	// if cluster
 	if input == "" {
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
-			ContextName: k8sinterface.GetClusterName(),
+			ContextName: k8sinterface.GetContextName(),
 		}
 		return
 	}
