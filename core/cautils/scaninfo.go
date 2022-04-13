@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	giturl "github.com/armosec/go-git-url"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
@@ -240,7 +241,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 }
 
 func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
-	// if cluster
+	//  cluster
 	if input == "" {
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
 			ContextName: k8sinterface.GetContextName(),
@@ -248,8 +249,16 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		return
 	}
 
-	// if url
-	if strings.HasPrefix(input, "http") { // TODO - check if can parse
+	// url
+	if gitParser, err := giturl.NewGitURL(input); err == nil {
+		if gitParser.GetBranch() == "" {
+			gitParser.SetDefaultBranch()
+		}
+		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
+			Repo:   gitParser.GetRepo(),
+			Owner:  gitParser.GetOwner(),
+			Branch: gitParser.GetBranch(),
+		}
 		return
 	}
 
@@ -259,7 +268,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		}
 	}
 
-	// if single file
+	//  single file
 	if IsFile(input) {
 		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
 			FilePath: input,
@@ -268,7 +277,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		return
 	}
 
-	// if dir/glob
+	//  dir/glob
 	if !IsFile(input) {
 		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
 			BasePath: input,
