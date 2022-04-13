@@ -8,6 +8,7 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/apis"
+	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	resources "github.com/armosec/opa-utils/resources"
 )
 
@@ -46,7 +47,7 @@ func (opap *OPAProcessor) updateResults() {
 
 	// set result summary
 	// map control to error
-	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap)
+	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 	// for f := range opap.PostureReport.FrameworkReports {
 	// 	// set exceptions
@@ -60,15 +61,21 @@ func (opap *OPAProcessor) updateResults() {
 	// }
 }
 
-func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo) map[string]apis.StatusInfo {
+func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {
 	controlToInfoMap := make(map[string]apis.StatusInfo)
 	for resource, statusInfo := range infoMap {
 		controls := mapResourceToControls[resource]
 		for _, control := range controls {
-			controlToInfoMap[control] = statusInfo
+			if isEmptyResources(controlSummary[control].ResourceCounters) {
+				controlToInfoMap[control] = statusInfo
+			}
 		}
 	}
 	return controlToInfoMap
+}
+
+func isEmptyResources(counters reportsummary.ResourceCounters) bool {
+	return counters.FailedResources == 0 && counters.ExcludedResources == 0 && counters.PassedResources == 0
 }
 
 func getAllSupportedObjects(k8sResources *cautils.K8SResources, armoResources *cautils.ArmoResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
