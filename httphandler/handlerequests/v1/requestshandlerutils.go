@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	pkgcautils "github.com/armosec/utils-go/utils"
 
@@ -26,7 +27,9 @@ func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
 		f.Write([]byte(e.Error()))
 
 	}
-	result.HandleResults()
+	if err := result.HandleResults(); err != nil {
+		return nil, err
+	}
 	b, err := result.ToJson()
 	if err != nil {
 		err = fmt.Errorf("failed to parse results to json, reason: %s", err.Error())
@@ -62,14 +65,18 @@ func searchFile(fileID string) string {
 }
 
 func findFile(targetDir string, fileName string) (string, error) {
-
-	matches, err := filepath.Glob(filepath.Join(targetDir, fileName))
+	var files []string
+	err := filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
+		files = append(files, path)
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
-
-	if len(matches) != 0 {
-		return matches[0], nil
+	for i := range files {
+		if strings.Contains(files[i], fileName) {
+			return files[i], nil
+		}
 	}
 	return "", nil
 }
@@ -98,14 +105,14 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.FailThreshold = 100
-	scanInfo.Account = envToString("KS_ACCOUNT", "")                              // publish results to Kubescape SaaS
-	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")        // namespace to exclude
-	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")         // namespace to include
-	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")               // output format version
-	scanInfo.Format = envToString("KS_FORMAT", "json")                            // default output should be json
-	scanInfo.Submit = envToBool("KS_SUBMIT", false)                               // publish results to Kubescape SaaS
-	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", true)) // enable host scanner
-	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                            // do not publish results to Kubescape SaaS
+	scanInfo.Account = envToString("KS_ACCOUNT", "")                               // publish results to Kubescape SaaS
+	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")         // namespace to exclude
+	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")          // namespace to include
+	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")                // output format version
+	scanInfo.Format = envToString("KS_FORMAT", "json")                             // default output should be json
+	scanInfo.Submit = envToBool("KS_SUBMIT", false)                                // publish results to Kubescape SaaS
+	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", false)) // enable host scanner
+	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                             // do not publish results to Kubescape SaaS
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}

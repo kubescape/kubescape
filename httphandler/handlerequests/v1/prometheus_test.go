@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
@@ -9,10 +10,11 @@ import (
 
 func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 	scanID := "1234"
-	scanInfo := getPrometheusDefaultScanCommand(scanID)
+	outputFile := filepath.Join(OutputDir, scanID)
+	scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile)
 
 	assert.Equal(t, scanID, scanInfo.ScanID)
-	assert.Equal(t, scanID, scanInfo.Output)
+	assert.Equal(t, outputFile, scanInfo.Output)
 	assert.Equal(t, "prometheus", scanInfo.Format)
 	// assert.False(t, *scanInfo.HostSensorEnabled.Get())
 	assert.Equal(t, getter.DefaultLocalStore, scanInfo.UseArtifactsFrom)

@@ -11,13 +11,22 @@ import (
 func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
 
-	if scanRequest.TargetType != nil && len(scanRequest.TargetNames) > 0 {
-		if *scanRequest.TargetType == reporthandling.KindFramework {
+	if scanRequest.TargetType != "" && len(scanRequest.TargetNames) > 0 {
+		if strings.EqualFold(string(scanRequest.TargetType), string(reporthandling.KindFramework)) {
+			scanRequest.TargetType = reporthandling.KindFramework
 			scanInfo.FrameworkScan = true
+		} else if strings.EqualFold(string(scanRequest.TargetType), string(reporthandling.KindControl)) {
+			scanRequest.TargetType = reporthandling.KindControl
+		} else {
+			// unknown policy kind - set scan all
+			scanInfo.FrameworkScan = true
+			scanInfo.ScanAll = true
+			scanRequest.TargetNames = []string{}
 		}
-		scanInfo.SetPolicyIdentifiers(scanRequest.TargetNames, *scanRequest.TargetType)
+		scanInfo.SetPolicyIdentifiers(scanRequest.TargetNames, scanRequest.TargetType)
 		scanInfo.ScanAll = false
 	} else {
+		scanInfo.FrameworkScan = true
 		scanInfo.ScanAll = true
 	}
 
@@ -31,21 +40,24 @@ func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
 		scanInfo.IncludeNamespaces = strings.Join(scanRequest.IncludeNamespaces, ",")
 	}
 
-	if scanRequest.Format == "" {
-		scanInfo.Format = scanRequest.Format // TODO - handle default
+	if scanRequest.Format != "" {
+		scanInfo.Format = scanRequest.Format
 	}
 
-	if scanRequest.UseCachedArtifacts.Get() != nil && !*scanRequest.UseCachedArtifacts.Get() {
+	useCachedArtifacts := cautils.NewBoolPtr(scanRequest.UseCachedArtifacts)
+	if useCachedArtifacts.Get() != nil && !*useCachedArtifacts.Get() {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
 
-	if scanRequest.KeepLocal.Get() != nil {
-		scanInfo.Local = *scanRequest.KeepLocal.Get() // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
+	keepLocal := cautils.NewBoolPtr(scanRequest.KeepLocal)
+	if keepLocal.Get() != nil {
+		scanInfo.Local = *keepLocal.Get() // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
-	if scanRequest.Submit.Get() != nil {
-		scanInfo.Submit = *scanRequest.Submit.Get()
+	submit := cautils.NewBoolPtr(scanRequest.Submit)
+	if submit.Get() != nil {
+		scanInfo.Submit = *submit.Get()
 	}
-	scanInfo.HostSensorEnabled = scanRequest.HostScanner
+	scanInfo.HostSensorEnabled = cautils.NewBoolPtr(scanRequest.HostScanner)
 
 	return scanInfo
 }

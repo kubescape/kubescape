@@ -29,6 +29,10 @@ type BoolPtrFlag struct {
 	valPtr *bool
 }
 
+func NewBoolPtr(b *bool) BoolPtrFlag {
+	return BoolPtrFlag{valPtr: b}
+}
+
 func (bpf *BoolPtrFlag) Type() string {
 	return "bool"
 }
