@@ -3,7 +3,8 @@ package v1
 import (
 	"testing"
 
-	"github.com/armosec/opa-utils/reporthandling"
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -19,8 +20,8 @@ func TestDefaultScanInfo(t *testing.T) {
 }
 
 func TestGetScanCommand(t *testing.T) {
-	req := PostScanRequest{
-		TargetType: reporthandling.KindFramework,
+	req := utilsmetav1.PostScanRequest{
+		TargetType: apisv1.KindFramework,
 	}
 	s := getScanCommand(&req, "abc")
 	assert.Equal(t, "", s.Account)

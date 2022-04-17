@@ -3,20 +3,23 @@ package v1
 import (
 	"strings"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
+
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
-func (scanRequest *PostScanRequest) ToScanInfo() *cautils.ScanInfo {
+func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
 
 	if scanRequest.TargetType != "" && len(scanRequest.TargetNames) > 0 {
 		if strings.EqualFold(string(scanRequest.TargetType), string(reporthandling.KindFramework)) {
-			scanRequest.TargetType = reporthandling.KindFramework
+			scanRequest.TargetType = apisv1.KindFramework
 			scanInfo.FrameworkScan = true
 		} else if strings.EqualFold(string(scanRequest.TargetType), string(reporthandling.KindControl)) {
-			scanRequest.TargetType = reporthandling.KindControl
+			scanRequest.TargetType = apisv1.KindControl
 		} else {
 			// unknown policy kind - set scan all
 			scanInfo.FrameworkScan = true

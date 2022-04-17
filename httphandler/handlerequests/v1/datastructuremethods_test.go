@@ -3,14 +3,16 @@ package v1
 import (
 	"testing"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestToScanInfo(t *testing.T) {
 	{
-		req := PostScanRequest{
-			TargetType:         reporthandling.KindFramework,
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:         apisv1.KindFramework,
 			Account:            "abc",
 			Logger:             "info",
 			Format:             "pdf",
@@ -18,7 +20,7 @@ func TestToScanInfo(t *testing.T) {
 			ExcludedNamespaces: []string{"kube-system", "kube-public"},
 			TargetNames:        []string{"nsa", "mitre"},
 		}
-		s := req.ToScanInfo()
+		s := ToScanInfo(req)
 		assert.Equal(t, "abc", s.Account)
 		assert.Equal(t, "v2", s.FormatVersion)
 		assert.Equal(t, "pdf", s.Format)
@@ -36,12 +38,12 @@ func TestToScanInfo(t *testing.T) {
 		assert.Equal(t, reporthandling.KindFramework, s.PolicyIdentifier[1].Kind)
 	}
 	{
-		req := PostScanRequest{
-			TargetType:        reporthandling.KindControl,
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:        apisv1.KindControl,
 			TargetNames:       []string{"c-0001"},
 			IncludeNamespaces: []string{"kube-system", "kube-public"},
 		}
-		s := req.ToScanInfo()
+		s := ToScanInfo(req)
 		assert.False(t, s.ScanAll)
 		assert.False(t, s.FrameworkScan)
 		assert.Equal(t, "kube-system,kube-public", s.IncludeNamespaces)
@@ -51,8 +53,8 @@ func TestToScanInfo(t *testing.T) {
 		assert.Equal(t, reporthandling.KindControl, s.PolicyIdentifier[0].Kind)
 	}
 	{
-		req := PostScanRequest{}
-		s := req.ToScanInfo()
+		req := &utilsmetav1.PostScanRequest{}
+		s := ToScanInfo(req)
 		assert.True(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
 	}

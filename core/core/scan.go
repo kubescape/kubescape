@@ -3,6 +3,8 @@ package core
 import (
 	"fmt"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 
@@ -130,7 +132,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
-		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.Getters.PolicyGetter), reporthandling.KindFramework)
+		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.Getters.PolicyGetter), apisv1.KindFramework)
 	}
 
 	// remove host scanner components

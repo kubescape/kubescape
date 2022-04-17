@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
@@ -64,7 +66,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			} else { // expected control or list of control sepparated by ","
 
 				// Read controls from input args
-				scanInfo.SetPolicyIdentifiers(strings.Split(args[0], ","), reporthandling.KindControl)
+				scanInfo.SetPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)
 
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {

@@ -3,13 +3,13 @@ module github.com/armosec/kubescape/v2
 go 1.17
 
 require (
-	github.com/armosec/armoapi-go v0.0.66
+	github.com/armosec/armoapi-go v0.0.67
 	github.com/armosec/go-git-url v0.0.4
-	github.com/armosec/k8s-interface v0.0.69
-	github.com/armosec/opa-utils v0.0.130
+	github.com/armosec/k8s-interface v0.0.70
+	github.com/armosec/opa-utils v0.0.135
 	github.com/armosec/rbac-utils v0.0.14
-	github.com/armosec/utils-go v0.0.3
-	github.com/armosec/utils-k8s-go v0.0.5
+	github.com/armosec/utils-go v0.0.5
+	github.com/armosec/utils-k8s-go v0.0.6
 	github.com/briandowns/spinner v1.18.1
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
