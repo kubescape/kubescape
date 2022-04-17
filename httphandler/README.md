@@ -23,22 +23,42 @@ body:
 ```
 {
     "format": <str>,               // results format [default: json] (same as 'kubescape scan --format')
-    "excludedNamespaces": <[]str>, // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
-    "includeNamespaces": <[]str>,  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
+    "excludedNamespaces": [<str>], // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
+    "includeNamespaces": [<str>],  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
     "useCachedArtifacts"`: <bool>, // use the cached artifacts instead of downloading (offline support)
     "submit": <bool>,              // submit results to Kubescape cloud (same as 'kubescape scan --submit')
     "hostScanner": <bool>,         // deploy kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
     "keepLocal": <bool>,           // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
-    "account": <str>               // account ID (same as 'kubescape scan --account')
+    "account": <str>,              // account ID (same as 'kubescape scan --account')
+    "targetType": <str>,           // framework/control
+    "targetNames": [<str>]         // names. e.g. when targetType==framework, targetNames=["nsa", "mitre"]
 }
 ```
 
-e.g.:
+#### Default scan  
 
+1. Trigger kubescape scan
+  ```bash
+  curl --header "Content-Type: application/json" --request POST --data '{}' http://127.0.0.1:8080/v1/scan -o scan_id
+  ```
+2. Get kubescape scan results
+  ```bash
+  curl --request GET http://127.0.0.1:8080/v1/results?id=$(cat scan_id)
+  ```
+
+#### Scan single namespace with specific framework
 ```bash
 curl --header "Content-Type: application/json" \
   --request POST \
   --data '{"hostScanner":true, "submit":true}' \
+  http://127.0.0.1:8080/v1/scan
+```
+
+#### Scan single namespace with specific framework
+```bash
+curl --header "Content-Type: application/json" \
+  --request POST \
+  --data '{"hostScanner":true, "submit":true, "includeNamespaces": ["ks-scanner"], "targetType": "framework", "targetNames": ["nsa"] }' \
   http://127.0.0.1:8080/v1/scan
 ```
 ## Examples

@@ -76,7 +76,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := []byte(scanID)
+	response := []byte(scanID + "\n")
 
 	returnResults := r.URL.Query().Has("wait")
 	var wg sync.WaitGroup
@@ -85,7 +85,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	} else {
 		wg.Add(0)
 	}
-
+	statusCode := http.StatusOK
 	go func() {
 		// execute scan in the background
 
@@ -96,7 +96,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			logger.L().Error("scanning failed", helpers.String("ID", scanID), helpers.Error(err))
 			if returnResults {
 				response = []byte(err.Error())
-				w.WriteHeader(http.StatusInternalServerError)
+				statusCode = http.StatusInternalServerError
 			}
 		} else {
 			logger.L().Success("done scanning", helpers.String("ID", scanID))
@@ -110,7 +110,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	wg.Wait()
-	w.WriteHeader(http.StatusOK)
+	w.WriteHeader(statusCode)
 	w.Write(response)
 }
 func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
@@ -126,10 +126,15 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	defer r.Body.Close()
 
 	var scanID string
-	if scanID = r.URL.Query().Get("scanID"); scanID == "" {
+	if scanID = r.URL.Query().Get("id"); scanID == "" {
 		scanID = handler.state.getLatestID()
 	}
-
+	if scanID == "" { // if no scan found
+		logger.L().Info("empty scan ID")
+		w.WriteHeader(http.StatusBadRequest) // Should we return ok?
+		w.Write([]byte("latest scan not found. trigger again"))
+		return
+	}
 	if handler.state.isBusy() { // if requested ID is still scanning
 		if scanID == handler.state.getID() {
 			logger.L().Info("scan in process", helpers.String("ID", scanID))
@@ -144,12 +149,15 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 		logger.L().Info("requesting results", helpers.String("ID", scanID))
 
 		if r.URL.Query().Has("remove") {
+			logger.L().Info("deleting results", helpers.String("ID", scanID))
 			defer removeResultsFile(scanID)
 		}
 		if res, err := readResultsFile(scanID); err != nil {
+			logger.L().Info("scan result not found", helpers.String("ID", scanID))
 			w.WriteHeader(http.StatusNoContent)
 			w.Write([]byte(err.Error()))
 		} else {
+			logger.L().Info("scan result found", helpers.String("ID", scanID))
 			w.WriteHeader(http.StatusOK)
 			w.Write(res)
 		}

@@ -116,6 +116,8 @@ github.com/armosec/armoapi-go v0.0.23/go.mod h1:iaVVGyc23QGGzAdv4n+szGQg3Rbpixn9
 github.com/armosec/armoapi-go v0.0.58/go.mod h1:U/Axd+D5N00x9Ekr7t+5HXqLCMO+98NfJSVAggqJftI=
 github.com/armosec/armoapi-go v0.0.66 h1:SEm4nTwtexlMqYQr7sj3rWIrDYZj3BQ76FvKLA8hiLo=
 github.com/armosec/armoapi-go v0.0.66/go.mod h1:U/Axd+D5N00x9Ekr7t+5HXqLCMO+98NfJSVAggqJftI=
+github.com/armosec/go-git-url v0.0.4 h1:emG9Yfl53rHpuX41fXLD92ehzhRoNSSnGT6Pr7ogWMY=
+github.com/armosec/go-git-url v0.0.4/go.mod h1:PJqdEyJyFxTQvawBcyOM0Ies6+uezire5gpwfr1XX5M=
 github.com/armosec/k8s-interface v0.0.8/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
 github.com/armosec/k8s-interface v0.0.37/go.mod h1:vHxGWqD/uh6+GQb9Sqv7OGMs+Rvc2dsFVc0XtgRh1ZU=
 github.com/armosec/k8s-interface v0.0.66/go.mod h1:vwprS8qn/iowd5yf0JHpqDsLA5I8W2muqX9AxKhkb0Q=

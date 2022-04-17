@@ -50,19 +50,6 @@ func setArmoResourceMap(frameworks []reporthandling.Framework, resourceToControl
 	return &armoResources
 }
 
-func convertComplexResourceMap(frameworks []reporthandling.Framework) map[string]map[string]map[string]interface{} {
-	k8sResources := make(map[string]map[string]map[string]interface{})
-	for _, framework := range frameworks {
-		for _, control := range framework.Controls {
-			for _, rule := range control.Rules {
-				for _, match := range rule.Match {
-					insertResources(k8sResources, match)
-				}
-			}
-		}
-	}
-	return k8sResources
-}
 func setComplexK8sResourceMap(frameworks []reporthandling.Framework) map[string]map[string]map[string]interface{} {
 	k8sResources := make(map[string]map[string]map[string]interface{})
 	for _, framework := range frameworks {
