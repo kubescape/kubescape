@@ -56,8 +56,8 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if handler.state.isBusy() {
-		w.Write([]byte(handler.state.getID()))
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(handler.state.getID()))
 		return
 	}
 

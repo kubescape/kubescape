@@ -65,3 +65,15 @@ curl --header "Content-Type: application/json" \
 
 * [Prometheus](examples/prometheus/README.md)
 * [Microservice](examples/microservice/README.md)
+
+
+## Supported environment variables
+
+* `KS_ACCOUNT`: Account ID
+* `KS_SUBMIT`: Submit the results to Kubescape SaaS version
+* `KS_EXCLUDE_NAMESPACES`: List of namespaces to exclude, e.g. `KS_EXCLUDE_NAMESPACES=kube-system,kube-public`
+* `KS_INCLUDE_NAMESPACES`: List of namespaces to include, rest of the namespaces will be ignored. e.g. `KS_INCLUDE_NAMESPACES=dev,prod`
+* `KS_HOST_SCAN_YAML`: Full path to the host scanner YAML
+* `KS_FORMAT`: Output file format. default is json
+* `KS_ENABLE_HOST_SCANNER`: Enable the host scanner feature
+* `KS_DOWNLOAD_ARTIFACTS`: Download the artifacts every scan
