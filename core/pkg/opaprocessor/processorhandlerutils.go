@@ -66,13 +66,15 @@ func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[str
 	for resource, statusInfo := range infoMap {
 		controlIDs := mapResourceToControls[resource]
 		for _, controlID := range controlIDs {
-			resources := controlSummary.GetControl(reportsummary.EControlCriteriaID, controlID).NumberOfResources()
-			if resources != nil {
+			ctrl := controlSummary.GetControl(reportsummary.EControlCriteriaID, controlID)
+			if ctrl != nil {
+				resources := ctrl.NumberOfResources()
 				// Check that there are no K8s resources too
 				if isEmptyResources(resources) {
 					controlToInfoMap[controlID] = statusInfo
 				}
 			}
+
 		}
 	}
 	return controlToInfoMap
