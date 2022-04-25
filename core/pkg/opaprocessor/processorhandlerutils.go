@@ -66,7 +66,8 @@ func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[str
 	for resource, statusInfo := range infoMap {
 		controls := mapResourceToControls[resource]
 		for _, control := range controls {
-			if isEmptyResources(controlSummary[control].ResourceCounters) {
+			counters := controlSummary[control].ResourceCounters
+			if isEmptyResources(&counters) {
 				controlToInfoMap[control] = statusInfo
 			}
 		}
@@ -74,8 +75,8 @@ func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[str
 	return controlToInfoMap
 }
 
-func isEmptyResources(counters reportsummary.ResourceCounters) bool {
-	return counters.FailedResources == 0 && counters.ExcludedResources == 0 && counters.PassedResources == 0
+func isEmptyResources(counters reportsummary.ICounters) bool {
+	return counters.Failed() == 0 && counters.Excluded() == 0 && counters.Passed() == 0
 }
 
 func getAllSupportedObjects(k8sResources *cautils.K8SResources, armoResources *cautils.ArmoResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
