@@ -64,11 +64,14 @@ func (opap *OPAProcessor) updateResults() {
 func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {
 	controlToInfoMap := make(map[string]apis.StatusInfo)
 	for resource, statusInfo := range infoMap {
-		controls := mapResourceToControls[resource]
-		for _, control := range controls {
-			counters := controlSummary[control].ResourceCounters
-			if isEmptyResources(&counters) {
-				controlToInfoMap[control] = statusInfo
+		controlIDs := mapResourceToControls[resource]
+		for _, controlID := range controlIDs {
+			resources := controlSummary.GetControl(reportsummary.EControlCriteriaID, controlID).NumberOfResources()
+			if resources != nil {
+				// Check that there are no K8s resources too
+				if isEmptyResources(resources) {
+					controlToInfoMap[controlID] = statusInfo
+				}
 			}
 		}
 	}
