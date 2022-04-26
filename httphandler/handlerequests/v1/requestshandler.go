@@ -89,6 +89,8 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	returnResults := r.URL.Query().Has("wait")
+	keepResults := r.URL.Query().Has("keep")
+
 	var wg sync.WaitGroup
 	if returnResults {
 		wg.Add(1)
@@ -116,6 +118,10 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 				response.Response = results
 				wg.Done()
 			}
+		}
+		if !keepResults {
+			logger.L().Debug("deleting results", helpers.String("ID", scanID))
+			removeResultsFile(scanID)
 		}
 		handler.state.setNotBusy()
 	}()
@@ -170,7 +176,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		logger.L().Info("requesting results", helpers.String("ID", scanID))
 
-		if r.URL.Query().Has("remove") {
+		if !r.URL.Query().Has("keep") {
 			logger.L().Info("deleting results", helpers.String("ID", scanID))
 			defer removeResultsFile(scanID)
 		}
