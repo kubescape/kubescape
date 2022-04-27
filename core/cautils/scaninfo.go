@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+
 	giturl "github.com/armosec/go-git-url"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
@@ -180,11 +182,11 @@ func (scanInfo *ScanInfo) GetScanningEnvironment() string {
 	return ScanCluster
 }
 
-func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind reporthandling.NotificationPolicyKind) {
+func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
 		if !scanInfo.contains(policy) {
 			newPolicy := reporthandling.PolicyIdentifier{}
-			newPolicy.Kind = kind // reporthandling.KindFramework
+			newPolicy.Kind = reporthandling.NotificationPolicyKind(kind) // reporthandling.KindFramework
 			newPolicy.Name = policy
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 		}

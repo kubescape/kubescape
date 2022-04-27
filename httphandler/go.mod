@@ -6,8 +6,8 @@ replace github.com/armosec/kubescape/v2 => ../
 
 require (
 	github.com/armosec/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/armosec/opa-utils v0.0.130
-	github.com/armosec/utils-go v0.0.3
+	github.com/armosec/opa-utils v0.0.135
+	github.com/armosec/utils-go v0.0.5
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/stretchr/testify v1.7.1
@@ -28,11 +28,11 @@ require (
 	github.com/Azure/go-autorest/logger v0.2.1 // indirect
 	github.com/Azure/go-autorest/tracing v0.6.0 // indirect
 	github.com/OneOfOne/xxhash v1.2.8 // indirect
-	github.com/armosec/armoapi-go v0.0.66 // indirect
+	github.com/armosec/armoapi-go v0.0.67 // indirect
 	github.com/armosec/go-git-url v0.0.4 // indirect
-	github.com/armosec/k8s-interface v0.0.69 // indirect
+	github.com/armosec/k8s-interface v0.0.70 // indirect
 	github.com/armosec/rbac-utils v0.0.14 // indirect
-	github.com/armosec/utils-k8s-go v0.0.5 // indirect
+	github.com/armosec/utils-k8s-go v0.0.6 // indirect
 	github.com/aws/aws-sdk-go v1.41.11 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.12.0 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.12.0 // indirect

@@ -6,14 +6,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	pkgcautils "github.com/armosec/utils-go/utils"
-
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/core"
+	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
+	"github.com/armosec/utils-go/boolutils"
 )
 
-func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
+func scan(scanRequest *utilsmetav1.PostScanRequest, scanID string) ([]byte, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
 
 	ks := core.NewKubescape()
@@ -81,9 +81,9 @@ func findFile(targetDir string, fileName string) (string, error) {
 	return "", nil
 }
 
-func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanInfo {
+func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *cautils.ScanInfo {
 
-	scanInfo := scanRequest.ToScanInfo()
+	scanInfo := ToScanInfo(scanRequest)
 	scanInfo.ScanID = scanID
 
 	// *** start ***
@@ -107,6 +107,7 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.FailThreshold = 100
 	scanInfo.Account = envToString("KS_ACCOUNT", "")                               // publish results to Kubescape SaaS
 	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")         // namespace to exclude
+	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")             // namespace to exclude
 	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")          // namespace to include
 	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")                // output format version
 	scanInfo.Format = envToString("KS_FORMAT", "json")                             // default output should be json
@@ -121,7 +122,7 @@ func defaultScanInfo() *cautils.ScanInfo {
 
 func envToBool(env string, defaultValue bool) bool {
 	if d, ok := os.LookupEnv(env); ok {
-		return pkgcautils.StringToBool(d)
+		return boolutils.StringToBool(d)
 	}
 	return defaultValue
 }

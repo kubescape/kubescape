@@ -31,14 +31,15 @@ RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts
 
 FROM alpine
 
-RUN addgroup -S ks && adduser -S ks -G ks
-USER ks
-WORKDIR /home/ks/
+RUN addgroup -S armo && adduser -S armo -G armo
+USER armo
+WORKDIR /home/armo
 
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/ksserver
 COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kubescape
 
-RUN mkdir /home/ks/.kubescape && chmod 777 -R /home/ks/.kubescape 
-COPY --from=builder /work/artifacts/ /home/ks/.kubescape
+RUN mkdir /home/armo/.kubescape 
+COPY --from=builder /work/artifacts/ /home/armo/.kubescape
+RUN chmod 777 -R /home/armo/.kubescape
 
 ENTRYPOINT ["ksserver"]

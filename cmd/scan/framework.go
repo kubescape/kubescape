@@ -6,11 +6,12 @@ import (
 	"os"
 	"strings"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/meta"
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
@@ -95,7 +96,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			}
 			scanInfo.FrameworkScan = true
 
-			scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
+			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
