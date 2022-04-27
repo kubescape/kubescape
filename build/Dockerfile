@@ -39,7 +39,7 @@ COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/kss
 COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kubescape
 
 RUN mkdir /home/armo/.kubescape 
-COPY --from=builder /work/artifacts/ /home/ks/.kubescape
+COPY --from=builder /work/artifacts/ /home/armo/.kubescape
 RUN chmod 777 -R /home/armo/.kubescape
 
 ENTRYPOINT ["ksserver"]
