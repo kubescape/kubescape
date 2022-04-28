@@ -3,6 +3,7 @@ package v1
 import (
 	"testing"
 
+	"github.com/armosec/kubescape/v2/core/cautils"
 	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
 	"github.com/armosec/opa-utils/reporthandling"
@@ -57,5 +58,49 @@ func TestToScanInfo(t *testing.T) {
 		s := ToScanInfo(req)
 		assert.True(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
+	}
+}
+
+func TestSetTargetInScanInfo(t *testing.T) {
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{"nsa", "mitre"},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.False(t, scanInfo.ScanAll)
+		assert.Equal(t, 2, len(scanInfo.PolicyIdentifier))
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{"all"},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindControl,
+			TargetNames: []string{"c-0001"},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.False(t, scanInfo.FrameworkScan)
+		assert.False(t, scanInfo.ScanAll)
+		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
 	}
 }

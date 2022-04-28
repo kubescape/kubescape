@@ -43,12 +43,12 @@ subjects:
 apiVersion: v1
 kind: Service
 metadata:
-  name: kubescape-service
+  name: kubescape
   namespace: ks-scanner
   labels:
-    app: kubescape-service
+    app: kubescape
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
     - port: 8080
       name: http
