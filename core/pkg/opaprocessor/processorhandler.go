@@ -180,6 +180,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[stri
 				for j := range ruleResponses[i].FixPaths {
 					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: ruleResponses[i].FixPaths[j]})
 				}
+				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixCommand: ruleResponses[i].FixCommand})
 				resources[failedResources[j].GetID()] = ruleResult
 			}
 		}

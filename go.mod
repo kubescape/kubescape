@@ -3,7 +3,7 @@ module github.com/armosec/kubescape/v2
 go 1.17
 
 require (
-	github.com/armosec/armoapi-go v0.0.67
+	github.com/armosec/armoapi-go v0.0.72
 	github.com/armosec/go-git-url v0.0.4
 	github.com/armosec/k8s-interface v0.0.70
 	github.com/armosec/opa-utils v0.0.135
