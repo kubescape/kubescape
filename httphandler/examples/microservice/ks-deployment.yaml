@@ -43,10 +43,10 @@ subjects:
 apiVersion: v1
 kind: Service
 metadata:
-  name: kubescape-service
+  name: kubescape
   namespace: ks-scanner
   labels:
-    app: kubescape-service
+    app: kubescape
 spec:
   type: NodePort
   ports:
@@ -89,13 +89,20 @@ spec:
             port: 8080
           initialDelaySeconds: 3
           periodSeconds: 3
-        image: quay.io/armosec/kubescape:prometheus.v2
+        image: quay.io/armosec/kubescape:latest
+        imagePullPolicy: Always
         env:
         - name: KS_DEFAULT_CONFIGMAP_NAMESPACE
           valueFrom:
             fieldRef:
               apiVersion: v1
               fieldPath: metadata.namespace
+        - name: "KS_SKIP_UPDATE_CHECK" # do not check latest version
+          value: "true"
+        - name: KS_ENABLE_HOST_SCANNER # enable host scanner -> https://hub.armo.cloud/docs/host-sensor
+          value: "true"              
+        - name: KS_DOWNLOAD_ARTIFACTS  # When set to true the artifacts will be downloaded every scan execution
+          value: "true" 
         ports:
         - containerPort: 8080
           name: http

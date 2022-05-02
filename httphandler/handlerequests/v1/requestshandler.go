@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 
+	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
 
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
@@ -26,20 +27,12 @@ func NewHTTPHandler() *HTTPHandler {
 		state: newServerState(),
 	}
 }
+
 func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	response := utilsmetav1.Response{}
 	w.Header().Set("Content-Type", "application/json")
 
-	defer func() {
-		if err := recover(); err != nil {
-			handler.state.setNotBusy()
-			logger.L().Error("Scan recover", helpers.Error(fmt.Errorf("%v", err)))
-			w.WriteHeader(http.StatusInternalServerError)
-			response.Response = []byte(fmt.Sprintf("%v", err))
-			response.Type = utilsmetav1.ErrorScanResponseType
-			w.Write(responseToBytes(&response))
-		}
-	}()
+	defer handler.recover(w)
 
 	defer r.Body.Close()
 
@@ -67,24 +60,16 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	scanID := uuid.NewString()
 	handler.state.setID(scanID)
 	response.ID = scanID
-	response.Type = utilsmetav1.IDScanResponseType
+	response.Type = utilsapisv1.IDScanResponseType
 
 	readBuffer, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		defer handler.state.setNotBusy()
-		w.WriteHeader(http.StatusBadRequest)
-		response.Response = []byte(fmt.Sprintf("failed to read request body, reason: %s", err.Error()))
-		response.Type = utilsmetav1.ErrorScanResponseType
-		w.Write(responseToBytes(&response))
+		handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()))
 		return
 	}
 	scanRequest := utilsmetav1.PostScanRequest{}
 	if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
-		defer handler.state.setNotBusy()
-		w.WriteHeader(http.StatusBadRequest)
-		response.Response = []byte(fmt.Sprintf("failed to parse request payload, reason: %s", err.Error()))
-		response.Type = utilsmetav1.ErrorScanResponseType
-		w.Write(responseToBytes(&response))
+		handler.writeError(w, fmt.Errorf("failed to parse request payload, reason: %s", err.Error()))
 		return
 	}
 
@@ -107,14 +92,14 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			logger.L().Error("scanning failed", helpers.String("ID", scanID), helpers.Error(err))
 			if returnResults {
-				response.Type = utilsmetav1.ErrorScanResponseType
+				response.Type = utilsapisv1.ErrorScanResponseType
 				response.Response = []byte(err.Error())
 				statusCode = http.StatusInternalServerError
 			}
 		} else {
 			logger.L().Success("done scanning", helpers.String("ID", scanID))
 			if returnResults {
-				response.Type = utilsmetav1.ResultsV1ScanResponseType
+				response.Type = utilsapisv1.ResultsV1ScanResponseType
 				response.Response = results
 				wg.Done()
 			}
@@ -135,16 +120,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	response := utilsmetav1.Response{}
 	w.Header().Set("Content-Type", "application/json")
 
-	defer func() {
-		if err := recover(); err != nil {
-			handler.state.setNotBusy()
-			logger.L().Error("Results recover", helpers.Error(fmt.Errorf("%v", err)))
-			w.WriteHeader(http.StatusInternalServerError)
-			response.Response = []byte(fmt.Sprintf("%v", err))
-			response.Type = utilsmetav1.ErrorScanResponseType
-			w.Write(responseToBytes(&response))
-		}
-	}()
+	defer handler.recover(w)
 
 	defer r.Body.Close()
 
@@ -156,7 +132,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 		logger.L().Info("empty scan ID")
 		w.WriteHeader(http.StatusBadRequest) // Should we return ok?
 		response.Response = []byte("latest scan not found. trigger again")
-		response.Type = utilsmetav1.ErrorScanResponseType
+		response.Type = utilsapisv1.ErrorScanResponseType
 		w.Write(responseToBytes(&response))
 		return
 	}
@@ -216,4 +192,25 @@ func (handler *HTTPHandler) Ready(w http.ResponseWriter, r *http.Request) {
 func responseToBytes(res *utilsmetav1.Response) []byte {
 	b, _ := json.Marshal(res)
 	return b
+}
+
+func (handler *HTTPHandler) recover(w http.ResponseWriter) {
+	response := utilsmetav1.Response{}
+	if err := recover(); err != nil {
+		handler.state.setNotBusy()
+		logger.L().Error("recover", helpers.Error(fmt.Errorf("%v", err)))
+		w.WriteHeader(http.StatusInternalServerError)
+		response.Response = []byte(fmt.Sprintf("%v", err))
+		response.Type = utilsapisv1.ErrorScanResponseType
+		w.Write(responseToBytes(&response))
+	}
+}
+
+func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error) {
+	response := utilsmetav1.Response{}
+	w.WriteHeader(http.StatusBadRequest)
+	response.Response = []byte(err.Error())
+	response.Type = utilsapisv1.ErrorScanResponseType
+	w.Write(responseToBytes(&response))
+	handler.state.setNotBusy()
 }
