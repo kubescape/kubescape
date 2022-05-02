@@ -113,6 +113,7 @@ func (report *ReportEventReceiver) GetURL() string {
 }
 func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cautils.OPASessionObj) error {
 	splittedPostureReport := report.setSubReport(opaSessionObj)
+
 	counter := 0
 	reportCounter := 0
 	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, &counter, &reportCounter, host); err != nil {
@@ -121,7 +122,6 @@ func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cau
 	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
 		return err
 	}
-
 	return report.sendReport(host, splittedPostureReport, reportCounter, true)
 }
 func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
