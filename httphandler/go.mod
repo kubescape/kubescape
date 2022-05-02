@@ -28,7 +28,7 @@ require (
 	github.com/Azure/go-autorest/logger v0.2.1 // indirect
 	github.com/Azure/go-autorest/tracing v0.6.0 // indirect
 	github.com/OneOfOne/xxhash v1.2.8 // indirect
-	github.com/armosec/armoapi-go v0.0.67 // indirect
+	github.com/armosec/armoapi-go v0.0.72 // indirect
 	github.com/armosec/go-git-url v0.0.4 // indirect
 	github.com/armosec/k8s-interface v0.0.70 // indirect
 	github.com/armosec/rbac-utils v0.0.14 // indirect
