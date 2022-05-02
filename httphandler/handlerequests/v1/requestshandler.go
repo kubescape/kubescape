@@ -39,7 +39,6 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet: // return request template
 		json.NewEncoder(w).Encode(utilsmetav1.PostScanRequest{})
-		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		return
 	case http.MethodPost:
@@ -50,7 +49,10 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	if handler.state.isBusy() {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(handler.state.getID()))
+		response.Response = []byte(handler.state.getID())
+		response.ID = handler.state.getID()
+		response.Type = utilsapisv1.IDScanResponseType
+		w.Write(responseToBytes(&response))
 		return
 	}
 
