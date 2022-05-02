@@ -19,20 +19,14 @@ func scan(scanRequest *utilsmetav1.PostScanRequest, scanID string) ([]byte, erro
 	ks := core.NewKubescape()
 	result, err := ks.Scan(scanInfo)
 	if err != nil {
-		f, e := os.Open(filepath.Join(FailedOutputDir, scanID))
-		if e != nil {
-			return []byte{}, fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file. reason: %s", err.Error(), e.Error())
-		}
-		defer f.Close()
-		f.Write([]byte(e.Error()))
-
+		return []byte{}, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(); err != nil {
 		return nil, err
 	}
 	b, err := result.ToJson()
 	if err != nil {
-		err = fmt.Errorf("failed to parse results to json, reason: %s", err.Error())
+		err = fmt.Errorf("failed to parse scan results to json, reason: %s", err.Error())
 	}
 	return b, err
 }
@@ -132,4 +126,20 @@ func envToString(env string, defaultValue string) string {
 		return d
 	}
 	return defaultValue
+}
+
+func writeScanErrorToFile(err error, scanID string) error {
+	if e := os.MkdirAll(filepath.Dir(FailedOutputDir), os.ModePerm); e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", err.Error(), e.Error())
+	}
+	f, e := os.Create(filepath.Join(FailedOutputDir, scanID))
+	if e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", err.Error(), e.Error())
+	}
+	defer f.Close()
+
+	if _, e := f.Write([]byte(err.Error())); e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
+	}
+	return fmt.Errorf("failed to scan. reason: '%s'", err.Error())
 }
