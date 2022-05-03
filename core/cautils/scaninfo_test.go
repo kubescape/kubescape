@@ -7,16 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// func TestSetInputPatterns(t *testing.T) { //Unitest
-// 	{
-// 		scanInfo := ScanInfo{
-// 			InputPatterns: []string{"file"},
-// 		}
-// 		scanInfo.setInputPatterns()
-// 		assert.Equal(t, "file", scanInfo.InputPatterns[0])
-// 	}
-// }
-
 func TestSetContextMetadata(t *testing.T) {
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
@@ -37,6 +27,10 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assert.Nil(t, ctx.RepoContextMetadata)
+
+		hostName := getHostname()
+		assert.Contains(t, ctx.DirectoryContextMetadata.BasePath, "file")
+		assert.Equal(t, hostName, ctx.DirectoryContextMetadata.HostName)
 	}
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
@@ -47,6 +41,10 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.NotNil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assert.Nil(t, ctx.RepoContextMetadata)
+
+		hostName := getHostname()
+		assert.Contains(t, ctx.FileContextMetadata.FilePath, "scaninfo_test.go")
+		assert.Equal(t, hostName, ctx.FileContextMetadata.HostName)
 	}
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
@@ -56,7 +54,11 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.DirectoryContextMetadata)
 		assert.Nil(t, ctx.FileContextMetadata)
 		assert.Nil(t, ctx.HelmContextMetadata)
-		assert.Nil(t, ctx.RepoContextMetadata) // TODO
+		assert.NotNil(t, ctx.RepoContextMetadata)
+
+		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Repo)
+		assert.Equal(t, "armosec", ctx.RepoContextMetadata.Owner)
+		assert.Equal(t, "master", ctx.RepoContextMetadata.Branch)
 	}
 }
 

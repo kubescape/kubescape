@@ -1,10 +1,10 @@
 package cautils
 
 import (
-	pkgcautils "github.com/armosec/utils-go/utils"
 	"golang.org/x/mod/semver"
 
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/armosec/utils-go/boolutils"
 )
 
 func NewPolicies() *Policies {
@@ -40,7 +40,7 @@ func ruleWithArmoOpaDependency(attributes map[string]interface{}) bool {
 		return false
 	}
 	if s, ok := attributes["armoOpa"]; ok { // TODO - make global
-		return pkgcautils.StringToBool(s.(string))
+		return boolutils.StringToBool(s.(string))
 	}
 	return false
 }

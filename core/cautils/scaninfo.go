@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+
+	giturl "github.com/armosec/go-git-url"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
@@ -26,6 +29,10 @@ const (
 
 type BoolPtrFlag struct {
 	valPtr *bool
+}
+
+func NewBoolPtr(b *bool) BoolPtrFlag {
+	return BoolPtrFlag{valPtr: b}
 }
 
 func (bpf *BoolPtrFlag) Type() string {
@@ -175,11 +182,11 @@ func (scanInfo *ScanInfo) GetScanningEnvironment() string {
 	return ScanCluster
 }
 
-func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind reporthandling.NotificationPolicyKind) {
+func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
 		if !scanInfo.contains(policy) {
 			newPolicy := reporthandling.PolicyIdentifier{}
-			newPolicy.Kind = kind // reporthandling.KindFramework
+			newPolicy.Kind = reporthandling.NotificationPolicyKind(kind) // reporthandling.KindFramework
 			newPolicy.Name = policy
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 		}
@@ -219,6 +226,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Name)
 	}
 
+	metadata.ScanMetadata.KubescapeVersion = BuildNumber
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
 	metadata.ScanMetadata.HostScanner = scanInfo.HostSensorEnabled.GetBool()
@@ -240,7 +248,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 }
 
 func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
-	// if cluster
+	//  cluster
 	if input == "" {
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
 			ContextName: k8sinterface.GetContextName(),
@@ -248,8 +256,16 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		return
 	}
 
-	// if url
-	if strings.HasPrefix(input, "http") { // TODO - check if can parse
+	// url
+	if gitParser, err := giturl.NewGitURL(input); err == nil {
+		if gitParser.GetBranch() == "" {
+			gitParser.SetDefaultBranch()
+		}
+		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
+			Repo:   gitParser.GetRepo(),
+			Owner:  gitParser.GetOwner(),
+			Branch: gitParser.GetBranch(),
+		}
 		return
 	}
 
@@ -259,7 +275,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		}
 	}
 
-	// if single file
+	//  single file
 	if IsFile(input) {
 		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
 			FilePath: input,
@@ -268,7 +284,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		return
 	}
 
-	// if dir/glob
+	//  dir/glob
 	if !IsFile(input) {
 		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
 			BasePath: input,

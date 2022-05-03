@@ -15,8 +15,8 @@ import (
 )
 
 var (
-	YAML_PREFIX = []string{".yaml", ".yml"}
-	JSON_PREFIX = []string{".json"}
+	YAML_PREFIX = []string{"yaml", "yml"}
+	JSON_PREFIX = []string{"json"}
 )
 
 type FileFormat string
@@ -78,7 +78,6 @@ func ReadFile(fileContent []byte, fileFromat FileFormat) ([]workloadinterface.IM
 	default:
 		return nil, nil // []error{fmt.Errorf("file extension %s not supported", fileFromat)}
 	}
-
 }
 
 func listFiles(patterns []string) ([]string, []error) {
@@ -178,11 +177,11 @@ func convertYamlToJson(i interface{}) interface{} {
 }
 
 func IsYaml(filePath string) bool {
-	return StringInSlice(YAML_PREFIX, filepath.Ext(filePath)) != ValueNotFound
+	return StringInSlice(YAML_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", "")) != ValueNotFound
 }
 
 func IsJson(filePath string) bool {
-	return StringInSlice(JSON_PREFIX, filepath.Ext(filePath)) != ValueNotFound
+	return StringInSlice(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", "")) != ValueNotFound
 }
 
 func glob(root, pattern string) ([]string, error) {

@@ -9,7 +9,7 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	pkgutils "github.com/armosec/utils-go/utils"
+	"github.com/armosec/utils-go/boolutils"
 	"golang.org/x/mod/semver"
 )
 
@@ -28,9 +28,9 @@ func NewIVersionCheckHandler() IVersionCheckHandler {
 	if BuildNumber == "" {
 		logger.L().Warning("unknown build number, this might affect your scan results. Please make sure you are updated to latest version")
 	}
-	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && pkgutils.StringToBool(v) {
+	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && boolutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
-	} else if v, ok := os.LookupEnv(SKIP_VERSION_CHECK_DEPRECATED); ok && pkgutils.StringToBool(v) {
+	} else if v, ok := os.LookupEnv(SKIP_VERSION_CHECK_DEPRECATED); ok && boolutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
 	}
 	return NewVersionCheckHandler()

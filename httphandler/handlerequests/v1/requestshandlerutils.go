@@ -4,32 +4,29 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-
-	pkgcautils "github.com/armosec/utils-go/utils"
+	"strings"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/core"
+	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
+	"github.com/armosec/utils-go/boolutils"
 )
 
-func scan(scanRequest *PostScanRequest, scanID string) ([]byte, error) {
+func scan(scanRequest *utilsmetav1.PostScanRequest, scanID string) ([]byte, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
 
 	ks := core.NewKubescape()
 	result, err := ks.Scan(scanInfo)
 	if err != nil {
-		f, e := os.Open(filepath.Join(FailedOutputDir, scanID))
-		if e != nil {
-			return []byte{}, fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file. reason: %s", err.Error(), e.Error())
-		}
-		defer f.Close()
-		f.Write([]byte(e.Error()))
-
+		return []byte{}, writeScanErrorToFile(err, scanID)
 	}
-	result.HandleResults()
+	if err := result.HandleResults(); err != nil {
+		return nil, err
+	}
 	b, err := result.ToJson()
 	if err != nil {
-		err = fmt.Errorf("failed to parse results to json, reason: %s", err.Error())
+		err = fmt.Errorf("failed to parse scan results to json, reason: %s", err.Error())
 	}
 	return b, err
 }
@@ -62,21 +59,25 @@ func searchFile(fileID string) string {
 }
 
 func findFile(targetDir string, fileName string) (string, error) {
-
-	matches, err := filepath.Glob(filepath.Join(targetDir, fileName))
+	var files []string
+	err := filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
+		files = append(files, path)
+		return nil
+	})
 	if err != nil {
 		return "", err
 	}
-
-	if len(matches) != 0 {
-		return matches[0], nil
+	for i := range files {
+		if strings.Contains(files[i], fileName) {
+			return files[i], nil
+		}
 	}
 	return "", nil
 }
 
-func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanInfo {
+func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *cautils.ScanInfo {
 
-	scanInfo := scanRequest.ToScanInfo()
+	scanInfo := ToScanInfo(scanRequest)
 	scanInfo.ScanID = scanID
 
 	// *** start ***
@@ -98,14 +99,15 @@ func getScanCommand(scanRequest *PostScanRequest, scanID string) *cautils.ScanIn
 func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.FailThreshold = 100
-	scanInfo.Account = envToString("KS_ACCOUNT", "")                              // publish results to Kubescape SaaS
-	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")        // namespace to exclude
-	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")         // namespace to include
-	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")               // output format version
-	scanInfo.Format = envToString("KS_FORMAT", "json")                            // default output should be json
-	scanInfo.Submit = envToBool("KS_SUBMIT", false)                               // publish results to Kubescape SaaS
-	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", true)) // enable host scanner
-	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                            // do not publish results to Kubescape SaaS
+	scanInfo.Account = envToString("KS_ACCOUNT", "")                               // publish results to Kubescape SaaS
+	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")         // namespace to exclude
+	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")             // namespace to exclude
+	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")          // namespace to include
+	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")                // output format version
+	scanInfo.Format = envToString("KS_FORMAT", "json")                             // default output should be json
+	scanInfo.Submit = envToBool("KS_SUBMIT", false)                                // publish results to Kubescape SaaS
+	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", false)) // enable host scanner
+	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                             // do not publish results to Kubescape SaaS
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
@@ -114,7 +116,7 @@ func defaultScanInfo() *cautils.ScanInfo {
 
 func envToBool(env string, defaultValue bool) bool {
 	if d, ok := os.LookupEnv(env); ok {
-		return pkgcautils.StringToBool(d)
+		return boolutils.StringToBool(d)
 	}
 	return defaultValue
 }
@@ -124,4 +126,20 @@ func envToString(env string, defaultValue string) string {
 		return d
 	}
 	return defaultValue
+}
+
+func writeScanErrorToFile(err error, scanID string) error {
+	if e := os.MkdirAll(filepath.Dir(FailedOutputDir), os.ModePerm); e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", err.Error(), e.Error())
+	}
+	f, e := os.Create(filepath.Join(FailedOutputDir, scanID))
+	if e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", err.Error(), e.Error())
+	}
+	defer f.Close()
+
+	if _, e := f.Write([]byte(err.Error())); e != nil {
+		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
+	}
+	return fmt.Errorf("failed to scan. reason: '%s'", err.Error())
 }

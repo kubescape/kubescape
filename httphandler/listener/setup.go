@@ -9,7 +9,6 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/zaplogger"
 	handlerequestsv1 "github.com/armosec/kubescape/v2/httphandler/handlerequests/v1"
 	"github.com/gorilla/mux"
 )
@@ -24,7 +23,7 @@ const (
 
 // SetupHTTPListener set up listening http servers
 func SetupHTTPListener() error {
-	logger.InitLogger(zaplogger.LoggerName)
+	initialize()
 
 	keyPair, err := loadTLSKey("", "") // TODO - support key and crt files
 	if err != nil {
