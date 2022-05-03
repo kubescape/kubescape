@@ -2,6 +2,7 @@ package v2
 
 import (
 	"net/url"
+	"strings"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
@@ -11,9 +12,13 @@ import (
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj := url.URL{}
-
-	urlObj.Scheme = "https"
 	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
+	if strings.Contains(urlObj.Host, "http://") {
+		urlObj.Scheme = "http"
+		urlObj.Host = strings.Replace(urlObj.Host, "http://", "", 1)
+	} else {
+		urlObj.Scheme = "https"
+	}
 	urlObj.Path = "/k8s/v2/postureReport"
 
 	q := urlObj.Query()
