@@ -226,6 +226,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Name)
 	}
 
+	metadata.ScanMetadata.KubescapeVersion = BuildNumber
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
 	metadata.ScanMetadata.HostScanner = scanInfo.HostSensorEnabled.GetBool()
