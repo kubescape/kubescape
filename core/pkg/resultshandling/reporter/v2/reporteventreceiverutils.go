@@ -11,14 +11,7 @@ import (
 )
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
-	urlObj := url.URL{}
-	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
-	if strings.Contains(urlObj.Host, "http://") {
-		urlObj.Scheme = "http"
-		urlObj.Host = strings.Replace(urlObj.Host, "http://", "", 1)
-	} else {
-		urlObj.Scheme = "https"
-	}
+	urlObj := parseHost(getter.GetArmoAPIConnector().GetReportReceiverURL())
 	urlObj.Path = "/k8s/v2/postureReport"
 
 	q := urlObj.Query()
@@ -30,6 +23,17 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 	report.eventReceiverURL = &urlObj
 }
 
+func parseHost(host string) url.URL {
+	urlObj := url.URL{}
+	if strings.Contains(host, "http://") {
+		urlObj.Scheme = "http"
+		urlObj.Host = strings.Replace(host, "http://", "", 1)
+	} else {
+		urlObj.Scheme = "https"
+		urlObj.Host = host
+	}
+	return urlObj
+}
 func hostToString(host *url.URL, reportID string) string {
 	q := host.Query()
 	q.Add("reportGUID", reportID) // TODO - do we add the reportID?

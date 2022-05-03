@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
@@ -89,15 +88,7 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 }
 
 func (report *ReportEventReceiver) GetURL() string {
-	u := url.URL{}
-	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
-	if strings.Contains(u.Host, "http://") {
-		u.Scheme = "http"
-		u.Host = strings.Replace(u.Host, "http://", "", 1)
-	} else {
-		u.Scheme = "https"
-	}
-
+	u := parseHost(getter.GetArmoAPIConnector().GetFrontendURL())
 	q := u.Query()
 
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
