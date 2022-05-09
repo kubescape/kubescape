@@ -278,7 +278,7 @@ Scan the YAML files while writing them using the [vs code extension](https://git
 
 ## Lens Extension
 
-View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using our [Lens extension](https://github.com/armosec/lens-kubescape/blob/master/README.md)
+View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using kubescape [Lens extension](https://github.com/armosec/lens-kubescape/blob/master/README.md)
 
 # Under the hood
 
