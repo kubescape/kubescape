@@ -6,7 +6,7 @@ replace github.com/armosec/kubescape/v2 => ../
 
 require (
 	github.com/armosec/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/armosec/opa-utils v0.0.136
+	github.com/armosec/opa-utils v0.0.137
 	github.com/armosec/utils-go v0.0.5
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
@@ -28,7 +28,7 @@ require (
 	github.com/Azure/go-autorest/logger v0.2.1 // indirect
 	github.com/Azure/go-autorest/tracing v0.6.0 // indirect
 	github.com/OneOfOne/xxhash v1.2.8 // indirect
-	github.com/armosec/armoapi-go v0.0.72 // indirect
+	github.com/armosec/armoapi-go v0.0.73 // indirect
 	github.com/armosec/go-git-url v0.0.4 // indirect
 	github.com/armosec/k8s-interface v0.0.70 // indirect
 	github.com/armosec/rbac-utils v0.0.14 // indirect
