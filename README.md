@@ -38,7 +38,7 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 ## Run:
 ```
-kubescape scan --submit --enable-host-scan --format-version v2 --verbose
+kubescape scan --submit --enable-host-scan --verbose
 ```
 
 <img src="docs/summary.png">

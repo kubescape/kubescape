@@ -70,6 +70,13 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 }
 
 // TODO - UPDATE
+type ViewTypes string
+
+const (
+	ResourceViewType ViewTypes = "resource"
+	ControlViewType  ViewTypes = "control"
+)
+
 type ScanInfo struct {
 	Getters                                              // TODO - remove from object
 	PolicyIdentifier   []reporthandling.PolicyIdentifier // TODO - remove from object
@@ -79,6 +86,7 @@ type ScanInfo struct {
 	UseDefault         bool                              // Load framework from cached file (instead of download). Use when running offline
 	UseArtifactsFrom   string                            // Load artifacts from local path. Use when running offline
 	VerboseMode        bool                              // Display all of the input resources and not only failed resources
+	View               string                            // Display all of the input resources and not only failed resources
 	Format             string                            // Format results (table, json, junit ...)
 	Output             string                            // Store results in an output file, Output file name
 	FormatVersion      string                            // Output object can be differnet between versions, this is for testing and backward compatibility

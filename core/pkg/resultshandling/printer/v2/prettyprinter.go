@@ -19,14 +19,16 @@ import (
 
 type PrettyPrinter struct {
 	formatVersion string
+	viewType      cautils.ViewTypes
 	writer        *os.File
 	verboseMode   bool
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string, viewType cautils.ViewTypes) *PrettyPrinter {
 	return &PrettyPrinter{
 		verboseMode:   verboseMode,
 		formatVersion: formatVersion,
+		viewType:      viewType,
 	}
 }
 
@@ -35,9 +37,15 @@ func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessio
 
 	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
-	if prettyPrinter.verboseMode {
-		prettyPrinter.resourceTable(opaSessionObj)
+	switch prettyPrinter.viewType {
+	case cautils.ControlViewType:
+		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlNames)
+	case cautils.ResourceViewType:
+		if prettyPrinter.verboseMode {
+			prettyPrinter.resourceTable(opaSessionObj)
+		}
 	}
+
 	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlNames)
 
 }
