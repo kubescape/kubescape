@@ -72,7 +72,7 @@ func (resultsHandler *ResultsHandler) HandleResults() error {
 }
 
 // NewPrinter defind output format
-func NewPrinter(printFormat, formatVersion string, verboseMode bool) printer.IPrinter {
+func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType cautils.ViewTypes) printer.IPrinter {
 
 	switch printFormat {
 	case printer.JsonFormat:
@@ -90,6 +90,6 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool) printer.IPr
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
 	default:
-		return printerv2.NewPrettyPrinter(verboseMode, formatVersion)
+		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
 	}
 }
