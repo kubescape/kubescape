@@ -18,6 +18,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8slabels "k8s.io/apimachinery/pkg/labels"
@@ -287,17 +288,33 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 }
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
-	// labels used for control plane
-	listOptions := metav1.ListOptions{
-		LabelSelector: "!node-role.kubernetes.io/control-plane,!node-role.kubernetes.io/master",
+	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	nodesNumber := 0
+	scheduableNodes := v1.NodeList{}
+	if nodesList != nil {
+		for _, node := range nodesList.Items {
+			if len(node.Spec.Taints) == 0 {
+				scheduableNodes.Items = append(scheduableNodes.Items, node)
+			} else {
+				if !isMasterNodeTaints(node.Spec.Taints) {
+					scheduableNodes.Items = append(scheduableNodes.Items, node)
+				}
+			}
+		}
 	}
-	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.TODO(), listOptions)
 	if err != nil {
 		return 0, err
 	}
-	nodesNumber := 0
-	if nodesList != nil {
-		nodesNumber = len(nodesList.Items)
-	}
+	nodesNumber = len(scheduableNodes.Items)
 	return nodesNumber, nil
+}
+
+// NoSchedule taint with empty value is usually applied to controlplane
+func isMasterNodeTaints(taints []v1.Taint) bool {
+	for _, taint := range taints {
+		if taint.Effect == v1.TaintEffectNoSchedule && taint.Value == "" {
+			return true
+		}
+	}
+	return false
 }
