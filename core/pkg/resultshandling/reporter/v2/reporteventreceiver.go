@@ -88,7 +88,9 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 }
 
 func (report *ReportEventReceiver) GetURL() string {
-	u := parseHost(getter.GetArmoAPIConnector().GetFrontendURL())
+	u := url.URL{}
+	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
+	ParseHost(&u)
 	q := u.Query()
 
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted

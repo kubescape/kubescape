@@ -2,7 +2,6 @@ package v2
 
 import (
 	"net/url"
-	"strings"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
@@ -11,9 +10,10 @@ import (
 )
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
-	urlObj := parseHost(getter.GetArmoAPIConnector().GetReportReceiverURL())
+	urlObj := url.URL{}
+	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
+	ParseHost(&urlObj)
 	urlObj.Path = "/k8s/v2/postureReport"
-
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())
 	q.Add("clusterName", report.clusterName)
@@ -23,17 +23,6 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 	report.eventReceiverURL = &urlObj
 }
 
-func parseHost(host string) url.URL {
-	urlObj := url.URL{}
-	if strings.Contains(host, "http://") {
-		urlObj.Scheme = "http"
-		urlObj.Host = strings.Replace(host, "http://", "", 1)
-	} else {
-		urlObj.Scheme = "https"
-		urlObj.Host = host
-	}
-	return urlObj
-}
 func hostToString(host *url.URL, reportID string) string {
 	q := host.Query()
 	q.Add("reportGUID", reportID) // TODO - do we add the reportID?

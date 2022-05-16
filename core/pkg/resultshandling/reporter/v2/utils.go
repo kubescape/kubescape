@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"net/url"
 	"strings"
 )
 
@@ -20,4 +21,14 @@ func maskID(id string) string {
 	}
 
 	return strings.TrimSuffix(str, sep)
+}
+
+func ParseHost(urlObj *url.URL) {
+	if strings.Contains(urlObj.Host, "http://") {
+		urlObj.Scheme = "http"
+		urlObj.Host = strings.Replace(urlObj.Host, "http://", "", 1)
+	} else {
+		urlObj.Scheme = "https"
+		urlObj.Host = strings.Replace(urlObj.Host, "https://", "", 1)
+	}
 }
