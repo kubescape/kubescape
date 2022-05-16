@@ -120,8 +120,9 @@ github.com/armosec/go-git-url v0.0.4 h1:emG9Yfl53rHpuX41fXLD92ehzhRoNSSnGT6Pr7og
 github.com/armosec/go-git-url v0.0.4/go.mod h1:PJqdEyJyFxTQvawBcyOM0Ies6+uezire5gpwfr1XX5M=
 github.com/armosec/k8s-interface v0.0.8/go.mod h1:xxS+V5QT3gVQTwZyAMMDrYLWGrfKOpiJ7Jfhfa0w9sM=
 github.com/armosec/k8s-interface v0.0.37/go.mod h1:vHxGWqD/uh6+GQb9Sqv7OGMs+Rvc2dsFVc0XtgRh1ZU=
-github.com/armosec/k8s-interface v0.0.70 h1:NU3UIaNl7H3hsRecwggiaQbZXTwXtOKg3GOBjq6/XJw=
 github.com/armosec/k8s-interface v0.0.70/go.mod h1:8NX4xWXh8mwW7QyZdZea1czNdM2azCK9BbUNmiZYXW0=
+github.com/armosec/k8s-interface v0.0.73 h1:L1W8irF4vttWoK2xa+VFxEO95g5IGP1+0DtQ7SMFKdA=
+github.com/armosec/k8s-interface v0.0.73/go.mod h1:8NX4xWXh8mwW7QyZdZea1czNdM2azCK9BbUNmiZYXW0=
 github.com/armosec/opa-utils v0.0.64/go.mod h1:6tQP8UDq2EvEfSqh8vrUdr/9QVSCG4sJfju1SXQOn4c=
 github.com/armosec/opa-utils v0.0.137 h1:KAkxWYnnTef8ofixJ198Zs4Xs7MOh32+yMUyFY7I8DA=
 github.com/armosec/opa-utils v0.0.137/go.mod h1:mCFQzz4E227f7V2jQVQ9XCivkNNK3UWCTaZ0HE5rBWk=
