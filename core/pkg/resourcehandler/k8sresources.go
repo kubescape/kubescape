@@ -292,7 +292,6 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
 	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
-	nodesNumber := 0
 	scheduableNodes := v1.NodeList{}
 	if nodesList != nil {
 		for _, node := range nodesList.Items {
@@ -308,8 +307,7 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	nodesNumber = len(scheduableNodes.Items)
-	return nodesNumber, nil
+	return len(scheduableNodes.Items), nil
 }
 
 // NoSchedule taint with empty value is usually applied to controlplane

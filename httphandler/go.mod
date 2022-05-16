@@ -30,7 +30,7 @@ require (
 	github.com/OneOfOne/xxhash v1.2.8 // indirect
 	github.com/armosec/armoapi-go v0.0.73 // indirect
 	github.com/armosec/go-git-url v0.0.4 // indirect
-	github.com/armosec/k8s-interface v0.0.70 // indirect
+	github.com/armosec/k8s-interface v0.0.74 // indirect
 	github.com/armosec/rbac-utils v0.0.14 // indirect
 	github.com/armosec/utils-k8s-go v0.0.6 // indirect
 	github.com/aws/aws-sdk-go v1.41.11 // indirect
