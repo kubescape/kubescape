@@ -39,11 +39,13 @@ var (
 func isEmptyImgVulns(armoResourcesMap cautils.ArmoResources) bool {
 	imgVulnResources := cautils.MapImageVulnResources(&armoResourcesMap)
 	for _, resource := range imgVulnResources {
-		if _, val := armoResourcesMap[resource]; val {
-			return true
+		if val, ok := armoResourcesMap[resource]; ok {
+			if len(val) > 0 {
+				return false
+			}
 		}
 	}
-	return false
+	return true
 }
 
 func setK8sResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResources {
