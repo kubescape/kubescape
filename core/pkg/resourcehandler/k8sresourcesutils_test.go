@@ -2,7 +2,9 @@ package resourcehandler
 
 import (
 	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/stretchr/testify/assert"
 
 	"testing"
 )
@@ -23,6 +25,17 @@ func TestSetResourceMap(t *testing.T) {
 		t.Errorf("missing: 'apps'. k8sResources: %v", k8sResources)
 	}
 
+}
+func TestSsEmptyImgVulns(t *testing.T) {
+	var armoResourcesMap cautils.ArmoResources
+	armoResourcesMap = MapResourceToApiGroupCloud
+	assert.Equal(t, false, isEmptyImgVulns(armoResourcesMap))
+
+	armoResourcesMap = MapResourceToApiGroupVuln
+	assert.Equal(t, true, isEmptyImgVulns(armoResourcesMap))
+
+	armoResourcesMap["bla"] = []string{"blu"}
+	assert.Equal(t, false, isEmptyImgVulns(armoResourcesMap))
 }
 
 func TestInsertK8sResources(t *testing.T) {
