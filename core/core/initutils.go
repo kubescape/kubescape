@@ -13,7 +13,6 @@ import (
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
 )
 
@@ -105,7 +104,7 @@ func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector
 	return &resourcehandler.EmptySelector{}
 }
 
-func policyIdentifierNames(pi []reporthandling.PolicyIdentifier) string {
+func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
 	policiesNames := ""
 	for i := range pi {
 		policiesNames += pi[i].Name

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 
 	giturl "github.com/armosec/go-git-url"
@@ -77,33 +78,39 @@ const (
 	ControlViewType  ViewTypes = "control"
 )
 
+type PolicyIdentifier struct {
+	Name        string                        // policy name e.g. nsa,mitre,c-0012
+	Kind        apisv1.NotificationPolicyKind // policy kind e.g. Framework,Control,Rule
+	Designators armotypes.PortalDesignator
+}
+
 type ScanInfo struct {
-	Getters                                              // TODO - remove from object
-	PolicyIdentifier   []reporthandling.PolicyIdentifier // TODO - remove from object
-	UseExceptions      string                            // Load file with exceptions configuration
-	ControlsInputs     string                            // Load file with inputs for controls
-	UseFrom            []string                          // Load framework from local file (instead of download). Use when running offline
-	UseDefault         bool                              // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom   string                            // Load artifacts from local path. Use when running offline
-	VerboseMode        bool                              // Display all of the input resources and not only failed resources
-	View               string                            // Display all of the input resources and not only failed resources
-	Format             string                            // Format results (table, json, junit ...)
-	Output             string                            // Store results in an output file, Output file name
-	FormatVersion      string                            // Output object can be differnet between versions, this is for testing and backward compatibility
-	ExcludedNamespaces string                            // used for host scanner namespace
-	IncludeNamespaces  string                            // DEPRECATED?
-	InputPatterns      []string                          // Yaml files input patterns
-	Silent             bool                              // Silent mode - Do not print progress logs
-	FailThreshold      float32                           // Failure score threshold
-	Submit             bool                              // Submit results to Armo BE
-	ScanID             string                            // Report id of the current scan
-	HostSensorEnabled  BoolPtrFlag                       // Deploy ARMO K8s host scanner to collect data from certain controls
-	HostSensorYamlPath string                            // Path to hostsensor file
-	Local              bool                              // Do not submit results
-	Account            string                            // account ID
-	KubeContext        string                            // context name
-	FrameworkScan      bool                              // false if scanning control
-	ScanAll            bool                              // true if scan all frameworks
+	Getters                               // TODO - remove from object
+	PolicyIdentifier   []PolicyIdentifier // TODO - remove from object
+	UseExceptions      string             // Load file with exceptions configuration
+	ControlsInputs     string             // Load file with inputs for controls
+	UseFrom            []string           // Load framework from local file (instead of download). Use when running offline
+	UseDefault         bool               // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom   string             // Load artifacts from local path. Use when running offline
+	VerboseMode        bool               // Display all of the input resources and not only failed resources
+	View               string             // Display all of the input resources and not only failed resources
+	Format             string             // Format results (table, json, junit ...)
+	Output             string             // Store results in an output file, Output file name
+	FormatVersion      string             // Output object can be differnet between versions, this is for testing and backward compatibility
+	ExcludedNamespaces string             // used for host scanner namespace
+	IncludeNamespaces  string             //
+	InputPatterns      []string           // Yaml files input patterns
+	Silent             bool               // Silent mode - Do not print progress logs
+	FailThreshold      float32            // Failure score threshold
+	Submit             bool               // Submit results to Armo BE
+	ScanID             string             // Report id of the current scan
+	HostSensorEnabled  BoolPtrFlag        // Deploy ARMO K8s host scanner to collect data from certain controls
+	HostSensorYamlPath string             // Path to hostsensor file
+	Local              bool               // Do not submit results
+	Account            string             // account ID
+	KubeContext        string             // context name
+	FrameworkScan      bool               // false if scanning control
+	ScanAll            bool               // true if scan all frameworks
 }
 
 type Getters struct {
@@ -193,8 +200,8 @@ func (scanInfo *ScanInfo) GetScanningEnvironment() string {
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
 		if !scanInfo.contains(policy) {
-			newPolicy := reporthandling.PolicyIdentifier{}
-			newPolicy.Kind = reporthandling.NotificationPolicyKind(kind) // reporthandling.KindFramework
+			newPolicy := PolicyIdentifier{}
+			newPolicy.Kind = kind
 			newPolicy.Name = policy
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 		}

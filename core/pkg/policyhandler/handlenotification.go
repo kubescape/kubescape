@@ -3,9 +3,9 @@ package policyhandler
 import (
 	"fmt"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/armosec/opa-utils/reporthandling"
 )
 
 // PolicyHandler -
@@ -22,7 +22,7 @@ func NewPolicyHandler(resourceHandler resourcehandler.IResourceHandler) *PolicyH
 	}
 }
 
-func (policyHandler *PolicyHandler) CollectResources(notification *reporthandling.PolicyNotification, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
+func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
 	opaSessionObj := cautils.NewOPASessionObj(nil, nil, scanInfo)
 
 	// validate notification
@@ -30,11 +30,11 @@ func (policyHandler *PolicyHandler) CollectResources(notification *reporthandlin
 	policyHandler.getters = &scanInfo.Getters
 
 	// get policies
-	if err := policyHandler.getPolicies(notification, opaSessionObj); err != nil {
+	if err := policyHandler.getPolicies(policyIdentifier, opaSessionObj); err != nil {
 		return opaSessionObj, err
 	}
 
-	err := policyHandler.getResources(notification, opaSessionObj, scanInfo)
+	err := policyHandler.getResources(policyIdentifier, opaSessionObj, scanInfo)
 	if err != nil {
 		return opaSessionObj, err
 	}
@@ -46,10 +46,10 @@ func (policyHandler *PolicyHandler) CollectResources(notification *reporthandlin
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getResources(notification *reporthandling.PolicyNotification, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
+func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
 
-	resourcesMap, allResources, armoResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &notification.Designators)
+	resourcesMap, allResources, armoResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
 	if err != nil {
 		return err
 	}
@@ -59,4 +59,11 @@ func (policyHandler *PolicyHandler) getResources(notification *reporthandling.Po
 	opaSessionObj.ArmoResource = armoResources
 
 	return nil
+}
+
+func getDesignator(policyIdentifier []cautils.PolicyIdentifier) *armotypes.PortalDesignator {
+	if len(policyIdentifier) > 0 {
+		return &policyIdentifier[0].Designators
+	}
+	return &armotypes.PortalDesignator{}
 }

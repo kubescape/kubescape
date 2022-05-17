@@ -4,12 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/opa-utils/reporthandling"
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+
+	"github.com/armosec/kubescape/v2/core/cautils"
 )
 
-func getScanKind(notification *reporthandling.PolicyNotification) reporthandling.NotificationPolicyKind {
-	if len(notification.Rules) > 0 {
-		return notification.Rules[0].Kind
+func getScanKind(policyIdentifier []cautils.PolicyIdentifier) apisv1.NotificationPolicyKind {
+	if len(policyIdentifier) > 0 {
+		return policyIdentifier[0].Kind
 	}
 	return "unknown"
 }

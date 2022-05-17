@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,30 +11,33 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/core"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/armosec/utils-go/boolutils"
 )
 
-func scan(scanRequest *utilsmetav1.PostScanRequest, scanID string) ([]byte, error) {
+func scan(scanRequest *utilsmetav1.PostScanRequest, scanID string) (*reporthandlingv2.PostureReport, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
 
 	ks := core.NewKubescape()
 	result, err := ks.Scan(scanInfo)
 	if err != nil {
-		return []byte{}, writeScanErrorToFile(err, scanID)
+		return nil, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(); err != nil {
 		return nil, err
 	}
-	b, err := result.ToJson()
-	if err != nil {
-		err = fmt.Errorf("failed to parse scan results to json, reason: %s", err.Error())
-	}
-	return b, err
+	return result.GetResults(), nil
 }
 
-func readResultsFile(fileID string) ([]byte, error) {
+func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 	if fileName := searchFile(fileID); fileName != "" {
-		return os.ReadFile(fileName)
+		f, err := os.ReadFile(fileName)
+		if err != nil {
+			return nil, err
+		}
+		postureReport := &reporthandlingv2.PostureReport{}
+		err = json.Unmarshal(f, postureReport)
+		return postureReport, err
 	}
 	return nil, fmt.Errorf("file %s not found", fileID)
 }

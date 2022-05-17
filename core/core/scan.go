@@ -5,7 +5,6 @@ import (
 
 	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/k8sinterface"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
@@ -20,7 +19,6 @@ import (
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/resources"
 )
 
@@ -146,7 +144,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// ===================== policies & resources =====================
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
-	scanData, err := collectResources(policyHandler, scanInfo)
+	scanData, err := policyHandler.CollectResources(scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
 		return resultsHandling, err
 	}
@@ -167,28 +165,6 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// }
 
 	return resultsHandling, nil
-}
-
-// TODO - remove function
-func collectResources(policyHandler *policyhandler.PolicyHandler, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
-	policyNotification := &reporthandling.PolicyNotification{
-		Rules: scanInfo.PolicyIdentifier,
-		KubescapeNotification: reporthandling.KubescapeNotification{
-			Designators:      armotypes.PortalDesignator{},
-			NotificationType: reporthandling.TypeExecPostureScan,
-		},
-	}
-	switch policyNotification.KubescapeNotification.NotificationType {
-	case reporthandling.TypeExecPostureScan:
-		collectedResources, err := policyHandler.CollectResources(policyNotification, scanInfo)
-		if err != nil {
-			return nil, err
-		}
-		return collectedResources, nil
-
-	default:
-		return nil, fmt.Errorf("notification type '%s' Unknown", policyNotification.KubescapeNotification.NotificationType)
-	}
 }
 
 // func askUserForHostSensor() bool {

@@ -6,7 +6,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.73
 	github.com/armosec/go-git-url v0.0.4
 	github.com/armosec/k8s-interface v0.0.70
-	github.com/armosec/opa-utils v0.0.137
+	github.com/armosec/opa-utils v0.0.139
 	github.com/armosec/rbac-utils v0.0.14
 	github.com/armosec/utils-go v0.0.5
 	github.com/armosec/utils-k8s-go v0.0.6
