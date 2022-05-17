@@ -12,7 +12,6 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/meta"
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
@@ -59,7 +58,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			// flagValidationControl(scanInfo)
-			scanInfo.PolicyIdentifier = []reporthandling.PolicyIdentifier{}
+			scanInfo.PolicyIdentifier = []cautils.PolicyIdentifier{}
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
