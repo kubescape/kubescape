@@ -125,6 +125,9 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()))
 		return
 	}
+
+	logger.L().Info("REST API received scan request", helpers.String("body", string(readBuffer)))
+
 	scanRequest := utilsmetav1.PostScanRequest{}
 	if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
 		handler.writeError(w, fmt.Errorf("failed to parse request payload, reason: %s", err.Error()))
