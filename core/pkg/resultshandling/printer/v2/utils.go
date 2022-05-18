@@ -12,7 +12,7 @@ import (
 )
 
 // finalizeV2Report finalize the results objects by copying data from map to lists
-func DataToJson(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
+func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
 		ClusterAPIServerInfo: data.Report.ClusterAPIServerInfo,

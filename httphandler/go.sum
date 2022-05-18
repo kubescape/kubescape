@@ -124,8 +124,9 @@ github.com/armosec/k8s-interface v0.0.70/go.mod h1:8NX4xWXh8mwW7QyZdZea1czNdM2az
 github.com/armosec/k8s-interface v0.0.75 h1:pfheXWGcE6vUlo4TOkwXQ8iGo8Dw/UCXefD3Bx4l0Qs=
 github.com/armosec/k8s-interface v0.0.75/go.mod h1:8NX4xWXh8mwW7QyZdZea1czNdM2azCK9BbUNmiZYXW0=
 github.com/armosec/opa-utils v0.0.64/go.mod h1:6tQP8UDq2EvEfSqh8vrUdr/9QVSCG4sJfju1SXQOn4c=
-github.com/armosec/opa-utils v0.0.137 h1:KAkxWYnnTef8ofixJ198Zs4Xs7MOh32+yMUyFY7I8DA=
 github.com/armosec/opa-utils v0.0.137/go.mod h1:mCFQzz4E227f7V2jQVQ9XCivkNNK3UWCTaZ0HE5rBWk=
+github.com/armosec/opa-utils v0.0.139 h1:JPxgPXVJUUIujtIoZk6TejE8PkZhX2pYnpj+E8PhcfA=
+github.com/armosec/opa-utils v0.0.139/go.mod h1:VnRVJgDDPFAprGDcibTtKHf9wgkoyTU8wmX2BxEIwok=
 github.com/armosec/rbac-utils v0.0.1/go.mod h1:pQ8CBiij8kSKV7aeZm9FMvtZN28VgA7LZcYyTWimq40=
 github.com/armosec/rbac-utils v0.0.14 h1:CKYKcgqJEXWF2Hen/B1pVGtS3nDAG1wp9dDv6oNtq90=
 github.com/armosec/rbac-utils v0.0.14/go.mod h1:Ex/IdGWhGv9HZq6Hs8N/ApzCKSIvpNe/ETqDfnuyah0=
@@ -463,6 +464,8 @@ github.com/googleapis/gnostic v0.5.5/go.mod h1:7+EbHbldMins07ALC74bsA81Ovc97Dwqy
 github.com/gopherjs/gopherjs v0.0.0-20181017120253-0766667cb4d1/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
 github.com/gorilla/mux v1.8.0 h1:i40aqfkR1h2SlN9hojwV5ZA91wcXFOvkdNIeFDP5koI=
 github.com/gorilla/mux v1.8.0/go.mod h1:DVbg23sWSpFRCP0SfiEN6jmj59UnW/n46BH5rLB71So=
+github.com/gorilla/schema v1.2.0 h1:YufUaxZYCKGFuAq3c96BOhjgd5nmXiOY9NGzF247Tsc=
+github.com/gorilla/schema v1.2.0/go.mod h1:kgLaKoK1FELgZqMAVxx/5cbj0kT+57qxUrAlIO2eleU=
 github.com/gorilla/websocket v1.4.2/go.mod h1:YR8l580nyteQvAITg2hZ9XVh4b55+EU/adAjf1fMHhE=
 github.com/gregjones/httpcache v0.0.0-20180305231024-9cad4c3443a7/go.mod h1:FecbI9+v66THATjSRHfNgh1IVFe/9kFxbXtjV0ctIMA=
 github.com/grpc-ecosystem/go-grpc-middleware v1.0.0/go.mod h1:FiyG127CGDf3tlThmgyCl78X/SZQqEOJBCDaAfeWzPs=
