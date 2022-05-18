@@ -12,6 +12,7 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	v2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/google/uuid"
 )
@@ -140,8 +141,8 @@ func (report *ReportEventReceiver) generateMessage() {
 	message := "You can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more by registering here:"
 
 	u := url.URL{}
-	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
+	v2.ParseHost(&u)
 
 	if report.customerAdminEMail != "" {
 		logger.L().Debug("", helpers.String("account ID", report.customerGUID))

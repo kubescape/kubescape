@@ -11,11 +11,9 @@ import (
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj := url.URL{}
-
-	urlObj.Scheme = "https"
 	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
+	ParseHost(&urlObj)
 	urlObj.Path = "/k8s/v2/postureReport"
-
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())
 	q.Add("clusterName", report.clusterName)

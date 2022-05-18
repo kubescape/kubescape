@@ -5,15 +5,16 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	v2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/google/uuid"
 )
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj := url.URL{}
-
-	urlObj.Scheme = "https"
 	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
+	v2.ParseHost(&urlObj)
+
 	urlObj.Path = "/k8s/postureReport"
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())
