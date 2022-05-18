@@ -14,7 +14,7 @@ var (
 	LinuxKernelVariables         = "LinuxKernelVariables"
 	KubeletCommandLine           = "KubeletCommandLine"
 
-	MapResourceToApiGroup = map[string]string{
+	MapHostSensorResourceToApiGroup = map[string]string{
 		KubeletConfiguration:         "hostdata.kubescape.cloud/v1beta0",
 		OsReleaseFile:                "hostdata.kubescape.cloud/v1beta0",
 		KubeletCommandLine:           "hostdata.kubescape.cloud/v1beta0",
@@ -26,7 +26,7 @@ var (
 )
 
 func addInfoToMap(resource string, infoMap map[string]apis.StatusInfo, err error) {
-	group, version := k8sinterface.SplitApiVersion(MapResourceToApiGroup[resource])
+	group, version := k8sinterface.SplitApiVersion(MapHostSensorResourceToApiGroup[resource])
 	r := k8sinterface.JoinResourceTriplets(group, version, resource)
 	infoMap[r] = apis.StatusInfo{
 		InnerStatus: apis.StatusSkipped,
