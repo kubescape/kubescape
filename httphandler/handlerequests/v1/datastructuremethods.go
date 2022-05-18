@@ -5,6 +5,7 @@ import (
 
 	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
+	"k8s.io/utils/strings/slices"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
@@ -59,6 +60,9 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 }
 
 func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cautils.ScanInfo) {
+	// remove empty targets from slice
+	scanRequest.TargetNames = slices.Filter(nil, scanRequest.TargetNames, func(e string) bool { return e != "" })
+
 	if scanRequest.TargetType != "" && len(scanRequest.TargetNames) > 0 {
 		if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindFramework)) {
 			scanRequest.TargetType = apisv1.KindFramework
