@@ -1,11 +1,8 @@
 package v1
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
-	"sync"
 
 	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
@@ -19,29 +16,21 @@ import (
 var OutputDir = "./results"
 var FailedOutputDir = "./failed"
 
-type ScanQueryParams struct {
-	ReturnResults bool `schema:"wait"` // wait for scanning to complete (synchronized request)
-	KeepResults   bool `schema:"keep"` // do not delete results after returning (relevant only for synchronized requests)
-}
-
-type ResultsQueryParams struct {
-	ScanID      string `schema:"id"`
-	KeepResults bool   `schema:"keep"` // do not delete results after returning (default will delete results)
-	AllResults  bool   `schema:"all"`  // delete all results
-}
-
-type StatusQueryParams struct {
-	ScanID string `schema:"id"`
-}
-
 type HTTPHandler struct {
-	state *serverState
+	state            *serverState
+	scanResponseChan *scanResponseChan
+	scanRequestChan  chan *scanRequestParams
 }
 
 func NewHTTPHandler() *HTTPHandler {
-	return &HTTPHandler{
-		state: newServerState(),
+	handler := &HTTPHandler{
+		state:            newServerState(),
+		scanRequestChan:  make(chan *scanRequestParams),
+		scanResponseChan: newScanResponseChan(),
 	}
+	go handler.executeScan()
+
+	return handler
 }
 
 // ============================================== STATUS ========================================================
@@ -80,7 +69,7 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 }
 
 // ============================================== SCAN ========================================================
-// Scan API - TODO: break down to functions
+// Scan API
 func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	// generate id
@@ -88,86 +77,52 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	defer handler.recover(w, scanID)
 
-	defer r.Body.Close()
-
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	response := utilsmetav1.Response{}
 	w.Header().Set("Content-Type", "application/json")
 
-	scanQueryParams := &ScanQueryParams{}
-	if err := schema.NewDecoder().Decode(scanQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
+	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
+	if err != nil {
+		handler.writeError(w, err, "")
 		return
 	}
 
 	handler.state.setBusy(scanID)
 
-	// Add to queue
-
+	response := &utilsmetav1.Response{}
 	response.ID = scanID
-	response.Type = utilsapisv1.IDScanResponseType
+	response.Type = utilsapisv1.BusyScanResponseType
+	response.Response = fmt.Sprintf("scanning '%s' is in progress", scanID)
 
-	readBuffer, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()), scanID)
-		return
-	}
+	handler.scanResponseChan.set(scanID) // add channel
+	defer handler.scanResponseChan.delete(scanID)
 
-	logger.L().Info("REST API received scan request", helpers.String("body", string(readBuffer)))
-
-	scanRequest := utilsmetav1.PostScanRequest{}
-	if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse request payload, reason: %s", err.Error()), scanID)
-		return
-	}
-
-	var wg sync.WaitGroup
-	if scanQueryParams.ReturnResults {
-		wg.Add(1)
-	} else {
-		wg.Add(0)
-	}
-	statusCode := http.StatusOK
+	// you must use a goroutine since the executeScan function is not always listening to the channel
 	go func() {
-		// execute scan in the background
+		// send to scanning handler
+		handler.scanRequestChan <- scanRequestParams
+	}()
 
-		logger.L().Info("scan triggered", helpers.String("ID", scanID))
+	if scanRequestParams.scanQueryParams.ReturnResults {
+		// wait for scan to complete
+		response = <-handler.scanResponseChan.get(scanID)
 
-		results, err := scan(&scanRequest, scanID)
-		if err != nil {
-			logger.L().Error("scanning failed", helpers.String("ID", scanID), helpers.Error(err))
-			if scanQueryParams.ReturnResults {
-				response.Type = utilsapisv1.ErrorScanResponseType
-				response.Response = err.Error()
-				statusCode = http.StatusInternalServerError
-			}
-		} else {
-			logger.L().Success("done scanning", helpers.String("ID", scanID))
-			if scanQueryParams.ReturnResults {
-				response.Type = utilsapisv1.ResultsV1ScanResponseType
-				response.Response = results
-				wg.Done()
-			}
-		}
-		if scanQueryParams.ReturnResults && !scanQueryParams.KeepResults {
+		if scanRequestParams.scanQueryParams.KeepResults {
+			// delete results after returning
 			logger.L().Debug("deleting results", helpers.String("ID", scanID))
 			removeResultsFile(scanID)
 		}
-		handler.state.setNotBusy(scanID)
-	}()
+	}
 
-	wg.Wait()
+	statusCode := http.StatusOK
+	if response.Type == utilsapisv1.ErrorScanResponseType {
+		statusCode = http.StatusInternalServerError
+	}
 
 	w.WriteHeader(statusCode)
-	w.Write(responseToBytes(&response))
-}
-func (handler *HTTPHandler) scan() {
-	for {
-
-	}
+	w.Write(responseToBytes(response))
 }
 
 // ============================================== RESULTS ========================================================
@@ -204,6 +159,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	if handler.state.isBusy(resultsQueryParams.ScanID) { // if requested ID is still scanning
 		logger.L().Info("scan in process", helpers.String("ID", resultsQueryParams.ScanID))
 		w.WriteHeader(http.StatusOK)
+		response.Type = utilsapisv1.BusyScanResponseType
 		response.Response = fmt.Sprintf("scanning '%s' in progress", resultsQueryParams.ScanID)
 		w.Write(responseToBytes(&response))
 		return
@@ -251,11 +207,6 @@ func (handler *HTTPHandler) Live(w http.ResponseWriter, r *http.Request) {
 
 func (handler *HTTPHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-}
-
-func responseToBytes(res *utilsmetav1.Response) []byte {
-	b, _ := json.Marshal(res)
-	return b
 }
 
 func (handler *HTTPHandler) recover(w http.ResponseWriter, scanID string) {

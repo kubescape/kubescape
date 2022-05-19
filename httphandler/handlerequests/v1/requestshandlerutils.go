@@ -9,12 +9,45 @@ import (
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/core"
+	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/armosec/utils-go/boolutils"
 )
 
+// executeScan execute the scan request passed in the channel
+func (handler *HTTPHandler) executeScan() {
+	for {
+		scanReq := <-handler.scanRequestChan
+
+		response := &utilsmetav1.Response{}
+
+		logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
+		results, err := scan(scanReq.scanRequest, scanReq.scanID)
+		if err != nil {
+			logger.L().Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = err.Error()
+			}
+		} else {
+			logger.L().Success("done scanning", helpers.String("ID", scanReq.scanID))
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ResultsV1ScanResponseType
+				response.Response = results
+			}
+		}
+
+		handler.state.setNotBusy(scanReq.scanID)
+
+		// return results
+		handler.scanResponseChan.push(scanReq.scanID, response)
+
+	}
+}
 func scan(scanRequest *utilsmetav1.PostScanRequest, scanID string) (*reporthandlingv2.PostureReport, error) {
 	scanInfo := getScanCommand(scanRequest, scanID)
 
@@ -136,7 +169,7 @@ func writeScanErrorToFile(err error, scanID string) error {
 	if e := os.MkdirAll(filepath.Dir(FailedOutputDir), os.ModePerm); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", err.Error(), e.Error())
 	}
-	f, e := os.Create(filepath.Join(FailedOutputDir, scanID))
+	f, e := os.Create(filepath.Join(filepath.Dir(FailedOutputDir), scanID))
 	if e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", err.Error(), e.Error())
 	}
@@ -146,4 +179,10 @@ func writeScanErrorToFile(err error, scanID string) error {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
 	}
 	return fmt.Errorf("failed to scan. reason: '%s'", err.Error())
+}
+
+// responseToBytes convert response object to bytes
+func responseToBytes(res *utilsmetav1.Response) []byte {
+	b, _ := json.Marshal(res)
+	return b
 }

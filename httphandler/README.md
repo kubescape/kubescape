@@ -7,13 +7,13 @@ Running `kubescape` will start up a webserver on port `8080` which will serve th
 ### Trigger scan
 
 * POST `/v1/scan` - Trigger a kubescape scan. The server will return an ID and will execute the scanning asynchronously 
-* * `wait`: scan synchronously (return results and not ID). Use only in small clusters are with an increased timeout
-* * `keep`: Do not delete results from local storage after returning
+* * `wait=true`: scan synchronously (return results and not ID). Use only in small clusters are with an increased timeout. default is `wait=false`
+* * `keep=true`: Do not delete results from local storage after returning. default is `keep=false`
 
 ### Get results
 * GET `/v1/results` -  Request kubescape scan results
 * * query `id=<string>` -> ID returned when triggering the scan action. If empty will return latest results
-* * query `keep` -> Do not delete results from local storage after returning
+* * query `keep=true` -> Do not delete results from local storage after returning. default is `keep=false`
 
 ### Check scanning progress status
 Check the scanning status - is the scanning in progress or done. This is meant for a waiting mechanize since the API does not return the entire results object when the scanning is done
