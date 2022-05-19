@@ -15,24 +15,23 @@ import (
 
 // Metrics http listener for prometheus support
 func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
-	if handler.state.isBusy() { // if already scanning the cluster
-		message := fmt.Sprintf("scan '%s' in action", handler.state.getID())
+	if handler.state.len() > 0 { // if already scanning the cluster
+		message := fmt.Sprintf("scan '%s' in action", handler.state.getLatestID())
 		logger.L().Info("server is busy", helpers.String("message", message), helpers.Time())
 		w.WriteHeader(http.StatusServiceUnavailable)
 		w.Write([]byte(message))
 		return
 	}
 
-	handler.state.setBusy()
-	defer handler.state.setNotBusy()
-
 	scanID := uuid.NewString()
-	handler.state.setID(scanID)
+	handler.state.setBusy(scanID)
+	defer handler.state.setNotBusy(scanID)
 
 	resultsFile := filepath.Join(OutputDir, scanID)
 
 	// trigger scanning
-	logger.L().Info(handler.state.getID(), helpers.String("action", "triggering scan"), helpers.Time())
+	logger.L().Info(scanID, helpers.String("action", "triggering scan"), helpers.Time())
+
 	ks := core.NewKubescape()
 	results, err := ks.Scan(getPrometheusDefaultScanCommand(scanID, resultsFile))
 	if err != nil {
@@ -41,7 +40,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	results.HandleResults()
-	logger.L().Info(handler.state.getID(), helpers.String("action", "done scanning"), helpers.Time())
+	logger.L().Info(scanID, helpers.String("action", "done scanning"), helpers.Time())
 
 	f, err := os.ReadFile(resultsFile)
 	if err != nil {

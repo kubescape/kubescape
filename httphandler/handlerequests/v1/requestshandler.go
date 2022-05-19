@@ -47,7 +47,7 @@ func NewHTTPHandler() *HTTPHandler {
 // ============================================== STATUS ========================================================
 // Status API
 func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
-	defer handler.recover(w)
+	defer handler.recover(w, "")
 
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -59,25 +59,22 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()))
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}
 
-	if !handler.state.isBusy() {
+	if !handler.state.isBusy(statusQueryParams.ScanID) {
 		response.Type = utilsapisv1.NotBusyScanResponseType
 		w.Write(responseToBytes(&response))
 		return
 	}
 
-	currentScanID := handler.state.getID()
-	if statusQueryParams.ScanID != "" && currentScanID != statusQueryParams.ScanID {
-		response.Type = utilsapisv1.NotBusyScanResponseType
-		w.Write(responseToBytes(&response))
-		return
+	if statusQueryParams.ScanID == "" {
+		statusQueryParams.ScanID = handler.state.getLatestID()
 	}
 
-	response.Response = currentScanID
-	response.ID = currentScanID
+	response.Response = statusQueryParams.ScanID
+	response.ID = statusQueryParams.ScanID
 	response.Type = utilsapisv1.BusyScanResponseType
 	w.Write(responseToBytes(&response))
 }
@@ -86,7 +83,10 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 // Scan API - TODO: break down to functions
 func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
-	defer handler.recover(w)
+	// generate id
+	scanID := uuid.NewString()
+
+	defer handler.recover(w, scanID)
 
 	defer r.Body.Close()
 
@@ -99,30 +99,20 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	scanQueryParams := &ScanQueryParams{}
 	if err := schema.NewDecoder().Decode(scanQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()))
-		return
-	}
-	if handler.state.isBusy() {
-		// TODO - Add to queue
-		w.WriteHeader(http.StatusOK)
-		response.Response = handler.state.getID()
-		response.ID = handler.state.getID()
-		response.Type = utilsapisv1.IDScanResponseType
-		w.Write(responseToBytes(&response))
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
 		return
 	}
 
-	handler.state.setBusy()
+	handler.state.setBusy(scanID)
 
-	// generate id
-	scanID := uuid.NewString()
-	handler.state.setID(scanID)
+	// Add to queue
+
 	response.ID = scanID
 	response.Type = utilsapisv1.IDScanResponseType
 
 	readBuffer, err := ioutil.ReadAll(r.Body)
 	if err != nil {
-		handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()))
+		handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()), scanID)
 		return
 	}
 
@@ -130,7 +120,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	scanRequest := utilsmetav1.PostScanRequest{}
 	if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse request payload, reason: %s", err.Error()))
+		handler.writeError(w, fmt.Errorf("failed to parse request payload, reason: %s", err.Error()), scanID)
 		return
 	}
 
@@ -166,13 +156,18 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 			logger.L().Debug("deleting results", helpers.String("ID", scanID))
 			removeResultsFile(scanID)
 		}
-		handler.state.setNotBusy()
+		handler.state.setNotBusy(scanID)
 	}()
 
 	wg.Wait()
 
 	w.WriteHeader(statusCode)
 	w.Write(responseToBytes(&response))
+}
+func (handler *HTTPHandler) scan() {
+	for {
+
+	}
 }
 
 // ============================================== RESULTS ========================================================
@@ -182,13 +177,13 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	response := utilsmetav1.Response{}
 	w.Header().Set("Content-Type", "application/json")
 
-	defer handler.recover(w)
+	defer handler.recover(w, "")
 
 	defer r.Body.Close()
 
 	resultsQueryParams := &ResultsQueryParams{}
 	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()))
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}
 
@@ -206,14 +201,13 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	}
 	response.ID = resultsQueryParams.ScanID
 
-	if handler.state.isBusy() { // if requested ID is still scanning
-		if resultsQueryParams.ScanID == handler.state.getID() {
-			logger.L().Info("scan in process", helpers.String("ID", resultsQueryParams.ScanID))
-			w.WriteHeader(http.StatusOK)
-			response.Response = "scanning in progress"
-			w.Write(responseToBytes(&response))
-			return
-		}
+	if handler.state.isBusy(resultsQueryParams.ScanID) { // if requested ID is still scanning
+		logger.L().Info("scan in process", helpers.String("ID", resultsQueryParams.ScanID))
+		w.WriteHeader(http.StatusOK)
+		response.Response = fmt.Sprintf("scanning '%s' in progress", resultsQueryParams.ScanID)
+		w.Write(responseToBytes(&response))
+		return
+
 	}
 
 	switch r.Method {
@@ -264,10 +258,10 @@ func responseToBytes(res *utilsmetav1.Response) []byte {
 	return b
 }
 
-func (handler *HTTPHandler) recover(w http.ResponseWriter) {
+func (handler *HTTPHandler) recover(w http.ResponseWriter, scanID string) {
 	response := utilsmetav1.Response{}
 	if err := recover(); err != nil {
-		handler.state.setNotBusy()
+		handler.state.setNotBusy(scanID)
 		logger.L().Error("recover", helpers.Error(fmt.Errorf("%v", err)))
 		w.WriteHeader(http.StatusInternalServerError)
 		response.Response = fmt.Sprintf("%v", err)
@@ -276,11 +270,11 @@ func (handler *HTTPHandler) recover(w http.ResponseWriter) {
 	}
 }
 
-func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error) {
+func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error, scanID string) {
 	response := utilsmetav1.Response{}
 	w.WriteHeader(http.StatusBadRequest)
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))
-	handler.state.setNotBusy()
+	handler.state.setNotBusy(scanID)
 }
