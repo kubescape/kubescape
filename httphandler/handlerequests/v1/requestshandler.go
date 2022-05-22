@@ -148,8 +148,8 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 
 	if resultsQueryParams.ScanID == "" { // if no scan found
 		logger.L().Info("empty scan ID")
-		w.WriteHeader(http.StatusBadRequest) // Should we return ok?
-		response.Response = "latest scan not found. trigger again"
+		w.WriteHeader(http.StatusBadRequest)
+		response.Response = "latest scan not found"
 		response.Type = utilsapisv1.ErrorScanResponseType
 		w.Write(responseToBytes(&response))
 		return
