@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
@@ -71,9 +72,9 @@ type StatusQueryParams struct {
 
 // scanRequestParams params passed to channel
 type scanRequestParams struct {
-	scanRequest     *utilsmetav1.PostScanRequest // request as received from api
-	scanQueryParams *ScanQueryParams             // request as received from api
-	scanID          string                       // generated scan ID
+	scanInfo        *cautils.ScanInfo // request as received from api
+	scanQueryParams *ScanQueryParams  // request as received from api
+	scanID          string            // generated scan ID
 }
 
 func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParams, error) {
@@ -99,9 +100,11 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 		return scanRequestParams, fmt.Errorf("failed to parse request payload, reason: %s", err.Error())
 	}
 
+	scanInfo := getScanCommand(scanRequest, scanID)
+
 	scanRequestParams.scanID = scanID
 	scanRequestParams.scanQueryParams = scanQueryParams
-	scanRequestParams.scanRequest = scanRequest
+	scanRequestParams.scanInfo = scanInfo
 
 	return scanRequestParams, nil
 }

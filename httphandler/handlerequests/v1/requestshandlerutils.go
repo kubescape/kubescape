@@ -23,10 +23,12 @@ func (handler *HTTPHandler) executeScan() {
 	for {
 		scanReq := <-handler.scanRequestChan
 
+		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
+
 		response := &utilsmetav1.Response{}
 
 		logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-		results, err := scan(scanReq.scanRequest, scanReq.scanID)
+		results, err := scan(scanReq.scanInfo, scanReq.scanID)
 		if err != nil {
 			logger.L().Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
 			if scanReq.scanQueryParams.ReturnResults {
@@ -48,8 +50,7 @@ func (handler *HTTPHandler) executeScan() {
 
 	}
 }
-func scan(scanRequest *utilsmetav1.PostScanRequest, scanID string) (*reporthandlingv2.PostureReport, error) {
-	scanInfo := getScanCommand(scanRequest, scanID)
+func scan(scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
 
 	ks := core.NewKubescape()
 	result, err := ks.Scan(scanInfo)
