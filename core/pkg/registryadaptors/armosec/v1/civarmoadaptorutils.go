@@ -14,7 +14,7 @@ func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulner
 	pageNumber := 1
 	request := V2ListRequest{PageSize: &pageSize, PageNum: &pageNumber, InnerFilters: filter, OrderBy: "timestamp:desc"}
 	requestBody, _ := json.Marshal(request)
-	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.armoAPI.GetAPIURL(), armoCivAdaptor.armoAPI.GetAccountID())
+	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.armoAPI.GetApiURL(), armoCivAdaptor.armoAPI.GetAccountID())
 
 	resp, err := armoCivAdaptor.armoAPI.Post(requestUrl, map[string]string{"Content-Type": "application/json"}, requestBody)
 	if err != nil {
