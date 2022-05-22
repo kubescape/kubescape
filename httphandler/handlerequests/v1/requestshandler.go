@@ -1,11 +1,8 @@
 package v1
 
 import (
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
-	"sync"
 
 	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
@@ -19,35 +16,27 @@ import (
 var OutputDir = "./results"
 var FailedOutputDir = "./failed"
 
-type ScanQueryParams struct {
-	ReturnResults bool `schema:"wait"` // wait for scanning to complete (synchronized request)
-	KeepResults   bool `schema:"keep"` // do not delete results after returning (relevant only for synchronized requests)
-}
-
-type ResultsQueryParams struct {
-	ScanID      string `schema:"id"`
-	KeepResults bool   `schema:"keep"` // do not delete results after returning (default will delete results)
-	AllResults  bool   `schema:"all"`  // delete all results
-}
-
-type StatusQueryParams struct {
-	ScanID string `schema:"id"`
-}
-
 type HTTPHandler struct {
-	state *serverState
+	state            *serverState
+	scanResponseChan *scanResponseChan
+	scanRequestChan  chan *scanRequestParams
 }
 
 func NewHTTPHandler() *HTTPHandler {
-	return &HTTPHandler{
-		state: newServerState(),
+	handler := &HTTPHandler{
+		state:            newServerState(),
+		scanRequestChan:  make(chan *scanRequestParams),
+		scanResponseChan: newScanResponseChan(),
 	}
+	go handler.executeScan()
+
+	return handler
 }
 
 // ============================================== STATUS ========================================================
 // Status API
 func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
-	defer handler.recover(w)
+	defer handler.recover(w, "")
 
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -59,120 +48,81 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()))
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}
 
-	if !handler.state.isBusy() {
+	if !handler.state.isBusy(statusQueryParams.ScanID) {
 		response.Type = utilsapisv1.NotBusyScanResponseType
 		w.Write(responseToBytes(&response))
 		return
 	}
 
-	currentScanID := handler.state.getID()
-	if statusQueryParams.ScanID != "" && currentScanID != statusQueryParams.ScanID {
-		response.Type = utilsapisv1.NotBusyScanResponseType
-		w.Write(responseToBytes(&response))
-		return
+	if statusQueryParams.ScanID == "" {
+		statusQueryParams.ScanID = handler.state.getLatestID()
 	}
 
-	response.Response = currentScanID
-	response.ID = currentScanID
+	response.Response = statusQueryParams.ScanID
+	response.ID = statusQueryParams.ScanID
 	response.Type = utilsapisv1.BusyScanResponseType
 	w.Write(responseToBytes(&response))
 }
 
 // ============================================== SCAN ========================================================
-// Scan API - TODO: break down to functions
+// Scan API
 func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
-	defer handler.recover(w)
+	// generate id
+	scanID := uuid.NewString()
 
-	defer r.Body.Close()
+	defer handler.recover(w, scanID)
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	response := utilsmetav1.Response{}
 	w.Header().Set("Content-Type", "application/json")
 
-	scanQueryParams := &ScanQueryParams{}
-	if err := schema.NewDecoder().Decode(scanQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()))
-		return
-	}
-	if handler.state.isBusy() {
-		// TODO - Add to queue
-		w.WriteHeader(http.StatusOK)
-		response.Response = handler.state.getID()
-		response.ID = handler.state.getID()
-		response.Type = utilsapisv1.IDScanResponseType
-		w.Write(responseToBytes(&response))
-		return
-	}
-
-	handler.state.setBusy()
-
-	// generate id
-	scanID := uuid.NewString()
-	handler.state.setID(scanID)
-	response.ID = scanID
-	response.Type = utilsapisv1.IDScanResponseType
-
-	readBuffer, err := ioutil.ReadAll(r.Body)
+	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
 	if err != nil {
-		handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()))
+		handler.writeError(w, err, "")
 		return
 	}
 
-	logger.L().Info("REST API received scan request", helpers.String("body", string(readBuffer)))
+	handler.state.setBusy(scanID)
 
-	scanRequest := utilsmetav1.PostScanRequest{}
-	if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse request payload, reason: %s", err.Error()))
-		return
-	}
+	response := &utilsmetav1.Response{}
+	response.ID = scanID
+	response.Type = utilsapisv1.BusyScanResponseType
+	response.Response = fmt.Sprintf("scanning '%s' is in progress", scanID)
 
-	var wg sync.WaitGroup
-	if scanQueryParams.ReturnResults {
-		wg.Add(1)
-	} else {
-		wg.Add(0)
-	}
-	statusCode := http.StatusOK
+	handler.scanResponseChan.set(scanID) // add channel
+	defer handler.scanResponseChan.delete(scanID)
+
+	// you must use a goroutine since the executeScan function is not always listening to the channel
 	go func() {
-		// execute scan in the background
+		// send to scanning handler
+		handler.scanRequestChan <- scanRequestParams
+	}()
 
-		logger.L().Info("scan triggered", helpers.String("ID", scanID))
+	if scanRequestParams.scanQueryParams.ReturnResults {
+		// wait for scan to complete
+		response = <-handler.scanResponseChan.get(scanID)
 
-		results, err := scan(&scanRequest, scanID)
-		if err != nil {
-			logger.L().Error("scanning failed", helpers.String("ID", scanID), helpers.Error(err))
-			if scanQueryParams.ReturnResults {
-				response.Type = utilsapisv1.ErrorScanResponseType
-				response.Response = err.Error()
-				statusCode = http.StatusInternalServerError
-			}
-		} else {
-			logger.L().Success("done scanning", helpers.String("ID", scanID))
-			if scanQueryParams.ReturnResults {
-				response.Type = utilsapisv1.ResultsV1ScanResponseType
-				response.Response = results
-				wg.Done()
-			}
-		}
-		if scanQueryParams.ReturnResults && !scanQueryParams.KeepResults {
+		if scanRequestParams.scanQueryParams.KeepResults {
+			// delete results after returning
 			logger.L().Debug("deleting results", helpers.String("ID", scanID))
 			removeResultsFile(scanID)
 		}
-		handler.state.setNotBusy()
-	}()
+	}
 
-	wg.Wait()
+	statusCode := http.StatusOK
+	if response.Type == utilsapisv1.ErrorScanResponseType {
+		statusCode = http.StatusInternalServerError
+	}
 
 	w.WriteHeader(statusCode)
-	w.Write(responseToBytes(&response))
+	w.Write(responseToBytes(response))
 }
 
 // ============================================== RESULTS ========================================================
@@ -182,13 +132,13 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	response := utilsmetav1.Response{}
 	w.Header().Set("Content-Type", "application/json")
 
-	defer handler.recover(w)
+	defer handler.recover(w, "")
 
 	defer r.Body.Close()
 
 	resultsQueryParams := &ResultsQueryParams{}
 	if err := schema.NewDecoder().Decode(resultsQueryParams, r.URL.Query()); err != nil {
-		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()))
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}
 
@@ -198,22 +148,22 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 
 	if resultsQueryParams.ScanID == "" { // if no scan found
 		logger.L().Info("empty scan ID")
-		w.WriteHeader(http.StatusBadRequest) // Should we return ok?
-		response.Response = "latest scan not found. trigger again"
+		w.WriteHeader(http.StatusBadRequest)
+		response.Response = "latest scan not found"
 		response.Type = utilsapisv1.ErrorScanResponseType
 		w.Write(responseToBytes(&response))
 		return
 	}
 	response.ID = resultsQueryParams.ScanID
 
-	if handler.state.isBusy() { // if requested ID is still scanning
-		if resultsQueryParams.ScanID == handler.state.getID() {
-			logger.L().Info("scan in process", helpers.String("ID", resultsQueryParams.ScanID))
-			w.WriteHeader(http.StatusOK)
-			response.Response = "scanning in progress"
-			w.Write(responseToBytes(&response))
-			return
-		}
+	if handler.state.isBusy(resultsQueryParams.ScanID) { // if requested ID is still scanning
+		logger.L().Info("scan in process", helpers.String("ID", resultsQueryParams.ScanID))
+		w.WriteHeader(http.StatusOK)
+		response.Type = utilsapisv1.BusyScanResponseType
+		response.Response = fmt.Sprintf("scanning '%s' in progress", resultsQueryParams.ScanID)
+		w.Write(responseToBytes(&response))
+		return
+
 	}
 
 	switch r.Method {
@@ -259,15 +209,10 @@ func (handler *HTTPHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func responseToBytes(res *utilsmetav1.Response) []byte {
-	b, _ := json.Marshal(res)
-	return b
-}
-
-func (handler *HTTPHandler) recover(w http.ResponseWriter) {
+func (handler *HTTPHandler) recover(w http.ResponseWriter, scanID string) {
 	response := utilsmetav1.Response{}
 	if err := recover(); err != nil {
-		handler.state.setNotBusy()
+		handler.state.setNotBusy(scanID)
 		logger.L().Error("recover", helpers.Error(fmt.Errorf("%v", err)))
 		w.WriteHeader(http.StatusInternalServerError)
 		response.Response = fmt.Sprintf("%v", err)
@@ -276,11 +221,11 @@ func (handler *HTTPHandler) recover(w http.ResponseWriter) {
 	}
 }
 
-func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error) {
+func (handler *HTTPHandler) writeError(w http.ResponseWriter, err error, scanID string) {
 	response := utilsmetav1.Response{}
 	w.WriteHeader(http.StatusBadRequest)
 	response.Response = err.Error()
 	response.Type = utilsapisv1.ErrorScanResponseType
 	w.Write(responseToBytes(&response))
-	handler.state.setNotBusy()
+	handler.state.setNotBusy(scanID)
 }

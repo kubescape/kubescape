@@ -7,49 +7,56 @@ import (
 	"path/filepath"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/core"
+	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	"github.com/google/uuid"
 )
 
 // Metrics http listener for prometheus support
 func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
-	if handler.state.isBusy() { // if already scanning the cluster
-		message := fmt.Sprintf("scan '%s' in action", handler.state.getID())
-		logger.L().Info("server is busy", helpers.String("message", message), helpers.Time())
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte(message))
-		return
-	}
-
-	handler.state.setBusy()
-	defer handler.state.setNotBusy()
 
 	scanID := uuid.NewString()
-	handler.state.setID(scanID)
+	handler.state.setBusy(scanID)
+	defer handler.state.setNotBusy(scanID)
 
 	resultsFile := filepath.Join(OutputDir, scanID)
+	scanInfo := getPrometheusDefaultScanCommand(scanID, resultsFile)
 
-	// trigger scanning
-	logger.L().Info(handler.state.getID(), helpers.String("action", "triggering scan"), helpers.Time())
-	ks := core.NewKubescape()
-	results, err := ks.Scan(getPrometheusDefaultScanCommand(scanID, resultsFile))
-	if err != nil {
+	scanParams := &scanRequestParams{
+		scanQueryParams: &ScanQueryParams{
+			ReturnResults: true,
+			KeepResults:   false,
+		},
+		scanInfo: scanInfo,
+		scanID:   scanID,
+	}
+
+	handler.scanResponseChan.set(scanID) // add scan to channel
+	defer handler.scanResponseChan.delete(scanID)
+
+	// send to scan queue
+	handler.scanRequestChan <- scanParams
+
+	// wait for scan to complete
+	results := <-handler.scanResponseChan.get(scanID)
+	defer removeResultsFile(scanID) // remove json format results file
+	defer os.Remove(resultsFile)    // remove prometheus format results file
+
+	// handle response
+	if results.Type == utilsapisv1.ErrorScanResponseType {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf("failed to complete scan. reason: %s", err.Error())))
+		w.Write(responseToBytes(results))
 		return
 	}
-	results.HandleResults()
-	logger.L().Info(handler.state.getID(), helpers.String("action", "done scanning"), helpers.Time())
 
+	// read prometheus format results file
 	f, err := os.ReadFile(resultsFile)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
-		w.Write([]byte(fmt.Sprintf("failed read results from file. reason: %s", err.Error())))
+		results.Type = utilsapisv1.ErrorScanResponseType
+		results.Response = fmt.Sprintf("failed read results from file. reason: %s", err.Error())
+		w.Write(responseToBytes(results))
 		return
 	}
-	os.Remove(resultsFile)
 
 	w.WriteHeader(http.StatusOK)
 	w.Write(f)
