@@ -288,9 +288,13 @@ func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
 		return nil, err
 	}
 
+	if jsonConf, ok := configMap.Data["config.json"]; ok {
+		return readConfig([]byte(jsonConf))
+	}
 	if bData, err := json.Marshal(configMap.Data); err == nil {
 		return readConfig(bData)
 	}
+
 	return nil, nil
 }
 
