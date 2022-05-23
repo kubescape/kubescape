@@ -91,7 +91,6 @@ type LocalConfig struct {
 
 func NewLocalConfig(
 	backendAPI getter.IBackend, customerGUID, clusterName string) *LocalConfig {
-	var configObj *ConfigObj
 
 	lc := &LocalConfig{
 		backendAPI: backendAPI,
@@ -100,12 +99,8 @@ func NewLocalConfig(
 	// get from configMap
 	if existsConfigFile() { // get from file
 		loadConfigFromFile(lc.configObj)
-	} else {
-		configObj = &ConfigObj{}
 	}
-	if configObj != nil {
-		lc.configObj = configObj
-	}
+
 	if customerGUID != "" {
 		lc.configObj.AccountID = customerGUID // override config customerGUID
 	}
@@ -206,14 +201,15 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		configMapNamespace: getConfigMapNamespace(),
 	}
 
-	// get from configMap
+	// first, load from configMap
 	if c.existsConfigMap() {
 		c.loadConfigFromConfigMap()
 	}
-	if c.configObj == nil && existsConfigFile() { // get from file
+
+	// second, load from file
+	if existsConfigFile() { // get from file
 		loadConfigFromFile(c.configObj)
 	}
-
 	if customerGUID != "" {
 		c.configObj.AccountID = customerGUID // override config customerGUID
 	}

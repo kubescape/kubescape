@@ -141,7 +141,7 @@ func TestLoadConfigFromData(t *testing.T) {
 		assert.Equal(t, c.GetSecretKey(), co.SecretKey)
 	}
 
-	// use case: all data is in config.json
+	// use case: some data is in config.json
 	{
 		c := mockClusterConfig()
 		configMap := &corev1.ConfigMap{
@@ -160,6 +160,32 @@ func TestLoadConfigFromData(t *testing.T) {
 		loadConfigFromData(c.configObj, configMap.Data)
 
 		assert.NotEmpty(t, c.GetAccountID())
+		assert.NotEmpty(t, c.GetClientID())
+		assert.NotEmpty(t, c.GetSecretKey())
+	}
+
+	// use case: some data is in config.json
+	{
+		c := mockClusterConfig()
+		configMap := &corev1.ConfigMap{
+			Data: make(map[string]string),
+		}
+
+		c.configObj.AccountID = "tttt"
+
+		// add to map
+		configMap.Data["accountID"] = mockConfigObj().AccountID
+		configMap.Data["clientID"] = c.configObj.ClientID
+		configMap.Data["secretKey"] = c.configObj.SecretKey
+
+		// delete the content
+		c.configObj.ClientID = ""
+		c.configObj.SecretKey = ""
+
+		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
+		loadConfigFromData(c.configObj, configMap.Data)
+
+		assert.Equal(t, mockConfigObj().AccountID, c.GetAccountID())
 		assert.NotEmpty(t, c.GetClientID())
 		assert.NotEmpty(t, c.GetSecretKey())
 	}
