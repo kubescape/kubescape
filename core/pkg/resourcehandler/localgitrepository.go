@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
@@ -21,7 +22,7 @@ type GitCommit struct {
 	authorName  string
 	authorEmail string
 	message     string
-	date        string
+	date        time.Time
 }
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
@@ -55,22 +56,31 @@ func (g *LocalGitRepository) GetBranchName() string {
 	return g.head.Name().Short()
 }
 
-func (g *LocalGitRepository) GetOriginUrl() string {
+func (g *LocalGitRepository) GetOriginUrl() (string, error) {
 	branchName := g.GetBranchName()
 	if branchRef, branchFound := g.config.Branches[branchName]; branchFound {
 		remoteName := branchRef.Remote
-		return g.config.Remotes[remoteName].URLs[0]
+		if len(g.config.Remotes[remoteName].URLs) == 0 {
+			return "", fmt.Errorf("expected to find URLs for remote '%s', branch '%s'", remoteName, branchName)
+		}
+		return g.config.Remotes[remoteName].URLs[0], nil
 	}
 
 	const defaultRemoteName string = "origin"
-	return g.config.Remotes[defaultRemoteName].URLs[0]
+	if len(g.config.Remotes[defaultRemoteName].URLs) == 0 {
+		return "", fmt.Errorf("expected to find URLs for remote '%s'", defaultRemoteName)
+	}
+	return g.config.Remotes[defaultRemoteName].URLs[0], nil
 }
 
-func (g *LocalGitRepository) GetName() string {
-	originUrl := g.GetOriginUrl()
+func (g *LocalGitRepository) GetName() (string, error) {
+	originUrl, err := g.GetOriginUrl()
+	if err != nil {
+		return "", err
+	}
 	baseName := path.Base(originUrl)
 	// remove .git
-	return strings.TrimSuffix(baseName, ".git")
+	return strings.TrimSuffix(baseName, ".git"), nil
 }
 
 func (g *LocalGitRepository) GetLastCommit() (*GitCommit, error) {
@@ -102,6 +112,6 @@ func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*GitCommit, err
 		hash:        commit.Hash.String(),
 		authorName:  commit.Author.Name,
 		authorEmail: commit.Author.Email,
-		date:        commit.Author.When.String(),
+		date:        commit.Author.When,
 	}, nil
 }

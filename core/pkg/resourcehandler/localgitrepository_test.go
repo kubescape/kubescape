@@ -101,13 +101,18 @@ func (s *LocalGitRepositoryTestSuite) TestGetBranchName() {
 
 func (s *LocalGitRepositoryTestSuite) TestGetName() {
 	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
-		s.Equal("localrepo", localRepo.GetName())
+		if name, err := localRepo.GetName(); s.NoError(err) {
+			s.Equal("localrepo", name)
+		}
+
 	}
 }
 
 func (s *LocalGitRepositoryTestSuite) TestGetOriginUrl() {
 	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
-		s.Equal("git@github.com:testuser/localrepo", localRepo.GetOriginUrl())
+		if url, err := localRepo.GetOriginUrl(); s.NoError(err) {
+			s.Equal("git@github.com:testuser/localrepo", url)
+		}
 	}
 }
 
@@ -117,7 +122,7 @@ func (s *LocalGitRepositoryTestSuite) TestGetLastCommit() {
 			s.Equal("7e09312b8017695fadcd606882e3779f10a5c832", commit.hash)
 			s.Equal("Amir Malka", commit.authorName)
 			s.Equal("amirm@armosec.io", commit.authorEmail)
-			s.Equal("2022-05-22 19:11:57 +0300 +0300", commit.date)
+			s.Equal("2022-05-22 19:11:57 +0300 +0300", commit.date.String())
 			s.Equal("added file B\n", commit.message)
 		}
 	}
@@ -130,7 +135,7 @@ func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
 				s.Equal("9fae4be19624297947d2b605cefbff516628612d", commit.hash)
 				s.Equal("Amir Malka", commit.authorName)
 				s.Equal("amirm@armosec.io", commit.authorEmail)
-				s.Equal("2022-05-22 18:55:48 +0300 +0300", commit.date)
+				s.Equal("2022-05-22 18:55:48 +0300 +0300", commit.date.String())
 				s.Equal("added file A\n", commit.message)
 			}
 		}
@@ -142,7 +147,7 @@ func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
 				s.Equal("7e09312b8017695fadcd606882e3779f10a5c832", commit.hash)
 				s.Equal("Amir Malka", commit.authorName)
 				s.Equal("amirm@armosec.io", commit.authorEmail)
-				s.Equal("2022-05-22 19:11:57 +0300 +0300", commit.date)
+				s.Equal("2022-05-22 19:11:57 +0300 +0300", commit.date.String())
 				s.Equal("added file B\n", commit.message)
 			}
 		}
