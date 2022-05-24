@@ -64,6 +64,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
+	scanInfo.Local = true // do not submit results every scan
 	scanInfo.FrameworkScan = true
 	scanInfo.ScanAll = true                                                        // scan all frameworks
 	scanInfo.ScanID = scanID                                                       // scan ID
