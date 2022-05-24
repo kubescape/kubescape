@@ -3,44 +3,32 @@ package v1
 import "sync"
 
 type serverState struct {
-	// response string
-	busy     bool
-	id       string
+	statusID map[string]bool
 	latestID string
 	mtx      sync.RWMutex
 }
 
-func (s *serverState) isBusy() bool {
+// isBusy is server busy with ID, if id is empty will check for latest ID
+func (s *serverState) isBusy(id string) bool {
 	s.mtx.RLock()
-	busy := s.busy
+	if id == "" {
+		id = s.latestID
+	}
+	busy := s.statusID[id]
 	s.mtx.RUnlock()
 	return busy
 }
 
-func (s *serverState) setBusy() {
+func (s *serverState) setBusy(id string) {
 	s.mtx.Lock()
-	s.busy = true
+	s.statusID[id] = true
+	s.latestID = id
 	s.mtx.Unlock()
 }
 
-func (s *serverState) setNotBusy() {
+func (s *serverState) setNotBusy(id string) {
 	s.mtx.Lock()
-	s.busy = false
-	s.latestID = s.id
-	s.id = ""
-	s.mtx.Unlock()
-}
-
-func (s *serverState) getID() string {
-	s.mtx.RLock()
-	id := s.id
-	s.mtx.RUnlock()
-	return id
-}
-
-func (s *serverState) setID(id string) {
-	s.mtx.Lock()
-	s.id = id
+	delete(s.statusID, id)
 	s.mtx.Unlock()
 }
 
@@ -51,9 +39,16 @@ func (s *serverState) getLatestID() string {
 	return id
 }
 
+func (s *serverState) len() int {
+	s.mtx.RLock()
+	l := len(s.statusID)
+	s.mtx.RUnlock()
+	return l
+}
+
 func newServerState() *serverState {
 	return &serverState{
-		busy: false,
-		mtx:  sync.RWMutex{},
+		statusID: make(map[string]bool),
+		mtx:      sync.RWMutex{},
 	}
 }

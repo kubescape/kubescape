@@ -13,8 +13,7 @@ var NativeFrameworks = []string{"nsa", "mitre", "armobest", "devopsbest"}
 
 func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.apiURL
+	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
 	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
@@ -31,8 +30,7 @@ func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 
 func (armoAPI *ArmoAPI) getListFrameworkURL() string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.apiURL
+	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
 	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
@@ -42,8 +40,7 @@ func (armoAPI *ArmoAPI) getListFrameworkURL() string {
 }
 func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.apiURL
+	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoPostureExceptions"
 
 	q := u.Query()
@@ -58,8 +55,7 @@ func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 
 func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.apiURL
+	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/postureExceptionPolicy"
 
 	q := u.Query()
@@ -81,8 +77,7 @@ func (armoAPI *ArmoAPI) getAccountConfigDefault(clusterName string) string {
 
 func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.apiURL
+	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoCustomerConfiguration"
 
 	q := u.Query()
@@ -97,24 +92,21 @@ func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 
 func (armoAPI *ArmoAPI) getAccountURL() string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.apiURL
+	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/createTenant"
 	return u.String()
 }
 
 func (armoAPI *ArmoAPI) getApiToken() string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.authURL
-	u.Path = "frontegg/identity/resources/auth/v1/api-token"
+	u.Scheme, u.Host = parseHost(armoAPI.GetAuthURL())
+	u.Path = "identity/resources/auth/v1/api-token"
 	return u.String()
 }
 
 func (armoAPI *ArmoAPI) getOpenidCustomers() string {
 	u := url.URL{}
-	u.Scheme = "https"
-	u.Host = armoAPI.apiURL
+	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/openid_customers"
 	return u.String()
 }
@@ -172,4 +164,13 @@ func (armoAPI *ArmoAPI) getCustomerGUIDFallBack() string {
 		return armoAPI.accountID
 	}
 	return "11111111-1111-1111-1111-111111111111"
+}
+
+func parseHost(host string) (string, string) {
+	if strings.HasPrefix(host, "http://") {
+		return "http", strings.Replace(host, "http://", "", 1)
+	}
+
+	// default scheme
+	return "https", strings.Replace(host, "https://", "", 1)
 }

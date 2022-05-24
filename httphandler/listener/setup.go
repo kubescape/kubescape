@@ -15,6 +15,7 @@ import (
 
 const (
 	scanPath              = "/v1/scan"
+	statusPath            = "/v1/status"
 	resultsPath           = "/v1/results"
 	prometheusMmeticsPath = "/v1/metrics"
 	livePath              = "/livez"
@@ -44,6 +45,7 @@ func SetupHTTPListener() error {
 
 	rtr.HandleFunc(prometheusMmeticsPath, httpHandler.Metrics)
 	rtr.HandleFunc(scanPath, httpHandler.Scan)
+	rtr.HandleFunc(statusPath, httpHandler.Status)
 	rtr.HandleFunc(resultsPath, httpHandler.Results)
 	rtr.HandleFunc(livePath, httpHandler.Live)
 	rtr.HandleFunc(readyPath, httpHandler.Ready)

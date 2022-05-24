@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
@@ -11,18 +13,18 @@ import (
 	"github.com/armosec/opa-utils/reporthandling"
 )
 
-func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.PolicyNotification, policiesAndResources *cautils.OPASessionObj) error {
+func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.PolicyIdentifier, policiesAndResources *cautils.OPASessionObj) error {
 	logger.L().Info("Downloading/Loading policy definitions")
 
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
-	policies, err := policyHandler.getScanPolicies(notification)
+	policies, err := policyHandler.getScanPolicies(policyIdentifier)
 	if err != nil {
 		return err
 	}
 	if len(policies) == 0 {
-		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(notification.Rules), ", "))
+		return fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(policyIdentifier), ", "))
 	}
 
 	policiesAndResources.Policies = policies
@@ -44,12 +46,12 @@ func (policyHandler *PolicyHandler) getPolicies(notification *reporthandling.Pol
 	return nil
 }
 
-func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling.PolicyNotification) ([]reporthandling.Framework, error) {
+func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.PolicyIdentifier) ([]reporthandling.Framework, error) {
 	frameworks := []reporthandling.Framework{}
 
-	switch getScanKind(notification) {
-	case reporthandling.KindFramework: // Download frameworks
-		for _, rule := range notification.Rules {
+	switch getScanKind(policyIdentifier) {
+	case apisv1.KindFramework: // Download frameworks
+		for _, rule := range policyIdentifier {
 			receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(rule.Name)
 			if err != nil {
 				return frameworks, policyDownloadError(err)
@@ -63,11 +65,11 @@ func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling
 				}
 			}
 		}
-	case reporthandling.KindControl: // Download controls
+	case apisv1.KindControl: // Download controls
 		f := reporthandling.Framework{}
 		var receivedControl *reporthandling.Control
 		var err error
-		for _, rule := range notification.Rules {
+		for _, rule := range policyIdentifier {
 			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(rule.Name)
 			if err != nil {
 				return frameworks, policyDownloadError(err)
@@ -89,7 +91,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(notification *reporthandling
 	return frameworks, nil
 }
 
-func policyIdentifierToSlice(rules []reporthandling.PolicyIdentifier) []string {
+func policyIdentifierToSlice(rules []cautils.PolicyIdentifier) []string {
 	s := []string{}
 	for i := range rules {
 		s = append(s, fmt.Sprintf("%s: %s", rules[i].Kind, rules[i].Name))

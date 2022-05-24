@@ -110,13 +110,4 @@ kubescape_control_count_resources_excluded{name="<control name>",url="<docs url>
 kubescape_control_count_resources_passed{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
 ```
 
-#### Resources metrics
-The resources metrics give you the ability to prioritize fixing the resources by the number of controls that failed 
-
-```
-# Number of controls that failed for this particular resource
-kubescape_resource_count_controls_failed{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
-
-# Number of controls that where excluded for this particular resource
-kubescape_resource_count_controls_excluded{apiVersion="<>",kind="<>",namespace="<>",name="<>"} <counter>
-```
+ 

@@ -10,6 +10,7 @@ import (
 	printerv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v1"
 	printerv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v2"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
 type ResultsHandler struct {
@@ -52,7 +53,12 @@ func (resultsHandler *ResultsHandler) GetReporter() reporter.IReport {
 
 // ToJson return results in json format
 func (resultsHandler *ResultsHandler) ToJson() ([]byte, error) {
-	return json.Marshal(printerv2.DataToJson(resultsHandler.scanData))
+	return json.Marshal(printerv2.FinalizeResults(resultsHandler.scanData))
+}
+
+// GetResults return results
+func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
+	return printerv2.FinalizeResults(resultsHandler.scanData)
 }
 
 // HandleResults handle the scan results according to the pre defind interfaces

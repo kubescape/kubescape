@@ -69,7 +69,10 @@ type ITenantConfig interface {
 	// getters
 	GetContextName() string
 	GetAccountID() string
-	GetTennatEmail() string
+	GetTenantEmail() string
+	GetToken() string
+	GetClientID() string
+	GetSecretKey() string
 	GetConfigObj() *ConfigObj
 	// GetBackendAPI() getter.IBackend
 	// GenerateURL()
@@ -88,7 +91,6 @@ type LocalConfig struct {
 
 func NewLocalConfig(
 	backendAPI getter.IBackend, customerGUID, clusterName string) *LocalConfig {
-	var configObj *ConfigObj
 
 	lc := &LocalConfig{
 		backendAPI: backendAPI,
@@ -96,13 +98,9 @@ func NewLocalConfig(
 	}
 	// get from configMap
 	if existsConfigFile() { // get from file
-		configObj, _ = loadConfigFromFile()
-	} else {
-		configObj = &ConfigObj{}
+		loadConfigFromFile(lc.configObj)
 	}
-	if configObj != nil {
-		lc.configObj = configObj
-	}
+
 	if customerGUID != "" {
 		lc.configObj.AccountID = customerGUID // override config customerGUID
 	}
@@ -119,9 +117,12 @@ func NewLocalConfig(
 }
 
 func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
-func (lc *LocalConfig) GetTennatEmail() string   { return lc.configObj.CustomerAdminEMail }
+func (lc *LocalConfig) GetTenantEmail() string   { return lc.configObj.CustomerAdminEMail }
 func (lc *LocalConfig) GetAccountID() string     { return lc.configObj.AccountID }
+func (lc *LocalConfig) GetClientID() string      { return lc.configObj.ClientID }
+func (lc *LocalConfig) GetSecretKey() string     { return lc.configObj.SecretKey }
 func (lc *LocalConfig) GetContextName() string   { return lc.configObj.ClusterName }
+func (lc *LocalConfig) GetToken() string         { return lc.configObj.Token }
 func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
@@ -191,7 +192,7 @@ type ClusterConfig struct {
 }
 
 func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, customerGUID, clusterName string) *ClusterConfig {
-	var configObj *ConfigObj
+	// var configObj *ConfigObj
 	c := &ClusterConfig{
 		k8s:                k8s,
 		backendAPI:         backendAPI,
@@ -200,15 +201,14 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		configMapNamespace: getConfigMapNamespace(),
 	}
 
-	// get from configMap
+	// first, load from configMap
 	if c.existsConfigMap() {
-		configObj, _ = c.loadConfigFromConfigMap()
+		c.loadConfigFromConfigMap()
 	}
-	if configObj == nil && existsConfigFile() { // get from file
-		configObj, _ = loadConfigFromFile()
-	}
-	if configObj != nil {
-		c.configObj = configObj
+
+	// second, load from file
+	if existsConfigFile() { // get from file
+		loadConfigFromFile(c.configObj)
 	}
 	if customerGUID != "" {
 		c.configObj.AccountID = customerGUID // override config customerGUID
@@ -234,7 +234,10 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 func (c *ClusterConfig) GetConfigObj() *ConfigObj { return c.configObj }
 func (c *ClusterConfig) GetDefaultNS() string     { return c.configMapNamespace }
 func (c *ClusterConfig) GetAccountID() string     { return c.configObj.AccountID }
-func (c *ClusterConfig) GetTennatEmail() string   { return c.configObj.CustomerAdminEMail }
+func (c *ClusterConfig) GetClientID() string      { return c.configObj.ClientID }
+func (c *ClusterConfig) GetSecretKey() string     { return c.configObj.SecretKey }
+func (c *ClusterConfig) GetTenantEmail() string   { return c.configObj.CustomerAdminEMail }
+func (c *ClusterConfig) GetToken() string         { return c.configObj.Token }
 func (c *ClusterConfig) IsConfigFound() bool      { return existsConfigFile() || c.existsConfigMap() }
 
 func (c *ClusterConfig) SetTenant() error {
@@ -282,18 +285,26 @@ func (c *ClusterConfig) ToMapString() map[string]interface{} {
 	}
 	return m
 }
-func (c *ClusterConfig) loadConfigFromConfigMap() (*ConfigObj, error) {
+func (c *ClusterConfig) loadConfigFromConfigMap() error {
 	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	if bData, err := json.Marshal(configMap.Data); err == nil {
-		return readConfig(bData)
-	}
-	return nil, nil
+	return loadConfigFromData(c.configObj, configMap.Data)
 }
 
+func loadConfigFromData(co *ConfigObj, data map[string]string) error {
+	var e error
+	if jsonConf, ok := data["config.json"]; ok {
+		e = readConfig([]byte(jsonConf), co)
+	}
+	if bData, err := json.Marshal(data); err == nil {
+		e = readConfig(bData, co)
+	}
+
+	return e
+}
 func (c *ClusterConfig) existsConfigMap() bool {
 	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 	// TODO - check if has customerGUID
@@ -411,28 +422,27 @@ func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {
 		}
 	}
 }
-func loadConfigFromFile() (*ConfigObj, error) {
+func loadConfigFromFile(configObj *ConfigObj) error {
 	dat, err := os.ReadFile(ConfigFileFullPath())
 	if err != nil {
-		return nil, err
+		return err
 	}
-
-	return readConfig(dat)
+	return readConfig(dat, configObj)
 }
-func readConfig(dat []byte) (*ConfigObj, error) {
+func readConfig(dat []byte, configObj *ConfigObj) error {
 
 	if len(dat) == 0 {
-		return nil, nil
+		return nil
 	}
-	configObj := &ConfigObj{}
+
 	if err := json.Unmarshal(dat, configObj); err != nil {
-		return nil, err
+		return err
 	}
 	if configObj.AccountID == "" {
 		configObj.AccountID = configObj.CustomerGUID
 	}
 	configObj.CustomerGUID = ""
-	return configObj, nil
+	return nil
 }
 
 // Check if the customer is submitted

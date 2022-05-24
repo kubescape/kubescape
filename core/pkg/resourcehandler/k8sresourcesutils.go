@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/reporthandling"
 	"k8s.io/utils/strings/slices"
 
@@ -12,11 +11,42 @@ import (
 )
 
 var (
-	ClusterDescribe = "ClusterDescribe"
+	ClusterDescribe              = "ClusterDescribe"
+	KubeletConfiguration         = "KubeletConfiguration"
+	OsReleaseFile                = "OsReleaseFile"
+	KernelVersion                = "KernelVersion"
+	LinuxSecurityHardeningStatus = "LinuxSecurityHardeningStatus"
+	OpenPortsList                = "OpenPortsList"
+	LinuxKernelVariables         = "LinuxKernelVariables"
+	KubeletCommandLine           = "KubeletCommandLine"
+	ImageVulnerabilities         = "ImageVulnerabilities"
 
+	MapResourceToApiGroup = map[string]string{
+		KubeletConfiguration:         "hostdata.kubescape.cloud/v1beta0",
+		OsReleaseFile:                "hostdata.kubescape.cloud/v1beta0",
+		KubeletCommandLine:           "hostdata.kubescape.cloud/v1beta0",
+		KernelVersion:                "hostdata.kubescape.cloud/v1beta0",
+		LinuxSecurityHardeningStatus: "hostdata.kubescape.cloud/v1beta0",
+		OpenPortsList:                "hostdata.kubescape.cloud/v1beta0",
+		LinuxKernelVariables:         "hostdata.kubescape.cloud/v1beta0",
+	}
+	MapResourceToApiGroupVuln = map[string][]string{
+		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}
 	MapResourceToApiGroupCloud = map[string][]string{
 		ClusterDescribe: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}}
 )
+
+func isEmptyImgVulns(armoResourcesMap cautils.ArmoResources) bool {
+	imgVulnResources := cautils.MapImageVulnResources(&armoResourcesMap)
+	for _, resource := range imgVulnResources {
+		if val, ok := armoResourcesMap[resource]; ok {
+			if len(val) > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func setK8sResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResources {
 	k8sResources := make(cautils.K8SResources)
@@ -80,10 +110,16 @@ func setComplexArmoResourceMap(frameworks []reporthandling.Framework, resourceTo
 }
 
 func mapArmoResourceToApiGroup(resource string) []string {
-	if val, ok := hostsensorutils.MapResourceToApiGroup[resource]; ok {
+	if val, ok := MapResourceToApiGroup[resource]; ok {
 		return []string{val}
 	}
-	return MapResourceToApiGroupCloud[resource]
+	if val, ok := MapResourceToApiGroupCloud[resource]; ok {
+		return val
+	}
+	if val, ok := MapResourceToApiGroupVuln[resource]; ok {
+		return val
+	}
+	return []string{}
 }
 
 func insertControls(resource string, resourceToControl map[string][]string, control reporthandling.Control) {

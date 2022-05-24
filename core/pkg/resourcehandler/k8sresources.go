@@ -18,6 +18,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 
+	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8slabels "k8s.io/apimachinery/pkg/labels"
@@ -86,6 +87,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, armoResourceMap); err != nil {
 			logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
 		}
+		if isEmptyImgVulns(*armoResourceMap) {
+			cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armo.cloud/docs/cluster-vulnerability-scanning", imgVulnResources, sessionObj.InfoMap)
+		}
 	}
 
 	hostResources := cautils.MapHostResources(armoResourceMap)
@@ -103,7 +107,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 				sessionObj.InfoMap = infoMap
 			}
 		} else {
-			cautils.SetInfoMapForResources("enable-host-scan flag not used", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information:  https://hub.armo.cloud/docs/host-sensor", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -287,17 +291,31 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 }
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
-	// labels used for control plane
-	listOptions := metav1.ListOptions{
-		LabelSelector: "!node-role.kubernetes.io/control-plane,!node-role.kubernetes.io/master",
+	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	scheduableNodes := v1.NodeList{}
+	if nodesList != nil {
+		for _, node := range nodesList.Items {
+			if len(node.Spec.Taints) == 0 {
+				scheduableNodes.Items = append(scheduableNodes.Items, node)
+			} else {
+				if !isMasterNodeTaints(node.Spec.Taints) {
+					scheduableNodes.Items = append(scheduableNodes.Items, node)
+				}
+			}
+		}
 	}
-	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.TODO(), listOptions)
 	if err != nil {
 		return 0, err
 	}
-	nodesNumber := 0
-	if nodesList != nil {
-		nodesNumber = len(nodesList.Items)
+	return len(scheduableNodes.Items), nil
+}
+
+// NoSchedule taint with empty value is usually applied to controlplane
+func isMasterNodeTaints(taints []v1.Taint) bool {
+	for _, taint := range taints {
+		if taint.Effect == v1.TaintEffectNoSchedule && taint.Value == "" {
+			return true
+		}
 	}
-	return nodesNumber, nil
+	return false
 }

@@ -89,9 +89,8 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 
 func (report *ReportEventReceiver) GetURL() string {
 	u := url.URL{}
-	u.Scheme = "https"
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
-
+	ParseHost(&u)
 	q := u.Query()
 
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted

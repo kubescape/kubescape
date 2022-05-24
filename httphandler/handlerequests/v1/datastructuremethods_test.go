@@ -6,7 +6,6 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils"
 	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -34,9 +33,9 @@ func TestToScanInfo(t *testing.T) {
 		assert.False(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
 		assert.Equal(t, "nsa", s.PolicyIdentifier[0].Name)
-		assert.Equal(t, reporthandling.KindFramework, s.PolicyIdentifier[0].Kind)
+		assert.Equal(t, apisv1.KindFramework, s.PolicyIdentifier[0].Kind)
 		assert.Equal(t, "mitre", s.PolicyIdentifier[1].Name)
-		assert.Equal(t, reporthandling.KindFramework, s.PolicyIdentifier[1].Kind)
+		assert.Equal(t, apisv1.KindFramework, s.PolicyIdentifier[1].Kind)
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -51,7 +50,7 @@ func TestToScanInfo(t *testing.T) {
 		assert.Equal(t, "", s.ExcludedNamespaces)
 		assert.Equal(t, 1, len(s.PolicyIdentifier))
 		assert.Equal(t, "c-0001", s.PolicyIdentifier[0].Name)
-		assert.Equal(t, reporthandling.KindControl, s.PolicyIdentifier[0].Kind)
+		assert.Equal(t, apisv1.KindControl, s.PolicyIdentifier[0].Kind)
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{}
@@ -62,6 +61,17 @@ func TestToScanInfo(t *testing.T) {
 }
 
 func TestSetTargetInScanInfo(t *testing.T) {
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{""},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+	}
 	{
 		req := &utilsmetav1.PostScanRequest{
 			TargetType:  apisv1.KindFramework,
