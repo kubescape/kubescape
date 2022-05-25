@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	"github.com/google/uuid"
 )
@@ -34,6 +36,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	defer handler.scanResponseChan.delete(scanID)
 
 	// send to scan queue
+	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/metrics"))
 	handler.scanRequestChan <- scanParams
 
 	// wait for scan to complete
@@ -64,7 +67,8 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
-	scanInfo.Local = true // do not submit results every scan
+	scanInfo.Submit = false // do not submit results every scan
+	scanInfo.Local = true   // do not submit results every scan
 	scanInfo.FrameworkScan = true
 	scanInfo.ScanAll = true                                                        // scan all frameworks
 	scanInfo.ScanID = scanID                                                       // scan ID

@@ -75,6 +75,17 @@ func TestSetTargetInScanInfo(t *testing.T) {
 	{
 		req := &utilsmetav1.PostScanRequest{
 			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
 			TargetNames: []string{"nsa", "mitre"},
 		}
 		scanInfo := &cautils.ScanInfo{}
