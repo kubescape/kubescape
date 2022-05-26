@@ -90,7 +90,7 @@ type LocalConfig struct {
 }
 
 func NewLocalConfig(
-	backendAPI getter.IBackend, customerGUID, clusterName string) *LocalConfig {
+	backendAPI getter.IBackend, credentials *Credentials, clusterName string) *LocalConfig {
 
 	lc := &LocalConfig{
 		backendAPI: backendAPI,
@@ -101,13 +101,11 @@ func NewLocalConfig(
 		loadConfigFromFile(lc.configObj)
 	}
 
-	if customerGUID != "" {
-		lc.configObj.AccountID = customerGUID // override config customerGUID
-	}
+	updateCredentials(lc.configObj, credentials)
+
 	if clusterName != "" {
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
-	getAccountFromEnv(lc.configObj)
 
 	lc.backendAPI.SetAccountID(lc.configObj.AccountID)
 	lc.backendAPI.SetClientID(lc.configObj.ClientID)
@@ -191,7 +189,7 @@ type ClusterConfig struct {
 	configObj          *ConfigObj
 }
 
-func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, customerGUID, clusterName string) *ClusterConfig {
+func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, credentials *Credentials, clusterName string) *ClusterConfig {
 	// var configObj *ConfigObj
 	c := &ClusterConfig{
 		k8s:                k8s,
@@ -210,13 +208,11 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	if existsConfigFile() { // get from file
 		loadConfigFromFile(c.configObj)
 	}
-	if customerGUID != "" {
-		c.configObj.AccountID = customerGUID // override config customerGUID
-	}
+	updateCredentials(c.configObj, credentials)
+
 	if clusterName != "" {
 		c.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
-	getAccountFromEnv(c.configObj)
 
 	if c.configObj.ClusterName == "" {
 		c.configObj.ClusterName = AdoptClusterName(k8sinterface.GetContextName())
@@ -489,15 +485,34 @@ func getConfigMapNamespace() string {
 	return "default"
 }
 
-func getAccountFromEnv(configObj *ConfigObj) {
+func getAccountFromEnv(credentials *Credentials) {
 	// load from env
-	if accountID := os.Getenv("KS_ACCOUNT_ID"); accountID != "" {
-		configObj.AccountID = accountID
+	if accountID := os.Getenv("KS_ACCOUNT_ID"); credentials.Account != "" && accountID != "" {
+		credentials.Account = accountID
 	}
-	if clientID := os.Getenv("KS_CLIENT_ID"); clientID != "" {
-		configObj.ClientID = clientID
+	if clientID := os.Getenv("KS_CLIENT_ID"); credentials.ClientID != "" && clientID != "" {
+		credentials.ClientID = clientID
 	}
-	if secretKey := os.Getenv("KS_SECRET_KEY"); secretKey != "" {
-		configObj.SecretKey = secretKey
+	if secretKey := os.Getenv("KS_SECRET_KEY"); credentials.SecretKey != "" && secretKey != "" {
+		credentials.SecretKey = secretKey
 	}
+}
+
+func updateCredentials(configObj *ConfigObj, credentials *Credentials) {
+
+	if credentials == nil {
+		credentials = &Credentials{}
+	}
+	getAccountFromEnv(credentials)
+
+	if credentials.Account != "" {
+		configObj.AccountID = credentials.Account // override config Account
+	}
+	if credentials.ClientID != "" {
+		configObj.ClientID = credentials.ClientID // override config ClientID
+	}
+	if credentials.SecretKey != "" {
+		configObj.SecretKey = credentials.SecretKey // override config SecretKey
+	}
+
 }

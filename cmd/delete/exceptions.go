@@ -26,7 +26,7 @@ func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command 
 			if len(exceptionsNames) == 0 {
 				logger.L().Fatal("missing exceptions names")
 			}
-			if err := ks.DeleteExceptions(&v1.DeleteExceptions{Account: deleteInfo.Account, Exceptions: exceptionsNames}); err != nil {
+			if err := ks.DeleteExceptions(&v1.DeleteExceptions{Credentials: deleteInfo.Credentials, Exceptions: exceptionsNames}); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 		},

@@ -59,7 +59,9 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 	}
-	listCmd.PersistentFlags().StringVar(&listPolicies.Account, "account", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	listCmd.PersistentFlags().StringVarP(&listPolicies.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	listCmd.PersistentFlags().StringVarP(&listPolicies.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armo.cloud/docs/authentication")
+	listCmd.PersistentFlags().StringVarP(&listPolicies.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armo.cloud/docs/authentication")
 	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-printer'/'json'")
 	listCmd.PersistentFlags().BoolVarP(&listPolicies.ListIDs, "id", "", false, "List control ID's instead of controls names")
 

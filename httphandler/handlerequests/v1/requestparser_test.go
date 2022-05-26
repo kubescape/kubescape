@@ -41,7 +41,7 @@ func TestGetScanParamsFromRequest(t *testing.T) {
 		assert.True(t, req.scanQueryParams.ReturnResults)
 		assert.True(t, req.scanInfo.HostSensorEnabled.GetBool())
 		assert.True(t, req.scanInfo.Submit)
-		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.Account)
+		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.Credentials.Account)
 	}
 
 	{
@@ -71,6 +71,6 @@ func TestGetScanParamsFromRequest(t *testing.T) {
 		assert.False(t, req.scanQueryParams.ReturnResults)
 		assert.False(t, req.scanInfo.HostSensorEnabled.GetBool())
 		assert.False(t, req.scanInfo.Submit)
-		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.Account)
+		assert.Equal(t, "aaaaaaaaaa", req.scanInfo.Credentials.Account)
 	}
 }

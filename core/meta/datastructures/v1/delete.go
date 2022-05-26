@@ -1,6 +1,8 @@
 package v1
 
+import "github.com/armosec/kubescape/v2/core/cautils"
+
 type DeleteExceptions struct {
-	Account    string
-	Exceptions []string
+	Credentials cautils.Credentials
+	Exceptions  []string
 }
