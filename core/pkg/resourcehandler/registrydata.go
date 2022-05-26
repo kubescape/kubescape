@@ -1,12 +1,13 @@
 package resourcehandler
 
 import (
+	"fmt"
+
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	armosecadaptorv1 "github.com/armosec/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
 	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 
@@ -45,8 +46,9 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	for i := range registryAdaptors.adaptors { // login and and get vulnerabilities
 
 		if err := registryAdaptors.adaptors[i].Login(); err != nil {
-			logger.L().Error("failed to login", helpers.Error(err))
-			continue
+			if err != nil {
+				return fmt.Errorf("failed to login, adaptor: '%s', reason: '%s'", registryAdaptors.adaptors[i].DescribeAdaptor(), err.Error())
+			}
 		}
 		vulnerabilities, err := registryAdaptors.adaptors[i].GetImagesVulnerabilities(imagesIdentifiers)
 		if err != nil {

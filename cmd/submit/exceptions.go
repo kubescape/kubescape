@@ -21,7 +21,7 @@ func getExceptionsCmd(ks meta.IKubescape, submitInfo *metav1.Submit) *cobra.Comm
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := ks.SubmitExceptions(submitInfo.Account, args[0]); err != nil {
+			if err := ks.SubmitExceptions(&submitInfo.Credentials, args[0]); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 		},

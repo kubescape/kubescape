@@ -8,6 +8,13 @@ type RootInfo struct {
 
 	ArmoBEURLs    string // armo url
 	ArmoBEURLsDep string // armo url
+
+}
+
+type Credentials struct {
+	Account   string
+	ClientID  string
+	SecretKey string
 }
 
 // func (rootInfo *RootInfo) InitLogger() {

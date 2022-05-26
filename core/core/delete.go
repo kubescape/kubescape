@@ -12,7 +12,7 @@ import (
 func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error {
 
 	// load cached config
-	getTenantConfig(delExceptions.Account, "", getKubernetesApi())
+	getTenantConfig(&delExceptions.Credentials, "", getKubernetesApi())
 
 	// login kubescape SaaS
 	armoAPI := getter.GetArmoAPIConnector()

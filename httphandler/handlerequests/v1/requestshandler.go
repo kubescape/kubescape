@@ -48,12 +48,16 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 
 	statusQueryParams := &StatusQueryParams{}
 	if err := schema.NewDecoder().Decode(statusQueryParams, r.URL.Query()); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}
+	logger.L().Info("requesting status", helpers.String("scanID", statusQueryParams.ScanID), helpers.String("api", "v1/status"))
 
+	w.WriteHeader(http.StatusOK)
 	if !handler.state.isBusy(statusQueryParams.ScanID) {
 		response.Type = utilsapisv1.NotBusyScanResponseType
+		logger.L().Debug("status: not busy", helpers.String("ID", statusQueryParams.ScanID))
 		w.Write(responseToBytes(&response))
 		return
 	}
@@ -65,6 +69,8 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 	response.Response = statusQueryParams.ScanID
 	response.ID = statusQueryParams.ScanID
 	response.Type = utilsapisv1.BusyScanResponseType
+
+	logger.L().Debug("status: busy", helpers.String("ID", statusQueryParams.ScanID))
 	w.Write(responseToBytes(&response))
 }
 
@@ -102,6 +108,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	// you must use a goroutine since the executeScan function is not always listening to the channel
 	go func() {
 		// send to scanning handler
+		logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/scan"))
 		handler.scanRequestChan <- scanRequestParams
 	}()
 
@@ -141,6 +148,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), "")
 		return
 	}
+	logger.L().Info("requesting results", helpers.String("scanID", resultsQueryParams.ScanID), helpers.String("api", "v1/results"), helpers.String("method", r.Method))
 
 	if resultsQueryParams.ScanID == "" {
 		resultsQueryParams.ScanID = handler.state.getLatestID()

@@ -86,9 +86,11 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	if len(imgVulnResources) > 0 {
 		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, armoResourceMap); err != nil {
 			logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
-		}
-		if isEmptyImgVulns(*armoResourceMap) {
-			cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armo.cloud/docs/cluster-vulnerability-scanning", imgVulnResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s", err.Error()), imgVulnResources, sessionObj.InfoMap)
+		} else {
+			if isEmptyImgVulns(*armoResourceMap) {
+				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armo.cloud/docs/cluster-vulnerability-scanning", imgVulnResources, sessionObj.InfoMap)
+			}
 		}
 	}
 

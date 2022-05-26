@@ -83,8 +83,7 @@ func (armoCivAdaptor *ArmoCivAdaptor) GetImageVulnerability(imageID *registryvul
 }
 
 func (armoCivAdaptor *ArmoCivAdaptor) DescribeAdaptor() string {
-	// TODO
-	return ""
+	return "armo image vulnerabilities scanner, docs: https://hub.armo.cloud/docs/cluster-vulnerability-scanning"
 }
 
 func (armoCivAdaptor *ArmoCivAdaptor) GetImagesInformation(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageInformation, error) {

@@ -48,8 +48,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:     "kubescape",
 		Version: cautils.BuildNumber,
-		Short:   "Kubescape is a tool for testing Kubernetes security posture",
-		Long:    `Based on NSA \ MITRE ATT&CK® and other frameworks specifications`,
+		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://hub.armo.cloud/docs",
 		Example: ksExamples,
 	}
 

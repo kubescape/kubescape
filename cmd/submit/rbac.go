@@ -27,7 +27,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			k8s := k8sinterface.NewKubernetesApi()
 
 			// get config
-			clusterConfig := getTenantConfig(submitInfo.Account, "", k8s)
+			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", k8s)
 			if err := clusterConfig.SetTenant(); err != nil {
 				logger.L().Error("failed setting account ID", helpers.Error(err))
 			}
@@ -60,9 +60,9 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(Account, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), Account, clusterName)
+		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), credentials, clusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), Account, clusterName)
+	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), credentials, clusterName)
 }

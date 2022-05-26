@@ -29,11 +29,11 @@ func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) err
 	return nil
 }
 
-func (ks *Kubescape) SubmitExceptions(accountID, excPath string) error {
+func (ks *Kubescape) SubmitExceptions(credentials *cautils.Credentials, excPath string) error {
 	logger.L().Info("submitting exceptions", helpers.String("path", excPath))
 
 	// load cached config
-	tenantConfig := getTenantConfig(accountID, "", getKubernetesApi())
+	tenantConfig := getTenantConfig(credentials, "", getKubernetesApi())
 	if err := tenantConfig.SetTenant(); err != nil {
 		logger.L().Error("failed setting account ID", helpers.Error(err))
 	}

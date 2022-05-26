@@ -44,14 +44,14 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 }
 
 func listFrameworks(listPolicies *metav1.ListPolicies) ([]string, error) {
-	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(&listPolicies.Credentials, "", getKubernetesApi()) // change k8sinterface
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), true, nil)
 
 	return listFrameworksNames(g), nil
 }
 
 func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
-	tenant := getTenantConfig(listPolicies.Account, "", getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(&listPolicies.Credentials, "", getKubernetesApi()) // change k8sinterface
 
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
 	l := getter.ListName
@@ -63,7 +63,7 @@ func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
 
 func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
 	// load tenant metav1
-	getTenantConfig(listPolicies.Account, "", getKubernetesApi())
+	getTenantConfig(&listPolicies.Credentials, "", getKubernetesApi())
 
 	var exceptionsNames []string
 	armoAPI := getExceptionsGetter("")

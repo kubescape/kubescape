@@ -21,7 +21,7 @@ func TestToScanInfo(t *testing.T) {
 			TargetNames:        []string{"nsa", "mitre"},
 		}
 		s := ToScanInfo(req)
-		assert.Equal(t, "abc", s.Account)
+		assert.Equal(t, "abc", s.Credentials.Account)
 		assert.Equal(t, "v2", s.FormatVersion)
 		assert.Equal(t, "pdf", s.Format)
 		assert.Equal(t, 2, len(s.PolicyIdentifier))
@@ -65,6 +65,17 @@ func TestSetTargetInScanInfo(t *testing.T) {
 		req := &utilsmetav1.PostScanRequest{
 			TargetType:  apisv1.KindFramework,
 			TargetNames: []string{""},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{},
 		}
 		scanInfo := &cautils.ScanInfo{}
 		setTargetInScanInfo(req, scanInfo)

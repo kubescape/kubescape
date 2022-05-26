@@ -11,7 +11,7 @@ import (
 func TestDefaultScanInfo(t *testing.T) {
 	s := defaultScanInfo()
 
-	assert.Equal(t, "", s.Account)
+	assert.Equal(t, "", s.Credentials.Account)
 	assert.Equal(t, "v2", s.FormatVersion)
 	assert.Equal(t, "json", s.Format)
 	assert.False(t, s.HostSensorEnabled.GetBool())
@@ -24,7 +24,7 @@ func TestGetScanCommand(t *testing.T) {
 		TargetType: apisv1.KindFramework,
 	}
 	s := getScanCommand(&req, "abc")
-	assert.Equal(t, "", s.Account)
+	assert.Equal(t, "", s.Credentials.Account)
 	assert.Equal(t, "abc", s.ScanID)
 	assert.Equal(t, "v2", s.FormatVersion)
 	assert.Equal(t, "json", s.Format)
