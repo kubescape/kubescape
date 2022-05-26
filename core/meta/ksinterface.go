@@ -15,8 +15,8 @@ type IKubescape interface {
 	Download(downloadInfo *metav1.DownloadInfo) error // TODO - return downloaded policies
 
 	// submit
-	Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error // TODO - func should receive object
-	SubmitExceptions(accountID, excPath string) error             // TODO - remove
+	Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error            // TODO - func should receive object
+	SubmitExceptions(credentials *cautils.Credentials, excPath string) error // TODO - remove
 
 	// config
 	SetCachedConfig(setConfig *metav1.SetConfig) error

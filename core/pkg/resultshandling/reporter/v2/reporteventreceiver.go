@@ -57,8 +57,7 @@ func (report *ReportEventReceiver) Submit(opaSessionObj *cautils.OPASessionObj) 
 	if err == nil {
 		report.generateMessage()
 	} else {
-
-		err = fmt.Errorf("failed to submit scan results. url: '%s'", report.GetURL())
+		err = fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.GetURL(), err.Error())
 	}
 
 	logger.L().Debug("", helpers.String("account ID", report.customerGUID))

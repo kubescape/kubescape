@@ -137,7 +137,7 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.FailThreshold = 100
-	scanInfo.Account = envToString("KS_ACCOUNT", "")                               // publish results to Kubescape SaaS
+	scanInfo.Credentials.Account = envToString("KS_ACCOUNT", "")                   // publish results to Kubescape SaaS
 	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")         // namespaces to exclude
 	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")          // namespaces to include
 	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")             // path to host scan YAML

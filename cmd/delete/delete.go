@@ -24,7 +24,9 @@ func GetDeleteCmd(ks meta.IKubescape) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 		},
 	}
-	deleteCmd.PersistentFlags().StringVarP(&deleteInfo.Account, "account", "", "", "Armo portal account ID. Default will load account ID from configMap or config file")
+	deleteCmd.PersistentFlags().StringVarP(&deleteInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	deleteCmd.PersistentFlags().StringVarP(&deleteInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armo.cloud/docs/authentication")
+	deleteCmd.PersistentFlags().StringVarP(&deleteInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armo.cloud/docs/authentication")
 
 	deleteCmd.AddCommand(getExceptionsCmd(ks, &deleteInfo))
 
