@@ -6,15 +6,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
+	gitv5 "github.com/go-git/go-git/v5"
+	configv5 "github.com/go-git/go-git/v5/config"
+	plumbingv5 "github.com/go-git/go-git/v5/plumbing"
 )
 
 type LocalGitRepository struct {
-	repo   *git.Repository
-	head   *plumbing.Reference
-	config *config.Config
+	repo   *gitv5.Repository
+	head   *plumbingv5.Reference
+	config *configv5.Config
 }
 
 type GitCommit struct {
@@ -26,7 +26,7 @@ type GitCommit struct {
 }
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
-	gitRepo, err := git.PlainOpen(path)
+	gitRepo, err := gitv5.PlainOpen(path)
 	if err != nil {
 		return nil, err
 	}
@@ -89,11 +89,11 @@ func (g *LocalGitRepository) GetLastCommit() (*GitCommit, error) {
 
 func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*GitCommit, error) {
 	// By default, returns commit information from current HEAD
-	logOptions := &git.LogOptions{}
+	logOptions := &gitv5.LogOptions{}
 
 	if filePath != "" {
 		logOptions.FileName = &filePath
-		logOptions.Order = git.LogOrderCommitterTime
+		logOptions.Order = gitv5.LogOrderCommitterTime
 	}
 
 	cIter, err := g.repo.Log(logOptions)
