@@ -97,7 +97,9 @@ func (hsh *HostSensorHandler) applyYAML() error {
 	namespaceName := ""
 	for i := range workloads {
 		if workloads[i].GetKind() == "Namespace" {
-			namespaceName = workloads[i].GetName()
+			// Fix namespace name to be unique
+			namespaceName = workloads[i].GetName() + "-" + randomString(6)
+			workloads[i].SetName(namespaceName)
 			break
 		}
 	}

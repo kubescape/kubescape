@@ -1,6 +1,8 @@
 package hostsensorutils
 
 import (
+	"math/rand"
+
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 )
@@ -32,4 +34,14 @@ func addInfoToMap(resource string, infoMap map[string]apis.StatusInfo, err error
 		InnerStatus: apis.StatusSkipped,
 		InnerInfo:   err.Error(),
 	}
+}
+
+func randomString(n int) string {
+	var letters = []rune("abcdefghijklmnopqrstuvwxyz0123456789")
+
+	s := make([]rune, n)
+	for i := range s {
+		s[i] = letters[rand.Intn(len(letters))]
+	}
+	return string(s)
 }
