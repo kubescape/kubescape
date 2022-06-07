@@ -10,66 +10,68 @@ ER_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoERURL"
 WEBSITE_CONST     = BASE_GETTER_CONST + ".ArmoFEURL"
 AUTH_SERVER_CONST = BASE_GETTER_CONST + ".armoAUTHURL"
 
-def checkStatus(status, msg):
+def check_status(status, msg):
     if status != 0:
         sys.stderr.write(msg)
         exit(status)
 
 
-def getBuildDir():
-    currentPlatform = platform.system()
-    buildDir = "./build/"
+def get_build_dir():
+    current_platform = platform.system()
+    build_dir = "./build/"
 
-    if currentPlatform == "Windows": buildDir += "windows-latest"
-    elif currentPlatform == "Linux": buildDir += "ubuntu-latest"
-    elif currentPlatform == "Darwin": buildDir += "macos-latest"
-    else: raise OSError("Platform %s is not supported!" % (currentPlatform))
+    if current_platform == "Windows": build_dir += "windows-latest"
+    elif current_platform == "Linux": build_dir += "ubuntu-latest"
+    elif current_platform == "Darwin": build_dir += "macos-latest"
+    else: raise OSError("Platform %s is not supported!" % (current_platform))
 
-    return buildDir
+    return build_dir
 
-def getPackageName():
-    packageName = "kubescape"
-    # if platform.system() == "Windows": packageName += ".exe"
+def get_package_name():
+    package_name = "kubescape"
+    # if platform.system() == "Windows": package_name += ".exe"
 
-    return packageName
+    return package_name
 
 
 def main():
     print("Building Kubescape")
 
-    # print environment variables
-    # print(os.environ)
-
     # Set some variables
-    packageName = getPackageName()
-    buildUrl = "github.com/armosec/kubescape/v2/core/cautils.BuildNumber"
-    releaseVersion = os.getenv("RELEASE")
-    ArmoBEServer = os.getenv("ArmoBEServer")
-    ArmoERServer = os.getenv("ArmoERServer")
-    ArmoWebsite = os.getenv("ArmoWebsite")
-    ArmoAuthServer = os.getenv("ArmoAuthServer")
+    package_name = get_package_name()
+    build_url = "github.com/armosec/kubescape/v2/core/cautils.BuildNumber"
+    release_version = os.getenv("RELEASE")
+    armo_be_server = os.getenv("ArmoBEServer")
+    armo_er_server = os.getenv("ArmoERServer")
+    armo_website = os.getenv("ArmoWebsite")
+    armo_auth_server = os.getenv("ArmoAuthServer")
 
+    client_var = "github.com/armosec/kubescape/v2/core/cautils.Client"
+    client_name = os.getenv("CLIENT")
+    
     # Create build directory
-    buildDir = getBuildDir()
+    build_dir = get_build_dir()
 
-    ks_file = os.path.join(buildDir, packageName)
+    ks_file = os.path.join(build_dir, package_name)
     hash_file = ks_file + ".sha256"
 
-    if not os.path.isdir(buildDir):
-        os.makedirs(buildDir)
+    if not os.path.isdir(build_dir):
+        os.makedirs(build_dir)
 
     # Build kubescape
     ldflags = "-w -s"
-    if releaseVersion:
-        ldflags += " -X {}={}".format(buildUrl, releaseVersion)
-    if ArmoBEServer:
-        ldflags += " -X {}={}".format(BE_SERVER_CONST, ArmoBEServer)
-    if ArmoERServer:
-        ldflags += " -X {}={}".format(ER_SERVER_CONST, ArmoERServer)
-    if ArmoWebsite:
-        ldflags += " -X {}={}".format(WEBSITE_CONST, ArmoWebsite)
-    if ArmoAuthServer:
-        ldflags += " -X {}={}".format(AUTH_SERVER_CONST, ArmoAuthServer)
+    if release_version:
+        ldflags += " -X {}={}".format(build_url, release_version)
+    if client_name:
+        ldflags += " -X {}={}".format(client_var, client_name)
+    if armo_be_server:
+        ldflags += " -X {}={}".format(BE_SERVER_CONST, armo_be_server)
+    if armo_er_server:
+        ldflags += " -X {}={}".format(ER_SERVER_CONST, armo_er_server)
+    if armo_website:
+        ldflags += " -X {}={}".format(WEBSITE_CONST, armo_website)
+    if armo_auth_server:
+        ldflags += " -X {}={}".format(AUTH_SERVER_CONST, armo_auth_server)
  
     build_command = ["go", "build", "-o", ks_file, "-ldflags" ,ldflags]
 
@@ -77,7 +79,7 @@ def main():
     print("Build command: {}".format(" ".join(build_command)))
 
     status = subprocess.call(build_command)
-    checkStatus(status, "Failed to build kubescape")
+    check_status(status, "Failed to build kubescape")
     
     sha256 = hashlib.sha256()
     with open(ks_file, "rb") as kube:

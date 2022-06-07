@@ -46,6 +46,7 @@ jobs:
       - name: Build
         env:
           RELEASE: v2.0.${{ github.run_number }} 
+          CLIENT: release
           ArmoBEServer: api.armo.cloud
           ArmoAuthServer: auth.armo.cloud
           ArmoERServer: report.armo.cloud
@@ -114,7 +115,7 @@ jobs:
         run: docker login -u="${QUAY_USERNAME}" -p="${QUAY_PASSWORD}" quay.io
 
       - name: Build the Docker image
-        run: docker buildx build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:latest --build-arg image_version=${{ steps.image-version.outputs.IMAGE_VERSION }} --push --platform linux/amd64,linux/arm64
+        run: docker buildx build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:latest --build-arg image_version=${{ steps.image-version.outputs.IMAGE_VERSION }} --build-arg client=image-release --push --platform linux/amd64,linux/arm64
 
       # - name: Login to GitHub Container Registry
       #   uses: docker/login-action@v1
