@@ -90,19 +90,23 @@ func listFiles(patterns []string) ([]string, []string, []error) {
 		if strings.HasPrefix(patterns[i], "http") {
 			continue
 		}
+		absPath := ""
 		if !filepath.IsAbs(patterns[i]) {
-			o, _ := os.Getwd()
-			patterns[i] = filepath.Join(o, patterns[i])
-			absPaths = append(absPaths, o)
+			absPath, _ = os.Getwd()
+			patterns[i] = filepath.Join(absPath, patterns[i])
 		}
 		if IsFile(patterns[i]) {
 			files = append(files, patterns[i])
+			absPaths = append(absPaths, absPath)
 		} else {
 			f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
 			if err != nil {
 				errs = append(errs, err)
 			} else {
 				files = append(files, f...)
+				for range f {
+					absPaths = append(absPaths, absPath)
+				}
 			}
 		}
 	}
