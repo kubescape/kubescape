@@ -151,11 +151,11 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
-func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]string, counter, reportCounter *int, host string) error {
+func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, counter, reportCounter *int, host string) error {
 	for resourceID, v := range allResources {
 		resource := reporthandling.NewResourceIMetadata(v)
 		if r, ok := resourcesSource[resourceID]; ok {
-			resource.SetSource(&reporthandling.Source{Path: r})
+			resource.SetSource(&r)
 		}
 		r, err := json.Marshal(resource)
 		if err != nil {

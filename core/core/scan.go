@@ -34,7 +34,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	// ================== setup k8s interface object ======================================
 	var k8s *k8sinterface.KubernetesApi
-	if scanInfo.GetScanningEnvironment() == cautils.ScanCluster {
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8s = getKubernetesApi()
 		if k8s == nil {
 			logger.L().Fatal("failed connecting to Kubernetes cluster")
@@ -48,11 +48,6 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
-	// Do not submit yaml scanning
-	if len(scanInfo.InputPatterns) > 0 {
-		scanInfo.Submit = false
-	}
-
 	if scanInfo.Submit {
 		// submit - Create tenant & Submit report
 		if err := tenantConfig.SetTenant(); err != nil {
@@ -63,7 +58,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== version testing ======================================
 
 	v := cautils.NewIVersionCheckHandler()
-	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", scanInfo.GetScanningEnvironment()))
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
 
 	// ================== setup host scanner object ======================================
 
@@ -154,7 +149,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
 	if err := reportResults.ProcessRulesListenner(); err != nil {
 		// TODO - do something
-		return resultsHandling, err
+		return resultsHandling, fmt.Errorf("%w", err)
 	}
 
 	// ========================= results handling =====================
@@ -166,25 +161,3 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	return resultsHandling, nil
 }
-
-// func askUserForHostSensor() bool {
-// 	return false
-
-// 	if !isatty.IsTerminal(os.Stdin.Fd()) {
-// 		return false
-// 	}
-// 	if ssss, err := os.Stdin.Stat(); err == nil {
-// 		// fmt.Printf("Found stdin type: %s\n", ssss.Mode().Type())
-// 		if ssss.Mode().Type()&(fs.ModeDevice|fs.ModeCharDevice) > 0 { //has TTY
-// 			fmt.Fprintf(os.Stderr, "Would you like to scan K8s nodes? [y/N]. This is required to collect valuable data for certain controls\n")
-// 			fmt.Fprintf(os.Stderr, "Use --enable-host-scan flag to suppress this message\n")
-// 			var b []byte = make([]byte, 1)
-// 			if n, err := os.Stdin.Read(b); err == nil {
-// 				if n > 0 && len(b) > 0 && (b[0] == 'y' || b[0] == 'Y') {
-// 					return true
-// 				}
-// 			}
-// 		}
-// 	}
-// 	return false
-// }

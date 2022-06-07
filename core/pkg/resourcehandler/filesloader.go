@@ -5,6 +5,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 
 	"github.com/armosec/k8s-interface/k8sinterface"
@@ -33,7 +34,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
-	workloadIDToSource := make(map[string]string, 0)
+	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	armoResources := &cautils.ArmoResources{}
 
 	workloads := []workloadinterface.IMetadata{}
@@ -46,7 +47,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 		for i := range ws {
-			workloadIDToSource[ws[i].GetID()] = source
+			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{RelativePath: source}
 		}
 	}
 	logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
@@ -59,7 +60,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 		for i := range ws {
-			workloadIDToSource[ws[i].GetID()] = source
+			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{RelativePath: source}
 		}
 	}
 

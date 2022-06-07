@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"path"
 	"testing"
 
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
@@ -64,4 +65,12 @@ func TestSetContextMetadata(t *testing.T) {
 
 func TestGetHostname(t *testing.T) {
 	assert.NotEqual(t, "", getHostname())
+}
+
+func TestGetScanningContext(t *testing.T) {
+	assert.Equal(t, ContextCluster, GetScanningContext(""))
+	assert.Equal(t, ContextDir, GetScanningContext("."))
+	assert.Equal(t, ContextFile, GetScanningContext(path.Join(".", "testdata", "localrepo.git")))
+	assert.Equal(t, ContextGitURL, GetScanningContext("https://github.com/armosec/kubescpae"))
+	// assert.Equal(t, ContextGitLocal, GetScanningContext(path.Join(".", "testdata")))
 }

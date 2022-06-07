@@ -22,8 +22,8 @@ import (
 )
 
 const (
-	ScanCluster                string = "cluster"
-	ScanLocalFiles             string = "yaml"
+	// ScanCluster                string = "cluster"
+	// ScanLocalFiles             string = "yaml"
 	localControlInputsFilename string = "controls-inputs.json"
 	localExceptionsFilename    string = "exceptions.json"
 )
@@ -190,12 +190,12 @@ func (scanInfo *ScanInfo) setOutputFile() {
 	}
 }
 
-func (scanInfo *ScanInfo) GetScanningEnvironment() string {
-	if len(scanInfo.InputPatterns) != 0 {
-		return ScanLocalFiles
-	}
-	return ScanCluster
-}
+// func (scanInfo *ScanInfo) GetScanningEnvironment() string {
+// 	if len(scanInfo.InputPatterns) != 0 {
+// 		return ScanLocalFiles
+// 	}
+// 	return ScanCluster
+// }
 
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
@@ -248,71 +248,191 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
 
-	metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
-	if scanInfo.GetScanningEnvironment() == ScanLocalFiles {
-		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
-	}
-
 	inputFiles := ""
 	if len(scanInfo.InputPatterns) > 0 {
 		inputFiles = scanInfo.InputPatterns[0]
 	}
+
+	metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
+	if GetScanningContext(inputFiles) != ContextCluster {
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+	}
+
 	setContextMetadata(&metadata.ContextMetadata, inputFiles)
 
 	return metadata
 }
 
-func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
+type ScanningContext string
+
+const (
+	ContextCluster  ScanningContext = "cluster"
+	ContextFile     ScanningContext = "single-file"
+	ContextDir      ScanningContext = "local-dir"
+	ContextGitURL   ScanningContext = "git-url"
+	ContextGitLocal ScanningContext = "git-local"
+)
+
+const ( // deprecated
+	ScopeCluster = "cluster"
+	ScopeYAML    = "yaml"
+)
+
+func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
+	input := ""
+	if len(scanInfo.InputPatterns) > 0 {
+		input = scanInfo.InputPatterns[0]
+	}
+	return GetScanningContext(input)
+}
+
+// GetScanningContext get scanning context from the input param
+func GetScanningContext(input string) ScanningContext {
 	//  cluster
 	if input == "" {
-		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
-			ContextName: k8sinterface.GetContextName(),
-		}
-		return
+		return ContextCluster
 	}
 
 	// url
-	if gitParser, err := giturl.NewGitURL(input); err == nil {
-		if gitParser.GetBranch() == "" {
-			gitParser.SetDefaultBranch()
-		}
-		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
-			Repo:   gitParser.GetRepo(),
-			Owner:  gitParser.GetOwner(),
-			Branch: gitParser.GetBranch(),
-		}
-		return
+	if _, err := giturl.NewGitURL(input); err == nil {
+		return ContextGitURL
 	}
 
-	if !filepath.IsAbs(input) {
+	if !filepath.IsAbs(input) { // parse path
 		if o, err := os.Getwd(); err == nil {
 			input = filepath.Join(o, input)
 		}
 	}
 
+	// local git repo
+	if _, err := NewLocalGitRepository(input); err == nil {
+		return ContextGitLocal
+	}
+
 	//  single file
 	if IsFile(input) {
-		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
-			FilePath: input,
-			HostName: getHostname(),
-		}
-		return
+		return ContextFile
 	}
 
 	//  dir/glob
-	if !IsFile(input) {
+	return ContextDir
+}
+func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
+	switch GetScanningContext(input) {
+	case ContextCluster:
+		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
+			ContextName: k8sinterface.GetContextName(),
+		}
+	case ContextGitURL:
+		// url
+		context, err := metadataGitURL(input)
+		if err != nil {
+			logger.L().Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
+		}
+		contextMetadata.RepoContextMetadata = context
+	case ContextDir:
 		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
-			BasePath: input,
+			BasePath: getAbsPath(input),
 			HostName: getHostname(),
 		}
-		return
+	case ContextFile:
+		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
+			FilePath: getAbsPath(input),
+			HostName: getHostname(),
+		}
+	case ContextGitLocal:
+		// local
+		context, err := metadataGitLocal(input)
+		if err != nil {
+			logger.L().Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
+		}
+		contextMetadata.RepoContextMetadata = context
 	}
-
 }
 
+func metadataGitURL(input string) (*reporthandlingv2.RepoContextMetadata, error) {
+	context := &reporthandlingv2.RepoContextMetadata{}
+	gitParser, err := giturl.NewGitURL(input)
+	if err != nil {
+		return context, fmt.Errorf("%w", err)
+	}
+	if gitParser.GetBranchName() == "" {
+		gitParser.SetDefaultBranchName()
+	}
+	context.Provider = gitParser.GetProvider()
+	context.Repo = gitParser.GetRepoName()
+	context.Owner = gitParser.GetOwnerName()
+	context.Branch = gitParser.GetBranchName()
+	context.RemoteURL = gitParser.GetURL().String()
+
+	commit, err := gitParser.GetLatestCommit()
+	if err != nil {
+		return context, fmt.Errorf("%w", err)
+	}
+
+	context.LastCommit = reporthandling.LastCommit{
+		Hash:          commit.SHA,
+		Date:          commit.Committer.Date,
+		CommitterName: commit.Committer.Name,
+	}
+
+	return context, nil
+}
+
+func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, error) {
+	gitParser, err := NewLocalGitRepository(input)
+	if err != nil {
+		return nil, fmt.Errorf("%w", err)
+	}
+	remoteURL, err := gitParser.GetRemoteUrl()
+	if err != nil {
+		return nil, fmt.Errorf("%w", err)
+	}
+	context := &reporthandlingv2.RepoContextMetadata{}
+	gitParserURL, err := giturl.NewGitURL(remoteURL)
+	if err != nil {
+		return context, fmt.Errorf("%w", err)
+	}
+	gitParserURL.SetBranchName(gitParser.GetBranchName())
+
+	context.Provider = gitParserURL.GetProvider()
+	context.Repo = gitParserURL.GetRepoName()
+	context.Owner = gitParserURL.GetOwnerName()
+	context.Branch = gitParserURL.GetBranchName()
+	context.RemoteURL = gitParserURL.GetURL().String()
+
+	commit, err := gitParser.GetLastCommit()
+	if err != nil {
+		return context, fmt.Errorf("%w", err)
+	}
+	context.LastCommit = reporthandling.LastCommit{
+		Hash:          commit.SHA,
+		Date:          commit.Committer.Date,
+		CommitterName: commit.Committer.Name,
+	}
+
+	return context, nil
+}
 func getHostname() string {
 	if h, e := os.Hostname(); e == nil {
 		return h
 	}
 	return ""
+}
+
+func getAbsPath(p string) string {
+	if !filepath.IsAbs(p) { // parse path
+		if o, err := os.Getwd(); err == nil {
+			return filepath.Join(o, p)
+		}
+	}
+	return p
+}
+
+// ScanningContextToScanningScope convert the context to the deprecated scope
+func ScanningContextToScanningScope(scanningContext ScanningContext) string {
+	if scanningContext == ContextCluster {
+		return ScopeCluster
+	}
+	return ScopeYAML
 }

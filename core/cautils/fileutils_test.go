@@ -18,7 +18,7 @@ func TestListFiles(t *testing.T) {
 
 	filesPath := onlineBoutiquePath()
 
-	files, errs := listFiles([]string{filesPath})
+	_, files, errs := listFiles([]string{filesPath})
 	assert.Equal(t, 0, len(errs))
 	assert.Equal(t, 12, len(files))
 }
@@ -38,13 +38,13 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 	}
 }
 func TestLoadFiles(t *testing.T) {
-	files, _ := listFiles([]string{onlineBoutiquePath()})
-	_, err := loadFiles(files)
+	absPaths, files, _ := listFiles([]string{onlineBoutiquePath()})
+	_, err := loadFiles(absPaths, files)
 	assert.Equal(t, 0, len(err))
 }
 
 func TestLoadFile(t *testing.T) {
-	files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1)})
+	_, files, _ := listFiles([]string{strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1)})
 	assert.Equal(t, 1, len(files))
 
 	_, err := loadFile(files[0])
