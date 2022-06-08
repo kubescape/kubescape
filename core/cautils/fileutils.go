@@ -26,8 +26,8 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func LoadResourcesFromFiles(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
-	absPaths, files, errs := listFiles(inputPatterns)
+func LoadResourcesFromFiles(input string) (map[string][]workloadinterface.IMetadata, error) {
+	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
@@ -35,14 +35,15 @@ func LoadResourcesFromFiles(inputPatterns []string) (map[string][]workloadinterf
 		return nil, nil
 	}
 
-	workloads, errs := loadFiles(absPaths, files)
+	workloads, errs := loadFiles(files)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
+
 	return workloads, nil
 }
 
-func loadFiles(absPaths, filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
+func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
 	workloads := make(map[string][]workloadinterface.IMetadata, 0)
 	errs := []error{}
 	for i := range filePaths {
@@ -54,7 +55,7 @@ func loadFiles(absPaths, filePaths []string) (map[string][]workloadinterface.IMe
 		w, e := ReadFile(f, GetFileFormat(filePaths[i]))
 		errs = append(errs, e...)
 		if w != nil {
-			path := strings.TrimPrefix(filePaths[i], absPaths[i])
+			path := filePaths[i]
 			if _, ok := workloads[path]; !ok {
 				workloads[path] = []workloadinterface.IMetadata{}
 			}
@@ -82,35 +83,22 @@ func ReadFile(fileContent []byte, fileFromat FileFormat) ([]workloadinterface.IM
 }
 
 // listFiles returns the list of absolute paths, full file path and list of errors. The list of abs paths and full path have the same length
-func listFiles(patterns []string) ([]string, []string, []error) {
-	var absPaths []string
+func listFiles(pattern string) ([]string, []error) {
+
 	var files []string
 	errs := []error{}
-	for i := range patterns {
-		if strings.HasPrefix(patterns[i], "http") {
-			continue
-		}
-		absPath := ""
-		if !filepath.IsAbs(patterns[i]) {
-			absPath, _ = os.Getwd()
-			patterns[i] = filepath.Join(absPath, patterns[i])
-		}
-		if IsFile(patterns[i]) {
-			files = append(files, patterns[i])
-			absPaths = append(absPaths, absPath)
+
+	if IsFile(pattern) {
+		files = append(files, pattern)
+	} else {
+		f, err := glob(filepath.Split(pattern))
+		if err != nil {
+			errs = append(errs, err)
 		} else {
-			f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
-			if err != nil {
-				errs = append(errs, err)
-			} else {
-				files = append(files, f...)
-				for range f {
-					absPaths = append(absPaths, absPath)
-				}
-			}
+			files = append(files, f...)
 		}
 	}
-	return absPaths, files, errs
+	return files, errs
 }
 
 func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {

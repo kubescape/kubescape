@@ -88,7 +88,7 @@ func (s *LocalGitRepositoryTestSuite) TearDownSuite() {
 }
 
 func (s *LocalGitRepositoryTestSuite) TestInvalidRepositoryPath() {
-	if _, err := NewLocalGitRepository("invalidpath"); s.Error(err) {
+	if _, err := NewLocalGitRepository("/invalidpath"); s.Error(err) {
 		s.Equal("repository does not exist", err.Error())
 	}
 }

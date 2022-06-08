@@ -18,7 +18,7 @@ type LocalGitRepository struct {
 }
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
-	gitRepo, err := gitv5.PlainOpen(path)
+	gitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return nil, err
 	}

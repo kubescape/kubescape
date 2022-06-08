@@ -40,7 +40,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	workloads := []workloadinterface.IMetadata{}
 
 	// load resource from local file system
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(fileHandler.inputPatterns)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(fileHandler.inputPatterns[0])
 	if err != nil {
 		return nil, allResources, nil, err
 	}
@@ -51,6 +51,8 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		}
 	}
 	logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
+
+	addCommitData(fileHandler.inputPatterns[0], workloadIDToSource)
 
 	// load resources from url
 	sourceToWorkloads, err = loadResourcesFromUrl(fileHandler.inputPatterns)
@@ -125,4 +127,26 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 	}
 	return allResources
 
+}
+
+func addCommitData(input string, workloadIDToSource map[string]reporthandling.Source) {
+	giRepo, err := cautils.NewLocalGitRepository(input)
+	if err != nil {
+		return
+	}
+	for k := range workloadIDToSource {
+		sourceObj := workloadIDToSource[k]
+		lastCommit, err := giRepo.GetFileLastCommit(sourceObj.RelativePath)
+		if err != nil {
+			continue
+		}
+		sourceObj.LastCommit = reporthandling.LastCommit{
+			Hash:           lastCommit.SHA,
+			Date:           lastCommit.Author.Date,
+			CommitterName:  lastCommit.Author.Name,
+			CommitterEmail: lastCommit.Author.Email,
+			Message:        lastCommit.Message,
+		}
+		workloadIDToSource[k] = sourceObj
+	}
 }
