@@ -2,8 +2,11 @@ package resourcehandler
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	giturl "github.com/armosec/go-git-url"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
@@ -30,9 +33,6 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 
 func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
 
-	logger.L().Info("Accessing local objects")
-	cautils.StartSpinner()
-
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
@@ -42,8 +42,26 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	workloads := []workloadinterface.IMetadata{}
 
+	path := fileHandler.inputPatterns[0]
+
+	// Clone git repository if needed
+	gitURL, err := giturl.NewGitURL(path)
+	if err == nil {
+		logger.L().Info("cloning git repository")
+		cautils.StartSpinner()
+		cloneDir, err := cloneRepo(gitURL)
+		cautils.StopSpinner()
+		if err != nil {
+			return nil, allResources, nil, fmt.Errorf("could not clone repository. %w", err)
+		}
+		defer os.RemoveAll(cloneDir)
+		path = filepath.Join(cloneDir, gitURL.GetPath())
+	}
+
 	// load resource from local file system
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(fileHandler.inputPatterns[0])
+	logger.L().Info("Accessing local objects")
+
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(path)
 	if err != nil {
 		return nil, allResources, nil, err
 	}
@@ -83,11 +101,9 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
 	}
 
-	cautils.StopSpinner()
 	logger.L().Success("Accessed to local objects")
 
 	return k8sResources, allResources, armoResources, nil
-
 }
 
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info {
