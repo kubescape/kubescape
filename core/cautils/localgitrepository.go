@@ -116,3 +116,12 @@ func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, e
 		Files:     []apis.Files{},
 	}, nil
 }
+
+func (g *LocalGitRepository) GetRootDir() (string, error) {
+	wt, err := g.repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo root")
+	}
+
+	return wt.Filesystem.Root(), nil
+}

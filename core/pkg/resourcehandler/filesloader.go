@@ -65,8 +65,21 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	if err != nil {
 		return nil, allResources, nil, err
 	}
+
+	// Get repo root
+	repoRoot := ""
+	giRepo, err := cautils.NewLocalGitRepository(path)
+	if err == nil {
+		repoRoot, _ = giRepo.GetRootDir()
+	}
+
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
+
+		relSource, err := filepath.Rel(repoRoot, source)
+		if err == nil {
+			source = relSource
+		}
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{RelativePath: source}
 		}
