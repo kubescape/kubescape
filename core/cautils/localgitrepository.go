@@ -90,7 +90,7 @@ func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, e
 
 	if filePath != "" {
 		logOptions.FileName = &filePath
-		logOptions.Order = gitv5.LogOrderCommitterTime
+		logOptions.Order = gitv5.LogOrderCommitterTime // faster -> LogOrderDFSPost
 	}
 
 	cIter, err := g.repo.Log(logOptions)

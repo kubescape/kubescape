@@ -30,6 +30,9 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 
 func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
 
+	logger.L().Info("Accessing local objects")
+	cautils.StartSpinner()
+
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
@@ -52,19 +55,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	}
 	logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 
-	addCommitData(fileHandler.inputPatterns[0], workloadIDToSource)
-
-	// load resources from url
-	sourceToWorkloads, err = loadResourcesFromUrl(fileHandler.inputPatterns)
-	if err != nil {
-		return nil, allResources, nil, err
-	}
-	for source, ws := range sourceToWorkloads {
-		workloads = append(workloads, ws...)
-		for i := range ws {
-			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{RelativePath: source}
-		}
-	}
+	// addCommitData(fileHandler.inputPatterns[0], workloadIDToSource)
 
 	if len(workloads) == 0 {
 		return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
@@ -91,6 +82,9 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, armoResources); err != nil {
 		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
 	}
+
+	cautils.StopSpinner()
+	logger.L().Success("Accessed to local objects")
 
 	return k8sResources, allResources, armoResources, nil
 

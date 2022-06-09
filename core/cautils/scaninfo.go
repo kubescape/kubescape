@@ -352,7 +352,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 
 func metadataGitURL(input string) (*reporthandlingv2.RepoContextMetadata, error) {
 	context := &reporthandlingv2.RepoContextMetadata{}
-	gitParser, err := giturl.NewGitURL(input)
+	gitParser, err := giturl.NewGitAPI(input)
 	if err != nil {
 		return context, fmt.Errorf("%w", err)
 	}
