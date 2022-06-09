@@ -93,7 +93,11 @@ func (report *ReportEventReceiver) GetURL() string {
 	q := u.Query()
 
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
-		u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+		if report.clusterName != "" {
+			u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+		} else {
+			u.Path = fmt.Sprintf("repositories-scan/%s", report.reportID)
+		}
 	} else {
 		u.Path = "account/sign-up"
 		q.Add("invitationToken", report.token)
