@@ -88,6 +88,11 @@ func listFiles(pattern string) ([]string, []error) {
 	var files []string
 	errs := []error{}
 
+	if !filepath.IsAbs(pattern) {
+		o, _ := os.Getwd()
+		pattern = filepath.Join(o, pattern)
+	}
+
 	if IsFile(pattern) {
 		files = append(files, pattern)
 		return files, errs
