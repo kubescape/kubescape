@@ -90,14 +90,26 @@ func listFiles(pattern string) ([]string, []error) {
 
 	if IsFile(pattern) {
 		files = append(files, pattern)
-	} else {
-		f, err := glob(filepath.Split(pattern))
-		if err != nil {
-			errs = append(errs, err)
-		} else {
-			files = append(files, f...)
-		}
+		return files, errs
 	}
+
+	root, shouldMatch := filepath.Split(pattern)
+
+	if IsDir(pattern) {
+		root = pattern
+		shouldMatch = "*"
+	}
+	if shouldMatch == "" {
+		shouldMatch = "*"
+	}
+
+	f, err := glob(root, shouldMatch)
+	if err != nil {
+		errs = append(errs, err)
+	} else {
+		files = append(files, f...)
+	}
+
 	return files, errs
 }
 
@@ -190,6 +202,10 @@ func glob(root, pattern string) ([]string, error) {
 		if info.IsDir() {
 			return nil
 		}
+		fileFormat := GetFileFormat(path)
+		if !(fileFormat == JSON_FILE_FORMAT || fileFormat == YAML_FILE_FORMAT) {
+			return nil
+		}
 		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
 			return err
 		} else if matched {
@@ -202,9 +218,21 @@ func glob(root, pattern string) ([]string, error) {
 	}
 	return matches, nil
 }
+
+// IsFile checks if a given path is a file
 func IsFile(name string) bool {
 	if fi, err := os.Stat(name); err == nil {
 		if fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+// IsDir checks if a given path is a directory
+func IsDir(name string) bool {
+	if info, err := os.Stat(name); err == nil {
+		if info.IsDir() {
 			return true
 		}
 	}
