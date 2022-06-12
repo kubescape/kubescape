@@ -21,6 +21,20 @@ import (
 	"github.com/google/uuid"
 )
 
+type ScanningContext string
+
+const (
+	ContextCluster  ScanningContext = "cluster"
+	ContextFile     ScanningContext = "single-file"
+	ContextDir      ScanningContext = "local-dir"
+	ContextGitURL   ScanningContext = "git-url"
+	ContextGitLocal ScanningContext = "git-local"
+)
+
+const ( // deprecated
+	ScopeCluster = "cluster"
+	ScopeYAML    = "yaml"
+)
 const (
 	// ScanCluster                string = "cluster"
 	// ScanLocalFiles             string = "yaml"
@@ -262,21 +276,6 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 
 	return metadata
 }
-
-type ScanningContext string
-
-const (
-	ContextCluster  ScanningContext = "cluster"
-	ContextFile     ScanningContext = "single-file"
-	ContextDir      ScanningContext = "local-dir"
-	ContextGitURL   ScanningContext = "git-url"
-	ContextGitLocal ScanningContext = "git-local"
-)
-
-const ( // deprecated
-	ScopeCluster = "cluster"
-	ScopeYAML    = "yaml"
-)
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 	input := ""

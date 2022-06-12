@@ -42,6 +42,9 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	workloads := []workloadinterface.IMetadata{}
 
+	if len(fileHandler.inputPatterns) == 0 {
+		return nil, nil, nil, fmt.Errorf("missing input")
+	}
 	path := fileHandler.inputPatterns[0]
 
 	// Clone git repository if needed
