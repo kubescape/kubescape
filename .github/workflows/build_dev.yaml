@@ -63,7 +63,7 @@ jobs:
   build-docker:
     name: Build docker container, tag and upload to registry
     needs: build
-    if: ${{ secrets.QUAYIO_REGISTRY_PASSWORD != "" && secrets.QUAYIO_REGISTRY_USERNAME != "" }} # build docker only if quay credentials are set
+    if: ${{ github.repository == 'armosec/kubescape' }} # TODO
     runs-on: ubuntu-latest
     permissions:
       id-token: write
