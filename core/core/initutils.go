@@ -12,6 +12,7 @@ import (
 	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+	"github.com/google/uuid"
 
 	"github.com/armosec/rbac-utils/rbacscanner"
 )
@@ -146,6 +147,12 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 	if tenantConfig.IsConfigFound() { // config found in cache (submitted)
 		if !scanInfo.Local {
+			if tenantConfig.GetAccountID() != "" {
+				if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
+					scanInfo.Submit = false
+					return
+				}
+			}
 			// Submit report
 			scanInfo.Submit = true
 		}
