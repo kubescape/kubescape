@@ -19,7 +19,7 @@ type OPASessionObj struct {
 	Policies              []reporthandling.Framework             // list of frameworks to scan
 	AllResources          map[string]workloadinterface.IMetadata // all scanned resources, map[<rtesource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result     // resources scan results, map[<rtesource ID>]<resource result>
-	ResourceSource        map[string]string                      // resources sources, map[<rtesource ID>]<resource result>
+	ResourceSource        map[string]reporthandling.Source       // resources sources, map[<rtesource ID>]<resource result>
 	PostureReport         *reporthandling.PostureReport          // scan results v1 - Remove
 	Report                *reporthandlingv2.PostureReport        // scan results v2 - Remove
 	Exceptions            []armotypes.PostureExceptionPolicy     // list of exceptions to apply on scan results
@@ -39,7 +39,7 @@ func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SRe
 		ResourcesResult:       make(map[string]resourcesresults.Result),
 		InfoMap:               make(map[string]apis.StatusInfo),
 		ResourceToControlsMap: make(map[string][]string),
-		ResourceSource:        make(map[string]string),
+		ResourceSource:        make(map[string]reporthandling.Source),
 		SessionID:             scanInfo.ScanID,
 		PostureReport: &reporthandling.PostureReport{
 			ClusterName:  ClusterName,

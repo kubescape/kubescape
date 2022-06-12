@@ -33,6 +33,7 @@ jobs:
       - name: Build
         env:
           RELEASE: v2.0.${{ github.run_number }} 
+          CLIENT: test
           ArmoBEServer: api.armo.cloud
           ArmoAuthServer: auth.armo.cloud
           ArmoERServer: report.armo.cloud

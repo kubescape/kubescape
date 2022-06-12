@@ -1,32 +1,24 @@
-package resourcehandler
+package cautils
 
 import (
 	"fmt"
 	"path"
 	"strings"
-	"time"
 
-	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/config"
-	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/armosec/go-git-url/apis"
+	gitv5 "github.com/go-git/go-git/v5"
+	configv5 "github.com/go-git/go-git/v5/config"
+	plumbingv5 "github.com/go-git/go-git/v5/plumbing"
 )
 
 type LocalGitRepository struct {
-	repo   *git.Repository
-	head   *plumbing.Reference
-	config *config.Config
-}
-
-type GitCommit struct {
-	hash        string
-	authorName  string
-	authorEmail string
-	message     string
-	date        time.Time
+	repo   *gitv5.Repository
+	head   *plumbingv5.Reference
+	config *configv5.Config
 }
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
-	gitRepo, err := git.PlainOpen(path)
+	gitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return nil, err
 	}
@@ -52,11 +44,13 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 	}, nil
 }
 
+// GetBranchName get current branch name
 func (g *LocalGitRepository) GetBranchName() string {
 	return g.head.Name().Short()
 }
 
-func (g *LocalGitRepository) GetOriginUrl() (string, error) {
+// GetRemoteUrl get default remote URL
+func (g *LocalGitRepository) GetRemoteUrl() (string, error) {
 	branchName := g.GetBranchName()
 	if branchRef, branchFound := g.config.Branches[branchName]; branchFound {
 		remoteName := branchRef.Remote
@@ -73,8 +67,9 @@ func (g *LocalGitRepository) GetOriginUrl() (string, error) {
 	return g.config.Remotes[defaultRemoteName].URLs[0], nil
 }
 
+// GetName get origin name without the .git suffix
 func (g *LocalGitRepository) GetName() (string, error) {
-	originUrl, err := g.GetOriginUrl()
+	originUrl, err := g.GetRemoteUrl()
 	if err != nil {
 		return "", err
 	}
@@ -83,17 +78,19 @@ func (g *LocalGitRepository) GetName() (string, error) {
 	return strings.TrimSuffix(baseName, ".git"), nil
 }
 
-func (g *LocalGitRepository) GetLastCommit() (*GitCommit, error) {
+// GetLastCommit get latest commit object
+func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
 	return g.GetFileLastCommit("")
 }
 
-func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*GitCommit, error) {
+// GetFileLastCommit get file latest commit object, if empty will return latest commit
+func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error) {
 	// By default, returns commit information from current HEAD
-	logOptions := &git.LogOptions{}
+	logOptions := &gitv5.LogOptions{}
 
 	if filePath != "" {
 		logOptions.FileName = &filePath
-		logOptions.Order = git.LogOrderCommitterTime
+		logOptions.Order = gitv5.LogOrderCommitterTime // faster -> LogOrderDFSPost
 	}
 
 	cIter, err := g.repo.Log(logOptions)
@@ -107,11 +104,24 @@ func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*GitCommit, err
 		return nil, err
 	}
 
-	return &GitCommit{
-		message:     commit.Message,
-		hash:        commit.Hash.String(),
-		authorName:  commit.Author.Name,
-		authorEmail: commit.Author.Email,
-		date:        commit.Author.When,
+	return &apis.Commit{
+		SHA: commit.Hash.String(),
+		Author: apis.Committer{
+			Name:  commit.Author.Name,
+			Email: commit.Author.Email,
+			Date:  commit.Author.When,
+		},
+		Message:   commit.Message,
+		Committer: apis.Committer{},
+		Files:     []apis.Files{},
 	}, nil
+}
+
+func (g *LocalGitRepository) GetRootDir() (string, error) {
+	wt, err := g.repo.Worktree()
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo root")
+	}
+
+	return wt.Filesystem.Root(), nil
 }

@@ -4,4 +4,5 @@
 *vender*
 *.pyc*
 .idea
+.history
 ca.srl

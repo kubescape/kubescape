@@ -20,7 +20,7 @@ func TestSetContextMetadata(t *testing.T) {
 	}
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
-		setContextMetadata(&ctx, "file")
+		setContextMetadata(&ctx, "/file")
 
 		assert.Nil(t, ctx.ClusterContextMetadata)
 		assert.NotNil(t, ctx.DirectoryContextMetadata)
@@ -31,20 +31,6 @@ func TestSetContextMetadata(t *testing.T) {
 		hostName := getHostname()
 		assert.Contains(t, ctx.DirectoryContextMetadata.BasePath, "file")
 		assert.Equal(t, hostName, ctx.DirectoryContextMetadata.HostName)
-	}
-	{
-		ctx := reporthandlingv2.ContextMetadata{}
-		setContextMetadata(&ctx, "scaninfo_test.go")
-
-		assert.Nil(t, ctx.ClusterContextMetadata)
-		assert.Nil(t, ctx.DirectoryContextMetadata)
-		assert.NotNil(t, ctx.FileContextMetadata)
-		assert.Nil(t, ctx.HelmContextMetadata)
-		assert.Nil(t, ctx.RepoContextMetadata)
-
-		hostName := getHostname()
-		assert.Contains(t, ctx.FileContextMetadata.FilePath, "scaninfo_test.go")
-		assert.Equal(t, hostName, ctx.FileContextMetadata.HostName)
 	}
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
@@ -64,4 +50,12 @@ func TestSetContextMetadata(t *testing.T) {
 
 func TestGetHostname(t *testing.T) {
 	assert.NotEqual(t, "", getHostname())
+}
+
+func TestGetScanningContext(t *testing.T) {
+	assert.Equal(t, ContextCluster, GetScanningContext(""))
+	assert.Equal(t, ContextDir, GetScanningContext("/"))
+	assert.Equal(t, ContextGitURL, GetScanningContext("https://github.com/armosec/kubescpae"))
+	// assert.Equal(t, ContextFile, GetScanningContext(path.Join(".", "testdata", "localrepo.git")))
+	// assert.Equal(t, ContextGitLocal, GetScanningContext(path.Join(".", "testdata")))
 }

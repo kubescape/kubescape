@@ -1,9 +1,20 @@
 #!/bin/bash
 set -e
 
+while getopts v: option
+do
+    case ${option} in
+        v) RELEASE="download/${OPTARG}";;
+    esac
+done
+
+if [ -z ${RELEASE} ]; then
+    RELEASE="latest/download"
+fi
+
 echo -e "\033[0;36mInstalling Kubescape..."
 echo
- 
+
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
 KUBESCAPE_ZIP=kubescape.zip
@@ -20,7 +31,8 @@ fi
 mkdir -p $BASE_DIR 
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
-DOWNLOAD_URL="https://github.com/armosec/kubescape/releases/latest/download/kubescape-${osName}-latest"
+DOWNLOAD_URL="https://github.com/armosec/kubescape/releases/${RELEASE}/kubescape-${osName}-latest"
+
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
 # Checking if SUDO needed/exists 
