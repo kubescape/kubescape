@@ -5,8 +5,8 @@ go 1.17
 require (
 	github.com/armosec/armoapi-go v0.0.73
 	github.com/armosec/go-git-url v0.0.13
-	github.com/armosec/k8s-interface v0.0.76
-	github.com/armosec/opa-utils v0.0.144
+	github.com/armosec/k8s-interface v0.0.78
+	github.com/armosec/opa-utils v0.0.148
 	github.com/armosec/rbac-utils v0.0.14
 	github.com/armosec/utils-go v0.0.5
 	github.com/armosec/utils-k8s-go v0.0.6

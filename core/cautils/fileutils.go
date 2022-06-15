@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
+
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/opa-utils/objectsenvelopes"
+	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v2"
 )
 
@@ -60,7 +62,11 @@ func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []
 				workloads[path] = []workloadinterface.IMetadata{}
 			}
 			wSlice := workloads[path]
-			wSlice = append(wSlice, w...)
+			for j := range w {
+				lw := localworkload.NewLocalWorkload(w[j].GetObject())
+				lw.SetPath(path)
+				wSlice = append(wSlice, lw)
+			}
 			workloads[path] = wSlice
 		}
 	}
