@@ -132,8 +132,8 @@ github.com/armosec/k8s-interface v0.0.37/go.mod h1:vHxGWqD/uh6+GQb9Sqv7OGMs+Rvc2
 github.com/armosec/k8s-interface v0.0.78 h1:zqIzbFQqSxVMjcDsB4+lgGNgkHVqDZ369/WTGGdLKCE=
 github.com/armosec/k8s-interface v0.0.78/go.mod h1:8NX4xWXh8mwW7QyZdZea1czNdM2azCK9BbUNmiZYXW0=
 github.com/armosec/opa-utils v0.0.64/go.mod h1:6tQP8UDq2EvEfSqh8vrUdr/9QVSCG4sJfju1SXQOn4c=
-github.com/armosec/opa-utils v0.0.151 h1:Ios7F3oRXI1n4gFJV+hOmeANUGJDqVPqLXb+wuIPQeM=
-github.com/armosec/opa-utils v0.0.151/go.mod h1:wvMiobwix9aeyDXh3hRt/pOjlgEr9cu4pGNCLljZQp0=
+github.com/armosec/opa-utils v0.0.152 h1:BdWXs0mZLbqQRGzFZrQK7UxTxU35/STYpKIOwstlUTg=
+github.com/armosec/opa-utils v0.0.152/go.mod h1:wvMiobwix9aeyDXh3hRt/pOjlgEr9cu4pGNCLljZQp0=
 github.com/armosec/rbac-utils v0.0.1/go.mod h1:pQ8CBiij8kSKV7aeZm9FMvtZN28VgA7LZcYyTWimq40=
 github.com/armosec/rbac-utils v0.0.14 h1:CKYKcgqJEXWF2Hen/B1pVGtS3nDAG1wp9dDv6oNtq90=
 github.com/armosec/rbac-utils v0.0.14/go.mod h1:Ex/IdGWhGv9HZq6Hs8N/ApzCKSIvpNe/ETqDfnuyah0=
