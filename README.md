@@ -28,7 +28,7 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 
 # TL;DR
 ## Install:
-```
+```sh
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
 
@@ -36,8 +36,12 @@ curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | 
 
 [Install on macOS](#install-on-macos)
 
+[Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix-community)
+
+[Install using Go](#install-using-go)
+
 ## Run:
-```
+```sh
 kubescape scan --submit --enable-host-scan --verbose
 ```
 
@@ -101,12 +105,48 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 
 ## Install on macOS
 
-1. ```
+1. ```sh
     brew tap armosec/kubescape
     ```
-2. ```
+2. ```sh
     brew install kubescape
     ```
+
+## Install on NixOS or with nix (Community)
+
+Direct issues installing `kubescape` via `nix` through the channels mentioned [here](https://nixos.wiki/wiki/Support)
+
+You can use `nix` on Linux or macOS and on other platforms unofficially.
+
+Try it out in an ephemeral shell: `nix-shell -p kubescape`
+
+Install declarative as usual
+
+NixOS:
+
+```nix
+  # your other config ...
+  environment.systemPackages = with pkgs; [
+    # your other packages ...
+    kubescape
+  ];
+```
+
+home-manager:
+
+```nix
+  # your other config ...
+  home.packages = with pkgs; [
+    # your other packages ...
+    kubescape
+  ];
+```
+
+Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
+
+## Install using Go
+
+With a sufficient version of `go` you can install and build with `go install github.com/armosec/kubescape/v2@latest`
 
 ## Usage & Examples
 
