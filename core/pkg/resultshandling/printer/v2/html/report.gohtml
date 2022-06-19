@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+    <title>Kubescape Scan Report</title>
+  </head>
+  <style>
+  :root {
+    --cell-padding-vertical: 0.25em;
+    --cell-padding-horizontal: 0.25em;
+    --font-family-sans: system-ui, -apple-system, sans-serif;
+  }
+  body {
+    max-width: 60em;
+    margin: auto;
+    font-family: var(--font-family-sans);
+  }
+  table {
+    width: 100%;
+    border-top: 0.1em solid black;
+    border-bottom: 0.1em solid black;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  th {
+    text-align: left;
+  }
+  td, th {
+    padding-top: var(--cell-padding-vertical);
+    padding-bottom: var(--cell-padding-vertical);
+    padding-right: var(--cell-padding-horizontal);
+    vertical-align: top;
+  }
+  td > p {
+    margin: 0;
+    word-break: break-all;
+    hyphens: auto;
+  }
+  thead {
+    border-bottom: 0.01em solid black;
+  }
+  .numericCell {
+    text-align: right;
+  }
+  .controlSeverityCell {
+    width: 10%;
+  }
+  .controlNameCell {
+    width: 50%;
+  }
+  .controlRiskCell {
+    width: 10%;
+  }
+  .resourceSeverityCell {
+    width: 10%;
+  }
+  .resourceNameCell {
+    width: 30%;
+  }
+  .resourceURLCell {
+    width: 10%;
+  }
+  .resourceRemediationCell {
+    width: 50%;
+  }
+  .logo {
+    width: 25%;
+    float: right;
+  }
+  </style>
+  <body>
+    <img class="logo" src="https://raw.githubusercontent.com/armosec/kubescape/master/core/pkg/resultshandling/printer/v2/pdf/logo.png">
+    <h1>Kubescape Scan Report</h1>
+    {{ with .OPASessionObj.Report.SummaryDetails }}
+    <h2>By Controls</h2>
+    <h3>Summary</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>All</th>
+          <th>Failed</th>
+          <th>Excluded</th>
+          <th>Skipped</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{{ .NumberOfControls.All }}</td>
+          <td>{{ .NumberOfControls.Failed }}</td>
+          <td>{{ .NumberOfControls.Excluded }}</td>
+          <td>{{ .NumberOfControls.Skipped }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <h3>Details</h3>
+    <table>
+      <thead>
+      <tr>
+        <th class="controlSeverityCell">Severity</th>
+        <th class="controlNameCell">Control Name</th>
+        <th class="controlRiskCell">Failed Resources</th>
+        <th class="controlRiskCell">Excluded Resources</th>
+        <th class="controlRiskCell">All Resources</th>
+        <th class="controlRiskCell">Risk Score, %</th>
+      </tr>
+      </thead>
+      <tbody>
+      {{ $sorted := sortBySeverityName .Controls }}
+      {{ range $control := $sorted }}
+        <tr>
+          <td class="controlSeverityCell">{{ controlSeverityToString $control.ScoreFactor }}</td>
+          <td class="controlNameCell">{{ $control.Name }}</td>
+          <td class="controlRiskCell numericCell">{{ $control.ResourceCounters.FailedResources }}</td>
+          <td class="controlRiskCell numericCell">{{ $control.ResourceCounters.ExcludedResources }}</td>
+          <td class="controlRiskCell numericCell">{{ sum $control.ResourceCounters.ExcludedResources $control.ResourceCounters.FailedResources $control.ResourceCounters.PassedResources }}</td>
+          <td class="controlRiskCell numericCell">{{ float32ToInt $control.Score }}</td>
+        </tr>
+      </tr>
+      {{ end }}
+      <tbody>
+    </table>
+    {{ end }}
+    <h2>By Resource</h2>
+    {{ $sortedResourceTableView := sortByNamespace .ResourceTableView }}
+    {{ range $sortedResourceTableView }}
+    <h3>Name: {{ .Resource.GetName }}</h3>
+      <p>ApiVersion: {{ .Resource.GetApiVersion }}</p>
+      <p>Kind: {{ .Resource.GetKind }}</p>
+      <p>Name: {{ .Resource.GetName }}</p>
+      <p>Namespace: {{ .Resource.GetNamespace }}</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        {{ range .ControlsResult }}
+        <tr>
+          <td class="resourceSeverityCell">{{ .Severity }}</td>
+          <td class="resourceNameCell">{{ .Name }}</td>
+          <td class="resourceURLCell"><a href="https://hub.armo.cloud/docs/{{ lower .URL }}">{{ .URL }}</a></td>
+          <td class="resourceRemediationCell">{{ range .FailedPaths }} <p>{{ . }}</p> {{ end }}</td>
+        </tr>
+        {{ end }}
+        </tbody>
+      </table>
+    </div>
+    {{ end }}
+  </body>
+</html>
