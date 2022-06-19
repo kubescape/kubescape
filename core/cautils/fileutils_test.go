@@ -32,8 +32,8 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 		switch filepath.Base(i) {
 		case "adservice.yaml":
 			assert.Equal(t, 2, len(w))
-			assert.Equal(t, "path=/Users/davidwertenteil/armo/repos/kubescape/examples/online-boutique/adservice.yaml/api=apps/v1//Deployment/adservice", w[0].GetID())
-			assert.Equal(t, "path=/Users/davidwertenteil/armo/repos/kubescape/examples/online-boutique/adservice.yaml/api=/v1//Service/adservice", w[1].GetID())
+			assert.Equal(t, "path=2348804969/api=apps/v1//Deployment/adservice", w[0].GetID())
+			assert.Equal(t, "path=2348804969/api=/v1//Service/adservice", w[1].GetID())
 		}
 	}
 }
