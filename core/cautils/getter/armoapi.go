@@ -34,7 +34,7 @@ var (
 
 	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armo.cloud"
-	armoDevFEURL   = "armoui-dev.eudev3.cyberarmorsoft.com"
+	armoDevFEURL   = "cloud-dev.armosec.io"
 	armoDevAUTHURL = "eggauth.eudev3.cyberarmorsoft.com"
 )
 
@@ -212,6 +212,7 @@ func (armoAPI *ArmoAPI) GetTenant() (*TenantResponse, error) {
 		return nil, err
 	}
 	tenant := &TenantResponse{}
+	// json.Un
 	if err = JSONDecoder(respStr).Decode(tenant); err != nil {
 		return nil, err
 	}
