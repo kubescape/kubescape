@@ -41,7 +41,7 @@ func TestGetHostname(t *testing.T) {
 func TestGetScanningContext(t *testing.T) {
 	assert.Equal(t, ContextCluster, GetScanningContext(""))
 	// assert.Equal(t, ContextDir, GetScanningContext("/"))
-	assert.Equal(t, ContextGitURL, GetScanningContext("https://github.com/armosec/kubescpae"))
+	assert.Equal(t, ContextGitURL, GetScanningContext("https://github.com/armosec/kubescape"))
 	// assert.Equal(t, ContextFile, GetScanningContext(path.Join(".", "testdata", "localrepo.git")))
 	// assert.Equal(t, ContextGitLocal, GetScanningContext(path.Join(".", "testdata")))
 }
