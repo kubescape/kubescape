@@ -95,6 +95,8 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType ca
 		return printerv2.NewPrometheusPrinter(verboseMode)
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
+	case printer.HtmlFormat:
+		return printerv2.NewHtmlPrinter()
 	default:
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
 	}
