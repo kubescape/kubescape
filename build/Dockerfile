@@ -1,4 +1,4 @@
-FROM golang:18-alpine as builder
+FROM golang:1.18-alpine as builder
 #ENV GOPROXY=https://goproxy.io,direct
 
 ARG image_version
