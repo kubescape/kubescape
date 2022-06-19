@@ -1,6 +1,6 @@
 module github.com/armosec/kubescape/v2
 
-go 1.17
+go 1.18
 
 require (
 	github.com/armosec/armoapi-go v0.0.95

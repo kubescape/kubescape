@@ -32,8 +32,8 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 		switch filepath.Base(i) {
 		case "adservice.yaml":
 			assert.Equal(t, 2, len(w))
-			assert.Equal(t, "apps/v1//Deployment/adservice", w[0].GetID())
-			assert.Equal(t, "/v1//Service/adservice", w[1].GetID())
+			assert.Equal(t, "apps/v1//Deployment/adservice", getRelativePath(w[0].GetID()))
+			assert.Equal(t, "/v1//Service/adservice", getRelativePath(w[1].GetID()))
 		}
 	}
 }
@@ -50,15 +50,8 @@ func TestLoadFile(t *testing.T) {
 	_, err := loadFile(files[0])
 	assert.NoError(t, err)
 }
-func TestMapResources(t *testing.T) {
-	// policyHandler := &PolicyHandler{}
-	// k8sResources, err := policyHandler.loadResources(opaSessionObj.Frameworks, scanInfo)
-	// files, _ := listFiles([]string{onlineBoutiquePath()})
-	// bb, err := loadFile(files[0])
-	// if len(err) > 0 {
-	// 	t.Errorf("%v", err)
-	// }
-	// for i := range bb {
-	// 	t.Errorf("%s", bb[i].ToString())
-	// }
+
+func getRelativePath(p string) string {
+	pp := strings.SplitAfter(p, "api=")
+	return pp[1]
 }

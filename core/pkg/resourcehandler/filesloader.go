@@ -50,12 +50,12 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	// Clone git repository if needed
 	gitURL, err := giturl.NewGitURL(path)
 	if err == nil {
-		logger.L().Info("cloning git repository")
+		logger.L().Info("cloning", helpers.String("repository url", gitURL.GetURL().String()))
 		cautils.StartSpinner()
 		cloneDir, err := cloneRepo(gitURL)
 		cautils.StopSpinner()
 		if err != nil {
-			return nil, allResources, nil, fmt.Errorf("could not clone repository. %w", err)
+			return nil, allResources, nil, fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
 		}
 		defer os.RemoveAll(cloneDir)
 		path = filepath.Join(cloneDir, gitURL.GetPath())
@@ -98,7 +98,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	sessionObj.ResourceSource = workloadIDToSource
 
-	// map all resources: map["/group/version/kind"][]<k8s workloads>
+	// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
 	mappedResources := mapResources(workloads)
 
 	// save only relevant resources

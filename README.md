@@ -187,14 +187,14 @@ kubescape scan --include-namespaces development,staging,production
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 
-#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI)
+#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI) Submit the results in case the directory is a git repo. [docs](https://hub.armo.cloud/docs/repository-scanning)
 ```
-kubescape scan *.yaml
+kubescape scan *.yaml --submit
 ```
 
-#### Scan kubernetes manifest files from a public github repository 
+#### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armo.cloud/docs/repository-scanning)
 ```
-kubescape scan https://github.com/armosec/kubescape
+kubescape scan https://github.com/armosec/kubescape --submit
 ```
 
 #### Display all scanned resources (including the resources who passed) 
