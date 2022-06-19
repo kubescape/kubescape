@@ -212,7 +212,6 @@ func (armoAPI *ArmoAPI) GetTenant() (*TenantResponse, error) {
 		return nil, err
 	}
 	tenant := &TenantResponse{}
-	// json.Un
 	if err = JSONDecoder(respStr).Decode(tenant); err != nil {
 		return nil, err
 	}
