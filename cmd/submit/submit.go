@@ -21,8 +21,8 @@ func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armo.cloud/docs/authentication")
-	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armo.cloud/docs/authentication")
+	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
+	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 
 	submitCmd.AddCommand(getExceptionsCmd(ks, &submitInfo))
 	submitCmd.AddCommand(getResultsCmd(ks, &submitInfo))

@@ -74,8 +74,8 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	}
 
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armo.cloud/docs/authentication")
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armo.cloud/docs/authentication")
+	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
+	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 	return downloadCmd

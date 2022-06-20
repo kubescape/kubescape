@@ -73,7 +73,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 			continue
 		}
 
-		row[resourceColumnURL] = fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controls[i].GetID()))
+		row[resourceColumnURL] = fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(controls[i].GetID()))
 		row[resourceColumnPath] = strings.Join(failedPathsToString(&controls[i]), "\n")
 		row[resourceColumnName] = controls[i].GetName()
 
