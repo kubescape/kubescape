@@ -6,12 +6,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 )
 
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
 	return filepath.Join(filepath.Dir(o), "../examples/online-boutique/*")
+}
+
+func helmChartPath() string {
+	o, _ := os.Getwd()
+	return filepath.Join(filepath.Dir(o), "../examples/helm_chart/*")
 }
 
 func TestListFiles(t *testing.T) {
@@ -24,8 +30,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads, err := LoadResourcesFromFiles(onlineBoutiquePath())
-	assert.NoError(t, err)
+	workloads := LoadResourcesFromFiles(onlineBoutiquePath())
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -37,10 +42,52 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadResourcesFromHelmCharts(t *testing.T) {
+	sourceToWorkloads := LoadResourcesFromHelmCharts(helmChartPath())
+	assert.Equal(t, 6, len(sourceToWorkloads))
+
+	for file, workloads := range sourceToWorkloads {
+		assert.Equalf(t, 1, len(workloads), "expected 1 workload in file %s", file)
+
+		w := workloads[0]
+		assert.True(t, localworkload.IsTypeLocalWorkload(w.GetObject()), "Expected localworkload as object type")
+
+		switch filepath.Base(file) {
+		case "serviceaccount.yaml":
+			assert.Equal(t, "/v1//ServiceAccount/kubescape-discovery", getRelativePath(w.GetID()))
+		case "clusterrole.yaml":
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRole/-kubescape", getRelativePath(w.GetID()))
+		case "cronjob.yaml":
+			assert.Equal(t, "batch/v1//CronJob/-kubescape", getRelativePath(w.GetID()))
+		case "role.yaml":
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//Role/-kubescape", getRelativePath(w.GetID()))
+		case "rolebinding.yaml":
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//RoleBinding/-kubescape", getRelativePath(w.GetID()))
+		case "clusterrolebinding.yaml":
+			assert.Equal(t, "rbac.authorization.k8s.io/v1//ClusterRoleBinding/-kubescape", getRelativePath(w.GetID()))
+		default:
+			assert.Failf(t, "missing case for file: %s", filepath.Base(file))
+		}
+	}
+}
+
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
 	_, err := loadFiles(files)
 	assert.Equal(t, 0, len(err))
+}
+
+func TestListDirs(t *testing.T) {
+	dirs, _ := listDirs(strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1))
+	assert.Equal(t, 0, len(dirs))
+
+	expectedDirs := []string{"examples/helm_chart", "examples/helm_chart/templates"}
+	dirs, _ = listDirs(helmChartPath())
+	assert.Equal(t, len(expectedDirs), len(dirs))
+	for i := range expectedDirs {
+		assert.Contains(t, dirs[i], expectedDirs[i])
+	}
 }
 
 func TestLoadFile(t *testing.T) {

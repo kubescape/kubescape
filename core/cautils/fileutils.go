@@ -28,13 +28,41 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func LoadResourcesFromFiles(input string) (map[string][]workloadinterface.IMetadata, error) {
+// LoadResourcesFromHelmCharts scans a given path (recuresively) for helm charts, renders the templates and returns a list of workloads
+func LoadResourcesFromHelmCharts(basePath string) map[string][]workloadinterface.IMetadata {
+	directories, _ := listDirs(basePath)
+	helmDirectories := make([]string, 0)
+	for _, dir := range directories {
+		if ok, _ := IsHelmDirectory(dir); ok {
+			helmDirectories = append(helmDirectories, dir)
+		}
+	}
+
+	result := map[string][]workloadinterface.IMetadata{}
+	for _, helmDir := range helmDirectories {
+		chart, err := NewHelmChart(helmDir)
+		if err == nil {
+			wls, errs := chart.GetWorkloadsWithDefaultValues()
+			if len(errs) > 0 {
+				logger.L().Error(fmt.Sprintf("Rendering of Helm chart template failed: %v", errs))
+				continue
+			}
+
+			for k, v := range wls {
+				result[k] = v
+			}
+		}
+	}
+	return result
+}
+
+func LoadResourcesFromFiles(input string) map[string][]workloadinterface.IMetadata {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
-		return nil, nil
+		return nil
 	}
 
 	workloads, errs := loadFiles(files)
@@ -42,7 +70,7 @@ func LoadResourcesFromFiles(input string) (map[string][]workloadinterface.IMetad
 		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
 
-	return workloads, nil
+	return workloads
 }
 
 func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
@@ -93,8 +121,16 @@ func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IM
 
 // listFiles returns the list of absolute paths, full file path and list of errors. The list of abs paths and full path have the same length
 func listFiles(pattern string) ([]string, []error) {
+	return listFilesOrDirectories(pattern, false)
+}
 
-	var files []string
+// listDirs returns the list of absolute paths, full directories path and list of errors. The list of abs paths and full path have the same length
+func listDirs(pattern string) ([]string, []error) {
+	return listFilesOrDirectories(pattern, true)
+}
+
+func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []error) {
+	var paths []string
 	errs := []error{}
 
 	if !filepath.IsAbs(pattern) {
@@ -102,9 +138,9 @@ func listFiles(pattern string) ([]string, []error) {
 		pattern = filepath.Join(o, pattern)
 	}
 
-	if IsFile(pattern) {
-		files = append(files, pattern)
-		return files, errs
+	if !onlyDirectories && IsFile(pattern) {
+		paths = append(paths, pattern)
+		return paths, errs
 	}
 
 	root, shouldMatch := filepath.Split(pattern)
@@ -117,14 +153,14 @@ func listFiles(pattern string) ([]string, []error) {
 		shouldMatch = "*"
 	}
 
-	f, err := glob(root, shouldMatch)
+	f, err := glob(root, shouldMatch, onlyDirectories)
 	if err != nil {
 		errs = append(errs, err)
 	} else {
-		files = append(files, f...)
+		paths = append(paths, f...)
 	}
 
-	return files, errs
+	return paths, errs
 }
 
 func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
@@ -206,13 +242,27 @@ func IsJson(filePath string) bool {
 	return StringInSlice(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", "")) != ValueNotFound
 }
 
-func glob(root, pattern string) ([]string, error) {
+func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 	var matches []string
 
 	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
+
+		// listing only directotries
+		if onlyDirectories {
+			if info.IsDir() {
+				if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
+					return err
+				} else if matched {
+					matches = append(matches, path)
+				}
+			}
+			return nil
+		}
+
+		// listing only files
 		if info.IsDir() {
 			return nil
 		}
@@ -225,6 +275,7 @@ func glob(root, pattern string) ([]string, error) {
 		} else if matched {
 			matches = append(matches, path)
 		}
+
 		return nil
 	})
 	if err != nil {
