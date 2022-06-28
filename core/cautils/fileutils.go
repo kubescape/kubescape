@@ -148,8 +148,6 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
 					yamlObjs = append(yamlObjs, o)
 				}
 			}
-		} else {
-			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
 		}
 	}
 
