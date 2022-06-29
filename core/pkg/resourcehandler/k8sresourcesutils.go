@@ -20,6 +20,8 @@ var (
 	LinuxKernelVariables         = "LinuxKernelVariables"
 	KubeletCommandLine           = "KubeletCommandLine"
 	ImageVulnerabilities         = "ImageVulnerabilities"
+	KubeletInfo                  = "KubeletInfo"
+	KubeProxyInfo                = "KubeProxyInfo"
 
 	MapResourceToApiGroup = map[string]string{
 		KubeletConfiguration:         "hostdata.kubescape.cloud/v1beta0",
@@ -29,6 +31,8 @@ var (
 		LinuxSecurityHardeningStatus: "hostdata.kubescape.cloud/v1beta0",
 		OpenPortsList:                "hostdata.kubescape.cloud/v1beta0",
 		LinuxKernelVariables:         "hostdata.kubescape.cloud/v1beta0",
+		KubeletInfo:                  "hostdata.kubescape.cloud/v1beta0",
+		KubeProxyInfo:                "hostdata.kubescape.cloud/v1beta0",
 	}
 	MapResourceToApiGroupVuln = map[string][]string{
 		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}

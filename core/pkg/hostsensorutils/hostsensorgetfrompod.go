@@ -116,6 +116,18 @@ func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.Ho
 	return hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening", "LinuxSecurityHardeningStatus")
 }
 
+// return list of KubeletInfo
+func (hsh *HostSensorHandler) GetKubeletInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/kubeletInfo", "KubeletInfo")
+}
+
+// return list of KubeProxyInfo
+func (hsh *HostSensorHandler) GetKubeProxyInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/kubeProxyInfo", "KubeProxyInfo")
+}
+
 // return list of KubeletCommandLine
 func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
@@ -235,6 +247,27 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
+
+	// GetKubeletInfo
+	kcData, err = hsh.GetKubeletInfo()
+	if err != nil {
+		addInfoToMap(KubeletInfo, infoMap, err)
+		logger.L().Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
+
+	// GetKubeProxyInfo
+	kcData, err = hsh.GetKubeProxyInfo()
+	if err != nil {
+		addInfoToMap(KubeProxyInfo, infoMap, err)
+		logger.L().Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
+
 	logger.L().Debug("Done reading information from host scanner")
 	return res, infoMap, nil
 }
