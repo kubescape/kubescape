@@ -188,6 +188,10 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 }
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
 
+	if summaryDetails.NumberOfControls().All() == 0 {
+		fmt.Fprintf(prettyPrinter.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
+		return
+	}
 	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n\n")
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
@@ -196,10 +200,16 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.SetHeaderLine(true)
 	summaryTable.SetColumnAlignment(getColumnsAlignments())
 
+	printAll := prettyPrinter.verboseMode
+	if summaryDetails.NumberOfResources().Failed() == 0 {
+		// if there are no failed controls, print the resource table and detailed information
+		printAll = true
+	}
+
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
 	for i := len(sortedControlNames) - 1; i >= 0; i-- {
 		for _, c := range sortedControlNames[i] {
-			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfo, prettyPrinter.verboseMode)
+			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfo, printAll)
 			if len(row) > 0 {
 				summaryTable.Append(row)
 			}

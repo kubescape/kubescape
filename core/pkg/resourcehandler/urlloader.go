@@ -33,7 +33,7 @@ func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterfac
 
 	for i, j := range files {
 		w, e := cautils.ReadFile(j, cautils.GetFileFormat(i))
-		if len(e) != 0 || len(w) == 0 {
+		if e != nil || len(w) == 0 {
 			continue
 		}
 		if _, ok := workloads[i]; !ok {

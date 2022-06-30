@@ -14,7 +14,10 @@ var (
 		"KernelVersion",
 		"LinuxSecurityHardeningStatus",
 		"OpenPortsList",
-		"LinuxKernelVariables"}
+		"LinuxKernelVariables",
+		"KubeletInfo",
+		"KubeProxyInfo",
+	}
 	CloudResources = []string{"ClusterDescribe"}
 )
 

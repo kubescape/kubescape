@@ -24,7 +24,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads, err := LoadResourcesFromFiles(onlineBoutiquePath())
+	workloads, err := LoadResourcesFromFiles(onlineBoutiquePath(), "")
 	assert.NoError(t, err)
 	assert.Equal(t, 12, len(workloads))
 
@@ -39,7 +39,7 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 }
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
-	_, err := loadFiles(files)
+	_, err := loadFiles("", files)
 	assert.Equal(t, 0, len(err))
 }
 

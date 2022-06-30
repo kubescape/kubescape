@@ -13,6 +13,8 @@ var (
 	OpenPortsList                = "OpenPortsList"
 	LinuxKernelVariables         = "LinuxKernelVariables"
 	KubeletCommandLine           = "KubeletCommandLine"
+	KubeletInfo                  = "KubeletInfo"
+	KubeProxyInfo                = "KubeProxyInfo"
 
 	MapHostSensorResourceToApiGroup = map[string]string{
 		KubeletConfiguration:         "hostdata.kubescape.cloud/v1beta0",
@@ -22,6 +24,8 @@ var (
 		LinuxSecurityHardeningStatus: "hostdata.kubescape.cloud/v1beta0",
 		OpenPortsList:                "hostdata.kubescape.cloud/v1beta0",
 		LinuxKernelVariables:         "hostdata.kubescape.cloud/v1beta0",
+		KubeletInfo:                  "hostdata.kubescape.cloud/v1beta0",
+		KubeProxyInfo:                "hostdata.kubescape.cloud/v1beta0",
 	}
 )
 

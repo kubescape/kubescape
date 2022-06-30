@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v2"
@@ -28,7 +29,7 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func LoadResourcesFromFiles(input string) (map[string][]workloadinterface.IMetadata, error) {
+func LoadResourcesFromFiles(input, rootPath string) (map[string][]workloadinterface.IMetadata, error) {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
@@ -37,7 +38,7 @@ func LoadResourcesFromFiles(input string) (map[string][]workloadinterface.IMetad
 		return nil, nil
 	}
 
-	workloads, errs := loadFiles(files)
+	workloads, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
@@ -45,7 +46,7 @@ func LoadResourcesFromFiles(input string) (map[string][]workloadinterface.IMetad
 	return workloads, nil
 }
 
-func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
+func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
 	workloads := make(map[string][]workloadinterface.IMetadata, 0)
 	errs := []error{}
 	for i := range filePaths {
@@ -57,9 +58,12 @@ func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []
 		if len(f) == 0 {
 			continue // empty file
 		}
+
 		w, e := ReadFile(f, GetFileFormat(filePaths[i]))
-		errs = append(errs, e...)
-		if w != nil {
+		if e != nil {
+			logger.L().Debug("failed to read file", helpers.String("file", filePaths[i]), helpers.Error(e))
+		}
+		if len(w) != 0 {
 			path := filePaths[i]
 			if _, ok := workloads[path]; !ok {
 				workloads[path] = []workloadinterface.IMetadata{}
@@ -67,7 +71,11 @@ func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []
 			wSlice := workloads[path]
 			for j := range w {
 				lw := localworkload.NewLocalWorkload(w[j].GetObject())
-				lw.SetPath(path)
+				if relPath, err := filepath.Rel(rootPath, path); err == nil {
+					lw.SetPath(relPath)
+				} else {
+					lw.SetPath(path)
+				}
 				wSlice = append(wSlice, lw)
 			}
 			workloads[path] = wSlice
@@ -79,7 +87,7 @@ func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []
 func loadFile(filePath string) ([]byte, error) {
 	return os.ReadFile(filePath)
 }
-func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, []error) {
+func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, error) {
 
 	switch fileFormat {
 	case YAML_FILE_FORMAT:
@@ -127,8 +135,8 @@ func listFiles(pattern string) ([]string, []error) {
 	return files, errs
 }
 
-func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
-	errs := []error{}
+func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, error) {
+	defer recover()
 
 	r := bytes.NewReader(yamlFile)
 	dec := yaml.NewDecoder(r)
@@ -148,19 +156,17 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
 					yamlObjs = append(yamlObjs, o)
 				}
 			}
-		} else {
-			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
 		}
 	}
 
-	return yamlObjs, errs
+	return yamlObjs, nil
 }
 
-func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, []error) {
+func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, error) {
 	workloads := []workloadinterface.IMetadata{}
 	var jsonObj interface{}
 	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
-		return workloads, []error{err}
+		return workloads, err
 	}
 
 	convertJsonToWorkload(jsonObj, &workloads)
