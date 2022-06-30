@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
@@ -188,7 +189,7 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 	return nil
 }
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
-	postureReport.PaginationInfo = reporthandlingv2.PaginationMarks{
+	postureReport.PaginationInfo = apis.PaginationMarks{
 		ReportNumber: counter,
 		IsLastReport: isLastReport,
 	}
