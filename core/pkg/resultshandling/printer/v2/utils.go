@@ -62,13 +62,13 @@ func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 	return infoToPrintInfo
 }
 
-func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]string) []reporthandling.Resource {
+func finalizeResources(results []resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source) []reporthandling.Resource {
 	resources := make([]reporthandling.Resource, 0)
 	for i := range results {
 		if obj, ok := allResources[results[i].ResourceID]; ok {
 			resource := *reporthandling.NewResourceIMetadata(obj)
 			if r, ok := resourcesSource[results[i].ResourceID]; ok {
-				resource.SetSource(&reporthandling.Source{Path: r})
+				resource.SetSource(&r)
 			}
 			resources = append(resources, resource)
 		}

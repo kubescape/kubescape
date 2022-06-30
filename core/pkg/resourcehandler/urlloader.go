@@ -12,7 +12,7 @@ func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterfac
 	if len(inputPatterns) == 0 {
 		return nil, nil
 	}
-	g, err := giturl.NewGitURL(inputPatterns[0])
+	g, err := giturl.NewGitAPI(inputPatterns[0])
 	if err != nil {
 		return nil, nil
 	}

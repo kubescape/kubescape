@@ -29,10 +29,10 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if !ok {
 			continue
 		}
-		fmt.Fprintf(prettyPrinter.writer, "\n"+getSperator("#")+"\n\n")
+		fmt.Fprintf(prettyPrinter.writer, fmt.Sprintf("\n%s\n\n", getSeparator("#")))
 
 		if source, ok := opaSessionObj.ResourceSource[resourceID]; ok {
-			fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", source)
+			fmt.Fprintf(prettyPrinter.writer, "Source: %s\n", source.RelativePath)
 		}
 		fmt.Fprintf(prettyPrinter.writer, "ApiVersion: %s\n", resource.GetApiVersion())
 		fmt.Fprintf(prettyPrinter.writer, "Kind: %s\n", resource.GetKind())

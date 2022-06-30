@@ -33,7 +33,7 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, viewType cautils.V
 }
 
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	fmt.Fprintf(prettyPrinter.writer, "\n"+getSperator("^")+"\n")
+	fmt.Fprintf(prettyPrinter.writer, "\n"+getSeparator("^")+"\n")
 
 	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
@@ -253,7 +253,7 @@ func controlCountersForSummary(counters reportsummary.ICounters) string {
 func controlCountersForResource(l *helpersv1.AllLists) string {
 	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", len(l.All()), len(l.Failed()), len(l.Excluded()))
 }
-func getSperator(sep string) string {
+func getSeparator(sep string) string {
 	s := ""
 	for i := 0; i < 80; i++ {
 		s += sep

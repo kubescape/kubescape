@@ -12,6 +12,7 @@ import (
 	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+	"github.com/google/uuid"
 
 	"github.com/armosec/rbac-utils/rbacscanner"
 )
@@ -122,7 +123,6 @@ func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
-
 		If "First run (local config not found)" -
 			Default/keep-local - Do not send report
 			Submit - Create tenant & Submit report
@@ -139,8 +139,20 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
+	scanningContext := scanInfo.GetScanningContext()
+	if scanningContext == cautils.ContextFile || scanningContext == cautils.ContextDir {
+		scanInfo.Submit = false
+		return
+	}
+
 	if tenantConfig.IsConfigFound() { // config found in cache (submitted)
 		if !scanInfo.Local {
+			if tenantConfig.GetAccountID() != "" {
+				if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
+					scanInfo.Submit = false
+					return
+				}
+			}
 			// Submit report
 			scanInfo.Submit = true
 		}
@@ -163,20 +175,6 @@ func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, framewor
 	return getDownloadReleasedPolicy(downloadReleasedPolicy)
 
 }
-
-// func setGetArmoAPIConnector(scanInfo *cautils.ScanInfo, customerGUID string) {
-// 	g := getter.GetArmoAPIConnector() // download policy from ARMO backend
-// 	g.SetCustomerGUID(customerGUID)
-// 	scanInfo.PolicyGetter = g
-// 	if scanInfo.ScanAll {
-// 		frameworks, err := g.ListCustomFrameworks(customerGUID)
-// 		if err != nil {
-// 			glog.Error("failed to get custom frameworks") // handle error
-// 			return
-// 		}
-// 		scanInfo.SetPolicyIdentifiers(frameworks, reporthandling.KindFramework)
-// 	}
-// }
 
 // setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
 func getConfigInputsGetter(ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {

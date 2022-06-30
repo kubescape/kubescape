@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
+
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/opa-utils/objectsenvelopes"
+	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v2"
 )
 
@@ -26,8 +28,8 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-func LoadResourcesFromFiles(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
-	files, errs := listFiles(inputPatterns)
+func LoadResourcesFromFiles(input string) (map[string][]workloadinterface.IMetadata, error) {
+	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
@@ -39,6 +41,7 @@ func LoadResourcesFromFiles(inputPatterns []string) (map[string][]workloadinterf
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
 	}
+
 	return workloads, nil
 }
 
@@ -51,15 +54,23 @@ func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []
 			errs = append(errs, err)
 			continue
 		}
+		if len(f) == 0 {
+			continue // empty file
+		}
 		w, e := ReadFile(f, GetFileFormat(filePaths[i]))
 		errs = append(errs, e...)
 		if w != nil {
-			if _, ok := workloads[filePaths[i]]; !ok {
-				workloads[filePaths[i]] = []workloadinterface.IMetadata{}
+			path := filePaths[i]
+			if _, ok := workloads[path]; !ok {
+				workloads[path] = []workloadinterface.IMetadata{}
 			}
-			wSlice := workloads[filePaths[i]]
-			wSlice = append(wSlice, w...)
-			workloads[filePaths[i]] = wSlice
+			wSlice := workloads[path]
+			for j := range w {
+				lw := localworkload.NewLocalWorkload(w[j].GetObject())
+				lw.SetPath(path)
+				wSlice = append(wSlice, lw)
+			}
+			workloads[path] = wSlice
 		}
 	}
 	return workloads, errs
@@ -68,40 +79,51 @@ func loadFiles(filePaths []string) (map[string][]workloadinterface.IMetadata, []
 func loadFile(filePath string) ([]byte, error) {
 	return os.ReadFile(filePath)
 }
-func ReadFile(fileContent []byte, fileFromat FileFormat) ([]workloadinterface.IMetadata, []error) {
+func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IMetadata, []error) {
 
-	switch fileFromat {
+	switch fileFormat {
 	case YAML_FILE_FORMAT:
 		return readYamlFile(fileContent)
 	case JSON_FILE_FORMAT:
 		return readJsonFile(fileContent)
 	default:
-		return nil, nil // []error{fmt.Errorf("file extension %s not supported", fileFromat)}
+		return nil, nil // []error{fmt.Errorf("file extension %s not supported", fileFormat)}
 	}
 }
 
-func listFiles(patterns []string) ([]string, []error) {
-	files := []string{}
+// listFiles returns the list of absolute paths, full file path and list of errors. The list of abs paths and full path have the same length
+func listFiles(pattern string) ([]string, []error) {
+
+	var files []string
 	errs := []error{}
-	for i := range patterns {
-		if strings.HasPrefix(patterns[i], "http") {
-			continue
-		}
-		if !filepath.IsAbs(patterns[i]) {
-			o, _ := os.Getwd()
-			patterns[i] = filepath.Join(o, patterns[i])
-		}
-		if IsFile(patterns[i]) {
-			files = append(files, patterns[i])
-		} else {
-			f, err := glob(filepath.Split(patterns[i])) //filepath.Glob(patterns[i])
-			if err != nil {
-				errs = append(errs, err)
-			} else {
-				files = append(files, f...)
-			}
-		}
+
+	if !filepath.IsAbs(pattern) {
+		o, _ := os.Getwd()
+		pattern = filepath.Join(o, pattern)
 	}
+
+	if IsFile(pattern) {
+		files = append(files, pattern)
+		return files, errs
+	}
+
+	root, shouldMatch := filepath.Split(pattern)
+
+	if IsDir(pattern) {
+		root = pattern
+		shouldMatch = "*"
+	}
+	if shouldMatch == "" {
+		shouldMatch = "*"
+	}
+
+	f, err := glob(root, shouldMatch)
+	if err != nil {
+		errs = append(errs, err)
+	} else {
+		files = append(files, f...)
+	}
+
 	return files, errs
 }
 
@@ -126,8 +148,6 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, []error) {
 					yamlObjs = append(yamlObjs, o)
 				}
 			}
-		} else {
-			errs = append(errs, fmt.Errorf("failed to convert yaml file to map[string]interface, file content: %v", j))
 		}
 	}
 
@@ -194,6 +214,10 @@ func glob(root, pattern string) ([]string, error) {
 		if info.IsDir() {
 			return nil
 		}
+		fileFormat := GetFileFormat(path)
+		if !(fileFormat == JSON_FILE_FORMAT || fileFormat == YAML_FILE_FORMAT) {
+			return nil
+		}
 		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
 			return err
 		} else if matched {
@@ -206,9 +230,21 @@ func glob(root, pattern string) ([]string, error) {
 	}
 	return matches, nil
 }
+
+// IsFile checks if a given path is a file
 func IsFile(name string) bool {
 	if fi, err := os.Stat(name); err == nil {
 		if fi.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+// IsDir checks if a given path is a directory
+func IsDir(name string) bool {
+	if info, err := os.Stat(name); err == nil {
+		if info.IsDir() {
 			return true
 		}
 	}

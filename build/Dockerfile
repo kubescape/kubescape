@@ -1,9 +1,10 @@
-FROM golang:1.17-alpine as builder
-#ENV GOPROXY=https://goproxy.io,direct
+FROM golang:1.18-alpine as builder
 
 ARG image_version
+ARG client
 
 ENV RELEASE=$image_version
+ENV CLIENT=$client
 
 ENV GO111MODULE=
 

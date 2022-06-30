@@ -16,7 +16,8 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj.Path = "/k8s/v2/postureReport"
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())
-	q.Add("clusterName", report.clusterName)
+	q.Add("contextName", report.clusterName)
+	q.Add("clusterName", report.clusterName) // deprecated
 
 	urlObj.RawQuery = q.Encode()
 

@@ -17,6 +17,7 @@ const SKIP_VERSION_CHECK_DEPRECATED = "KUBESCAPE_SKIP_UPDATE_CHECK"
 const SKIP_VERSION_CHECK = "KS_SKIP_UPDATE_CHECK"
 
 var BuildNumber string
+var Client string
 
 const UnknownBuildNumber = "unknown"
 
@@ -48,10 +49,12 @@ type VersionCheckHandler struct {
 }
 type VersionCheckRequest struct {
 	Client           string `json:"client"`           // kubescape
+	ClientBuild      string `json:"clientBuild"`      // client build environment
 	ClientVersion    string `json:"clientVersion"`    // kubescape version
 	Framework        string `json:"framework"`        // framework name
 	FrameworkVersion string `json:"frameworkVersion"` // framework version
-	ScanningTarget   string `json:"target"`           // scanning target- cluster/yaml
+	ScanningTarget   string `json:"target"`           // Deprecated
+	ScanningContext  string `json:"context"`          // scanning context- cluster/file/gitURL/localGit/dir
 }
 
 type VersionCheckResponse struct {
@@ -74,8 +77,12 @@ func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanni
 	if scanningTarget == "" {
 		scanningTarget = "unknown"
 	}
+	if Client == "" {
+		Client = "local-build"
+	}
 	return &VersionCheckRequest{
 		Client:           "kubescape",
+		ClientBuild:      Client,
 		ClientVersion:    buildNumber,
 		Framework:        frameworkName,
 		FrameworkVersion: frameworkVersion,

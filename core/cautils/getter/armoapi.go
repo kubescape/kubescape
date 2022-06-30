@@ -34,7 +34,7 @@ var (
 
 	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armo.cloud"
-	armoDevFEURL   = "armoui-dev.eudev3.cyberarmorsoft.com"
+	armoDevFEURL   = "cloud-dev.armosec.io"
 	armoDevAUTHURL = "eggauth.eudev3.cyberarmorsoft.com"
 )
 
