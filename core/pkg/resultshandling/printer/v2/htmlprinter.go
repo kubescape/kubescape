@@ -102,7 +102,7 @@ func (htmlPrinter *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 		template.New("htmlReport").Funcs(tplFuncMap).Parse(reportTemplate),
 	)
 
-	resourceTableView := bulidResourceTableView(opaSessionObj)
+	resourceTableView := buildResourceTableView(opaSessionObj)
 	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView}
 	err := tpl.Execute(htmlPrinter.writer, reportingCtx)
 	if err != nil {
@@ -114,7 +114,7 @@ func (htmlPrinter *HtmlPrinter) Score(score float32) {
 	return
 }
 
-func bulidResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableView {
+func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableView {
 	resourceTableView := make(ResourceTableView, 0)
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
