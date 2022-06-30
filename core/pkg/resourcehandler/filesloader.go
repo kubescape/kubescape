@@ -61,19 +61,19 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		path = filepath.Join(cloneDir, gitURL.GetPath())
 	}
 
-	// load resource from local file system
-	logger.L().Info("Accessing local objects")
-
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(path)
-	if err != nil {
-		return nil, allResources, nil, err
-	}
-
 	// Get repo root
 	repoRoot := ""
 	giRepo, err := cautils.NewLocalGitRepository(path)
 	if err == nil {
 		repoRoot, _ = giRepo.GetRootDir()
+	}
+
+	// load resource from local file system
+	logger.L().Info("Accessing local objects")
+
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(path, repoRoot)
+	if err != nil {
+		return nil, allResources, nil, err
 	}
 
 	for source, ws := range sourceToWorkloads {
