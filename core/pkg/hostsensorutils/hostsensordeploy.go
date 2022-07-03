@@ -91,7 +91,7 @@ func (hsh *HostSensorHandler) Init() error {
 
 func (hsh *HostSensorHandler) applyYAML() error {
 	workloads, err := cautils.ReadFile([]byte(hostSensorYAML), cautils.YAML_FILE_FORMAT)
-	if len(err) != 0 {
+	if err != nil {
 		return fmt.Errorf("failed to read YAML files, reason: %v", err)
 	}
 
