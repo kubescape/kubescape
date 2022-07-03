@@ -30,20 +30,9 @@ func NewWorkerPool() workerPool {
 }
 
 func (wp *workerPool) init() {
-	// init the channels, if they are open then close first
-	if _, open := <-wp.jobs; open {
-		close(wp.jobs)
-	}
+	// init the channels
 	wp.jobs = make(chan Job, noOfWorkers)
-
-	if _, open := <-wp.results; open {
-		close(wp.results)
-	}
 	wp.results = make(chan hostsensor.HostSensorDataEnvelope, noOfWorkers)
-
-	if _, open := <-wp.Done; open {
-		close(wp.Done)
-	}
 	wp.Done = make(chan bool)
 }
 
