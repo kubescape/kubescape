@@ -1,7 +1,6 @@
 package cautils
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -76,7 +75,8 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		if len(wls) == 0 {
 			continue
 		}
-		if firstPathSeparatorIndex := strings.Index(path, string(os.PathSeparator)); firstPathSeparatorIndex != -1 {
+		// separate base path and file name. We do not use the os.Separator because the paths returned from the helm engine are not OS specific (e.g. mychart/templates/myfile.yaml)
+		if firstPathSeparatorIndex := strings.Index(path, string("/")); firstPathSeparatorIndex != -1 {
 			absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
 
 			workloads[absPath] = []workloadinterface.IMetadata{}
