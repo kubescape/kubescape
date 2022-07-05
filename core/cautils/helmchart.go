@@ -73,6 +73,9 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		if e != nil {
 			logger.L().Debug("failed to read rendered yaml file", helpers.String("file", path), helpers.Error(e))
 		}
+		if len(wls) == 0 {
+			continue
+		}
 		if firstPathSeparatorIndex := strings.Index(path, string(os.PathSeparator)); firstPathSeparatorIndex != -1 {
 			absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
 
@@ -83,7 +86,6 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 				workloads[absPath] = append(workloads[absPath], lw)
 			}
 		}
-
 	}
 	return workloads, errs
 }
