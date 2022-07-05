@@ -10,7 +10,7 @@ import (
 
 const noOfWorkers int = 10
 
-type Job struct {
+type job struct {
 	podName     string
 	nodeName    string
 	requestKind string
@@ -18,22 +18,27 @@ type Job struct {
 }
 
 type workerPool struct {
-	jobs    chan Job
-	results chan hostsensor.HostSensorDataEnvelope
-	Done    chan bool
+	jobs        chan job
+	results     chan hostsensor.HostSensorDataEnvelope
+	done        chan bool
+	noOfWorkers int
 }
 
 func NewWorkerPool() workerPool {
 	wp := workerPool{}
+	wp.noOfWorkers = noOfWorkers
 	wp.init()
 	return wp
 }
 
-func (wp *workerPool) init() {
+func (wp *workerPool) init(noOfPods ...int) {
+	if noOfPods != nil && len(noOfPods) > 0 && noOfPods[0] < noOfWorkers {
+		wp.noOfWorkers = noOfPods[0]
+	}
 	// init the channels
-	wp.jobs = make(chan Job, noOfWorkers)
+	wp.jobs = make(chan job, noOfWorkers)
 	wp.results = make(chan hostsensor.HostSensorDataEnvelope, noOfWorkers)
-	wp.Done = make(chan bool)
+	wp.done = make(chan bool)
 }
 
 // The worker takes a job out of the chan, executes the request, and pushes the result to the results chan
@@ -62,7 +67,7 @@ func (wp *workerPool) waitForDone(wg *sync.WaitGroup) {
 	close(wp.results)
 
 	// Waiting for the results to be processed
-	<-wp.Done
+	<-wp.done
 }
 
 func (wp *workerPool) hostSensorGetResults(result *[]hostsensor.HostSensorDataEnvelope) {
@@ -70,14 +75,14 @@ func (wp *workerPool) hostSensorGetResults(result *[]hostsensor.HostSensorDataEn
 		for res := range wp.results {
 			*result = append(*result, res)
 		}
-		wp.Done <- true
+		wp.done <- true
 	}()
 }
 
 func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path, requestKind string) {
 	go func() {
 		for podName, nodeName := range podList {
-			job := Job{
+			job := job{
 				podName:     podName,
 				nodeName:    nodeName,
 				requestKind: requestKind,

@@ -88,7 +88,7 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 	res := make([]hostsensor.HostSensorDataEnvelope, 0, len(podList))
 	var wg sync.WaitGroup
 	// initialization of the channels
-	hsh.workerPool.init()
+	hsh.workerPool.init(len(podList))
 
 	hsh.workerPool.hostSensorApplyJobs(podList, path, requestKind)
 	hsh.workerPool.hostSensorGetResults(&res)
