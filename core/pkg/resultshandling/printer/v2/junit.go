@@ -49,7 +49,7 @@ type JUnitTestSuite struct {
 	XMLName    xml.Name        `xml:"testsuite"`
 	Name       string          `xml:"name,attr"`      // Full (class) name of the test for non-aggregated testsuite documents. Class name without the package for aggregated testsuites documents. Required
 	Disabled   int             `xml:"disabled,attr"`  // The total number of disabled tests in the suite. optional. not supported by maven surefire.
-	Errors     int             `xml:"errors,attr"`    // The total number of tests in the suite that errored
+	Errors     int             `xml:"errors,attr"`    // The total number of tests in the suite that errors
 	Failures   int             `xml:"failures,attr"`  // The total number of tests in the suite that failed
 	Hostname   string          `xml:"hostname,attr"`  // Host on which the tests were executed ? cluster name ?
 	ID         int             `xml:"id,attr"`        // Starts at 0 for the first testsuite and is incremented by 1 for each following testsuite
@@ -181,7 +181,7 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			testCase.Failure = &testCaseFailure
 		} else if control.GetStatus().IsSkipped() {
 			testCase.SkipMessage = &JUnitSkipMessage{
-				Message: "", // TODO - fill after statusInfo is supportred
+				Message: "", // TODO - fill after statusInfo is supported
 			}
 
 		}

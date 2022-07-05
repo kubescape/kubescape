@@ -74,7 +74,7 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 
 func TestLoadFiles(t *testing.T) {
 	files, _ := listFiles(onlineBoutiquePath())
-	_, err := loadFiles(files)
+	_, err := loadFiles("", files)
 	assert.Equal(t, 0, len(err))
 }
 

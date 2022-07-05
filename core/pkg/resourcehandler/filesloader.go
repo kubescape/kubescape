@@ -73,6 +73,14 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		repoRoot, _ = giRepo.GetRootDir()
 	}
 
+	// load resource from local file system
+	logger.L().Info("Accessing local objects")
+
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(path, repoRoot)
+	if err != nil {
+		return nil, allResources, nil, err
+	}
+
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 
