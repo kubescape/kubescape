@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
@@ -68,7 +70,9 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		}
 
 		wls, e := ReadFile([]byte(renderedYaml), YAML_FILE_FORMAT)
-		errs = append(errs, e...)
+		if e != nil {
+			logger.L().Debug("failed to read rendered yaml file", helpers.String("file", path), helpers.Error(e))
+		}
 		if len(wls) == 0 {
 			continue
 		}
@@ -82,7 +86,6 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 				workloads[absPath] = append(workloads[absPath], lw)
 			}
 		}
-
 	}
 	return workloads, errs
 }

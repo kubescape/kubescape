@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	giturl "github.com/armosec/go-git-url"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
@@ -33,6 +32,7 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 
 func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
 
+	//
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
@@ -47,24 +47,13 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	}
 	path := fileHandler.inputPatterns[0]
 
-	// Clone git repository if needed
-	gitURL, err := giturl.NewGitURL(path)
-	if err == nil {
-		logger.L().Info("cloning", helpers.String("repository url", gitURL.GetURL().String()))
-		cautils.StartSpinner()
-		cloneDir, err := cloneRepo(gitURL)
-		cautils.StopSpinner()
-		if err != nil {
-			return nil, allResources, nil, fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
-		}
-		defer os.RemoveAll(cloneDir)
-		path = filepath.Join(cloneDir, gitURL.GetPath())
+	clonedRepo, err := cloneGitRepo(&path)
+	if err != nil {
+		return nil, allResources, nil, err
 	}
-
-	// load resource from local file system
-	logger.L().Info("Accessing local objects")
-
-	sourceToWorkloads := cautils.LoadResourcesFromFiles(path)
+	if clonedRepo != "" {
+		defer os.RemoveAll(clonedRepo)
+	}
 
 	// Get repo root
 	repoRoot := ""
@@ -76,11 +65,9 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	// load resource from local file system
 	logger.L().Info("Accessing local objects")
 
-	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(path, repoRoot)
-	if err != nil {
-		return nil, allResources, nil, err
-	}
+	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
 
+	// update workloads and workloadIDToSource
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 
@@ -95,17 +82,18 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 			} else if cautils.IsJson(source) {
 				filetype = reporthandling.SourceTypeJson
 			} else {
-				logger.L().Error(fmt.Sprintf("unsupported file type: %s", source))
 				continue
 			}
-
 			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{
 				RelativePath: source,
 				FileType:     filetype,
 			}
 		}
 	}
-	logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
+
+	if len(workloads) == 0 {
+		logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
+	}
 
 	// load resources from helm charts
 	helmSourceToWorkloads := cautils.LoadResourcesFromHelmCharts(path)
@@ -123,7 +111,10 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 			}
 		}
 	}
-	logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
+
+	if len(helmSourceToWorkloads) > 0 {
+		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
+	}
 
 	// addCommitData(fileHandler.inputPatterns[0], workloadIDToSource)
 
@@ -159,55 +150,4 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info {
 	return nil
-}
-
-// build resources map
-func mapResources(workloads []workloadinterface.IMetadata) map[string][]workloadinterface.IMetadata {
-
-	allResources := map[string][]workloadinterface.IMetadata{}
-	for i := range workloads {
-		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
-		if err != nil {
-			// TODO - print warning
-			continue
-		}
-
-		if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
-			w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
-			if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
-				// TODO - print warning
-				continue
-			}
-		}
-		resourceTriplets := k8sinterface.JoinResourceTriplets(groupVersionResource.Group, groupVersionResource.Version, groupVersionResource.Resource)
-		if r, ok := allResources[resourceTriplets]; ok {
-			allResources[resourceTriplets] = append(r, workloads[i])
-		} else {
-			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
-		}
-	}
-	return allResources
-
-}
-
-func addCommitData(input string, workloadIDToSource map[string]reporthandling.Source) {
-	giRepo, err := cautils.NewLocalGitRepository(input)
-	if err != nil {
-		return
-	}
-	for k := range workloadIDToSource {
-		sourceObj := workloadIDToSource[k]
-		lastCommit, err := giRepo.GetFileLastCommit(sourceObj.RelativePath)
-		if err != nil {
-			continue
-		}
-		sourceObj.LastCommit = reporthandling.LastCommit{
-			Hash:           lastCommit.SHA,
-			Date:           lastCommit.Author.Date,
-			CommitterName:  lastCommit.Author.Name,
-			CommitterEmail: lastCommit.Author.Email,
-			Message:        lastCommit.Message,
-		}
-		workloadIDToSource[k] = sourceObj
-	}
 }

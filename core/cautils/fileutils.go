@@ -57,8 +57,7 @@ func LoadResourcesFromHelmCharts(basePath string) map[string][]workloadinterface
 	return result
 }
 
-
-func LoadResourcesFromFiles(input, rootPath string) (map[string][]workloadinterface.IMetadata, error) {
+func LoadResourcesFromFiles(input, rootPath string) map[string][]workloadinterface.IMetadata {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("%v", errs))
@@ -124,7 +123,7 @@ func ReadFile(fileContent []byte, fileFormat FileFormat) ([]workloadinterface.IM
 	case JSON_FILE_FORMAT:
 		return readJsonFile(fileContent)
 	default:
-		return nil, nil // []error{fmt.Errorf("file extension %s not supported", fileFormat)}
+		return nil, nil
 	}
 }
 
