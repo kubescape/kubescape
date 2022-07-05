@@ -237,6 +237,7 @@ kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 kubescape scan </path/to/directory> --submit
 ```
+> Kubescape will load the default values file
 
 ### Offline/Air-gaped Environment Support
 
