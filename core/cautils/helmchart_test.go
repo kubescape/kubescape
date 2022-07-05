@@ -27,19 +27,19 @@ func TestHelmChartTestSuite(t *testing.T) {
 func (s *HelmChartTestSuite) SetupSuite() {
 	o, _ := os.Getwd()
 
-	s.helmChartPath = filepath.Join(filepath.Dir(o), "../examples/helm_chart")
+	s.helmChartPath = filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
 
 	s.expectedFiles = []string{
-		filepath.Join(s.helmChartPath, "templates/clusterrolebinding.yaml"),
-		filepath.Join(s.helmChartPath, "templates/clusterrole.yaml"),
-		filepath.Join(s.helmChartPath, "templates/serviceaccount.yaml"),
-		filepath.Join(s.helmChartPath, "templates/rolebinding.yaml"),
-		filepath.Join(s.helmChartPath, "templates/role.yaml"),
-		filepath.Join(s.helmChartPath, "templates/cronjob.yaml"),
+		filepath.Join(s.helmChartPath, "templates", "clusterrolebinding.yaml"),
+		filepath.Join(s.helmChartPath, "templates", "clusterrole.yaml"),
+		filepath.Join(s.helmChartPath, "templates", "serviceaccount.yaml"),
+		filepath.Join(s.helmChartPath, "templates", "rolebinding.yaml"),
+		filepath.Join(s.helmChartPath, "templates", "role.yaml"),
+		filepath.Join(s.helmChartPath, "templates", "cronjob.yaml"),
 	}
 
 	var obj interface{}
-	file, _ := ioutil.ReadFile("testdata/helm_expected_default_values.json")
+	file, _ := ioutil.ReadFile(filepath.Join("testdata", "helm_expected_default_values.json"))
 	_ = json.Unmarshal([]byte(file), &obj)
 	s.expectedDefaultValues = obj.(map[string]interface{})
 }

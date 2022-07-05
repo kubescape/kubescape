@@ -12,12 +12,12 @@ import (
 
 func onlineBoutiquePath() string {
 	o, _ := os.Getwd()
-	return filepath.Join(filepath.Dir(o), "../examples/online-boutique/*")
+	return filepath.Join(filepath.Dir(o), "..", "examples", "online-boutique")
 }
 
 func helmChartPath() string {
 	o, _ := os.Getwd()
-	return filepath.Join(filepath.Dir(o), "../examples/helm_chart/*")
+	return filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
 }
 
 func TestListFiles(t *testing.T) {
@@ -79,10 +79,10 @@ func TestLoadFiles(t *testing.T) {
 }
 
 func TestListDirs(t *testing.T) {
-	dirs, _ := listDirs(strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1))
+	dirs, _ := listDirs(filepath.Join(onlineBoutiquePath(), "adservice.yaml"))
 	assert.Equal(t, 0, len(dirs))
 
-	expectedDirs := []string{"examples/helm_chart", "examples/helm_chart/templates"}
+	expectedDirs := []string{filepath.Join("examples", "helm_chart"), filepath.Join("examples", "helm_chart", "templates")}
 	dirs, _ = listDirs(helmChartPath())
 	assert.Equal(t, len(expectedDirs), len(dirs))
 	for i := range expectedDirs {
@@ -91,7 +91,7 @@ func TestListDirs(t *testing.T) {
 }
 
 func TestLoadFile(t *testing.T) {
-	files, _ := listFiles(strings.Replace(onlineBoutiquePath(), "*", "adservice.yaml", 1))
+	files, _ := listFiles(filepath.Join(onlineBoutiquePath(), "adservice.yaml"))
 	assert.Equal(t, 1, len(files))
 
 	_, err := loadFile(files[0])
