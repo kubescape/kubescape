@@ -30,7 +30,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(onlineBoutiquePath())
+	workloads := LoadResourcesFromFiles(onlineBoutiquePath(), "")
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
