@@ -61,6 +61,11 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		path = filepath.Join(cloneDir, gitURL.GetPath())
 	}
 
+	// load resource from local file system
+	logger.L().Info("Accessing local objects")
+
+	sourceToWorkloads := cautils.LoadResourcesFromFiles(path)
+
 	// Get repo root
 	repoRoot := ""
 	giRepo, err := cautils.NewLocalGitRepository(path)
@@ -84,17 +89,47 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 			source = relSource
 		}
 		for i := range ws {
-			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{RelativePath: source}
+			var filetype string
+			if cautils.IsYaml(source) {
+				filetype = reporthandling.SourceTypeYaml
+			} else if cautils.IsJson(source) {
+				filetype = reporthandling.SourceTypeJson
+			} else {
+				logger.L().Error(fmt.Sprintf("unsupported file type: %s", source))
+				continue
+			}
+
+			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{
+				RelativePath: source,
+				FileType:     filetype,
+			}
 		}
 	}
 	logger.L().Debug("files found in local storage", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
+
+	// load resources from helm charts
+	helmSourceToWorkloads := cautils.LoadResourcesFromHelmCharts(path)
+	for source, ws := range helmSourceToWorkloads {
+		workloads = append(workloads, ws...)
+
+		relSource, err := filepath.Rel(repoRoot, source)
+		if err == nil {
+			source = relSource
+		}
+		for i := range ws {
+			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{
+				RelativePath: source,
+				FileType:     reporthandling.SourceTypeHelmChart,
+			}
+		}
+	}
+	logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 
 	// addCommitData(fileHandler.inputPatterns[0], workloadIDToSource)
 
 	if len(workloads) == 0 {
 		return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
 	}
-	logger.L().Debug("files found in git repo", helpers.Int("files", len(sourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 
 	sessionObj.ResourceSource = workloadIDToSource
 
