@@ -13,13 +13,12 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
-const MAX_REPORT_SIZE = 2097152 // 2 MB
+const MAX_REPORT_SIZE = 4000000 // 4 MB
 
 type ReportEventReceiver struct {
 	httpClient         *http.Client
@@ -125,6 +124,7 @@ func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cau
 	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
 		return err
 	}
+
 	return report.sendReport(host, splittedPostureReport, reportCounter, true)
 }
 func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {

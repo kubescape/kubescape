@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -62,9 +61,9 @@ func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
 }
 
 func (s *LocalGitRepositoryTestSuite) SetupSuite() {
-	zippedFixturePath := path.Join(".", "testdata", "localrepo.git")
-	destinationPath := path.Join(".", "testdata", "temp")
-	gitRepositoryPath := path.Join(destinationPath, "localrepo")
+	zippedFixturePath := filepath.Join(".", "testdata", "localrepo.git")
+	destinationPath := filepath.Join(".", "testdata", "temp")
+	gitRepositoryPath := filepath.Join(destinationPath, "localrepo")
 
 	os.RemoveAll(destinationPath)
 	archive, err := unzipFile(zippedFixturePath, destinationPath)
