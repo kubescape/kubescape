@@ -18,6 +18,7 @@ import (
 
 	"github.com/armosec/k8s-interface/workloadinterface"
 
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/armosec/opa-utils/resources"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
@@ -62,7 +63,13 @@ func (opap *OPAProcessor) ProcessRulesListenner() error {
 }
 
 func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
-	logger.L().Info("Scanning", helpers.String("cluster", cautils.ClusterName))
+	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget.String()
+	clusterScan := reporthandlingv2.Cluster
+	if clusterScan.String() == targetScan {
+		logger.L().Info("Scanning", helpers.String(targetScan, cautils.ClusterName))
+	} else {
+		logger.L().Info("Scanning " + targetScan)
+	}
 
 	cautils.StartSpinner()
 
@@ -89,7 +96,12 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 	opap.Report.ReportGenerationTime = time.Now().UTC()
 
 	cautils.StopSpinner()
-	logger.L().Success("Done scanning", helpers.String("cluster", cautils.ClusterName))
+
+	if clusterScan.String() == targetScan {
+		logger.L().Success("Done scanning", helpers.String(targetScan, cautils.ClusterName))
+	} else {
+		logger.L().Info("Done scanning " + targetScan)
+	}
 
 	return errs
 }
