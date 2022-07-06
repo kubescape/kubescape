@@ -89,7 +89,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s", err.Error()), imgVulnResources, sessionObj.InfoMap)
 		} else {
 			if isEmptyImgVulns(*armoResourceMap) {
-				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armo.cloud/docs/cluster-vulnerability-scanning", imgVulnResources, sessionObj.InfoMap)
+				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/cluster-vulnerability-scanning", imgVulnResources, sessionObj.InfoMap)
 			}
 		}
 	}
@@ -109,7 +109,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 				sessionObj.InfoMap = infoMap
 			}
 		} else {
-			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information:  https://hub.armo.cloud/docs/host-sensor", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information:  https://hub.armosec.io/docs/host-sensor", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -283,7 +283,7 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 		if err != nil {
 			// Return error with useful info on how to configure credentials for getting cloud provider info
 			logger.L().Debug("failed to get descriptive information", helpers.Error(err))
-			return provider, fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armo.cloud/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
+			return provider, fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
 		}
 		allResources[wl.GetID()] = wl
 		(*armoResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}

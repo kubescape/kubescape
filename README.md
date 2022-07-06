@@ -233,16 +233,11 @@ kubescape scan --format prometheus
 kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 
-#### Scan Helm charts - Render the helm chart using [`helm template`](https://helm.sh/docs/helm/helm_template/) and pass to stdout
+#### Scan Helm charts 
 ```
-helm template [NAME] [CHART] [flags] --dry-run | kubescape scan -
+kubescape scan </path/to/directory> --submit
 ```
-
-e.g.
-```
-helm template bitnami/mysql --generate-name --dry-run | kubescape scan -
-```
-
+> Kubescape will load the default values file
 
 ### Offline/Air-gaped Environment Support
 

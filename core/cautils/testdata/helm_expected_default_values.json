@@ -1,0 +1,40 @@
+{
+    "affinity": {},
+    "configMap": {
+      "create": false,
+      "params": {
+        "clusterName": "<MyK8sClusterName>",
+        "customerGUID": "<MyGUID>"
+      }
+    },
+    "fullnameOverride": "",
+    "image": {
+      "imageName": "kubescape",
+      "pullPolicy": "Always",
+      "repository": "quay.io/armosec",
+      "tag": "latest"
+    },
+    "imagePullSecrets": [],
+    "nameOverride": "",
+    "nodeSelector": {},
+    "podAnnotations": {},
+    "podSecurityContext": {},
+    "resources": {
+      "limits": {
+        "cpu": "500m",
+        "memory": "512Mi"
+      },
+      "requests": {
+        "cpu": "200m",
+        "memory": "256Mi"
+      }
+    },
+    "schedule": "* * 1 * *",
+    "securityContext": {},
+    "serviceAccount": {
+      "annotations": {},
+      "create": true,
+      "name": "kubescape-discovery"
+    },
+    "tolerations": []
+}
