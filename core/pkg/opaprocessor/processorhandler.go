@@ -103,6 +103,11 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 		logger.L().Info("Done scanning " + targetScan)
 	}
 
+	// All scans whose target is not a cluster, currently their target is a file, which is what the backend expects
+	// (e.g. local-git, directory, etc)
+	if opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget != clusterScan {
+		opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+	}
 	return errs
 }
 
