@@ -30,7 +30,7 @@ var (
   Run 'kubescape list controls' for the list of supported controls
   
   Control documentation:
-  https://hub.armo.cloud/docs/controls
+  https://hub.armosec.io/docs/controls
 `
 )
 
