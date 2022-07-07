@@ -27,15 +27,15 @@ var (
 	armoFEURL   = "portal.armo.cloud"
 	armoAUTHURL = "auth.armo.cloud"
 
-	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft.com"
-	armoStageBEURL   = "api-stage.armo.cloud"
-	armoStageFEURL   = "armoui.eustage2.cyberarmorsoft.com"
-	armoStageAUTHURL = "eggauth.eustage2.cyberarmorsoft.com"
+	armoStageERURL   = "report-stage.armosec.io"
+	armoStageBEURL   = "api-stage.armosec.io"
+	armoStageFEURL   = "armoui-stage.armosec.io"
+	armoStageAUTHURL = "eggauth-stage.armosec.io"
 
-	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
-	armoDevBEURL   = "api-dev.armo.cloud"
+	armoDevERURL   = "report-dev.armosec.io"
+	armoDevBEURL   = "api-dev.armosec.io"
 	armoDevFEURL   = "cloud-dev.armosec.io"
-	armoDevAUTHURL = "eggauth.eudev3.cyberarmorsoft.com"
+	armoDevAUTHURL = "eggauth-dev.armosec.io"
 )
 
 // Armo API for downloading policies
