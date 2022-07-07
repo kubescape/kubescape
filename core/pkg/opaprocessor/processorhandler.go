@@ -63,13 +63,7 @@ func (opap *OPAProcessor) ProcessRulesListenner() error {
 }
 
 func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
-	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget.String()
-	clusterScan := reporthandlingv2.Cluster
-	if clusterScan.String() == targetScan {
-		logger.L().Info("Scanning", helpers.String(targetScan, cautils.ClusterName))
-	} else {
-		logger.L().Info("Scanning " + targetScan)
-	}
+	opap.loggerStartScanning()
 
 	cautils.StartSpinner()
 
@@ -97,18 +91,27 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 
 	cautils.StopSpinner()
 
-	if clusterScan.String() == targetScan {
-		logger.L().Success("Done scanning", helpers.String(targetScan, cautils.ClusterName))
-	} else {
-		logger.L().Info("Done scanning " + targetScan)
-	}
+	opap.loggerDoneScanning()
 
-	// All scans whose target is not a cluster, currently their target is a file, which is what the backend expects
-	// (e.g. local-git, directory, etc)
-	if opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget != clusterScan {
-		opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
-	}
 	return errs
+}
+
+func (opap *OPAProcessor) loggerStartScanning() {
+	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
+	if reporthandlingv2.Cluster == targetScan {
+		logger.L().Info("Scanning", helpers.String(targetScan.String(), cautils.ClusterName))
+	} else {
+		logger.L().Info("Scanning " + targetScan.String())
+	}
+}
+
+func (opap *OPAProcessor) loggerDoneScanning() {
+	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
+	if reporthandlingv2.Cluster == targetScan {
+		logger.L().Success("Done scanning", helpers.String(targetScan.String(), cautils.ClusterName))
+	} else {
+		logger.L().Success("Done scanning " + targetScan.String())
+	}
 }
 
 func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
