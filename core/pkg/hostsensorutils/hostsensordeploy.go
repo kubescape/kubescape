@@ -35,6 +35,7 @@ type HostSensorHandler struct {
 	DaemonSet                     *appsv1.DaemonSet
 	podListLock                   sync.RWMutex
 	gracePeriod                   int64
+	workerPool                    workerPool
 }
 
 func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile string) (*HostSensorHandler, error) {
@@ -54,6 +55,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 		HostSensorPodNames:            map[string]string{},
 		HostSensorUnscheduledPodNames: map[string]string{},
 		gracePeriod:                   int64(15),
+		workerPool:                    NewWorkerPool(),
 	}
 	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
 	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {

@@ -74,6 +74,12 @@ func (report *ReportEventReceiver) SetClusterName(clusterName string) {
 }
 
 func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
+	// All scans whose target is not a cluster, currently their target is a file, which is what the backend expects
+	// (e.g. local-git, directory, etc)
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.Cluster {
+		opaSessionObj.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+	}
+
 	report.initEventReceiverURL()
 	host := hostToString(report.eventReceiverURL, report.reportID)
 
