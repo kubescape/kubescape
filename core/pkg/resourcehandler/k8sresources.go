@@ -109,7 +109,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 				sessionObj.InfoMap = infoMap
 			}
 		} else {
-			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information:  https://hub.armosec.io/docs/host-sensor", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor", hostResources, sessionObj.InfoMap)
 		}
 	}
 

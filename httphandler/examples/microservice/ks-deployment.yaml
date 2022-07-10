@@ -99,7 +99,7 @@ spec:
               fieldPath: metadata.namespace
         - name: "KS_SKIP_UPDATE_CHECK" # do not check latest version
           value: "true"
-        - name: KS_ENABLE_HOST_SCANNER # enable host scanner -> https://hub.armo.cloud/docs/host-sensor
+        - name: KS_ENABLE_HOST_SCANNER # enable host scanner -> https://hub.armosec.io/docs/host-sensor
           value: "true"              
         - name: KS_DOWNLOAD_ARTIFACTS  # When set to true the artifacts will be downloaded every scan execution
           value: "true" 
