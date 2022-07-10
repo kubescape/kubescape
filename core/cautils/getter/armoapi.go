@@ -23,16 +23,16 @@ var (
 	// ATTENTION!!!
 	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFUL
 	armoERURL   = "report.armo.cloud"
-	armoBEURL   = "api.armo.cloud"
-	armoFEURL   = "portal.armo.cloud"
-	armoAUTHURL = "auth.armo.cloud"
+	armoBEURL   = "api.armosec.io"
+	armoFEURL   = "cloud.armosec.io"
+	armoAUTHURL = "auth.armosec.io"
 
-	armoStageERURL   = "report-stage.armosec.io"
+	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft.com"
 	armoStageBEURL   = "api-stage.armosec.io"
 	armoStageFEURL   = "armoui-stage.armosec.io"
 	armoStageAUTHURL = "eggauth-stage.armosec.io"
 
-	armoDevERURL   = "report-dev.armosec.io"
+	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
 	armoDevBEURL   = "api-dev.armosec.io"
 	armoDevFEURL   = "cloud-dev.armosec.io"
 	armoDevAUTHURL = "eggauth-dev.armosec.io"

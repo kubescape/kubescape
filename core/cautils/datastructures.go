@@ -62,6 +62,11 @@ func NewOPASessionObjMock() *OPASessionObj {
 			ReportID:     "",
 			JobID:        "",
 		},
+		Metadata: &reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{
+				ScanningTarget: 0,
+			},
+		},
 	}
 }
 
