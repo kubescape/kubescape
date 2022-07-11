@@ -18,7 +18,7 @@ import (
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 )
 
-const MAX_REPORT_SIZE = 4000000 // 4 MB
+const MAX_REPORT_SIZE = 2097152 // 2 MB
 
 type ReportEventReceiver struct {
 	httpClient         *http.Client
