@@ -8,16 +8,24 @@ ENV CLIENT=$client
 
 ENV GO111MODULE=
 
-ENV CGO_ENABLED=0
+ENV CGO_ENABLED=1
 
 # Install required python/pip
 ENV PYTHONUNBUFFERED=1
-RUN apk add --update --no-cache python3 && ln -sf python3 /usr/bin/python
+RUN apk add --update --no-cache python3 git openssl-dev musl-dev gcc make cmake pkgconfig && ln -sf python3 /usr/bin/python
 RUN python3 -m ensurepip
 RUN pip3 install --no-cache --upgrade pip setuptools
 
 WORKDIR /work
 ADD . .
+
+# install git2go
+WORKDIR /work
+RUN rm -rf /work/git2go
+RUN git submodule update --init
+WORKDIR /work/git2go
+RUN git submodule update --init
+RUN make install-static
 
 # build kubescape server
 WORKDIR /work/httphandler

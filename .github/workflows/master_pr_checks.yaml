@@ -13,10 +13,16 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
           go-version: 1.18
+
+      - name: Install dependencies
+        run: python3 --version && python3 install_dependencies.py
 
       # - name: Test cmd pkg
       #   run: cd cmd && go test -v ./...
@@ -37,7 +43,7 @@ jobs:
           ArmoAuthServer: auth.armo.cloud
           ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
         run: python3 --version && python3 build.py
 
       - name: Smoke Testing
