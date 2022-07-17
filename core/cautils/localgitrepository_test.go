@@ -92,6 +92,12 @@ func (s *LocalGitRepositoryTestSuite) TestInvalidRepositoryPath() {
 	}
 }
 
+func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
+	if _, err := NewLocalGitRepository("/Users/amirmalka/dev/gitwithoutremote"); s.Error(err) {
+		s.Equal("no remotes found", err.Error())
+	}
+}
+
 func (s *LocalGitRepositoryTestSuite) TestGetBranchName() {
 	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
 		s.Equal("master", localRepo.GetBranchName())

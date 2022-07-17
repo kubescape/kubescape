@@ -57,9 +57,9 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	// Get repo root
 	repoRoot := ""
-	giRepo, err := cautils.NewLocalGitRepository(path)
+	gitRepo, err := cautils.NewLocalGitRepository(path)
 	if err == nil {
-		repoRoot, _ = giRepo.GetRootDir()
+		repoRoot, _ = gitRepo.GetRootDir()
 	}
 
 	// load resource from local file system
@@ -75,19 +75,36 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		if err == nil {
 			source = relSource
 		}
+
+		var filetype string
+		if cautils.IsYaml(source) {
+			filetype = reporthandling.SourceTypeYaml
+		} else if cautils.IsJson(source) {
+			filetype = reporthandling.SourceTypeJson
+		} else {
+			continue
+		}
+
+		var lastCommit reporthandling.LastCommit
+		commitInfo, _ := gitRepo.GetFileLastCommit(source)
+		if commitInfo != nil {
+			lastCommit = reporthandling.LastCommit{
+				Hash:           commitInfo.SHA,
+				Date:           commitInfo.Author.Date,
+				CommitterName:  commitInfo.Author.Name,
+				CommitterEmail: commitInfo.Author.Email,
+				Message:        commitInfo.Message,
+			}
+		}
+
+		workloadSource := reporthandling.Source{
+			RelativePath: source,
+			FileType:     filetype,
+			LastCommit:   lastCommit,
+		}
+
 		for i := range ws {
-			var filetype string
-			if cautils.IsYaml(source) {
-				filetype = reporthandling.SourceTypeYaml
-			} else if cautils.IsJson(source) {
-				filetype = reporthandling.SourceTypeJson
-			} else {
-				continue
-			}
-			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{
-				RelativePath: source,
-				FileType:     filetype,
-			}
+			workloadIDToSource[ws[i].GetID()] = workloadSource
 		}
 	}
 
@@ -104,11 +121,27 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		if err == nil {
 			source = relSource
 		}
-		for i := range ws {
-			workloadIDToSource[ws[i].GetID()] = reporthandling.Source{
-				RelativePath: source,
-				FileType:     reporthandling.SourceTypeHelmChart,
+
+		var lastCommit reporthandling.LastCommit
+		commitInfo, _ := gitRepo.GetFileLastCommit(source)
+		if commitInfo != nil {
+			lastCommit = reporthandling.LastCommit{
+				Hash:           commitInfo.SHA,
+				Date:           commitInfo.Author.Date,
+				CommitterName:  commitInfo.Author.Name,
+				CommitterEmail: commitInfo.Author.Email,
+				Message:        commitInfo.Message,
 			}
+		}
+
+		workloadSource := reporthandling.Source{
+			RelativePath: source,
+			FileType:     reporthandling.SourceTypeHelmChart,
+			LastCommit:   lastCommit,
+		}
+
+		for i := range ws {
+			workloadIDToSource[ws[i].GetID()] = workloadSource
 		}
 	}
 
