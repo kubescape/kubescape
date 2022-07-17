@@ -21,10 +21,8 @@ ADD . .
 
 # install git2go
 WORKDIR /work
-RUN rm -rf /work/git2go
-RUN git submodule update --init
+RUN git submodule update --init --recursive
 WORKDIR /work/git2go
-RUN git submodule update --init
 RUN make install-static
 
 # build kubescape server

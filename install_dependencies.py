@@ -7,7 +7,7 @@ def main():
     if current_platform == "Windows":
         pass
     elif current_platform == "Linux" or current_platform == "Darwin":      
-        os.system(f"git submodule update --init && cd git2go && git submodule update --init&& make install-static")
+        os.system(f"git submodule update --init --recursive --init && cd git2go && make install-static")
     else: 
         raise OSError("Platform %s is not supported!" % (current_platform))
 
