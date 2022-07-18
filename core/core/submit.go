@@ -3,9 +3,9 @@ package core
 import (
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 )
 
 func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {

@@ -5,9 +5,10 @@ import (
 	"strings"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
+
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"

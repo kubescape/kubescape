@@ -5,10 +5,10 @@ import (
 	"fmt"
 
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/pkg/containerscan"
 	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 )
 
 func NewArmoAdaptor(armoAPI *getter.ArmoAPI) *ArmoCivAdaptor {

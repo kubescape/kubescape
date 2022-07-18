@@ -11,7 +11,7 @@ import (
 
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	logger "github.com/dwertent/go-logger"
 	corev1 "k8s.io/api/core/v1"
 )
 

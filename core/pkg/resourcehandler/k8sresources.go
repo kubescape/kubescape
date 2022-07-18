@@ -6,11 +6,11 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling/apis"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 
 	"github.com/armosec/k8s-interface/cloudsupport"
 	"github.com/armosec/k8s-interface/k8sinterface"

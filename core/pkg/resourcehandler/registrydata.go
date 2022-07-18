@@ -7,9 +7,9 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	armosecadaptorv1 "github.com/armosec/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
 	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
+	logger "github.com/dwertent/go-logger"
 
 	"github.com/armosec/opa-utils/shared"
 )

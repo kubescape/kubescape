@@ -9,9 +9,10 @@ import (
 	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/meta"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
+
 	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
