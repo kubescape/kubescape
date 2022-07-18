@@ -1,8 +1,8 @@
-name: master-pr
+name: pr-checks
 
 on:
   pull_request:
-    branches: [ master ]
+    branches: [ master, dev ]
     types: [ edited, opened, synchronize, reopened ]
 jobs:
   build:
