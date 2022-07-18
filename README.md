@@ -316,16 +316,34 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 ## Windows
 
-Simply run `go build .` OR `make build`
+```
+go build .
+```
+OR
+```
+make build
+```
 
 ## Linux / MacOS
 
-You should have cmake installed, if not 
+1. Install libgit2 dependency
 
-1. Install libgit2 dependency: `make libgit2`
+    ```
+    make libgit2
+    ```
+
 > `cmake` is required to build libgit2. You can install it by running `sudo apt-get install cmake` (Linux) or `brew install cmake` (MacOS)
-2. Build: `make build`
-3. Test: `make test`
+
+2. Build
+
+    ```
+    make build
+    ```
+3. Test
+
+    ```
+    make test
+    ```
 
 ## VS code configuration samples
 
