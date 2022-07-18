@@ -73,7 +73,7 @@ def main():
     if armo_auth_server:
         ldflags += " -X {}={}".format(AUTH_SERVER_CONST, armo_auth_server)
  
-    build_command = ["go", "build", "-o", ks_file, "-ldflags" ,ldflags]
+    build_command = ["go", "build", "-tags=static", "-o", ks_file, "-ldflags" ,ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))
