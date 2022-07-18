@@ -144,9 +144,6 @@ home-manager:
 
 Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 
-## Install using Go
-
-With a sufficient version of `go` you can install and build with `go install github.com/armosec/kubescape/v2@latest`
 
 ## Usage & Examples
 
@@ -302,7 +299,6 @@ Now you can submit the results to the Kubescape SaaS version -
 kubescape submit results path/to/results.json
 ```
 
-
 # Integrations
 
 ## VS Code Extension 
@@ -314,6 +310,57 @@ Scan the YAML files while writing them using the [vs code extension](https://git
 ## Lens Extension
 
 View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using kubescape [Lens extension](https://github.com/armosec/lens-kubescape/blob/master/README.md)
+
+
+# Building Kubescape
+
+## Windows
+
+Simply run `go build .` OR `make build`
+
+## Linux / MacOS
+
+1. Install libgit2 dependency (first time): `make libgit2`
+2. Build: `make build`
+3. Test: `make test`
+
+## VS code configuration samples
+
+You can use the samples files below to setup your VS code environment for building and debugging purposes.
+
+
+```json5
+// .vscode/settings.json
+{
+    "go.testTags": "static",
+    "go.buildTags": "static",
+    "go.toolsEnvVars": {
+        "CGO_ENABLED": "1"
+    }
+}
+```
+
+```json5
+// .vscode/launch.json∂
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Package",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/main.go",
+            "args": [
+                "scan",
+                "--logger",
+                "debug"
+            ],
+            "buildFlags": "-tags=static"
+        }
+    ]
+}
+```
 
 # Under the hood
 

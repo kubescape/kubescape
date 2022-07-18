@@ -21,8 +21,9 @@ jobs:
         with:
           go-version: 1.18
 
-      - name: Install dependencies
-        run: python3 --version && python3 install_dependencies.py
+      - name: Install libgit2
+        run: make libgit2
+        if: matrix.os != 'windows-latest'
 
       # - name: Test cmd pkg
       #   run: cd cmd && go test -v ./...

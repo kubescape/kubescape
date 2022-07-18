@@ -19,11 +19,9 @@ RUN pip3 install --no-cache --upgrade pip setuptools
 WORKDIR /work
 ADD . .
 
-# install git2go
+# install libgit2
 WORKDIR /work
-RUN git submodule update --init --recursive
-WORKDIR /work/git2go
-RUN make install-static
+RUN rm -rf git2go && make libgit2
 
 # build kubescape server
 WORKDIR /work/httphandler
