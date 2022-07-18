@@ -320,7 +320,10 @@ Simply run `go build .` OR `make build`
 
 ## Linux / MacOS
 
-1. Install libgit2 dependency (first time): `make libgit2`
+You should have cmake installed, if not 
+
+1. Install libgit2 dependency: `make libgit2`
+> `cmake` is required to build libgit2. You can install it by running `sudo apt-get install cmake` (Linux) or `brew install cmake` (MacOS)
 2. Build: `make build`
 3. Test: `make test`
 
@@ -341,7 +344,7 @@ You can use the samples files below to setup your VS code environment for buildi
 ```
 
 ```json5
-// .vscode/launch.json∂
+// .vscode/launch.json
 {
     "version": "0.2.0",
     "configurations": [
