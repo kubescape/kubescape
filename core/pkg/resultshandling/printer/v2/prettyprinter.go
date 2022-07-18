@@ -253,7 +253,7 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 }
 
 func getControlLink(controlID string) string {
-	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
+	return fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(controlID))
 }
 
 func controlCountersForSummary(counters reportsummary.ICounters) string {

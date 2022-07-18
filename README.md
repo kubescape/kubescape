@@ -74,7 +74,7 @@ Want to contribute? Want to discuss something? Have an issue?
 
 # Options and examples
 
-[Kubescape docs](https://hub.armo.cloud/docs)
+[Kubescape docs](https://hub.armosec.io/docs)
 
 ## Playground
 * [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
@@ -144,9 +144,6 @@ home-manager:
 
 Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 
-## Install using Go
-
-With a sufficient version of `go` you can install and build with `go install github.com/armosec/kubescape/v2@latest`
 
 ## Usage & Examples
 
@@ -158,7 +155,7 @@ With a sufficient version of `go` you can install and build with `go install git
 kubescape scan --submit --enable-host-scan  --verbose
 ```
 
-> Read [here](https://hub.armo.cloud/docs/host-sensor) more about the `enable-host-scan` flag
+> Read [here](https://hub.armosec.io/docs/host-sensor) more about the `enable-host-scan` flag
 
 #### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
 ```
@@ -172,7 +169,7 @@ kubescape scan framework mitre --submit
 ```
 
 
-#### Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armo.cloud/docs/controls) 
+#### Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armosec.io/docs/controls) 
 ```
 kubescape scan control "Privileged container"
 ```
@@ -187,12 +184,12 @@ kubescape scan --include-namespaces development,staging,production
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 
-#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI) Submit the results in case the directory is a git repo. [docs](https://hub.armo.cloud/docs/repository-scanning)
+#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI) Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning)
 ```
 kubescape scan *.yaml --submit
 ```
 
-#### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armo.cloud/docs/repository-scanning)
+#### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning)
 ```
 kubescape scan https://github.com/armosec/kubescape --submit
 ```
@@ -274,7 +271,7 @@ kubescape scan framework nsa --use-from /path/nsa.json
 
 
 ## Scan Periodically using Helm - Contributed by [@yonahd](https://github.com/yonahd)  
-[Please follow the instructions here](https://hub.armo.cloud/docs/installation-of-armo-in-cluster)
+[Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster)
 [helm chart repo](https://github.com/armosec/armo-helm)
 
 ## Scan using docker image
@@ -302,7 +299,6 @@ Now you can submit the results to the Kubescape SaaS version -
 kubescape submit results path/to/results.json
 ```
 
-
 # Integrations
 
 ## VS Code Extension 
@@ -314,6 +310,78 @@ Scan the YAML files while writing them using the [vs code extension](https://git
 ## Lens Extension
 
 View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using kubescape [Lens extension](https://github.com/armosec/lens-kubescape/blob/master/README.md)
+
+
+# Building Kubescape
+
+## Windows
+
+```
+go build .
+```
+OR
+```
+make build
+```
+
+## Linux / MacOS
+
+1. Install libgit2 dependency
+
+    ```
+    make libgit2
+    ```
+
+> `cmake` is required to build libgit2. You can install it by running `sudo apt-get install cmake` (Linux) or `brew install cmake` (MacOS)
+
+2. Build
+
+    ```
+    make build
+    ```
+3. Test
+
+    ```
+    make test
+    ```
+
+## VS code configuration samples
+
+You can use the samples files below to setup your VS code environment for building and debugging purposes.
+
+
+```json5
+// .vscode/settings.json
+{
+    "go.testTags": "static",
+    "go.buildTags": "static",
+    "go.toolsEnvVars": {
+        "CGO_ENABLED": "1"
+    }
+}
+```
+
+```json5
+// .vscode/launch.json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch Package",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/main.go",
+            "args": [
+                "scan",
+                "--logger",
+                "debug"
+            ],
+            "buildFlags": "-tags=static"
+        }
+    ]
+}
+```
 
 # Under the hood
 

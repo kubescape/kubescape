@@ -266,10 +266,23 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	if len(scanInfo.InputPatterns) > 0 {
 		inputFiles = scanInfo.InputPatterns[0]
 	}
-
-	metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
-	if GetScanningContext(inputFiles) != ContextCluster {
+	switch GetScanningContext(inputFiles) {
+	case ContextCluster:
+		// cluster
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
+	case ContextFile:
+		// local file
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+	case ContextGitURL:
+		// url
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Repo
+	case ContextGitLocal:
+		// local-git
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.GitLocal
+	case ContextDir:
+		// directory
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+
 	}
 
 	setContextMetadata(&metadata.ContextMetadata, inputFiles)

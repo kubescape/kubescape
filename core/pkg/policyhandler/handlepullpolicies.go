@@ -33,6 +33,8 @@ func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.Polic
 	exceptionPolicies, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.ClusterName)
 	if err == nil {
 		policiesAndResources.Exceptions = exceptionPolicies
+	} else {
+		logger.L().Error("failed to load exceptions", helpers.Error(err))
 	}
 
 	// get account configuration
