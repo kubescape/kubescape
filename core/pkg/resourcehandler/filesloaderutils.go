@@ -65,7 +65,7 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 
 func addCommitData(input string, workloadIDToSource map[string]reporthandling.Source) {
 	giRepo, err := cautils.NewLocalGitRepository(input)
-	if err != nil {
+	if err != nil || giRepo == nil {
 		return
 	}
 	for k := range workloadIDToSource {

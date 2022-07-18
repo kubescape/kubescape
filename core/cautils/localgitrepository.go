@@ -48,17 +48,21 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 		return nil, fmt.Errorf("no remotes found")
 	}
 
-	git2GoRepo, err := git2go.OpenRepository(path)
-	if err != nil {
-		return nil, err
+	l := &LocalGitRepository{
+		goGitRepo: goGitRepo,
+		head:      head,
+		config:    config,
 	}
 
-	return &LocalGitRepository{
-		goGitRepo:  goGitRepo,
-		head:       head,
-		config:     config,
-		git2GoRepo: git2GoRepo,
-	}, nil
+	if repoRoot, err := l.GetRootDir(); err == nil {
+		git2GoRepo, err := git2go.OpenRepository(repoRoot)
+		if err != nil {
+			return l, err
+		}
+		l.git2GoRepo = git2GoRepo
+	}
+
+	return l, nil
 }
 
 // GetBranchName get current branch name
@@ -154,7 +158,7 @@ func (g *LocalGitRepository) getAllCommits() ([]*git2go.Commit, error) {
 }
 
 func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error) {
-	if g.fileToLastCommit == nil {
+	if len(g.fileToLastCommit) == 0 {
 		filePathToCommitTime := map[string]time.Time{}
 		filePathToCommit := map[string]*git2go.Commit{}
 		allCommits, _ := g.getAllCommits()
