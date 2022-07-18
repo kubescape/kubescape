@@ -58,12 +58,13 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	// Get repo root
 	repoRoot := ""
 	gitRepo, err := cautils.NewLocalGitRepository(path)
-	if err == nil {
+	if err == nil && gitRepo != nil {
 		repoRoot, _ = gitRepo.GetRootDir()
 	}
 
 	// load resource from local file system
 	logger.L().Info("Accessing local objects")
+	cautils.StartSpinner()
 
 	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
 
@@ -86,14 +87,16 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		}
 
 		var lastCommit reporthandling.LastCommit
-		commitInfo, _ := gitRepo.GetFileLastCommit(source)
-		if commitInfo != nil {
-			lastCommit = reporthandling.LastCommit{
-				Hash:           commitInfo.SHA,
-				Date:           commitInfo.Author.Date,
-				CommitterName:  commitInfo.Author.Name,
-				CommitterEmail: commitInfo.Author.Email,
-				Message:        commitInfo.Message,
+		if gitRepo != nil {
+			commitInfo, _ := gitRepo.GetFileLastCommit(source)
+			if commitInfo != nil {
+				lastCommit = reporthandling.LastCommit{
+					Hash:           commitInfo.SHA,
+					Date:           commitInfo.Author.Date,
+					CommitterName:  commitInfo.Author.Name,
+					CommitterEmail: commitInfo.Author.Email,
+					Message:        commitInfo.Message,
+				}
 			}
 		}
 
@@ -123,14 +126,16 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		}
 
 		var lastCommit reporthandling.LastCommit
-		commitInfo, _ := gitRepo.GetFileLastCommit(source)
-		if commitInfo != nil {
-			lastCommit = reporthandling.LastCommit{
-				Hash:           commitInfo.SHA,
-				Date:           commitInfo.Author.Date,
-				CommitterName:  commitInfo.Author.Name,
-				CommitterEmail: commitInfo.Author.Email,
-				Message:        commitInfo.Message,
+		if gitRepo != nil {
+			commitInfo, _ := gitRepo.GetFileLastCommit(source)
+			if commitInfo != nil {
+				lastCommit = reporthandling.LastCommit{
+					Hash:           commitInfo.SHA,
+					Date:           commitInfo.Author.Date,
+					CommitterName:  commitInfo.Author.Name,
+					CommitterEmail: commitInfo.Author.Email,
+					Message:        commitInfo.Message,
+				}
 			}
 		}
 
@@ -176,6 +181,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
 	}
 
+	cautils.StopSpinner()
 	logger.L().Success("Accessed to local objects")
 
 	return k8sResources, allResources, armoResources, nil
