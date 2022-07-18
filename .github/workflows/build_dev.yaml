@@ -12,6 +12,8 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v3
+        with:
+          submodules: recursive
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
@@ -28,13 +30,17 @@ jobs:
       # - name: Test cmd pkg
       #   run: cd cmd && go test -v ./...
 
+      - name: Install libgit2
+        run: make libgit2
+        if: matrix.os != 'windows-latest'
+
       - name: Test core pkg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go test -v ./...
+        run: go test -tags=static -v ./...
 
       - name: Test httphandler pkg
-        run: cd httphandler && go test -v ./...
+        run: cd httphandler && go test -tags=static -v ./...
 
       - name: Build
         env:
@@ -44,7 +50,7 @@ jobs:
           ArmoAuthServer: auth.armo.cloud
           ArmoERServer: report.armo.cloud
           ArmoWebsite: portal.armo.cloud
-          CGO_ENABLED: 0
+          CGO_ENABLED: 1
         run: python3 --version && python3 build.py
       
       - name: Smoke Testing
@@ -71,6 +77,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v2
+        with:
+          submodules: recursive
 
       - name: Set image version
         id: image-version

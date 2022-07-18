@@ -89,7 +89,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s", err.Error()), imgVulnResources, sessionObj.InfoMap)
 		} else {
 			if isEmptyImgVulns(*armoResourceMap) {
-				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/cluster-vulnerability-scanning", imgVulnResources, sessionObj.InfoMap)
+				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", imgVulnResources, sessionObj.InfoMap)
 			}
 		}
 	}
