@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 
 	"github.com/mattn/go-isatty"
 )

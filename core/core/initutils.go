@@ -6,12 +6,13 @@ import (
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
+
 	"github.com/google/uuid"
 
 	"github.com/armosec/rbac-utils/rbacscanner"

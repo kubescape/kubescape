@@ -7,13 +7,14 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/pkg/score"
 	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/apis"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
+
 	"github.com/open-policy-agent/opa/storage"
 
 	"github.com/armosec/k8s-interface/workloadinterface"

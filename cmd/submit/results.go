@@ -7,14 +7,14 @@ import (
 	"time"
 
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/meta"
 	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
 	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v1"
 	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/google/uuid"

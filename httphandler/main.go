@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/httphandler/listener"
+	logger "github.com/dwertent/go-logger"
 )
 
 func main() {

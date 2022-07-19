@@ -6,8 +6,8 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
+	logger "github.com/dwertent/go-logger"
 )
 
 type JsonPrinter struct {

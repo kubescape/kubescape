@@ -7,9 +7,9 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	armosecadaptorv1 "github.com/armosec/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
 	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
+	logger "github.com/dwertent/go-logger"
 
 	"github.com/armosec/opa-utils/shared"
 )
@@ -61,6 +61,10 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 
 	// convert result to IMetadata object
 	metaObjs := vulnerabilitiesToIMetadata(imagesVulnerability)
+
+	if len(metaObjs) == 0 {
+		return fmt.Errorf("no vulnerabilities found for any of the images")
+	}
 
 	// save in resources map
 	for i := range metaObjs {
