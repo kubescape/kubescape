@@ -62,6 +62,10 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	// convert result to IMetadata object
 	metaObjs := vulnerabilitiesToIMetadata(imagesVulnerability)
 
+	if len(metaObjs) == 0 {
+		return fmt.Errorf("no vulnerabilities found for any of the images")
+	}
+
 	// save in resources map
 	for i := range metaObjs {
 		allResources[metaObjs[i].GetID()] = metaObjs[i]
