@@ -55,10 +55,10 @@ jobs:
         env:
           RELEASE: v2.0.${{ github.run_number }} 
           CLIENT: release
-          ArmoBEServer: api.armo.cloud
-          ArmoAuthServer: auth.armo.cloud
+          ArmoBEServer: api.armosec.io
+          ArmoAuthServer: auth.armosec.io
           ArmoERServer: report.armo.cloud
-          ArmoWebsite: portal.armo.cloud
+          ArmoWebsite: cloud.armosec.io
           CGO_ENABLED: 1
         run: python3 --version && python3 build.py
       
