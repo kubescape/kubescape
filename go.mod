@@ -11,6 +11,7 @@ require (
 	github.com/armosec/utils-go v0.0.7
 	github.com/armosec/utils-k8s-go v0.0.7
 	github.com/briandowns/spinner v1.18.1
+	github.com/dwertent/go-logger v0.0.2
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
 	github.com/francoispqt/gojay v1.2.13
@@ -24,7 +25,6 @@ require (
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.0
 	github.com/whilp/git-urls v1.0.0
-	go.uber.org/zap v1.21.0
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3
 	gopkg.in/yaml.v2 v2.4.0
 	helm.sh/helm/v3 v3.9.0
@@ -140,6 +140,7 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
+	go.uber.org/zap v1.21.0 // indirect
 	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e // indirect
 	golang.org/x/net v0.0.0-20220624214902-1bab6f366d9e // indirect
 	golang.org/x/oauth2 v0.0.0-20220630143837-2104d58473e0 // indirect

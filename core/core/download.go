@@ -8,9 +8,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	metav1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 )
 
 var downloadFunc = map[string]func(*metav1.DownloadInfo) error{

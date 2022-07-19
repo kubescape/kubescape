@@ -11,11 +11,11 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 )
 
 const MAX_REPORT_SIZE = 2097152 // 2 MB

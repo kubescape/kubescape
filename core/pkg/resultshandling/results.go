@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
 	printerv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v1"
 	printerv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v2"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 )
 
 type ResultsHandler struct {

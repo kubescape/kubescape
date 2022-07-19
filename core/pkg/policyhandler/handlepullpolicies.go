@@ -8,9 +8,9 @@ import (
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 )
 
 func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.PolicyIdentifier, policiesAndResources *cautils.OPASessionObj) error {

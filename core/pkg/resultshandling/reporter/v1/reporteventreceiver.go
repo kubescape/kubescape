@@ -10,10 +10,11 @@ import (
 	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	v2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 	"github.com/armosec/opa-utils/reporthandling"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
+
 	"github.com/google/uuid"
 )
 

@@ -6,10 +6,12 @@ import (
 
 	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
+	"github.com/dwertent/go-logger/helpers"
+
 	"github.com/gorilla/schema"
 
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	logger "github.com/dwertent/go-logger"
+
 	"github.com/google/uuid"
 )
 

@@ -9,8 +9,6 @@ import (
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/armosec/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/armosec/kubescape/v2/core/pkg/policyhandler"
@@ -18,6 +16,8 @@ import (
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
 
 	"github.com/armosec/opa-utils/resources"
 )

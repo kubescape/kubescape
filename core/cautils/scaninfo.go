@@ -14,10 +14,11 @@ import (
 	giturl "github.com/armosec/go-git-url"
 	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
 	"github.com/armosec/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	logger "github.com/dwertent/go-logger"
+	"github.com/dwertent/go-logger/helpers"
+
 	"github.com/google/uuid"
 )
 
