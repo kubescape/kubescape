@@ -32,6 +32,39 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Cache Go modules (Linux)
+        if: matrix.os == 'ubuntu-latest' 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (macOS)
+        if: matrix.os == 'macos-latest' 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
@@ -39,7 +72,12 @@ jobs:
       # - name: Test cmd pkg
       #   run: cd cmd && go test -v ./...
 
-      - name: Install libgit2
+      - name: Install MSYS2 & libgit2 (Windows)
+        shell: cmd
+        run: .\build.bat all
+        if: matrix.os == 'windows-latest'
+
+      - name: Install libgit2 (Linux/macOS)
         run: make libgit2
         if: matrix.os != 'windows-latest'
 
