@@ -131,17 +131,27 @@ type triggerScanResponseWrapper struct {
 
 // swagger:parameters getScanResults
 type getScanResultsRequestWrapper struct {
+	// ID of the previously performed scan
 	// in:path
 	ScanID string `json:"scanID"`
 }
 
 type getScanResultsResponse struct {
+	// ID of the performed scan
+	//
+	// example: b211da07-ce6c-4cdd-9e81-7e7f40f170ea
 	ID       string      `json:"id"`
+	// Type of the response
+	//
+	// example: busy
 	Type     string      `json:"type"`
+	// Response payload
+	//
+	// example: {"message": "Still busy."}
 	Response interface{} `json:"response"`
 }
 
-// swagger:response
+// swagger:response getScanResultsResponse
 type getScanResultsResponseWrapper struct {
 	// in:body
 	Body getScanResultsResponse

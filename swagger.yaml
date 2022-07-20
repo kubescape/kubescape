@@ -8,12 +8,19 @@ definitions:
   getScanResultsResponse:
     properties:
       id:
+        description: ID of the performed scan
+        example: b211da07-ce6c-4cdd-9e81-7e7f40f170ea
         type: string
         x-go-name: ID
       response:
+        description: Response payload
+        example:
+          message: Still busy.
         type: object
         x-go-name: Response
       type:
+        description: Type of the response
+        example: busy
         type: string
         x-go-name: Type
     type: object
@@ -145,7 +152,7 @@ info:
 paths:
   /v1/metrics:
     post:
-      description: Enables support for Prometheus metrics
+      description: Enables support for Prometheus metrics.
       operationId: enableMetrics
       responses:
         "200":
@@ -157,24 +164,21 @@ paths:
     get:
       operationId: getScanResults
       parameters:
-      - in: path
+      - description: ID of the previously performed scan
+        in: path
         name: scanID
         required: true
         type: string
         x-go-name: ScanID
       responses:
         "200":
-          description: getScanResultsResponse
-          schema:
-            $ref: '#/definitions/getScanResultsResponse'
+          $ref: '#/responses/getScanResultsResponse'
       summary: Read results of a previously performed scan.
       tags:
       - scanning
   /v1/scan:
     post:
-      description: |-
-        The server will return an ID and will execute the
-        scanning asynchronously.
+      description: The server will return an ID and will execute the scanning asynchronously.
       operationId: triggerScan
       parameters:
       - description: Trigger scan parameters
@@ -210,7 +214,7 @@ responses:
     description: ""
     schema:
       $ref: '#/definitions/enableMetricsResponse'
-  getScanResultsResponseWrapper:
+  getScanResultsResponse:
     description: ""
     schema:
       $ref: '#/definitions/getScanResultsResponse'
