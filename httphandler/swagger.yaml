@@ -1,0 +1,262 @@
+openapi: 3.0.1
+info:
+  title: kubescape_microservice
+  description: An HTTP interface to in-cluster Kubescape components.
+  version: 1.0.0
+paths:
+  /v1/metrics:
+    post:
+      tags:
+      - metrics
+      summary: Trigger Kubescape support for Prometheus
+      description: Enables support for Prometheus metrics.
+      operationId: enableMetrics
+      responses:
+        200:
+          description: "Support for metrics has been successfully enabled"
+  /livez:
+    get:
+      tags:
+      - metrics
+      summary: Liveness probe
+      description: Returns OK if the service is alive
+      responses:
+        200:
+          description: The service is alive
+  /readyz:
+    get:
+      tags:
+      - metrics
+      summary: Readiness probe
+      description: Returns OK if the service is ready to accept requests
+      responses:
+        200:
+          description: The service is ready to accept requests
+  /v1/scan:
+    post:
+      tags:
+      - scanning
+      summary: Trigger a Kubescape scan
+      description: Starts a scan of the cluster and returns the scan ID.
+      operationId: triggerScan
+      parameters:
+      - name: wait
+        in: query
+        description: |-
+          Whether to wait for the scanning to complete.
+
+          By default, no waiting is done, and the cluster is scanned asynchronously. However, when `wait` is set to `true`, such a request triggers a synchronous scan. A synchronous scan waits for the scan to complete during the course of the HTTP request-response cycle and returns the result. Therefore, you should use synchronous scanning only in small clusters or with an increased timeout.
+        schema:
+          type: boolean
+          default: false
+      - name: keep
+        in: query
+        description: Whether to keep the results in Kubescape’s local storage after returning.
+        schema:
+          type: boolean
+          default: false
+      requestBody:
+        description: Trigger scan parameters
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerScanParams'
+        required: false
+      responses:
+        200:
+          description: The scan was triggered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponseOK'
+        500:
+          description: There was an internal error processing the request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponseInternalServerError'
+  /v1/results:
+    delete:
+      tags:
+      - scanning
+      summary: Delete cached results
+      description: Deletes cached results.
+      parameters:
+      - name: id
+        in: query
+        description: ID of result to delete
+        schema:
+          type: string
+      - name: all
+        in: query
+        description: Delete all results?
+        schema:
+          type: boolean
+      responses:
+        200:
+          description: "Result successfully deleted"
+        400:
+          $ref: '#/components/responses/BadRequest'
+  /v1/results/{scanID}:
+    get:
+      tags:
+      - scanning
+      summary: Read results of a previously performed scan.
+      operationId: getScanResults
+      parameters:
+      - name: scanID
+        in: path
+        description: ID of the previously performed scan
+        required: true
+        schema:
+          type: string
+      responses:
+        200:
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponseOK'
+        400:
+          $ref: '#/components/responses/BadRequest'
+components:
+  schemas:
+    ScanResponseType:
+      type: string
+      description: |-
+        Type of the scan response.
+        
+        * `error` - an Error object.
+        * `v1results` - v1 Results object.
+        * `busy` - a server is busy processing previous requests.
+        * `notBusy` - a server is not busy processing previous requests.
+        * `ready` - a server is done processing requests and the results are ready.
+      enum:
+      - error
+      - v1results
+      - busy
+      - notBusy
+      - ready
+    ScanResponseBase:
+      type: object
+      properties:
+        id:
+          type: string
+          description: ID of the scan
+          example: b211da07-ce6c-4cdd-9e81-7e7f40f170ea
+        type:
+          $ref: '#/components/schemas/ScanResponseType'
+        response:
+          type: string
+          description: Response payload
+          example: Scanning 'b211da07-ce6c-4cdd-9e81-7e7f40f170ea' is in progress.
+    ScanResponseOK:
+      allOf:
+        - $ref: '#/components/schemas/ScanResponseBase'
+        - type: object
+          properties:
+            type:
+              example: "busy"
+    ScanResponseInternalServerError:
+      allOf:
+        - $ref: '#/components/schemas/ScanResponseBase'
+        - type: object
+          properties:
+            type:
+              example: "error"
+            response:
+              example: "There was an error"
+    ScanResponseNotFound:
+      allOf:
+        - $ref: '#/components/schemas/ScanResponseBase'
+        - type: object
+          properties:
+            type:
+              example: "error"
+            response:
+              example: "latest scan not found"
+    TriggerScanParams:
+      type: object
+      properties:
+        account:
+          type: string
+          description: |-
+            A Kubescape account ID to use for scanning.
+
+            Same as `kubescape scan --account`.
+          example: fec9e951-e0c8-42e1-b72f-f62cc91ad4ad
+        excludedNamespaces:
+          type: array
+          description: List of namespaces to exclude. Same as `kubescape scan --excluded-namespaces`
+          example:
+          - kube-system
+          - armo-system
+          items:
+            type: string
+        format:
+          type: string
+          description: Results format. Same as `kubescape scan --format`
+          example: json
+          default: json
+        hostScanner:
+          type: boolean
+          description: Deploy Kubescape K8s host-scanner DeamonSet in the scanned
+            cluster (same as `kubescape scan --enable-host-scan`)
+          example: true
+        includeNamespaces:
+          type: array
+          description: List of namespaces to include. Same as `kubescape scan --include-namespaces`
+          example:
+          - litmus-tests
+          - known-bad
+          items:
+            type: string
+        keepLocal:
+          type: boolean
+          description: |-
+            Do not submit results to Kubescape Cloud.
+
+            Same as `kubescape scan --keep-local`
+        submit:
+          type: boolean
+          description: Submit results to Kubescape Cloud. Same as `kubescape scan
+            --submit`.
+          example: true
+        targetNames:
+          type: array
+          description: |-
+            Name of the scan targets.
+
+            For example, if you select `targetType: "framework"`, you can trigger a scan using the NSA and MITRE ATT&CK Framework by passing `targetNames: ["nsa, "mitre"]`.
+          example:
+          - nsa
+          - mitre
+          items:
+            type: string
+        targetType:
+          type: string
+          description: |-
+            Type of the scan target: either `framework` or `control`.
+            framework Framework
+            control Control
+          example: framework
+          enum:
+          - framework
+          - control
+        useCachedArtifacts:
+          type: boolean
+          description: Use the cached artifacts instead of downloading (offline support)
+          example: false
+  responses:
+    BadRequest:
+      description: "Bad Request"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ScanResponseNotFound"
+    ScanResponse:
+      description: ""
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ScanResponseOK'
