@@ -119,6 +119,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(path)
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
+		helmChartName := helmSourceToChartName[source]
 
 		relSource, err := filepath.Rel(repoRoot, source)
 		if err == nil {
@@ -142,7 +143,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		workloadSource := reporthandling.Source{
 			RelativePath:  source,
 			FileType:      reporthandling.SourceTypeHelmChart,
-			HelmChartName: helmSourceToChartName[source],
+			HelmChartName: helmChartName,
 			LastCommit:    lastCommit,
 		}
 
