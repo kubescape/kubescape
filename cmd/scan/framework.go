@@ -14,6 +14,7 @@ import (
 	"github.com/dwertent/go-logger/helpers"
 
 	"github.com/enescakir/emoji"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -124,6 +125,11 @@ func flagValidationFramework(scanInfo *cautils.ScanInfo) error {
 	}
 	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
 		return fmt.Errorf("bad argument: out of range threshold")
+	}
+
+	accountID := scanInfo.Credentials.Account
+	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
+		return fmt.Errorf("bad argument: account must be a valid UUID")
 	}
 	return nil
 }
