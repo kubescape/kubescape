@@ -44,7 +44,7 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads := LoadResourcesFromHelmCharts(helmChartPath())
+	sourceToWorkloads, sourceToChartName := LoadResourcesFromHelmCharts(helmChartPath())
 	assert.Equal(t, 6, len(sourceToWorkloads))
 
 	for file, workloads := range sourceToWorkloads {
@@ -52,6 +52,7 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 
 		w := workloads[0]
 		assert.True(t, localworkload.IsTypeLocalWorkload(w.GetObject()), "Expected localworkload as object type")
+		assert.Equal(t, "kubescape", sourceToChartName[file])
 
 		switch filepath.Base(file) {
 		case "serviceaccount.yaml":
