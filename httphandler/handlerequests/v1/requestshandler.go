@@ -18,6 +18,14 @@ import (
 var OutputDir = "./results"
 var FailedOutputDir = "./failed"
 
+// A Scan Response object
+//
+// swagger:response scanResponse
+type ScanResponse struct {
+	// in:body
+	Body utilsmetav1.Response
+}
+
 type HTTPHandler struct {
 	state            *serverState
 	scanResponseChan *scanResponseChan

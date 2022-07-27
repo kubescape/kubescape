@@ -1,262 +1,286 @@
-openapi: 3.0.1
+basePath: /
+consumes:
+- application/json
+definitions:
+  NotificationPolicyKind:
+    type: string
+    x-go-package: github.com/armosec/opa-utils/httpserver/apis/v1
+  PostScanRequest:
+    description: A request to trigger a Kubescape scan
+    properties:
+      account:
+        description: |-
+          A Kubescape account ID to use for scanning.
+
+          Same as `kubescape scan --account`.
+        example: d13791eb-19b1-4222-867b-9a7c1799cfac
+        format: uuid4
+        type: string
+        x-go-name: Account
+      failThreshold:
+        description: |-
+          Threshold for a failing score.
+
+          Scores higher that the provided value will be considered failing.
+        example: 42
+        format: float
+        type: number
+        x-go-name: FailThreshold
+      format:
+        default: json
+        description: Format of the results. Same as `kubescape scan --format`
+        example: json
+        type: string
+        x-go-name: Format
+      hostScanner:
+        description: |-
+          Deploy the Kubescape K8s host-scanner
+
+          Deploys the Armo K8s Host Scanner DeamonSet in the scanned cluster (same as `kubescape scan --enable-host-scan`). Collects data from certain controls.
+        example: true
+        type: boolean
+        x-go-name: HostScanner
+      keepLocal:
+        description: |-
+          Do not submit results to Kubescape Cloud.
+
+          Same as `kubescape scan --keep-local`
+        type: boolean
+        x-go-name: KeepLocal
+      targetNames:
+        default: all
+        description: |-
+          Name of the scan targets.
+
+          For example, if you select `targetType: "framework"`, you can trigger a scan using the NSA and MITRE ATT&CK Framework by passing `targetNames: ["nsa, "mitre"]`.
+        example:
+        - nsa
+        - mitre
+        items:
+          type: string
+        type: array
+        x-go-name: TargetNames
+      targetType:
+        $ref: '#/definitions/NotificationPolicyKind'
+      useCachedArtifacts:
+        description: Use the cached artifacts instead of downloading (offline support)
+        example: false
+        type: boolean
+        x-go-name: UseCachedArtifacts
+    type: object
+    x-go-package: github.com/armosec/opa-utils/httpserver/meta/v1
+  Response:
+    properties:
+      id:
+        description: ID of the scan
+        example: d13791eb-19b1-4222-867b-9a7c1799cfac
+        format: uuid4
+        type: string
+        x-go-name: ID
+      response:
+        description: The actual Response object
+        example:
+          some: other
+        type: object
+        x-go-name: Response
+      type:
+        description: |-
+          Type of this response
+          id IDScanResponseType  Deprecated: will return busy/notBusy instead
+          error ErrorScanResponseType  A response contains an error message
+          v1results ResultsV1ScanResponseType  A response contains a v1 Results object
+          busy BusyScanResponseType  A response indicates that a server is busy with another request
+          notBusy NotBusyScanResponseType  A response indicates server is not busy with another request
+          ready ReadyScanResponseType  A response indicates that a server has successfully completed the request
+        enum:
+        - id
+        - error
+        - v1results
+        - busy
+        - notBusy
+        - ready
+        example: busy
+        type: string
+        x-go-enum-desc: |-
+          id IDScanResponseType  Deprecated: will return busy/notBusy instead
+          error ErrorScanResponseType  A response contains an error message
+          v1results ResultsV1ScanResponseType  A response contains a v1 Results object
+          busy BusyScanResponseType  A response indicates that a server is busy with another request
+          notBusy NotBusyScanResponseType  A response indicates server is not busy with another request
+          ready ReadyScanResponseType  A response indicates that a server has successfully completed the request
+        x-go-name: Type
+    type: object
+    x-go-package: github.com/armosec/opa-utils/httpserver/meta/v1
+host: 192.168.49.2:31379
 info:
-  title: kubescape_microservice
-  description: An HTTP interface to in-cluster Kubescape components.
+  description: 'The Kubescape Microservice API allows clients to interact with a Kubescape
+    instance running in a Kubernetes cluster: trigger scans, retrieve and delete their
+    results, enable exporting metrics to Prometheus etc.'
+  title: Kubescape Microservice
   version: 1.0.0
 paths:
-  /v1/metrics:
-    post:
-      tags:
-      - metrics
-      summary: Trigger Kubescape support for Prometheus
-      description: Enables support for Prometheus metrics.
-      operationId: enableMetrics
-      responses:
-        200:
-          description: "Support for metrics has been successfully enabled"
   /livez:
     get:
+      description: Returns the liveness status of the Kubescape microservice.
+      operationId: getLiveness
+      responses:
+        "200":
+          $ref: '#/responses/livenessProbeOK'
+      summary: Returns Kubescape’s liveness status
       tags:
       - metrics
-      summary: Liveness probe
-      description: Returns OK if the service is alive
-      responses:
-        200:
-          description: The service is alive
   /readyz:
     get:
+      description: Returns the readiness status of the Kubescape microservice.
+      operationId: getReadiness
+      responses:
+        "200":
+          $ref: '#/responses/readinessProbeOK'
+      summary: Returns Kubescape’s readiness status
       tags:
       - metrics
-      summary: Readiness probe
-      description: Returns OK if the service is ready to accept requests
+  /v1/metrics:
+    get:
+      description: Enables support for Prometheus metrics, runs a scan and returns
+        its result in Prometheus metrics format.
+      operationId: getMetrics
       responses:
-        200:
-          description: The service is ready to accept requests
-  /v1/scan:
-    post:
+        "200":
+          $ref: '#/responses/enableMetricsResponse'
+      summary: Returns current scan metrics in Prometheus format
       tags:
-      - scanning
-      summary: Trigger a Kubescape scan
-      description: Starts a scan of the cluster and returns the scan ID.
-      operationId: triggerScan
-      parameters:
-      - name: wait
-        in: query
-        description: |-
-          Whether to wait for the scanning to complete.
-
-          By default, no waiting is done, and the cluster is scanned asynchronously. However, when `wait` is set to `true`, such a request triggers a synchronous scan. A synchronous scan waits for the scan to complete during the course of the HTTP request-response cycle and returns the result. Therefore, you should use synchronous scanning only in small clusters or with an increased timeout.
-        schema:
-          type: boolean
-          default: false
-      - name: keep
-        in: query
-        description: Whether to keep the results in Kubescape’s local storage after returning.
-        schema:
-          type: boolean
-          default: false
-      requestBody:
-        description: Trigger scan parameters
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TriggerScanParams'
-        required: false
-      responses:
-        200:
-          description: The scan was triggered successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScanResponseOK'
-        500:
-          description: There was an internal error processing the request
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScanResponseInternalServerError'
+      - metrics
   /v1/results:
     delete:
-      tags:
-      - scanning
-      summary: Delete cached results
-      description: Deletes cached results.
+      description: Deletes Kubescape scan results from storage.
+      operationId: deleteScanResults
       parameters:
-      - name: id
+      - description: ID of the requested scan. If empty or not provided, defaults
+          to the latest scan.
         in: query
-        description: ID of result to delete
-        schema:
-          type: string
-      - name: all
+        name: id
+        type: string
+        x-go-name: ScanID
+      - default: false
+        description: |-
+          Keep the results in local storage after returning them.
+
+          By default, the Kubescape Microservice will delete scan results.
         in: query
-        description: Delete all results?
-        schema:
-          type: boolean
+        name: keep
+        type: boolean
+        x-go-name: KeepResults
+      - default: false
+        description: Whether to delete all results
+        in: query
+        name: all
+        type: boolean
+        x-go-name: AllResults
       responses:
-        200:
-          description: "Result successfully deleted"
-        400:
-          $ref: '#/components/responses/BadRequest'
-  /v1/results/{scanID}:
-    get:
+        "200":
+          $ref: '#/responses/scanResponse'
+        "400":
+          $ref: '#/responses/scanResponse'
+      summary: Deletes results of a scan
       tags:
       - scanning
-      summary: Read results of a previously performed scan.
+    get:
+      description: Returns the results of Kubescape scans
       operationId: getScanResults
       parameters:
-      - name: scanID
-        in: path
-        description: ID of the previously performed scan
-        required: true
-        schema:
-          type: string
+      - description: ID of the requested scan. If empty or not provided, defaults
+          to the latest scan.
+        in: query
+        name: id
+        type: string
+        x-go-name: ScanID
+      - default: false
+        description: |-
+          Keep the results in local storage after returning them.
+
+          By default, the Kubescape Microservice will delete scan results.
+        in: query
+        name: keep
+        type: boolean
+        x-go-name: KeepResults
       responses:
-        200:
-          description: ""
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ScanResponseOK'
-        400:
-          $ref: '#/components/responses/BadRequest'
-components:
-  schemas:
-    ScanResponseType:
-      type: string
+        "200":
+          $ref: '#/responses/scanResponse'
+        "204":
+          $ref: '#/responses/scanResponse'
+        "400":
+          $ref: '#/responses/scanResponse'
+      summary: Returns results of a scan
+      tags:
+      - scanning
+  /v1/scan:
+    post:
+      description: The server will return a scan ID and execute the scan.
+      operationId: triggerScan
+      parameters:
+      - default: false
+        description: Wait for scanning to complete (synchronous request)
+        in: query
+        name: wait
+        type: boolean
+        x-go-name: ReturnResults
+      - default: false
+        description: Do not delete results after returning (relevant only for synchronous
+          requests)
+        in: query
+        name: keep
+        type: boolean
+        x-go-name: KeepResults
+      - description: Scan parameters
+        in: body
+        name: Body
+        schema:
+          $ref: '#/definitions/PostScanRequest'
+      responses:
+        "200":
+          $ref: '#/responses/scanResponse'
+        "400":
+          $ref: '#/responses/scanResponse'
+        "500":
+          $ref: '#/responses/scanResponse'
+      summary: Triggers a Kubescape scan
+      tags:
+      - scanning
+  /v1/status:
+    get:
       description: |-
-        Type of the scan response.
-        
-        * `error` - an Error object.
-        * `v1results` - v1 Results object.
-        * `busy` - a server is busy processing previous requests.
-        * `notBusy` - a server is not busy processing previous requests.
-        * `ready` - a server is done processing requests and the results are ready.
-      enum:
-      - error
-      - v1results
-      - busy
-      - notBusy
-      - ready
-    ScanResponseBase:
-      type: object
-      properties:
-        id:
-          type: string
-          description: ID of the scan
-          example: b211da07-ce6c-4cdd-9e81-7e7f40f170ea
-        type:
-          $ref: '#/components/schemas/ScanResponseType'
-        response:
-          type: string
-          description: Response payload
-          example: Scanning 'b211da07-ce6c-4cdd-9e81-7e7f40f170ea' is in progress.
-    ScanResponseOK:
-      allOf:
-        - $ref: '#/components/schemas/ScanResponseBase'
-        - type: object
-          properties:
-            type:
-              example: "busy"
-    ScanResponseInternalServerError:
-      allOf:
-        - $ref: '#/components/schemas/ScanResponseBase'
-        - type: object
-          properties:
-            type:
-              example: "error"
-            response:
-              example: "There was an error"
-    ScanResponseNotFound:
-      allOf:
-        - $ref: '#/components/schemas/ScanResponseBase'
-        - type: object
-          properties:
-            type:
-              example: "error"
-            response:
-              example: "latest scan not found"
-    TriggerScanParams:
-      type: object
-      properties:
-        account:
-          type: string
-          description: |-
-            A Kubescape account ID to use for scanning.
+        Returns the current status of a scan with a given ID: whether it completed or not. Intended for asynchronous scanning, so you can check when a result is ready and fetch the results.
 
-            Same as `kubescape scan --account`.
-          example: fec9e951-e0c8-42e1-b72f-f62cc91ad4ad
-        excludedNamespaces:
-          type: array
-          description: List of namespaces to exclude. Same as `kubescape scan --excluded-namespaces`
-          example:
-          - kube-system
-          - armo-system
-          items:
-            type: string
-        format:
-          type: string
-          description: Results format. Same as `kubescape scan --format`
-          example: json
-          default: json
-        hostScanner:
-          type: boolean
-          description: Deploy Kubescape K8s host-scanner DeamonSet in the scanned
-            cluster (same as `kubescape scan --enable-host-scan`)
-          example: true
-        includeNamespaces:
-          type: array
-          description: List of namespaces to include. Same as `kubescape scan --include-namespaces`
-          example:
-          - litmus-tests
-          - known-bad
-          items:
-            type: string
-        keepLocal:
-          type: boolean
-          description: |-
-            Do not submit results to Kubescape Cloud.
-
-            Same as `kubescape scan --keep-local`
-        submit:
-          type: boolean
-          description: Submit results to Kubescape Cloud. Same as `kubescape scan
-            --submit`.
-          example: true
-        targetNames:
-          type: array
-          description: |-
-            Name of the scan targets.
-
-            For example, if you select `targetType: "framework"`, you can trigger a scan using the NSA and MITRE ATT&CK Framework by passing `targetNames: ["nsa, "mitre"]`.
-          example:
-          - nsa
-          - mitre
-          items:
-            type: string
-        targetType:
-          type: string
-          description: |-
-            Type of the scan target: either `framework` or `control`.
-            framework Framework
-            control Control
-          example: framework
-          enum:
-          - framework
-          - control
-        useCachedArtifacts:
-          type: boolean
-          description: Use the cached artifacts instead of downloading (offline support)
-          example: false
-  responses:
-    BadRequest:
-      description: "Bad Request"
-      content:
-        application/json:
-          schema:
-            $ref: "#/components/schemas/ScanResponseNotFound"
-    ScanResponse:
-      description: ""
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ScanResponseOK'
+        When a scan is in progress, the response's `type` will be `busy`. When a scan is complete, `type` is `notBusy`.
+      operationId: getStatus
+      parameters:
+      - description: ID of the scan to check
+        format: uuid4
+        in: query
+        name: scanID
+        type: string
+        x-go-name: ScanID
+      responses:
+        "200":
+          $ref: '#/responses/scanResponse'
+      summary: Returns a scan’s status
+      tags:
+      - scanning
+produces:
+- application/json
+responses:
+  enableMetricsResponse:
+    description: Provided Prometheus metrics
+    schema:
+      type: string
+  livenessProbeOK:
+    description: Kubescape Microservice API is alive
+  readinessProbeOK:
+    description: Kubescape Microservice API is ready to serve requests
+  scanResponse:
+    description: A Scan Response object
+    schema:
+      $ref: '#/definitions/Response'
+schemes:
+- http
+swagger: "2.0"
