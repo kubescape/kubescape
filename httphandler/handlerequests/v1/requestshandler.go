@@ -3,6 +3,7 @@ package v1
 import (
 	"fmt"
 	"net/http"
+	"runtime/pprof"
 
 	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
@@ -217,6 +218,13 @@ func (handler *HTTPHandler) Live(w http.ResponseWriter, r *http.Request) {
 
 func (handler *HTTPHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
+}
+
+// return process heap information
+func (handler *HTTPHandler) Heap(w http.ResponseWriter, r *http.Request) {
+	defer recover()
+	w.WriteHeader(http.StatusOK)
+	pprof.WriteHeapProfile(w)
 }
 
 func (handler *HTTPHandler) recover(w http.ResponseWriter, scanID string) {

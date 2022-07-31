@@ -21,6 +21,7 @@ const (
 	prometheusMmeticsPath = "/v1/metrics"
 	livePath              = "/livez"
 	readyPath             = "/readyz"
+	heap                  = "/heap"
 )
 
 // SetupHTTPListener set up listening http servers
@@ -50,6 +51,7 @@ func SetupHTTPListener() error {
 	rtr.HandleFunc(resultsPath, httpHandler.Results)
 	rtr.HandleFunc(livePath, httpHandler.Live)
 	rtr.HandleFunc(readyPath, httpHandler.Ready)
+	rtr.HandleFunc(heap, httpHandler.Heap)
 
 	server.Handler = rtr
 

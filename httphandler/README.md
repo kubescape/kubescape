@@ -1,6 +1,6 @@
 # Kubescape HTTP Handler Package
 
-Running `kubescape` will start up a webserver on port `8080` which will serve the following API's: 
+Running `kubescape` will start up a web-server on port `8080` which will serve the following API's: 
 
 ### Trigger scan
 
@@ -151,6 +151,12 @@ curl --header "Content-Type: application/json" \
   --request POST \
   --data '{"hostScanner":true, "submit":true, "includeNamespaces": ["ks-scanner"], "targetType": "framework", "targetNames": ["nsa"] }' \
   http://127.0.0.1:8080/v1/scan
+```
+
+#### Read process heap
+```bash
+curl --request POST http://127.0.0.1:8080/heap -o heap
+go tool pprof heap
 ```
 
 ## Examples
