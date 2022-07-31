@@ -77,7 +77,7 @@ Want to contribute? Want to discuss something? Have an issue?
 [Kubescape docs](https://hub.armosec.io/docs)
 
 ## Playground
-* [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
+* [Kubescape playground](https://killercoda.com/saiyampathak/scenario/kubescape)
 
 ## Tutorials
 
