@@ -302,33 +302,51 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 ## Windows
 
+1. Install MSYS2 & build libgit _(needed only for the first time)_
+
 ```
-go build .
+build.bat all
 ```
-OR
-```
-make build
-```
-</details>
 
-<details><summary>Linux / MacOS</summary>
+> You can install MSYS2 separately by running `build.bat install` and build libgit2 separately by running `build.bat build`
 
-## Linux / MacOS
-
-
-1. Install libgit2 dependency
-
-    ```
-    make libgit2
-    ```
-
-> `cmake` is required to build libgit2. You can install it by running `sudo apt-get install cmake` (Linux) or `brew install cmake` (MacOS)
-
-2. Build
+2. Build kubescape
 
     ```
     make build
     ```
+
+    OR 
+
+    ```
+    go build -tags=static .
+    ```
+
+</details>
+
+<details><summary>Linux / MacOS</summary>
+
+## Linux / macOS
+
+1. Install libgit2 dependency _(needed only for the first time)_
+    ```
+    make libgit2
+    ```
+
+> `cmake` is required to build libgit2. You can install it by running `sudo apt-get install cmake` (Linux) or `brew install cmake` (macOS)
+
+2. Build kubescape
+
+    ```
+    make build
+    ```
+
+    OR 
+
+    ```
+    go build -tags=static .
+    ```
+
 3. Test
 
     ```

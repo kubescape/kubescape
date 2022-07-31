@@ -487,13 +487,13 @@ func getConfigMapNamespace() string {
 
 func getAccountFromEnv(credentials *Credentials) {
 	// load from env
-	if accountID := os.Getenv("KS_ACCOUNT_ID"); credentials.Account != "" && accountID != "" {
+	if accountID := os.Getenv("KS_ACCOUNT_ID"); credentials.Account == "" && accountID != "" {
 		credentials.Account = accountID
 	}
-	if clientID := os.Getenv("KS_CLIENT_ID"); credentials.ClientID != "" && clientID != "" {
+	if clientID := os.Getenv("KS_CLIENT_ID"); credentials.ClientID == "" && clientID != "" {
 		credentials.ClientID = clientID
 	}
-	if secretKey := os.Getenv("KS_SECRET_KEY"); credentials.SecretKey != "" && secretKey != "" {
+	if secretKey := os.Getenv("KS_SECRET_KEY"); credentials.SecretKey == "" && secretKey != "" {
 		credentials.SecretKey = secretKey
 	}
 }
