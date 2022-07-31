@@ -89,6 +89,8 @@ Want to contribute? Want to discuss something? Have an issue?
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
 * Customize controls configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
+<details><summary>Windows</summary>
+
 ## Install on Windows
 
 **Requires powershell v5.0+**
@@ -102,6 +104,9 @@ Note: if you get an error you might need to change the execution policy (i.e. en
 ``` powershell
 Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
+</details>
+
+<details><summary>MacOS</summary>
 
 ## Install on macOS
 
@@ -111,6 +116,9 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 2. ```sh
     brew install kubescape
     ```
+</details>
+
+<details><summary>Nix/NixOS</summary>
 
 ## Install on NixOS or with nix (Community)
 
@@ -144,6 +152,7 @@ home-manager:
 
 Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 
+</details>
 
 ## Usage & Examples
 
@@ -270,34 +279,9 @@ kubescape scan framework nsa --use-from /path/nsa.json
 ```
 
 
-## Scan Periodically using Helm - Contributed by [@yonahd](https://github.com/yonahd)  
+## Scan Periodically using Helm 
 [Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster)
 [helm chart repo](https://github.com/armosec/armo-helm)
-
-## Scan using docker image
-
-Official Docker image `quay.io/armosec/kubescape`
-
-```
-docker run -v "$(pwd)/example.yaml:/app/example.yaml  quay.io/armosec/kubescape scan /app/example.yaml
-```
-
-If you wish, you can [build the docker image on your own](build/README.md)
-
-# Submit data manually
-
-Use the `submit` command if you wish to submit data manually
-
-## Submit scan results manually
-
-> Support forward compatibility by using the `--format-version v2` flag
-
-First, scan your cluster using the `json` format flag: `kubescape scan framework <name> --format json --format-version v2 --output path/to/results.json`.
-
-Now you can submit the results to the Kubescape SaaS version -
-```
-kubescape submit results path/to/results.json
-```
 
 # Integrations
 
@@ -314,6 +298,8 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 # Building Kubescape
 
+<details><summary>Windows</summary>
+
 ## Windows
 
 ```
@@ -323,8 +309,12 @@ OR
 ```
 make build
 ```
+</details>
+
+<details><summary>Linux / MacOS</summary>
 
 ## Linux / MacOS
+
 
 1. Install libgit2 dependency
 
@@ -345,10 +335,14 @@ make build
     make test
     ```
 
+</details>
+
 ## VS code configuration samples
 
 You can use the samples files below to setup your VS code environment for building and debugging purposes.
 
+
+<details><summary>.vscode/settings.json</summary>
 
 ```json5
 // .vscode/settings.json
@@ -360,6 +354,9 @@ You can use the samples files below to setup your VS code environment for buildi
     }
 }
 ```
+</details>
+
+<details><summary>.vscode/launch.json</summary>
 
 ```json5
 // .vscode/launch.json
@@ -382,6 +379,7 @@ You can use the samples files below to setup your VS code environment for buildi
     ]
 }
 ```
+</details>
 
 # Under the hood
 
