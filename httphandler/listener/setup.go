@@ -21,7 +21,6 @@ const (
 	prometheusMmeticsPath = "/v1/metrics"
 	livePath              = "/livez"
 	readyPath             = "/readyz"
-	heap                  = "/heap"
 )
 
 // SetupHTTPListener set up listening http servers
@@ -51,12 +50,13 @@ func SetupHTTPListener() error {
 	rtr.HandleFunc(resultsPath, httpHandler.Results)
 	rtr.HandleFunc(livePath, httpHandler.Live)
 	rtr.HandleFunc(readyPath, httpHandler.Ready)
-	rtr.HandleFunc(heap, httpHandler.Heap)
 
 	server.Handler = rtr
 
 	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", cautils.BuildNumber))
-	server.ListenAndServe()
+
+	servePprof()
+
 	if keyPair != nil {
 		return server.ListenAndServeTLS("", "")
 	}
@@ -80,4 +80,14 @@ func getPort() string {
 		return p
 	}
 	return "8080"
+}
+
+func servePprof() {
+	go func() {
+		// start pprof server -> https://pkg.go.dev/net/http/pprof
+		if logger.L().GetLevel() == helpers.DebugLevel.String() {
+			logger.L().Info("starting pprof server", helpers.String("port", "6060"))
+			logger.L().Error(http.ListenAndServe(":6060", nil).Error())
+		}
+	}()
 }

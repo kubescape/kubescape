@@ -175,3 +175,5 @@ go tool pprof heap
 * `KS_FORMAT`: Output file format. default is json
 * `KS_ENABLE_HOST_SCANNER`: Enable the host scanner feature
 * `KS_DOWNLOAD_ARTIFACTS`: Download the artifacts every scan
+* `KS_LOGGER_NAME`: Set logger name
+* `KS_LOGGER_LEVEL`: Set logger level
