@@ -6,7 +6,8 @@
 
 
 Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer and image vulnerabilities scanning. 
-Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo) , [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
+Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo&utm_source=github&utm_medium=repository
+) , [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
 It became one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins’ precious time, effort, and resources.
 Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack, and supports multi-cloud K8s deployments like EKS, GKE, and AKS.
 
@@ -66,7 +67,7 @@ Want to contribute? Want to discuss something? Have an issue?
 
 * Feel free to pick a task from the [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
 * Open a issue, we are trying to respond within 48 hours
-* [Join us](https://armosec.github.io/kubescape/) in a discussion on our discord server!
+* [Join us](https://armosec.github.io/kubescape) in a discussion on our discord server!
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
 ![discord](https://img.shields.io/discord/893048809884643379)
@@ -74,7 +75,7 @@ Want to contribute? Want to discuss something? Have an issue?
 
 # Options and examples
 
-[Kubescape docs](https://hub.armosec.io/docs)
+[Kubescape docs](https://hub.armosec.io/docs?utm_source=github&utm_medium=repository)
 
 ## Playground
 * [Kubescape playground](https://www.katacoda.com/pathaksaiyam/scenarios/kubescape)
@@ -159,26 +160,26 @@ Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 ### Examples
 
 
-#### Scan a running Kubernetes cluster and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
+#### Scan a running Kubernetes cluster and submit results to the [Kubescape SaaS version](https://cloud.armosec.io?utm_source=github&utm_medium=repository)
 ```
 kubescape scan --submit --enable-host-scan  --verbose
 ```
 
-> Read [here](https://hub.armosec.io/docs/host-sensor) more about the `enable-host-scan` flag
+> Read [here](https://hub.armosec.io/docs/host-sensor?utm_source=github&utm_medium=repository) more about the `enable-host-scan` flag
 
-#### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
+#### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://cloud.armosec.io?utm_source=github&utm_medium=repository)
 ```
 kubescape scan framework nsa --submit
 ```
 
 
-#### Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to the [Kubescape SaaS version](https://portal.armo.cloud/)
+#### Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to the [Kubescape SaaS version](https://cloud.armosec.io?utm_source=github&utm_medium=repository)
 ```
 kubescape scan framework mitre --submit
 ```
 
 
-#### Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armosec.io/docs/controls) 
+#### Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armosec.io/docs/controls?utm_source=github&utm_medium=repository) 
 ```
 kubescape scan control "Privileged container"
 ```
@@ -193,12 +194,12 @@ kubescape scan --include-namespaces development,staging,production
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 
-#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI) Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning)
+#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI) Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
 kubescape scan *.yaml --submit
 ```
 
-#### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning)
+#### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
 kubescape scan https://github.com/armosec/kubescape --submit
 ```
@@ -280,7 +281,7 @@ kubescape scan framework nsa --use-from /path/nsa.json
 
 
 ## Scan Periodically using Helm 
-[Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster)
+[Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster?utm_source=github&utm_medium=repository)
 [helm chart repo](https://github.com/armosec/armo-helm)
 
 # Integrations
@@ -404,7 +405,7 @@ You can use the samples files below to setup your VS code environment for buildi
 ## Technology
 Kubescape based on OPA engine: https://github.com/open-policy-agent/opa and ARMO's posture controls.
 
-The tools retrieves Kubernetes objects from the API server and runs a set of [rego's snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io/).
+The tools retrieves Kubernetes objects from the API server and runs a set of [rego's snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
 
 The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
 
