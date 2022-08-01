@@ -98,7 +98,7 @@ type StatusQueryParams struct {
 	//
 	// in:query
 	// swagger:strfmt uuid4
-	ScanID string `schema:"id" json:"scanID"`
+	ScanID string `schema:"id" json:"id"`
 }
 
 // scanRequestParams params passed to channel
