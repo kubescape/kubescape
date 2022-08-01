@@ -2,9 +2,6 @@ basePath: /
 consumes:
 - application/json
 definitions:
-  NotificationPolicyKind:
-    type: string
-    x-go-package: github.com/armosec/opa-utils/httpserver/apis/v1
   PostScanRequest:
     description: A request to trigger a Kubescape scan
     properties:
@@ -96,7 +93,23 @@ definitions:
         type: array
         x-go-name: TargetNames
       targetType:
-        $ref: '#/definitions/NotificationPolicyKind'
+        default: framework
+        description: |-
+          Type of the target. "framework" or "control".
+          Framework KindFramework
+          Control KindControl
+          Rule KindRule
+        enum:
+        - Framework
+        - Control
+        - Rule
+        example: control
+        type: string
+        x-go-enum-desc: |-
+          Framework KindFramework
+          Control KindControl
+          Rule KindRule
+        x-go-name: TargetType
       useCachedArtifacts:
         description: Use the cached artifacts instead of downloading (offline support)
         example: false
@@ -115,16 +128,37 @@ definitions:
         x-go-name: ID
       response:
         description: The actual Response payload
-        example: d1eb7006-1029-48d2-9c02-f5b757807977
+        example: d13791eb-19b1-4222-867b-9a7c1799cfac
         type: object
         x-go-name: Response
       type:
-        $ref: '#/definitions/ScanResponseType'
+        description: |-
+          Type of this response
+          id IDScanResponseType  Deprecated: will return busy / notBusy instead
+          error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+          v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+          busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+          notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+          ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+        enum:
+        - id
+        - error
+        - v1results
+        - busy
+        - notBusy
+        - ready
+        example: busy
+        type: string
+        x-go-enum-desc: |-
+          id IDScanResponseType  Deprecated: will return busy / notBusy instead
+          error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+          v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+          busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+          notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+          ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+        x-go-name: Type
     type: object
     x-go-package: github.com/armosec/opa-utils/httpserver/meta/v1
-  ScanResponseType:
-    type: string
-    x-go-package: github.com/armosec/opa-utils/httpserver/apis/v1
 info:
   description: 'The Kubescape Microservice API allows clients to interact with a Kubescape
     instance running in a Kubernetes cluster: trigger scans, retrieve and delete their
@@ -193,7 +227,7 @@ paths:
         "200":
           $ref: '#/responses/scanResponse'
         "400":
-          $ref: '#/responses/scanResponse'
+          $ref: '#/responses/scanResponseBadRequest'
       summary: Deletes results of a scan
       tags:
       - scanning
@@ -220,9 +254,9 @@ paths:
         "200":
           $ref: '#/responses/scanResponse'
         "204":
-          $ref: '#/responses/scanResponse'
+          $ref: '#/responses/scanResponseNoContent'
         "400":
-          $ref: '#/responses/scanResponseError'
+          $ref: '#/responses/scanResponseBadRequest'
       summary: Returns results of a scan
       tags:
       - scanning
@@ -253,9 +287,9 @@ paths:
         "200":
           $ref: '#/responses/scanResponse'
         "400":
-          $ref: '#/responses/scanResponse'
+          $ref: '#/responses/scanResponseBadRequest'
         "500":
-          $ref: '#/responses/scanResponse'
+          $ref: '#/responses/scanResponseInternalServerError'
       summary: Triggers a Kubescape scan
       tags:
       - scanning
@@ -294,8 +328,8 @@ responses:
     description: A Scan Response object
     schema:
       $ref: '#/definitions/Response'
-  scanResponseError:
-    description: ""
+  scanResponseBadRequest:
+    description: A Scan Response that occures after malformed requests
     schema:
       allOf:
       - properties:
@@ -307,15 +341,39 @@ responses:
             x-go-name: ID
           response:
             description: The actual Response payload
-            example: d1eb7006-1029-48d2-9c02-f5b757807977
+            example: d13791eb-19b1-4222-867b-9a7c1799cfac
             type: object
             x-go-name: Response
           type:
-            $ref: '#/definitions/ScanResponseType'
+            description: |-
+              Type of this response
+              id IDScanResponseType  Deprecated: will return busy / notBusy instead
+              error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+              v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+              busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+              notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+              ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+            enum:
+            - id
+            - error
+            - v1results
+            - busy
+            - notBusy
+            - ready
+            example: busy
+            type: string
+            x-go-enum-desc: |-
+              id IDScanResponseType  Deprecated: will return busy / notBusy instead
+              error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+              v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+              busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+              notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+              ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+            x-go-name: Type
         type: object
       - properties:
           response:
-            example: '"an error occurred"'
+            example: 'failed to parse query params, reason: schema: invalid path "waitr"'
             type: object
             x-go-name: Resp
           type:
@@ -323,6 +381,68 @@ responses:
             type: string
             x-go-name: Type
         type: object
+  scanResponseInternalServerError:
+    description: A Scan Response that occures after malformed requests
+    schema:
+      allOf:
+      - properties:
+          id:
+            description: ID of the scan
+            example: d13791eb-19b1-4222-867b-9a7c1799cfac
+            format: uuid4
+            type: string
+            x-go-name: ID
+          response:
+            description: The actual Response payload
+            example: d13791eb-19b1-4222-867b-9a7c1799cfac
+            type: object
+            x-go-name: Response
+          type:
+            description: |-
+              Type of this response
+              id IDScanResponseType  Deprecated: will return busy / notBusy instead
+              error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+              v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+              busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+              notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+              ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+            enum:
+            - id
+            - error
+            - v1results
+            - busy
+            - notBusy
+            - ready
+            example: busy
+            type: string
+            x-go-enum-desc: |-
+              id IDScanResponseType  Deprecated: will return busy / notBusy instead
+              error ErrorScanResponseType  ErrorScanResponseType indicates a response that reports an error
+              v1results ResultsV1ScanResponseType  ResultsV1ScanResponseType indicates a response that carries a v1 Results object as payload
+              busy BusyScanResponseType  BusyScanResponseType indicates that a server is busy with a previous request
+              notBusy NotBusyScanResponseType  NotBusyScanResponseType indicates that a server is not busy with a previous request
+              ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
+            x-go-name: Type
+        type: object
+      - properties:
+          id:
+            example: '""'
+            type: string
+            x-go-name: ID
+          response:
+            example: 'failed to scan. reason: ''empty list of resources'''
+            type: object
+            x-go-name: Resp
+          type:
+            example: error
+            type: string
+            x-go-name: Type
+        type: object
+  scanResponseNoContent:
+    description: |-
+      A Scan Response that indicates no response body.
+
+      Kubescape generates this response, for example, when results with given ID do not exist.
 schemes:
 - http
 swagger: "2.0"
