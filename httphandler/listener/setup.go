@@ -51,9 +51,10 @@ func SetupHTTPListener() error {
 	rtr.HandleFunc(resultsPath, httpHandler.Results)
 	rtr.HandleFunc(livePath, httpHandler.Live)
 	rtr.HandleFunc(readyPath, httpHandler.Ready)
-	handler := docs.ServeSpecs()
-	// rtr.Handle(docs.OpenAPIV2Prefix, handler)
-	rtr.PathPrefix(docs.OpenAPIV2Prefix).Handler(handler)
+
+	// Setup the OpenAPI UI handler
+	handler := docs.NewOpenAPIUIHandler()
+	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(handler)
 
 	server.Handler = rtr
 

@@ -1,7 +1,6 @@
 package docs
 
 import (
-	"bytes"
 	"fmt"
 	"net/http"
 
@@ -22,13 +21,15 @@ const (
 //go:embed swagger.yaml
 var specJSONBytes []byte
 
-var lastKnownBaseHost string
-var lastKnownScheme string
+// ServeOpenAPISpec returns the OpenAPI specification file
+func ServeOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	w.Write(specJSONBytes)
+}
 
-type fileHandler struct{}
-
-func ServeSpecs() http.Handler {
-	logstr := fmt.Sprintf("Starting swagger UI. baseURI: %v, docsEP: %v, rapidocEP: %v, swaggerui: %s", OpenAPIV2Prefix, OpenAPIDocsEndpoint, OpenAPIRapiEndpoint, OpenAPISwaggerUIEndpoint)
+// NewOpenAPIUIHandler returns a handler that serves OpenAPI specs via UI
+func NewOpenAPIUIHandler() http.Handler {
+	logstr := fmt.Sprintf("Starting swagger UI. baseURI: %v, docsEP: %v, rapidocEP: %v, swaggerui: %v", OpenAPIV2Prefix, OpenAPIDocsEndpoint, OpenAPIRapiEndpoint, OpenAPISwaggerUIEndpoint)
 	logger.L().Info(logstr)
 
 	redocOpts := middleware.RedocOpts{
@@ -46,22 +47,11 @@ func ServeSpecs() http.Handler {
 		Path:     OpenAPISwaggerUIEndpoint,
 	}
 
-	fs := &fileHandler{}
-	redoc := middleware.Redoc(redocOpts, fs)
-	rapi := middleware.RapiDoc(RapiDocOpts, redoc)
-	swaggerui := middleware.SwaggerUI(opts, rapi)
-	return swaggerui
-}
+	var openAPISpecHandler http.Handler = http.HandlerFunc(ServeOpenAPISpec)
 
-func (f *fileHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Host != "" && r.Host != lastKnownBaseHost {
-		lastKnownBaseHost = r.Host
-		specJSONBytes = bytes.ReplaceAll(specJSONBytes, []byte("api-dev.armo.cloud"), []byte(lastKnownBaseHost))
-	}
-	if fHost := r.Header.Get("X-Forwarded-Host"); fHost != "" && fHost != lastKnownBaseHost {
-		lastKnownBaseHost = fHost
-		specJSONBytes = bytes.ReplaceAll(specJSONBytes, []byte("api-dev.armo.cloud"), []byte(lastKnownBaseHost))
-	}
-	w.WriteHeader(http.StatusOK)
-	w.Write(specJSONBytes)
+	openAPIUIHandler := middleware.Redoc(redocOpts, openAPISpecHandler)
+	openAPIUIHandler = middleware.RapiDoc(RapiDocOpts, openAPIUIHandler)
+	openAPIUIHandler = middleware.SwaggerUI(opts, openAPIUIHandler)
+
+	return openAPIUIHandler
 }
