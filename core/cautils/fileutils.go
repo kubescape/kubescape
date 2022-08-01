@@ -30,8 +30,8 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-// LoadResourcesFromHelmCharts scans a given path (recuresively) for helm charts, renders the templates and returns a list of workloads
-func LoadResourcesFromHelmCharts(basePath string) map[string][]workloadinterface.IMetadata {
+// LoadResourcesFromHelmCharts scans a given path (recuresively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
+func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -40,7 +40,8 @@ func LoadResourcesFromHelmCharts(basePath string) map[string][]workloadinterface
 		}
 	}
 
-	result := map[string][]workloadinterface.IMetadata{}
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	sourceToChartName := map[string]string{}
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
@@ -50,12 +51,14 @@ func LoadResourcesFromHelmCharts(basePath string) map[string][]workloadinterface
 				continue
 			}
 
+			chartName := chart.GetName()
 			for k, v := range wls {
-				result[k] = v
+				sourceToWorkloads[k] = v
+				sourceToChartName[k] = chartName
 			}
 		}
 	}
-	return result
+	return sourceToWorkloads, sourceToChartName
 }
 
 func LoadResourcesFromFiles(input, rootPath string) map[string][]workloadinterface.IMetadata {
