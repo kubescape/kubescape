@@ -17,42 +17,77 @@ definitions:
         format: uuid4
         type: string
         x-go-name: Account
+      excludedNamespaces:
+        description: |-
+          Namespaces to exclude.
+
+          Same as `kubescape scan --excluded-namespaces`.
+        example:
+        - armo-system
+        - kube-system
+        items:
+          type: string
+        type: array
+        x-go-name: ExcludedNamespaces
       failThreshold:
         description: |-
           Threshold for a failing score.
 
-          Scores higher that the provided value will be considered failing.
+          Scores higher than the provided value will be considered failing.
         example: 42
         format: float
         type: number
         x-go-name: FailThreshold
       format:
-        default: json
-        description: Format of the results. Same as `kubescape scan --format`
+        description: |-
+          Format of the results.
+
+          Same as `kubescape scan --format`.
         example: json
         type: string
         x-go-name: Format
       hostScanner:
         description: |-
-          Deploy the Kubescape K8s host-scanner
+          Deploy the Kubescape Kubernetes Host Scanner
 
-          Deploys the Armo K8s Host Scanner DeamonSet in the scanned cluster (same as `kubescape scan --enable-host-scan`). Collects data from certain controls.
+          Deploys the Armo K8s Host Scanner DeamonSet in the scanned cluster to collect data from certain controls.
         example: true
         type: boolean
         x-go-name: HostScanner
+      includeNamespaces:
+        description: |-
+          Namespaces to include.
+
+          Same as `kubescape scan --include-namespaces`.
+        example:
+        - litmus-tests
+        - known-bad
+        items:
+          type: string
+        type: array
+        x-go-name: IncludeNamespaces
       keepLocal:
         description: |-
           Do not submit results to Kubescape Cloud.
 
           Same as `kubescape scan --keep-local`
+        example: true
         type: boolean
         x-go-name: KeepLocal
+      submit:
+        description: |-
+          Submit results to Kubescape Cloud.
+
+          Same as `kubescape scan --submit`.
+        type: boolean
+        x-go-name: Submit
       targetNames:
-        default: all
+        default:
+        - all
         description: |-
           Name of the scan targets.
 
-          For example, if you select `targetType: "framework"`, you can trigger a scan using the NSA and MITRE ATT&CK Framework by passing `targetNames: ["nsa, "mitre"]`.
+          For example, if you select `targetType: "framework"`, you can trigger a scan using the NSA and MITRE ATT&CK Framework by passing `targetNames: ["nsa", "mitre"].
         example:
         - nsa
         - mitre
@@ -70,6 +105,7 @@ definitions:
     type: object
     x-go-package: github.com/armosec/opa-utils/httpserver/meta/v1
   Response:
+    description: A Scan Response object
     properties:
       id:
         description: ID of the scan
@@ -78,39 +114,17 @@ definitions:
         type: string
         x-go-name: ID
       response:
-        description: The actual Response object
-        example:
-          some: other
+        description: The actual Response payload
+        example: d1eb7006-1029-48d2-9c02-f5b757807977
         type: object
         x-go-name: Response
       type:
-        description: |-
-          Type of this response
-          id IDScanResponseType  Deprecated: will return busy/notBusy instead
-          error ErrorScanResponseType  A response contains an error message
-          v1results ResultsV1ScanResponseType  A response contains a v1 Results object
-          busy BusyScanResponseType  A response indicates that a server is busy with another request
-          notBusy NotBusyScanResponseType  A response indicates server is not busy with another request
-          ready ReadyScanResponseType  A response indicates that a server has successfully completed the request
-        enum:
-        - id
-        - error
-        - v1results
-        - busy
-        - notBusy
-        - ready
-        example: busy
-        type: string
-        x-go-enum-desc: |-
-          id IDScanResponseType  Deprecated: will return busy/notBusy instead
-          error ErrorScanResponseType  A response contains an error message
-          v1results ResultsV1ScanResponseType  A response contains a v1 Results object
-          busy BusyScanResponseType  A response indicates that a server is busy with another request
-          notBusy NotBusyScanResponseType  A response indicates server is not busy with another request
-          ready ReadyScanResponseType  A response indicates that a server has successfully completed the request
-        x-go-name: Type
+        $ref: '#/definitions/ScanResponseType'
     type: object
     x-go-package: github.com/armosec/opa-utils/httpserver/meta/v1
+  ScanResponseType:
+    type: string
+    x-go-package: github.com/armosec/opa-utils/httpserver/apis/v1
 info:
   description: 'The Kubescape Microservice API allows clients to interact with a Kubescape
     instance running in a Kubernetes cluster: trigger scans, retrieve and delete their
@@ -256,7 +270,7 @@ paths:
       - description: ID of the scan to check
         format: uuid4
         in: query
-        name: scanID
+        name: id
         type: string
         x-go-name: ScanID
       responses:
@@ -292,37 +306,12 @@ responses:
             type: string
             x-go-name: ID
           response:
-            description: The actual Response object
-            example:
-              some: other
+            description: The actual Response payload
+            example: d1eb7006-1029-48d2-9c02-f5b757807977
             type: object
             x-go-name: Response
           type:
-            description: |-
-              Type of this response
-              id IDScanResponseType  Deprecated: will return busy/notBusy instead
-              error ErrorScanResponseType  A response contains an error message
-              v1results ResultsV1ScanResponseType  A response contains a v1 Results object
-              busy BusyScanResponseType  A response indicates that a server is busy with another request
-              notBusy NotBusyScanResponseType  A response indicates server is not busy with another request
-              ready ReadyScanResponseType  A response indicates that a server has successfully completed the request
-            enum:
-            - id
-            - error
-            - v1results
-            - busy
-            - notBusy
-            - ready
-            example: busy
-            type: string
-            x-go-enum-desc: |-
-              id IDScanResponseType  Deprecated: will return busy/notBusy instead
-              error ErrorScanResponseType  A response contains an error message
-              v1results ResultsV1ScanResponseType  A response contains a v1 Results object
-              busy BusyScanResponseType  A response indicates that a server is busy with another request
-              notBusy NotBusyScanResponseType  A response indicates server is not busy with another request
-              ready ReadyScanResponseType  A response indicates that a server has successfully completed the request
-            x-go-name: Type
+            $ref: '#/definitions/ScanResponseType'
         type: object
       - properties:
           response:
