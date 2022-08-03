@@ -57,18 +57,48 @@ func newScanResponseChan() *scanResponseChan {
 }
 
 type ScanQueryParams struct {
-	ReturnResults bool `schema:"wait"` // wait for scanning to complete (synchronized request)
-	KeepResults   bool `schema:"keep"` // do not delete results after returning (relevant only for synchronized requests)
+	// Wait for scanning to complete (synchronous request)
+	// default: false
+	ReturnResults bool `schema:"wait" json:"wait"`
+	// Do not delete results after returning (relevant only for synchronous requests)
+	// default: false
+	KeepResults bool `schema:"keep" json:"keep"`
 }
 
+
+// swagger:parameters getScanResults
+type GetResultsQueryParams struct {
+	// ID of the requested scan. If empty or not provided, defaults to the latest scan.
+	//
+	// in: query
+	ScanID string `schema:"id" json:"id"`
+	// Keep the results in local storage after returning them.
+	//
+	// By default, the Kubescape Microservice will delete scan results.
+	//
+	// in: query
+	// default: false
+	KeepResults bool `schema:"keep" json:"keep"`
+
+}
+
+// swagger:parameters deleteScanResults
 type ResultsQueryParams struct {
-	ScanID      string `schema:"id"`
-	KeepResults bool   `schema:"keep"` // do not delete results after returning (default will delete results)
-	AllResults  bool   `schema:"all"`  // delete all results
+	GetResultsQueryParams
+	// Whether to delete all results
+	//
+	// in: query
+	// default: false
+	AllResults bool `schema:"all" json:"all"`
 }
 
+// swagger:parameters getStatus
 type StatusQueryParams struct {
-	ScanID string `schema:"id"`
+	// ID of the scan to check
+	//
+	// in:query
+	// swagger:strfmt uuid4
+	ScanID string `schema:"id" json:"id"`
 }
 
 // scanRequestParams params passed to channel
@@ -76,6 +106,14 @@ type scanRequestParams struct {
 	scanInfo        *cautils.ScanInfo // request as received from api
 	scanQueryParams *ScanQueryParams  // request as received from api
 	scanID          string            // generated scan ID
+}
+
+// swagger:parameters triggerScan
+type ScanRequest struct {
+	ScanQueryParams
+	// Scan parameters
+	// in:body
+	Body utilsmetav1.PostScanRequest
 }
 
 func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParams, error) {

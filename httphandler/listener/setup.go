@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/armosec/kubescape/v2/httphandler/docs"
 	handlerequestsv1 "github.com/armosec/kubescape/v2/httphandler/handlerequests/v1"
 	logger "github.com/dwertent/go-logger"
 	"github.com/dwertent/go-logger/helpers"
@@ -50,6 +51,10 @@ func SetupHTTPListener() error {
 	rtr.HandleFunc(resultsPath, httpHandler.Results)
 	rtr.HandleFunc(livePath, httpHandler.Live)
 	rtr.HandleFunc(readyPath, httpHandler.Ready)
+
+	// Setup the OpenAPI UI handler
+	handler := docs.NewOpenAPIUIHandler()
+	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(handler)
 
 	server.Handler = rtr
 
