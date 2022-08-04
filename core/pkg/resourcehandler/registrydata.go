@@ -38,6 +38,16 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) error {
 	logger.L().Debug("Collecting images vulnerabilities")
 
+	if len(registryAdaptors.adaptors) == 0 {
+		return fmt.Errorf("credentials are not configured for any registry adaptor")
+	}
+
+	for i := range registryAdaptors.adaptors { // login and and get vulnerabilities
+		if err := registryAdaptors.adaptors[i].Login(); err != nil {
+			return fmt.Errorf("failed to login, adaptor: '%s', reason: '%s'", registryAdaptors.adaptors[i].DescribeAdaptor(), err.Error())
+		}
+	}
+
 	// list cluster images
 	images := listImagesTags(k8sResourcesMap, allResources)
 	imagesIdentifiers := imageTagsToContainerImageIdentifier(images)
@@ -45,11 +55,6 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	imagesVulnerability := map[string][]registryvulnerabilities.Vulnerability{}
 	for i := range registryAdaptors.adaptors { // login and and get vulnerabilities
 
-		if err := registryAdaptors.adaptors[i].Login(); err != nil {
-			if err != nil {
-				return fmt.Errorf("failed to login, adaptor: '%s', reason: '%s'", registryAdaptors.adaptors[i].DescribeAdaptor(), err.Error())
-			}
-		}
 		vulnerabilities, err := registryAdaptors.adaptors[i].GetImagesVulnerabilities(imagesIdentifiers)
 		if err != nil {
 			return err

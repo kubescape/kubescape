@@ -3,6 +3,7 @@ package v1
 import (
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 
 	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"

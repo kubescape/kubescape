@@ -7,7 +7,7 @@ For these controls to work properly, it is necessary to
 
 # Integrate With Armosec Server
 
-1. Navigate to the [armosec.io](https://portal.armo.cloud/)
+1. Navigate to the [armosec.io](https://cloud.armosec.io?utm_source=github&utm_medium=repository)
 2. Click Profile(top right icon)->"User Management"->"API Tokens" and Generate a token
 3. Copy the clientID and secretKey and run:
 ```
