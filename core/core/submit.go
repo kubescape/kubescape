@@ -4,6 +4,7 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
+
 	logger "github.com/dwertent/go-logger"
 	"github.com/dwertent/go-logger/helpers"
 )
@@ -11,7 +12,7 @@ import (
 func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 
 	// list resources
-	postureReport, err := submitInterfaces.SubmitObjects.SetResourcesReport()
+	report, err := submitInterfaces.SubmitObjects.SetResourcesReport()
 	if err != nil {
 		return err
 	}
@@ -20,7 +21,12 @@ func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) err
 		return err
 	}
 	// report
-	if err := submitInterfaces.Reporter.Submit(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
+	o := &cautils.OPASessionObj{
+		Report:       report,
+		AllResources: allresources,
+		Metadata:     &report.Metadata,
+	}
+	if err := submitInterfaces.Reporter.Submit(o); err != nil {
 		return err
 	}
 	logger.L().Success("Data has been submitted successfully")

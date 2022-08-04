@@ -6,12 +6,10 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/mocks"
-	"github.com/armosec/opa-utils/objectsenvelopes"
 	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/opa-utils/resources"
 	"github.com/stretchr/testify/assert"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/k8s-interface/workloadinterface"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 )
@@ -19,43 +17,6 @@ import (
 func NewOPAProcessorMock() *OPAProcessor {
 	return &OPAProcessor{}
 }
-func TestProcess(t *testing.T) {
-
-	// set k8s
-	k8sResources := make(cautils.K8SResources)
-	allResources := make(map[string]workloadinterface.IMetadata)
-	imetaObj := objectsenvelopes.ListMapToMeta(k8sinterface.ConvertUnstructuredSliceToMap(k8sinterface.V1KubeSystemNamespaceMock().Items))
-	for i := range imetaObj {
-		allResources[imetaObj[i].GetID()] = imetaObj[i]
-	}
-	k8sResources["/v1/pods"] = workloadinterface.ListMetaIDs(imetaObj)
-
-	// set opaSessionObj
-	opaSessionObj := cautils.NewOPASessionObjMock()
-	opaSessionObj.Policies = []reporthandling.Framework{*reporthandling.MockFrameworkA()}
-	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "")
-
-	opaSessionObj.K8SResources = &k8sResources
-	opaSessionObj.AllResources = allResources
-
-	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock()) // ,
-	opap.Process(policies)
-	opap.updateResults()
-	for _, f := range opap.PostureReport.FrameworkReports {
-		for _, c := range f.ControlReports {
-			for _, r := range c.RuleReports {
-				for _, rr := range r.RuleResponses {
-					// t.Errorf("AlertMessage: %v", rr.AlertMessage)
-					if rr.Exception != nil {
-						t.Errorf("Exception: %v", rr.Exception)
-					}
-				}
-			}
-		}
-	}
-
-}
-
 func TestProcessResourcesResult(t *testing.T) {
 
 	// set k8s

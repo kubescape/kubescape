@@ -7,10 +7,8 @@ import (
 	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-func ReportV2ToV1(opaSessionObj *OPASessionObj) {
-	if len(opaSessionObj.PostureReport.FrameworkReports) > 0 {
-		return // report already converted
-	}
+func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
+	report := &reporthandling.PostureReport{}
 	//	opaSessionObj.PostureReport.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
 
 	frameworks := []reporthandling.FrameworkReport{}
@@ -53,7 +51,8 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 	// scoreutil := score.NewScore(opaSessionObj.AllResources)
 	// scoreutil.Calculate(frameworks)
 
-	opaSessionObj.PostureReport.FrameworkReports = frameworks
+	report.FrameworkReports = frameworks
+	return report
 }
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {

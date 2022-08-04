@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"time"
 
+	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+
 	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/rbac-utils/rbacscanner"
 	"github.com/armosec/rbac-utils/rbacutils"
 	"github.com/google/uuid"
@@ -19,12 +20,19 @@ func NewRBACObjects(scanner *rbacscanner.RbacScannerFromK8sAPI) *RBACObjects {
 	return &RBACObjects{scanner: scanner}
 }
 
-func (rbacObjects *RBACObjects) SetResourcesReport() (*reporthandling.PostureReport, error) {
-	return &reporthandling.PostureReport{
+func (rbacObjects *RBACObjects) SetResourcesReport() (*reporthandlingv2.PostureReport, error) {
+	return &reporthandlingv2.PostureReport{
 		ReportID:             uuid.NewString(),
 		ReportGenerationTime: time.Now().UTC(),
 		CustomerGUID:         rbacObjects.scanner.CustomerGUID,
 		ClusterName:          rbacObjects.scanner.ClusterName,
+		Metadata: reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{
+					ContextName: rbacObjects.scanner.ClusterName,
+				},
+			},
+		},
 	}, nil
 }
 
@@ -53,7 +61,7 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 		************************************************************************************************************************
 	*/
 
-	// wrap rbac aggregated objects in IMetadata and add to allresources
+	// wrap rbac aggregated objects in IMetadata and add to AllResources
 	// TODO - DEPRECATE SA2WLIDmap
 	SA2WLIDmapIMeta, err := rbacutils.SA2WLIDmapIMetadataWrapper(resources.SA2WLIDmap)
 	if err != nil {
