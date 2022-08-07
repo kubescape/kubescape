@@ -20,7 +20,6 @@ type OPASessionObj struct {
 	AllResources          map[string]workloadinterface.IMetadata // all scanned resources, map[<rtesource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result     // resources scan results, map[<rtesource ID>]<resource result>
 	ResourceSource        map[string]reporthandling.Source       // resources sources, map[<rtesource ID>]<resource result>
-	PostureReport         *reporthandling.PostureReport          // scan results v1 - Remove
 	Report                *reporthandlingv2.PostureReport        // scan results v2 - Remove
 	Exceptions            []armotypes.PostureExceptionPolicy     // list of exceptions to apply on scan results
 	RegoInputData         RegoInputData                          // input passed to rgo for scanning. map[<control name>][<input arguments>]
@@ -41,11 +40,7 @@ func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SRe
 		ResourceToControlsMap: make(map[string][]string),
 		ResourceSource:        make(map[string]reporthandling.Source),
 		SessionID:             scanInfo.ScanID,
-		PostureReport: &reporthandling.PostureReport{
-			ClusterName:  ClusterName,
-			CustomerGUID: CustomerGUID,
-		},
-		Metadata: scanInfoToScanMetadata(scanInfo),
+		Metadata:              scanInfoToScanMetadata(scanInfo),
 	}
 }
 
@@ -56,12 +51,6 @@ func NewOPASessionObjMock() *OPASessionObj {
 		AllResources:    make(map[string]workloadinterface.IMetadata),
 		ResourcesResult: make(map[string]resourcesresults.Result),
 		Report:          &reporthandlingv2.PostureReport{},
-		PostureReport: &reporthandling.PostureReport{
-			ClusterName:  "",
-			CustomerGUID: "",
-			ReportID:     "",
-			JobID:        "",
-		},
 		Metadata: &reporthandlingv2.Metadata{
 			ScanMetadata: reporthandlingv2.ScanMetadata{
 				ScanningTarget: 0,

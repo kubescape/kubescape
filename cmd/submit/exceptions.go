@@ -12,7 +12,7 @@ import (
 
 func getExceptionsCmd(ks meta.IKubescape, submitInfo *metav1.Submit) *cobra.Command {
 	return &cobra.Command{
-		Use:   "exceptions <full path to exceptins file>",
+		Use:   "exceptions <full path to exceptions file>",
 		Short: "Submit exceptions to the Kubescape SaaS version",
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {

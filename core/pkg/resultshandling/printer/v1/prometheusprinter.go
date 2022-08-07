@@ -87,9 +87,9 @@ func (printer *PrometheusPrinter) printReports(allResources map[string]workloadi
 }
 
 func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	cautils.ReportV2ToV1(opaSessionObj)
+	report := cautils.ReportV2ToV1(opaSessionObj)
 
-	err := printer.printReports(opaSessionObj.AllResources, opaSessionObj.PostureReport.FrameworkReports)
+	err := printer.printReports(opaSessionObj.AllResources, report.FrameworkReports)
 	if err != nil {
 		logger.L().Fatal(err.Error())
 	}

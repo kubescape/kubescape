@@ -27,15 +27,15 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 }
 
 func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	cautils.ReportV2ToV1(opaSessionObj)
+	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	var postureReportStr []byte
 	var err error
 
-	if len(opaSessionObj.PostureReport.FrameworkReports) == 1 {
-		postureReportStr, err = json.Marshal(opaSessionObj.PostureReport.FrameworkReports[0])
+	if len(report.FrameworkReports) == 1 {
+		postureReportStr, err = json.Marshal(report.FrameworkReports[0])
 	} else {
-		postureReportStr, err = json.Marshal(opaSessionObj.PostureReport.FrameworkReports)
+		postureReportStr, err = json.Marshal(report.FrameworkReports)
 	}
 
 	if err != nil {

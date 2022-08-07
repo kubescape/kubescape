@@ -26,8 +26,6 @@ const (
 
 func (su *ScoreWrapper) Calculate(reportVersion PostureReportVersion) error {
 	switch reportVersion {
-	case EPostureReportV1:
-		return su.scoreUtil.Calculate(su.opaSessionObj.PostureReport.FrameworkReports)
 	case EPostureReportV2:
 		return su.scoreUtil.CalculatePostureReportV2(su.opaSessionObj.Report)
 	}
