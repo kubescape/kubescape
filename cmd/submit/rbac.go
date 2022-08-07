@@ -24,7 +24,7 @@ var (
 	kubescape submit rbac
 
 	# Submit cluster's Role-Based Access Control(RBAC) with account ID 
-	kubescape submit rbac --account-id <account-id>
+	kubescape submit rbac --account <account-id>
 	`
 )
 
@@ -46,7 +46,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			}
 
 			if clusterConfig.GetAccountID() == "" {
-				return fmt.Errorf("account ID is not set, run 'kubescape submit rbac --account-id <account-id>'")
+				return fmt.Errorf("account ID is not set, run 'kubescape submit rbac --account <account-id>'")
 			}
 
 			// list RBAC

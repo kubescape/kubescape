@@ -52,7 +52,7 @@ func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fw
 	if submit {
 		submitData := reporterv2.SubmitContextScan
 		if scanningContext != cautils.ContextCluster {
-			submitData = reporterv2.SubmitContextRBAC
+			submitData = reporterv2.SubmitContextRepository
 		}
 		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID, submitData)
 	}
