@@ -1,6 +1,6 @@
 # Kubescape HTTP Handler Package
 
-Running `kubescape` will start up a webserver on port `8080` which will serve the following API's: 
+Running `kubescape` will start up a web-server on port `8080` which will serve the following API's: 
 
 ### Trigger scan
 
@@ -153,6 +153,15 @@ curl --header "Content-Type: application/json" \
   http://127.0.0.1:8080/v1/scan
 ```
 
+#### Data profiling
+Analyze profiled data using [pprof](https://github.com/google/pprof/blob/main/doc/README.md).
+[How ro use](https://pkg.go.dev/net/http/pprof)
+
+example:
+```bash
+go tool pprof http://localhost:6060/debug/pprof/heap
+```
+
 ## Examples
 
 * [Prometheus](examples/prometheus/README.md)
@@ -169,3 +178,5 @@ curl --header "Content-Type: application/json" \
 * `KS_FORMAT`: Output file format. default is json
 * `KS_ENABLE_HOST_SCANNER`: Enable the host scanner feature
 * `KS_DOWNLOAD_ARTIFACTS`: Download the artifacts every scan
+* `KS_LOGGER_NAME`: Set logger name
+* `KS_LOGGER_LEVEL`: Set logger level

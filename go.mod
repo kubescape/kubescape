@@ -4,11 +4,11 @@ go 1.18
 
 require (
 	github.com/armosec/armoapi-go v0.0.98
-	github.com/armosec/go-git-url v0.0.13
+	github.com/armosec/go-git-url v0.0.15
 	github.com/armosec/k8s-interface v0.0.79
-	github.com/armosec/opa-utils v0.0.160
+	github.com/armosec/opa-utils v0.0.166
 	github.com/armosec/rbac-utils v0.0.14
-	github.com/armosec/utils-go v0.0.7
+	github.com/armosec/utils-go v0.0.9
 	github.com/armosec/utils-k8s-go v0.0.7
 	github.com/briandowns/spinner v1.18.1
 	github.com/dwertent/go-logger v0.0.2

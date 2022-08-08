@@ -3,6 +3,7 @@ package v1
 import (
 	"fmt"
 	"net/http"
+	_ "net/http/pprof"
 
 	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
@@ -17,6 +18,14 @@ import (
 
 var OutputDir = "./results"
 var FailedOutputDir = "./failed"
+
+// A Scan Response object
+//
+// swagger:response scanResponse
+type ScanResponse struct {
+	// in:body
+	Body utilsmetav1.Response
+}
 
 type HTTPHandler struct {
 	state            *serverState

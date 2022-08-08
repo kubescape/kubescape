@@ -20,6 +20,14 @@ import (
 
 const MAX_REPORT_SIZE = 2097152 // 2 MB
 
+type SubmitContext string
+
+const (
+	SubmitContextScan       SubmitContext = "scan"
+	SubmitContextRBAC       SubmitContext = "rbac"
+	SubmitContextRepository SubmitContext = "repository"
+)
+
 type ReportEventReceiver struct {
 	httpClient         *http.Client
 	clusterName        string
@@ -29,9 +37,10 @@ type ReportEventReceiver struct {
 	customerAdminEMail string
 	message            string
 	reportID           string
+	submitContext      SubmitContext
 }
 
-func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string) *ReportEventReceiver {
+func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string, submitContext SubmitContext) *ReportEventReceiver {
 	return &ReportEventReceiver{
 		httpClient:         &http.Client{},
 		clusterName:        tenantConfig.ClusterName,
@@ -39,6 +48,7 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string) *R
 		token:              tenantConfig.Token,
 		customerAdminEMail: tenantConfig.CustomerAdminEMail,
 		reportID:           reportID,
+		submitContext:      submitContext,
 	}
 }
 
@@ -95,21 +105,11 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 func (report *ReportEventReceiver) GetURL() string {
 	u := url.URL{}
 	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
-	ParseHost(&u)
+
+	parseHost(&u)
+	report.addPathURL(&u)
+
 	q := u.Query()
-
-	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
-		if report.clusterName != "" {
-			u.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
-		} else {
-			u.Path = fmt.Sprintf("repositories-scan/%s", report.reportID)
-		}
-	} else {
-		u.Path = "account/sign-up"
-		q.Add("invitationToken", report.token)
-		q.Add("customerGUID", report.customerGUID)
-	}
-
 	q.Add("utm_source", "GitHub")
 	q.Add("utm_medium", "CLI")
 	q.Add("utm_campaign", "Submit")
@@ -225,4 +225,27 @@ func (report *ReportEventReceiver) DisplayReportURL() {
 	if report.message != "" {
 		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 	}
+}
+
+func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
+	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
+		switch report.submitContext {
+		case SubmitContextScan:
+			urlObj.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+		case SubmitContextRBAC:
+			urlObj.Path = "rbac-visualizer"
+		case SubmitContextRepository:
+			urlObj.Path = fmt.Sprintf("repository-scanning/%s", report.reportID)
+		default:
+			urlObj.Path = "dashboard"
+		}
+		return
+	}
+	urlObj.Path = "account/sign-up"
+
+	q := urlObj.Query()
+	q.Add("invitationToken", report.token)
+	q.Add("customerGUID", report.customerGUID)
+	urlObj.RawQuery = q.Encode()
+
 }
