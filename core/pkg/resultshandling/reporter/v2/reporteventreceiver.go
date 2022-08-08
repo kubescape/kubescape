@@ -235,7 +235,7 @@ func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
 		case SubmitContextRBAC:
 			urlObj.Path = "rbac-visualizer"
 		case SubmitContextRepository:
-			urlObj.Path = fmt.Sprintf("repository-scanning/%s", report.reportID)
+			urlObj.Path = fmt.Sprintf("repositories-scan/%s", report.reportID)
 		default:
 			urlObj.Path = "dashboard"
 		}

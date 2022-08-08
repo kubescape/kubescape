@@ -88,7 +88,7 @@ func TestGetURL(t *testing.T) {
 			"XXXX",
 			SubmitContextRepository,
 		)
-		assert.Equal(t, "https://cloud.armosec.io/repository-scanning/XXXX?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+		assert.Equal(t, "https://cloud.armosec.io/repositories-scan/XXXX?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
 	}
 
 	// Test submit and NOT registered url
