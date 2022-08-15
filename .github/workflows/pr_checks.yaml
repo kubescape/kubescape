@@ -4,6 +4,9 @@ on:
   pull_request:
     branches: [ master, dev ]
     types: [ edited, opened, synchronize, reopened ]
+    paths-ignore:
+      # Do not run the pipeline if only Markdown files changed
+      - '**.md'
 jobs:
   build:
     name: Create cross-platform build
