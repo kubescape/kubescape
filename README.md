@@ -111,10 +111,10 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ## Install on macOS
 
 1. ```sh
-    brew tap armosec/kubescape
+    brew tap kubescape/tap
     ```
 2. ```sh
-    brew install kubescape
+    brew install kubescape-cli
     ```
 </details>
 
