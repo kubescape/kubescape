@@ -61,7 +61,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
 
 	// pull k8s recourses
-	ksResourceMap := setArmoResourceMap(sessionObj.Policies, resourceToControl)
+	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
