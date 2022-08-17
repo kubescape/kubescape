@@ -15,10 +15,6 @@ import (
 	"github.com/dwertent/go-logger/helpers"
 )
 
-// =======================================================================================================================
-// =============================================== ArmoAPI ===============================================================
-// =======================================================================================================================
-
 var (
 	// ATTENTION!!!
 	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFUL
@@ -38,8 +34,8 @@ var (
 	armoDevAUTHURL = "eggauth-dev.armosec.io"
 )
 
-// Armo API for downloading policies
-type ArmoAPI struct {
+// KSCloudAPI allows accessing the API of the Kubescape Cloud offering
+type KSCloudAPI struct {
 	httpClient *http.Client
 	apiURL     string
 	authURL    string
@@ -53,14 +49,14 @@ type ArmoAPI struct {
 	loggedIn   bool
 }
 
-var globalArmoAPIConnector *ArmoAPI
+var globalArmoAPIConnector *KSCloudAPI
 
-func SetARMOAPIConnector(armoAPI *ArmoAPI) {
+func SetARMOAPIConnector(armoAPI *KSCloudAPI) {
 	logger.L().Debug("Armo URLs", helpers.String("api", armoAPI.apiURL), helpers.String("auth", armoAPI.authURL), helpers.String("report", armoAPI.erURL), helpers.String("UI", armoAPI.feURL))
 	globalArmoAPIConnector = armoAPI
 }
 
-func GetArmoAPIConnector() *ArmoAPI {
+func GetArmoAPIConnector() *KSCloudAPI {
 	if globalArmoAPIConnector == nil {
 		// logger.L().Error("returning nil API connector")
 		SetARMOAPIConnector(NewARMOAPIProd())
@@ -68,7 +64,7 @@ func GetArmoAPIConnector() *ArmoAPI {
 	return globalArmoAPIConnector
 }
 
-func NewARMOAPIDev() *ArmoAPI {
+func NewARMOAPIDev() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.apiURL = armoDevBEURL
@@ -79,7 +75,7 @@ func NewARMOAPIDev() *ArmoAPI {
 	return apiObj
 }
 
-func NewARMOAPIProd() *ArmoAPI {
+func NewARMOAPIProd() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.apiURL = armoBEURL
@@ -90,7 +86,7 @@ func NewARMOAPIProd() *ArmoAPI {
 	return apiObj
 }
 
-func NewARMOAPIStaging() *ArmoAPI {
+func NewARMOAPIStaging() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.apiURL = armoStageBEURL
@@ -101,7 +97,7 @@ func NewARMOAPIStaging() *ArmoAPI {
 	return apiObj
 }
 
-func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL string) *ArmoAPI {
+func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL string) *KSCloudAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.erURL = armoERURL
@@ -112,14 +108,14 @@ func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL string) *
 	return apiObj
 }
 
-func newArmoAPI() *ArmoAPI {
-	return &ArmoAPI{
+func newArmoAPI() *KSCloudAPI {
+	return &KSCloudAPI{
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
 		loggedIn:   false,
 	}
 }
 
-func (armoAPI *ArmoAPI) Post(fullURL string, headers map[string]string, body []byte) (string, error) {
+func (armoAPI *KSCloudAPI) Post(fullURL string, headers map[string]string, body []byte) (string, error) {
 	if headers == nil {
 		headers = make(map[string]string)
 	}
@@ -127,14 +123,14 @@ func (armoAPI *ArmoAPI) Post(fullURL string, headers map[string]string, body []b
 	return HttpPost(armoAPI.httpClient, fullURL, headers, body)
 }
 
-func (armoAPI *ArmoAPI) Delete(fullURL string, headers map[string]string) (string, error) {
+func (armoAPI *KSCloudAPI) Delete(fullURL string, headers map[string]string) (string, error) {
 	if headers == nil {
 		headers = make(map[string]string)
 	}
 	armoAPI.appendAuthHeaders(headers)
 	return HttpDelete(armoAPI.httpClient, fullURL, headers)
 }
-func (armoAPI *ArmoAPI) Get(fullURL string, headers map[string]string) (string, error) {
+func (armoAPI *KSCloudAPI) Get(fullURL string, headers map[string]string) (string, error) {
 	if headers == nil {
 		headers = make(map[string]string)
 	}
@@ -142,19 +138,19 @@ func (armoAPI *ArmoAPI) Get(fullURL string, headers map[string]string) (string, 
 	return HttpGetter(armoAPI.httpClient, fullURL, headers)
 }
 
-func (armoAPI *ArmoAPI) GetAccountID() string          { return armoAPI.accountID }
-func (armoAPI *ArmoAPI) IsLoggedIn() bool              { return armoAPI.loggedIn }
-func (armoAPI *ArmoAPI) GetClientID() string           { return armoAPI.clientID }
-func (armoAPI *ArmoAPI) GetSecretKey() string          { return armoAPI.secretKey }
-func (armoAPI *ArmoAPI) GetFrontendURL() string        { return armoAPI.feURL }
-func (armoAPI *ArmoAPI) GetApiURL() string             { return armoAPI.apiURL }
-func (armoAPI *ArmoAPI) GetAuthURL() string            { return armoAPI.authURL }
-func (armoAPI *ArmoAPI) GetReportReceiverURL() string  { return armoAPI.erURL }
-func (armoAPI *ArmoAPI) SetAccountID(accountID string) { armoAPI.accountID = accountID }
-func (armoAPI *ArmoAPI) SetClientID(clientID string)   { armoAPI.clientID = clientID }
-func (armoAPI *ArmoAPI) SetSecretKey(secretKey string) { armoAPI.secretKey = secretKey }
+func (armoAPI *KSCloudAPI) GetAccountID() string          { return armoAPI.accountID }
+func (armoAPI *KSCloudAPI) IsLoggedIn() bool              { return armoAPI.loggedIn }
+func (armoAPI *KSCloudAPI) GetClientID() string           { return armoAPI.clientID }
+func (armoAPI *KSCloudAPI) GetSecretKey() string          { return armoAPI.secretKey }
+func (armoAPI *KSCloudAPI) GetFrontendURL() string        { return armoAPI.feURL }
+func (armoAPI *KSCloudAPI) GetApiURL() string             { return armoAPI.apiURL }
+func (armoAPI *KSCloudAPI) GetAuthURL() string            { return armoAPI.authURL }
+func (armoAPI *KSCloudAPI) GetReportReceiverURL() string  { return armoAPI.erURL }
+func (armoAPI *KSCloudAPI) SetAccountID(accountID string) { armoAPI.accountID = accountID }
+func (armoAPI *KSCloudAPI) SetClientID(clientID string)   { armoAPI.clientID = clientID }
+func (armoAPI *KSCloudAPI) SetSecretKey(secretKey string) { armoAPI.secretKey = secretKey }
 
-func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, error) {
+func (armoAPI *KSCloudAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := armoAPI.Get(armoAPI.getFrameworkURL(name), nil)
 	if err != nil {
 		return nil, nil
@@ -168,7 +164,7 @@ func (armoAPI *ArmoAPI) GetFramework(name string) (*reporthandling.Framework, er
 	return framework, err
 }
 
-func (armoAPI *ArmoAPI) GetFrameworks() ([]reporthandling.Framework, error) {
+func (armoAPI *KSCloudAPI) GetFrameworks() ([]reporthandling.Framework, error) {
 	respStr, err := armoAPI.Get(armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, nil
@@ -183,11 +179,11 @@ func (armoAPI *ArmoAPI) GetFrameworks() ([]reporthandling.Framework, error) {
 	return frameworks, err
 }
 
-func (armoAPI *ArmoAPI) GetControl(policyName string) (*reporthandling.Control, error) {
+func (armoAPI *KSCloudAPI) GetControl(policyName string) (*reporthandling.Control, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
 
-func (armoAPI *ArmoAPI) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+func (armoAPI *KSCloudAPI) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	exceptions := []armotypes.PostureExceptionPolicy{}
 
 	respStr, err := armoAPI.Get(armoAPI.getExceptionsURL(clusterName), nil)
@@ -202,7 +198,7 @@ func (armoAPI *ArmoAPI) GetExceptions(clusterName string) ([]armotypes.PostureEx
 	return exceptions, nil
 }
 
-func (armoAPI *ArmoAPI) GetTenant() (*TenantResponse, error) {
+func (armoAPI *KSCloudAPI) GetTenant() (*TenantResponse, error) {
 	url := armoAPI.getAccountURL()
 	if armoAPI.accountID != "" {
 		url = fmt.Sprintf("%s?customerGUID=%s", url, armoAPI.accountID)
@@ -222,7 +218,7 @@ func (armoAPI *ArmoAPI) GetTenant() (*TenantResponse, error) {
 }
 
 // ControlsInputs  // map[<control name>][<input arguments>]
-func (armoAPI *ArmoAPI) GetAccountConfig(clusterName string) (*armotypes.CustomerConfig, error) {
+func (armoAPI *KSCloudAPI) GetAccountConfig(clusterName string) (*armotypes.CustomerConfig, error) {
 	accountConfig := &armotypes.CustomerConfig{}
 	if armoAPI.accountID == "" {
 		return accountConfig, nil
@@ -247,7 +243,7 @@ func (armoAPI *ArmoAPI) GetAccountConfig(clusterName string) (*armotypes.Custome
 }
 
 // ControlsInputs  // map[<control name>][<input arguments>]
-func (armoAPI *ArmoAPI) GetControlsInputs(clusterName string) (map[string][]string, error) {
+func (armoAPI *KSCloudAPI) GetControlsInputs(clusterName string) (map[string][]string, error) {
 	accountConfig, err := armoAPI.GetAccountConfig(clusterName)
 	if err == nil {
 		return accountConfig.Settings.PostureControlInputs, nil
@@ -255,7 +251,7 @@ func (armoAPI *ArmoAPI) GetControlsInputs(clusterName string) (map[string][]stri
 	return nil, err
 }
 
-func (armoAPI *ArmoAPI) ListCustomFrameworks() ([]string, error) {
+func (armoAPI *KSCloudAPI) ListCustomFrameworks() ([]string, error) {
 	respStr, err := armoAPI.Get(armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, err
@@ -275,7 +271,7 @@ func (armoAPI *ArmoAPI) ListCustomFrameworks() ([]string, error) {
 	return frameworkList, nil
 }
 
-func (armoAPI *ArmoAPI) ListFrameworks() ([]string, error) {
+func (armoAPI *KSCloudAPI) ListFrameworks() ([]string, error) {
 	respStr, err := armoAPI.Get(armoAPI.getListFrameworkURL(), nil)
 	if err != nil {
 		return nil, err
@@ -297,11 +293,11 @@ func (armoAPI *ArmoAPI) ListFrameworks() ([]string, error) {
 	return frameworkList, nil
 }
 
-func (armoAPI *ArmoAPI) ListControls(l ListType) ([]string, error) {
+func (armoAPI *KSCloudAPI) ListControls(l ListType) ([]string, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
 
-func (armoAPI *ArmoAPI) PostExceptions(exceptions []armotypes.PostureExceptionPolicy) error {
+func (armoAPI *KSCloudAPI) PostExceptions(exceptions []armotypes.PostureExceptionPolicy) error {
 
 	for i := range exceptions {
 		ex, err := json.Marshal(exceptions[i])
@@ -316,7 +312,7 @@ func (armoAPI *ArmoAPI) PostExceptions(exceptions []armotypes.PostureExceptionPo
 	return nil
 }
 
-func (armoAPI *ArmoAPI) DeleteException(exceptionName string) error {
+func (armoAPI *KSCloudAPI) DeleteException(exceptionName string) error {
 
 	_, err := armoAPI.Delete(armoAPI.exceptionsURL(exceptionName), nil)
 	if err != nil {
@@ -324,7 +320,7 @@ func (armoAPI *ArmoAPI) DeleteException(exceptionName string) error {
 	}
 	return nil
 }
-func (armoAPI *ArmoAPI) Login() error {
+func (armoAPI *KSCloudAPI) Login() error {
 	if armoAPI.accountID == "" {
 		return fmt.Errorf("failed to login, missing accountID")
 	}

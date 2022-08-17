@@ -11,7 +11,7 @@ import (
 
 var NativeFrameworks = []string{"nsa", "mitre", "armobest", "devopsbest"}
 
-func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
+func (armoAPI *KSCloudAPI) getFrameworkURL(frameworkName string) string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoFrameworks"
@@ -28,7 +28,7 @@ func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getListFrameworkURL() string {
+func (armoAPI *KSCloudAPI) getListFrameworkURL() string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoFrameworks"
@@ -38,7 +38,7 @@ func (armoAPI *ArmoAPI) getListFrameworkURL() string {
 
 	return u.String()
 }
-func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
+func (armoAPI *KSCloudAPI) getExceptionsURL(clusterName string) string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoPostureExceptions"
@@ -53,7 +53,7 @@ func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
+func (armoAPI *KSCloudAPI) exceptionsURL(exceptionsPolicyName string) string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/postureExceptionPolicy"
@@ -69,13 +69,13 @@ func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getAccountConfigDefault(clusterName string) string {
+func (armoAPI *KSCloudAPI) getAccountConfigDefault(clusterName string) string {
 	config := armoAPI.getAccountConfig(clusterName)
 	url := config + "&scope=customer"
 	return url
 }
 
-func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
+func (armoAPI *KSCloudAPI) getAccountConfig(clusterName string) string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/armoCustomerConfiguration"
@@ -90,28 +90,28 @@ func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getAccountURL() string {
+func (armoAPI *KSCloudAPI) getAccountURL() string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/createTenant"
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getApiToken() string {
+func (armoAPI *KSCloudAPI) getApiToken() string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetAuthURL())
 	u.Path = "identity/resources/auth/v1/api-token"
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getOpenidCustomers() string {
+func (armoAPI *KSCloudAPI) getOpenidCustomers() string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
 	u.Path = "api/v1/openid_customers"
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getAuthCookie() (string, error) {
+func (armoAPI *KSCloudAPI) getAuthCookie() (string, error) {
 	selectCustomer := ArmoSelectCustomer{SelectedCustomerGuid: armoAPI.accountID}
 	requestBody, _ := json.Marshal(selectCustomer)
 	client := &http.Client{}
@@ -149,7 +149,7 @@ func (armoAPI *ArmoAPI) getAuthCookie() (string, error) {
 
 	return authCookie, nil
 }
-func (armoAPI *ArmoAPI) appendAuthHeaders(headers map[string]string) {
+func (armoAPI *KSCloudAPI) appendAuthHeaders(headers map[string]string) {
 
 	if armoAPI.feToken.Token != "" {
 		headers["Authorization"] = fmt.Sprintf("Bearer %s", armoAPI.feToken.Token)
@@ -159,7 +159,7 @@ func (armoAPI *ArmoAPI) appendAuthHeaders(headers map[string]string) {
 	}
 }
 
-func (armoAPI *ArmoAPI) getCustomerGUIDFallBack() string {
+func (armoAPI *KSCloudAPI) getCustomerGUIDFallBack() string {
 	if armoAPI.accountID != "" {
 		return armoAPI.accountID
 	}

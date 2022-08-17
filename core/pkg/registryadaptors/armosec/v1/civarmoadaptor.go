@@ -11,7 +11,7 @@ import (
 	"github.com/dwertent/go-logger/helpers"
 )
 
-func NewArmoAdaptor(armoAPI *getter.ArmoAPI) *ArmoCivAdaptor {
+func NewArmoAdaptor(armoAPI *getter.KSCloudAPI) *ArmoCivAdaptor {
 	return &ArmoCivAdaptor{
 		armoAPI: armoAPI,
 	}
