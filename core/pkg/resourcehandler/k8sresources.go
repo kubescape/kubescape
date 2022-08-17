@@ -45,7 +45,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSCloudResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -232,7 +232,7 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 // 	}
 // 	return nil
 // }
-func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (map[string]apis.StatusInfo, error) {
+func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.KSCloudResources) (map[string]apis.StatusInfo, error) {
 	logger.L().Debug("Collecting host scanner resources")
 	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources()
 	if err != nil {
@@ -269,7 +269,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
-func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (string, error) {
+func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.KSCloudResources) (string, error) {
 	logger.L().Debug("Collecting cloud data")
 
 	clusterName := cautils.ClusterName

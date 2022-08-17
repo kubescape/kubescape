@@ -21,7 +21,7 @@ var (
 	CloudResources = []string{"ClusterDescribe"}
 )
 
-func MapArmoResource(armoResourceMap *ArmoResources, resources []string) []string {
+func MapArmoResource(armoResourceMap *KSCloudResources, resources []string) []string {
 	var hostResources []string
 	for k := range *armoResourceMap {
 		for _, resource := range resources {
@@ -33,15 +33,15 @@ func MapArmoResource(armoResourceMap *ArmoResources, resources []string) []strin
 	return hostResources
 }
 
-func MapHostResources(armoResourceMap *ArmoResources) []string {
+func MapHostResources(armoResourceMap *KSCloudResources) []string {
 	return MapArmoResource(armoResourceMap, HostSensorResources)
 }
 
-func MapImageVulnResources(armoResourceMap *ArmoResources) []string {
+func MapImageVulnResources(armoResourceMap *KSCloudResources) []string {
 	return MapArmoResource(armoResourceMap, ImageVulnResources)
 }
 
-func MapCloudResources(armoResourceMap *ArmoResources) []string {
+func MapCloudResources(armoResourceMap *KSCloudResources) []string {
 	return MapArmoResource(armoResourceMap, CloudResources)
 }
 

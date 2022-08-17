@@ -40,7 +40,7 @@ var (
 		ClusterDescribe: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}}
 )
 
-func isEmptyImgVulns(armoResourcesMap cautils.ArmoResources) bool {
+func isEmptyImgVulns(armoResourcesMap cautils.KSCloudResources) bool {
 	imgVulnResources := cautils.MapImageVulnResources(&armoResourcesMap)
 	for _, resource := range imgVulnResources {
 		if val, ok := armoResourcesMap[resource]; ok {
@@ -68,8 +68,8 @@ func setK8sResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResour
 	return &k8sResources
 }
 
-func setArmoResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) *cautils.ArmoResources {
-	armoResources := make(cautils.ArmoResources)
+func setArmoResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) *cautils.KSCloudResources {
+	armoResources := make(cautils.KSCloudResources)
 	complexMap := setComplexArmoResourceMap(frameworks, resourceToControl)
 	for group := range complexMap {
 		for version := range complexMap[group] {

@@ -27,7 +27,7 @@ func TestSetResourceMap(t *testing.T) {
 
 }
 func TestSsEmptyImgVulns(t *testing.T) {
-	armoResourcesMap := make(cautils.ArmoResources, 0)
+	armoResourcesMap := make(cautils.KSCloudResources, 0)
 	armoResourcesMap["container.googleapis.com/v1"] = []string{"fsdfds"}
 	assert.Equal(t, true, isEmptyImgVulns(armoResourcesMap))
 

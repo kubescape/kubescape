@@ -35,7 +35,7 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	return registryAdaptors, nil
 }
 
-func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) error {
+func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.KSCloudResources) error {
 	logger.L().Debug("Collecting images vulnerabilities")
 
 	if len(registryAdaptors.adaptors) == 0 {
