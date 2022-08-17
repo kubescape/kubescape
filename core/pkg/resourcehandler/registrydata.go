@@ -151,10 +151,10 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 
 	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
 
-	armoAPI := getter.GetArmoAPIConnector()
+	armoAPI := getter.GetKSCloudAPIConnector()
 	if armoAPI != nil {
 		if armoAPI.GetSecretKey() != "" && armoAPI.GetClientID() != "" && armoAPI.GetAccountID() != "" {
-			adaptors = append(adaptors, armosecadaptorv1.NewArmoAdaptor(getter.GetArmoAPIConnector()))
+			adaptors = append(adaptors, armosecadaptorv1.NewArmoAdaptor(getter.GetKSCloudAPIConnector()))
 		}
 	}
 

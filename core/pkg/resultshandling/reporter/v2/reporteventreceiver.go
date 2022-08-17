@@ -104,7 +104,7 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 
 func (report *ReportEventReceiver) GetURL() string {
 	u := url.URL{}
-	u.Host = getter.GetArmoAPIConnector().GetFrontendURL()
+	u.Host = getter.GetKSCloudAPIConnector().GetFrontendURL()
 
 	parseHost(&u)
 	report.addPathURL(&u)

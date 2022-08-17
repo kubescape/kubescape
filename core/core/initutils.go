@@ -27,9 +27,9 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 }
 func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), credentials, clusterName)
+		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), credentials, clusterName)
+	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName)
 }
 
 func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
@@ -37,7 +37,7 @@ func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
 		// load exceptions from file
 		return getter.NewLoadPolicy([]string{useExceptions})
 	} else {
-		return getter.GetArmoAPIConnector()
+		return getter.GetKSCloudAPIConnector()
 	}
 }
 
@@ -73,7 +73,7 @@ func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenant
 		// scanInfo.HostSensor.SetBool(false)
 		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns, registryAdaptors)
 	}
-	getter.GetArmoAPIConnector()
+	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
 	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors)
 }
@@ -171,7 +171,7 @@ func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, framewor
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
 	if tennatEmail != "" && frameworkScope {
-		g := getter.GetArmoAPIConnector() // download policy from ARMO backend
+		g := getter.GetKSCloudAPIConnector() // download policy from ARMO backend
 		return g
 	}
 	if downloadReleasedPolicy == nil {
@@ -187,7 +187,7 @@ func getConfigInputsGetter(ControlsInputs string, accountID string, downloadRele
 		return getter.NewLoadPolicy([]string{ControlsInputs})
 	}
 	if accountID != "" {
-		g := getter.GetArmoAPIConnector() // download config from ARMO backend
+		g := getter.GetKSCloudAPIConnector() // download config from ARMO backend
 		return g
 	}
 	if downloadReleasedPolicy == nil {

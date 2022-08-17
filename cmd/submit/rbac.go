@@ -79,7 +79,7 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 }
 func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), credentials, clusterName)
+		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), credentials, clusterName)
+	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName)
 }

@@ -11,7 +11,7 @@ import (
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj := url.URL{}
-	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
+	urlObj.Host = getter.GetKSCloudAPIConnector().GetReportReceiverURL()
 	parseHost(&urlObj)
 
 	urlObj.Path = "/k8s/v2/postureReport"

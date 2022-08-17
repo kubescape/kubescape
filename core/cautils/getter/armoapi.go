@@ -56,7 +56,7 @@ func SetKSCloudAPIConnector(ksCloudAPI *KSCloudAPI) {
 	globalArmoAPIConnector = ksCloudAPI
 }
 
-func GetArmoAPIConnector() *KSCloudAPI {
+func GetKSCloudAPIConnector() *KSCloudAPI {
 	if globalArmoAPIConnector == nil {
 		// logger.L().Error("returning nil API connector")
 		SetKSCloudAPIConnector(NewARMOAPIProd())

@@ -15,7 +15,7 @@ func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error 
 	getTenantConfig(&delExceptions.Credentials, "", getKubernetesApi())
 
 	// login kubescape SaaS
-	armoAPI := getter.GetArmoAPIConnector()
+	armoAPI := getter.GetKSCloudAPIConnector()
 	if err := armoAPI.Login(); err != nil {
 		return err
 	}
