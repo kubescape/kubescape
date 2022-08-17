@@ -44,12 +44,12 @@ func initializeSaaSEnv() {
 	switch saasEnv {
 	case "dev", "development":
 		logger.L().Debug("setting dev env")
-		getter.SetARMOAPIConnector(getter.NewARMOAPIDev())
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIDev())
 	case "stage", "staging":
 		logger.L().Debug("setting staging env")
-		getter.SetARMOAPIConnector(getter.NewARMOAPIStaging())
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIStaging())
 	default:
 		logger.L().Debug("setting prod env")
-		getter.SetARMOAPIConnector(getter.NewARMOAPIProd())
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIProd())
 	}
 }
