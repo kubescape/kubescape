@@ -117,9 +117,9 @@ type ScanInfo struct {
 	InputPatterns      []string           // Yaml files input patterns
 	Silent             bool               // Silent mode - Do not print progress logs
 	FailThreshold      float32            // Failure score threshold
-	Submit             bool               // Submit results to Armo BE
+	Submit             bool               // Submit results to Kubescape Cloud BE
 	ScanID             string             // Report id of the current scan
-	HostSensorEnabled  BoolPtrFlag        // Deploy ARMO K8s host scanner to collect data from certain controls
+	HostSensorEnabled  BoolPtrFlag        // Deploy Kubescape K8s host scanner to collect data from certain controls
 	HostSensorYamlPath string             // Path to hostsensor file
 	Local              bool               // Do not submit results
 	Credentials        Credentials        // account ID
