@@ -15,8 +15,8 @@ func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error 
 	getTenantConfig(&delExceptions.Credentials, "", getKubernetesApi())
 
 	// login kubescape SaaS
-	armoAPI := getter.GetKSCloudAPIConnector()
-	if err := armoAPI.Login(); err != nil {
+	ksCloudAPI := getter.GetKSCloudAPIConnector()
+	if err := ksCloudAPI.Login(); err != nil {
 		return err
 	}
 
@@ -26,7 +26,7 @@ func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error 
 			continue
 		}
 		logger.L().Info("Deleting exception", helpers.String("name", exceptionName))
-		if err := armoAPI.DeleteException(exceptionName); err != nil {
+		if err := ksCloudAPI.DeleteException(exceptionName); err != nil {
 			return fmt.Errorf("failed to delete exception '%s', reason: %s", exceptionName, err.Error())
 		}
 		logger.L().Success("Exception deleted successfully")
