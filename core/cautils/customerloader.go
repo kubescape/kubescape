@@ -124,7 +124,7 @@ func (lc *LocalConfig) GetToken() string         { return lc.configObj.Token }
 func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
-	// ARMO tenant GUID
+	// Kubescape Cloud tenant GUID
 	if err := getTenantConfigFromBE(lc.backendAPI, lc.configObj); err != nil {
 		return err
 	}
@@ -145,7 +145,7 @@ func (lc *LocalConfig) DeleteCachedConfig() error {
 
 func getTenantConfigFromBE(backendAPI getter.IBackend, configObj *ConfigObj) error {
 
-	// get from armoBE
+	// get from Kubescape Cloud API
 	tenantResponse, err := backendAPI.GetTenant()
 	if err == nil && tenantResponse != nil {
 		if tenantResponse.AdminMail != "" { // registered tenant
