@@ -62,7 +62,7 @@ func GetKSCloudAPIConnector() *KSCloudAPI {
 }
 
 func NewKSCloudAPIDev() *KSCloudAPI {
-	apiObj := newArmoAPI()
+	apiObj := newKSCloudAPI()
 
 	apiObj.apiURL = ksCloudDevBEURL
 	apiObj.authURL = ksCloudDevAUTHURL
@@ -73,7 +73,7 @@ func NewKSCloudAPIDev() *KSCloudAPI {
 }
 
 func NewKSCloudAPIProd() *KSCloudAPI {
-	apiObj := newArmoAPI()
+	apiObj := newKSCloudAPI()
 
 	apiObj.apiURL = ksCloudBEURL
 	apiObj.erURL = ksCloudERURL
@@ -84,7 +84,7 @@ func NewKSCloudAPIProd() *KSCloudAPI {
 }
 
 func NewKSCloudAPIStaging() *KSCloudAPI {
-	apiObj := newArmoAPI()
+	apiObj := newKSCloudAPI()
 
 	apiObj.apiURL = ksCloudStageBEURL
 	apiObj.erURL = ksCloudStageERURL
@@ -94,18 +94,18 @@ func NewKSCloudAPIStaging() *KSCloudAPI {
 	return apiObj
 }
 
-func NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL string) *KSCloudAPI {
-	apiObj := newArmoAPI()
+func NewKSCloudAPICustomized(ksCloudERURL, ksCloudBEURL, ksCloudFEURL, ksCloudAUTHURL string) *KSCloudAPI {
+	apiObj := newKSCloudAPI()
 
-	apiObj.erURL = armoERURL
-	apiObj.apiURL = armoBEURL
-	apiObj.feURL = armoFEURL
-	apiObj.authURL = armoAUTHURL
+	apiObj.erURL = ksCloudERURL
+	apiObj.apiURL = ksCloudBEURL
+	apiObj.feURL = ksCloudFEURL
+	apiObj.authURL = ksCloudAUTHURL
 
 	return apiObj
 }
 
-func newArmoAPI() *KSCloudAPI {
+func newKSCloudAPI() *KSCloudAPI {
 	return &KSCloudAPI{
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
 		loggedIn:   false,
