@@ -16,22 +16,20 @@ import (
 )
 
 var (
-	// ATTENTION!!!
-	// Changes in this URLs variable names, or in the usage is affecting the build process! BE CAREFUL
-	armoERURL   = "report.armo.cloud"
-	armoBEURL   = "api.armosec.io"
-	armoFEURL   = "cloud.armosec.io"
-	armoAUTHURL = "auth.armosec.io"
+	ksCloudERURL   = "report.armo.cloud"
+	ksCloudBEURL   = "api.armosec.io"
+	ksCloudFEURL   = "cloud.armosec.io"
+	ksCloudAUTHURL = "auth.armosec.io"
 
-	armoStageERURL   = "report-ks.eustage2.cyberarmorsoft.com"
-	armoStageBEURL   = "api-stage.armosec.io"
-	armoStageFEURL   = "armoui-stage.armosec.io"
-	armoStageAUTHURL = "eggauth-stage.armosec.io"
+	ksCloudStageERURL   = "report-ks.eustage2.cyberarmorsoft.com"
+	ksCloudStageBEURL   = "api-stage.armosec.io"
+	ksCloudStageFEURL   = "armoui-stage.armosec.io"
+	ksCloudStageAUTHURL = "eggauth-stage.armosec.io"
 
-	armoDevERURL   = "report.eudev3.cyberarmorsoft.com"
-	armoDevBEURL   = "api-dev.armosec.io"
-	armoDevFEURL   = "cloud-dev.armosec.io"
-	armoDevAUTHURL = "eggauth-dev.armosec.io"
+	ksCloudDevERURL   = "report.eudev3.cyberarmorsoft.com"
+	ksCloudDevBEURL   = "api-dev.armosec.io"
+	ksCloudDevFEURL   = "cloud-dev.armosec.io"
+	ksCloudDevAUTHURL = "eggauth-dev.armosec.io"
 )
 
 // KSCloudAPI allows accessing the API of the Kubescape Cloud offering
@@ -66,10 +64,10 @@ func GetKSCloudAPIConnector() *KSCloudAPI {
 func NewKSCloudAPIDev() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
-	apiObj.apiURL = armoDevBEURL
-	apiObj.authURL = armoDevAUTHURL
-	apiObj.erURL = armoDevERURL
-	apiObj.feURL = armoDevFEURL
+	apiObj.apiURL = ksCloudDevBEURL
+	apiObj.authURL = ksCloudDevAUTHURL
+	apiObj.erURL = ksCloudDevERURL
+	apiObj.feURL = ksCloudDevFEURL
 
 	return apiObj
 }
@@ -77,10 +75,10 @@ func NewKSCloudAPIDev() *KSCloudAPI {
 func NewKSCloudAPIProd() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
-	apiObj.apiURL = armoBEURL
-	apiObj.erURL = armoERURL
-	apiObj.feURL = armoFEURL
-	apiObj.authURL = armoAUTHURL
+	apiObj.apiURL = ksCloudBEURL
+	apiObj.erURL = ksCloudERURL
+	apiObj.feURL = ksCloudFEURL
+	apiObj.authURL = ksCloudAUTHURL
 
 	return apiObj
 }
@@ -88,10 +86,10 @@ func NewKSCloudAPIProd() *KSCloudAPI {
 func NewARMOAPIStaging() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
-	apiObj.apiURL = armoStageBEURL
-	apiObj.erURL = armoStageERURL
-	apiObj.feURL = armoStageFEURL
-	apiObj.authURL = armoStageAUTHURL
+	apiObj.apiURL = ksCloudStageBEURL
+	apiObj.erURL = ksCloudStageERURL
+	apiObj.feURL = ksCloudStageFEURL
+	apiObj.authURL = ksCloudStageAUTHURL
 
 	return apiObj
 }
