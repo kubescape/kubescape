@@ -66,7 +66,7 @@ func initEnvironment() {
 	case 1:
 		switch urlSlices[0] {
 		case "dev", "development":
-			getter.SetKSCloudAPIConnector(getter.NewARMOAPIDev())
+			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIDev())
 		case "stage", "staging":
 			getter.SetKSCloudAPIConnector(getter.NewARMOAPIStaging())
 		case "":

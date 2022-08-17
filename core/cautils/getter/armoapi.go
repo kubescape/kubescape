@@ -63,7 +63,7 @@ func GetKSCloudAPIConnector() *KSCloudAPI {
 	return globalKSCloudAPIConnector
 }
 
-func NewARMOAPIDev() *KSCloudAPI {
+func NewKSCloudAPIDev() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.apiURL = armoDevBEURL
