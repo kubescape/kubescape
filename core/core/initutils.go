@@ -124,7 +124,7 @@ func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
 	return policiesNames
 }
 
-// setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Armo BE
+// setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Kubescape Cloud BE
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
@@ -165,13 +165,13 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 }
 
-// setPolicyGetter set the policy getter - local file/github release/ArmoAPI
+// setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
 func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
 	if tennatEmail != "" && frameworkScope {
-		g := getter.GetKSCloudAPIConnector() // download policy from ARMO backend
+		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
 	}
 	if downloadReleasedPolicy == nil {
@@ -181,13 +181,13 @@ func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, framewor
 
 }
 
-// setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
+// setConfigInputsGetter sets the config input getter - local file/github release/Kubescape Cloud API
 func getConfigInputsGetter(ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
 	}
 	if accountID != "" {
-		g := getter.GetKSCloudAPIConnector() // download config from ARMO backend
+		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
 		return g
 	}
 	if downloadReleasedPolicy == nil {
