@@ -15,7 +15,7 @@ type KSResources map[string][]string
 
 type OPASessionObj struct {
 	K8SResources          *K8SResources                          // input k8s objects
-	ArmoResource          *KSResources                         // input ARMO objects
+	ArmoResource          *KSResources                           // input ARMO objects
 	Policies              []reporthandling.Framework             // list of frameworks to scan
 	AllResources          map[string]workloadinterface.IMetadata // all scanned resources, map[<rtesource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result     // resources scan results, map[<rtesource ID>]<resource result>
