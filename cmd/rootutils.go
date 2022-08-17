@@ -77,13 +77,13 @@ func initEnvironment() {
 	case 2:
 		logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 	case 3, 4:
-		var armoAUTHURL string
-		armoERURL := urlSlices[0] // mandatory
-		armoBEURL := urlSlices[1] // mandatory
-		armoFEURL := urlSlices[2] // mandatory
+		var ksAuthURL string
+		ksEventReceiverURL := urlSlices[0] // mandatory
+		ksBackendURL := urlSlices[1] // mandatory
+		ksFrontendURL := urlSlices[2] // mandatory
 		if len(urlSlices) >= 4 {
-			armoAUTHURL = urlSlices[3]
+			ksAuthURL = urlSlices[3]
 		}
-		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL))
+		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(ksEventReceiverURL, ksBackendURL, ksFrontendURL, ksAuthURL))
 	}
 }
