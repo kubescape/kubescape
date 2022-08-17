@@ -66,11 +66,11 @@ func initEnvironment() {
 	case 1:
 		switch urlSlices[0] {
 		case "dev", "development":
-			getter.SetARMOAPIConnector(getter.NewARMOAPIDev())
+			getter.SetKSCloudAPIConnector(getter.NewARMOAPIDev())
 		case "stage", "staging":
-			getter.SetARMOAPIConnector(getter.NewARMOAPIStaging())
+			getter.SetKSCloudAPIConnector(getter.NewARMOAPIStaging())
 		case "":
-			getter.SetARMOAPIConnector(getter.NewARMOAPIProd())
+			getter.SetKSCloudAPIConnector(getter.NewARMOAPIProd())
 		default:
 			logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 		}
@@ -84,6 +84,6 @@ func initEnvironment() {
 		if len(urlSlices) >= 4 {
 			ksAuthURL = urlSlices[3]
 		}
-		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(ksEventReceiverURL, ksBackendURL, ksFrontendURL, ksAuthURL))
+		getter.SetKSCloudAPIConnector(getter.NewARMOAPICustomized(ksEventReceiverURL, ksBackendURL, ksFrontendURL, ksAuthURL))
 	}
 }
