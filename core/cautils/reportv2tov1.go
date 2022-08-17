@@ -9,7 +9,6 @@ import (
 
 func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 	report := &reporthandling.PostureReport{}
-	//	opaSessionObj.PostureReport.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
 
 	frameworks := []reporthandling.FrameworkReport{}
 
@@ -31,25 +30,11 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 		fwv1.Score = opaSessionObj.Report.SummaryDetails.Score
 	}
 
-	// // remove unused data
-	// opaSessionObj.Report = nil
-	// opaSessionObj.ResourcesResult = nil
-
 	// setup counters and score
 	for f := range frameworks {
-		// // set exceptions
-		// exceptions.SetFrameworkExceptions(frameworks, opap.Exceptions, cautils.ClusterName)
-
 		// set counters
 		reporthandling.SetUniqueResourcesCounter(&frameworks[f])
-
-		// set default score
-		// reporthandling.SetDefaultScore(&frameworks[f])
 	}
-
-	// // update score
-	// scoreutil := score.NewScore(opaSessionObj.AllResources)
-	// scoreutil.Calculate(frameworks)
 
 	report.FrameworkReports = frameworks
 	return report
@@ -64,7 +49,6 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.Name = crv2.GetName()
 		crv1.Score = crv2.GetScore()
 		crv1.Control_ID = controlID
-		// crv1.Attributes = crv2.
 
 		// TODO - add fields
 		crv1.Description = crv2.Description
