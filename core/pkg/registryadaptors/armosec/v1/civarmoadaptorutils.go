@@ -8,15 +8,15 @@ import (
 	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 )
 
-func (armoCivAdaptor *ArmoCivAdaptor) getImageLastScanId(imageID *registryvulnerabilities.ContainerImageIdentifier) (string, error) {
+func (armoCivAdaptor *KSCivAdaptor) getImageLastScanId(imageID *registryvulnerabilities.ContainerImageIdentifier) (string, error) {
 	filter := []map[string]string{{"imageTag": imageID.Tag, "status": "Success"}}
 	pageSize := 1
 	pageNumber := 1
 	request := V2ListRequest{PageSize: &pageSize, PageNum: &pageNumber, InnerFilters: filter, OrderBy: "timestamp:desc"}
 	requestBody, _ := json.Marshal(request)
-	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.armoAPI.GetApiURL(), armoCivAdaptor.armoAPI.GetAccountID())
+	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsSumSummary?customerGUID=%s", armoCivAdaptor.ksCloudAPI.GetApiURL(), armoCivAdaptor.ksCloudAPI.GetAccountID())
 
-	resp, err := armoCivAdaptor.armoAPI.Post(requestUrl, map[string]string{"Content-Type": "application/json"}, requestBody)
+	resp, err := armoCivAdaptor.ksCloudAPI.Post(requestUrl, map[string]string{"Content-Type": "application/json"}, requestBody)
 	if err != nil {
 		return "", err
 	}

@@ -30,6 +30,7 @@ type V2ListRequest struct {
 	FieldsList              []string          `json:"includeFields,omitempty"`
 	FieldsReverseKeywordMap map[string]string `json:"-,omitempty"`
 }
-type ArmoCivAdaptor struct {
-	armoAPI *getter.KSCloudAPI
+
+type KSCivAdaptor struct {
+	ksCloudAPI *getter.KSCloudAPI
 }
