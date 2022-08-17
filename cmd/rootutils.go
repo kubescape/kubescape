@@ -55,10 +55,10 @@ func initCacheDir() {
 	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 }
 func initEnvironment() {
-	if rootInfo.ArmoBEURLs == "" {
-		rootInfo.ArmoBEURLs = rootInfo.ArmoBEURLsDep
+	if rootInfo.KSCloudBEURLs == "" {
+		rootInfo.KSCloudBEURLs = rootInfo.KSCloudBEURLsDep
 	}
-	urlSlices := strings.Split(rootInfo.ArmoBEURLs, ",")
+	urlSlices := strings.Split(rootInfo.KSCloudBEURLs, ",")
 	if len(urlSlices) != 1 && len(urlSlices) < 3 {
 		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
 	}

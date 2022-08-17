@@ -51,8 +51,8 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		Example: ksExamples,
 	}
 
-	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLsDep, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLs, "env", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLsDep, "environment", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLs, "env", "", envFlagUsage)
 	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
