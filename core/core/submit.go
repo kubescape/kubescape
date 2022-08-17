@@ -52,12 +52,12 @@ func (ks *Kubescape) SubmitExceptions(credentials *cautils.Credentials, excPath 
 	}
 
 	// login kubescape SaaS
-	armoAPI := getter.GetKSCloudAPIConnector()
-	if err := armoAPI.Login(); err != nil {
+	ksCloudAPI := getter.GetKSCloudAPIConnector()
+	if err := ksCloudAPI.Login(); err != nil {
 		return err
 	}
 
-	if err := armoAPI.PostExceptions(exceptions); err != nil {
+	if err := ksCloudAPI.PostExceptions(exceptions); err != nil {
 		return err
 	}
 	logger.L().Success("Exceptions submitted successfully")
