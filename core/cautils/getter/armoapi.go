@@ -83,7 +83,7 @@ func NewKSCloudAPIProd() *KSCloudAPI {
 	return apiObj
 }
 
-func NewARMOAPIStaging() *KSCloudAPI {
+func NewKSCloudAPIStaging() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.apiURL = ksCloudStageBEURL

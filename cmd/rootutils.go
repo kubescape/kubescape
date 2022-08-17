@@ -68,7 +68,7 @@ func initEnvironment() {
 		case "dev", "development":
 			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIDev())
 		case "stage", "staging":
-			getter.SetKSCloudAPIConnector(getter.NewARMOAPIStaging())
+			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIStaging())
 		case "":
 			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIProd())
 		default:
