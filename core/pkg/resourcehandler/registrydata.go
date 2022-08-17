@@ -35,7 +35,7 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	return registryAdaptors, nil
 }
 
-func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.KSResources) error {
+func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
 	logger.L().Debug("Collecting images vulnerabilities")
 
 	if len(registryAdaptors.adaptors) == 0 {
@@ -75,7 +75,7 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	for i := range metaObjs {
 		allResources[metaObjs[i].GetID()] = metaObjs[i]
 	}
-	(*armoResourceMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
+	(*ksResourceMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
 
 	return nil
 }
@@ -151,9 +151,9 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 
 	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
 
-	armoAPI := getter.GetKSCloudAPIConnector()
-	if armoAPI != nil {
-		if armoAPI.GetSecretKey() != "" && armoAPI.GetClientID() != "" && armoAPI.GetAccountID() != "" {
+	ksCloudAPI := getter.GetKSCloudAPIConnector()
+	if ksCloudAPI != nil {
+		if ksCloudAPI.GetSecretKey() != "" && ksCloudAPI.GetClientID() != "" && ksCloudAPI.GetAccountID() != "" {
 			adaptors = append(adaptors, armosecadaptorv1.NewKSAdaptor(getter.GetKSCloudAPIConnector()))
 		}
 	}
