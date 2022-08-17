@@ -84,14 +84,14 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Excluded() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources *cautils.K8SResources, armoResources *cautils.KSCloudResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
+func getAllSupportedObjects(k8sResources *cautils.K8SResources, armoResources *cautils.KSResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
 	k8sObjects = append(k8sObjects, getArmoObjects(armoResources, allResources, rule.DynamicMatch)...)
 	return k8sObjects
 }
 
-func getArmoObjects(k8sResources *cautils.KSCloudResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getArmoObjects(k8sResources *cautils.KSResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 
 	for m := range match {
