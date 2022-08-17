@@ -49,19 +49,18 @@ type KSCloudAPI struct {
 	loggedIn   bool
 }
 
-var globalArmoAPIConnector *KSCloudAPI
+var globalKSCloudAPIConnector *KSCloudAPI
 
 func SetKSCloudAPIConnector(ksCloudAPI *KSCloudAPI) {
 	logger.L().Debug("Armo URLs", helpers.String("api", ksCloudAPI.apiURL), helpers.String("auth", ksCloudAPI.authURL), helpers.String("report", ksCloudAPI.erURL), helpers.String("UI", ksCloudAPI.feURL))
-	globalArmoAPIConnector = ksCloudAPI
+	globalKSCloudAPIConnector = ksCloudAPI
 }
 
 func GetKSCloudAPIConnector() *KSCloudAPI {
-	if globalArmoAPIConnector == nil {
-		// logger.L().Error("returning nil API connector")
+	if globalKSCloudAPIConnector == nil {
 		SetKSCloudAPIConnector(NewARMOAPIProd())
 	}
-	return globalArmoAPIConnector
+	return globalKSCloudAPIConnector
 }
 
 func NewARMOAPIDev() *KSCloudAPI {
