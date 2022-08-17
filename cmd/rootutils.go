@@ -70,7 +70,7 @@ func initEnvironment() {
 		case "stage", "staging":
 			getter.SetKSCloudAPIConnector(getter.NewARMOAPIStaging())
 		case "":
-			getter.SetKSCloudAPIConnector(getter.NewARMOAPIProd())
+			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIProd())
 		default:
 			logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 		}

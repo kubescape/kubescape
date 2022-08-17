@@ -58,7 +58,7 @@ func SetKSCloudAPIConnector(ksCloudAPI *KSCloudAPI) {
 
 func GetKSCloudAPIConnector() *KSCloudAPI {
 	if globalKSCloudAPIConnector == nil {
-		SetKSCloudAPIConnector(NewARMOAPIProd())
+		SetKSCloudAPIConnector(NewKSCloudAPIProd())
 	}
 	return globalKSCloudAPIConnector
 }
@@ -74,7 +74,7 @@ func NewKSCloudAPIDev() *KSCloudAPI {
 	return apiObj
 }
 
-func NewARMOAPIProd() *KSCloudAPI {
+func NewKSCloudAPIProd() *KSCloudAPI {
 	apiObj := newArmoAPI()
 
 	apiObj.apiURL = armoBEURL
