@@ -27,16 +27,16 @@ func TestSetResourceMap(t *testing.T) {
 
 }
 func TestSsEmptyImgVulns(t *testing.T) {
-	armoResourcesMap := make(cautils.ArmoResources, 0)
-	armoResourcesMap["container.googleapis.com/v1"] = []string{"fsdfds"}
-	assert.Equal(t, true, isEmptyImgVulns(armoResourcesMap))
+	ksResourcesMap := make(cautils.KSResources, 0)
+	ksResourcesMap["container.googleapis.com/v1"] = []string{"fsdfds"}
+	assert.Equal(t, true, isEmptyImgVulns(ksResourcesMap))
 
-	armoResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{"dada"}
-	assert.Equal(t, false, isEmptyImgVulns(armoResourcesMap))
+	ksResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{"dada"}
+	assert.Equal(t, false, isEmptyImgVulns(ksResourcesMap))
 
-	armoResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{}
-	armoResourcesMap["bla"] = []string{"blu"}
-	assert.Equal(t, true, isEmptyImgVulns(armoResourcesMap))
+	ksResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{}
+	ksResourcesMap["bla"] = []string{"blu"}
+	assert.Equal(t, true, isEmptyImgVulns(ksResourcesMap))
 }
 
 func TestInsertK8sResources(t *testing.T) {

@@ -45,7 +45,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -61,14 +61,14 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
 
 	// pull k8s recourses
-	armoResourceMap := setArmoResourceMap(sessionObj.Policies, resourceToControl)
+	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
-	// map of armo resources to control_ids
+	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, armoResourceMap, err
+		return k8sResourcesMap, allResources, ksResourceMap, err
 	}
 
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
@@ -81,24 +81,24 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		}
 	}
 
-	imgVulnResources := cautils.MapImageVulnResources(armoResourceMap)
+	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
 	// check that controls use image vulnerability resources
 	if len(imgVulnResources) > 0 {
-		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, armoResourceMap); err != nil {
+		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
 			logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
 			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
 		} else {
-			if isEmptyImgVulns(*armoResourceMap) {
+			if isEmptyImgVulns(*ksResourceMap) {
 				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", imgVulnResources, sessionObj.InfoMap)
 			}
 		}
 	}
 
-	hostResources := cautils.MapHostResources(armoResourceMap)
+	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
-			infoMap, err := k8sHandler.collectHostResources(allResources, armoResourceMap)
+			infoMap, err := k8sHandler.collectHostResources(allResources, ksResourceMap)
 			if err != nil {
 				logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
 				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
@@ -117,10 +117,10 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		logger.L().Warning("failed to collect rbac resources", helpers.Error(err))
 	}
 
-	cloudResources := cautils.MapCloudResources(armoResourceMap)
+	cloudResources := cautils.MapCloudResources(ksResourceMap)
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
-		provider, err := getCloudProviderDescription(allResources, armoResourceMap)
+		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
@@ -135,7 +135,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	cautils.StopSpinner()
 	logger.L().Success("Accessed to Kubernetes objects")
 
-	return k8sResourcesMap, allResources, armoResourceMap, nil
+	return k8sResourcesMap, allResources, ksResourceMap, nil
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
@@ -220,19 +220,7 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 	return workloads
 }
 
-// func (k8sHandler *K8sResourceHandler) collectHostResourcesAPI(allResources map[string]workloadinterface.IMetadata, resourcesMap *cautils.K8SResources) error {
-
-// 	HostSensorAPI := map[string]string{
-// 		"bla/v1": "",
-// 	}
-// 	for apiVersion := range allResources {
-// 		if HostSensorAPI == apiVersion {
-// 			k8sHandler.collectHostResources()
-// 		}
-// 	}
-// 	return nil
-// }
-func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (map[string]apis.StatusInfo, error) {
+func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (map[string]apis.StatusInfo, error) {
 	logger.L().Debug("Collecting host scanner resources")
 	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources()
 	if err != nil {
@@ -244,11 +232,11 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[stri
 		groupResource := k8sinterface.JoinResourceTriplets(group, version, hostResources[rscIdx].GetKind())
 		allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
 
-		grpResourceList, ok := (*armoResourceMap)[groupResource]
+		grpResourceList, ok := (*ksResourceMap)[groupResource]
 		if !ok {
 			grpResourceList = make([]string, 0)
 		}
-		(*armoResourceMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
+		(*ksResourceMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 	}
 	return infoMap, nil
 }
@@ -269,7 +257,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
-func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) (string, error) {
+func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (string, error) {
 	logger.L().Debug("Collecting cloud data")
 
 	clusterName := cautils.ClusterName
@@ -286,7 +274,7 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 			return provider, fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
 		}
 		allResources[wl.GetID()] = wl
-		(*armoResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
 	return provider, nil
 

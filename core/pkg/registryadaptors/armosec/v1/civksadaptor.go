@@ -11,22 +11,22 @@ import (
 	"github.com/dwertent/go-logger/helpers"
 )
 
-func NewArmoAdaptor(armoAPI *getter.ArmoAPI) *ArmoCivAdaptor {
-	return &ArmoCivAdaptor{
-		armoAPI: armoAPI,
+func NewKSAdaptor(api *getter.KSCloudAPI) *KSCivAdaptor {
+	return &KSCivAdaptor{
+		ksCloudAPI: api,
 	}
 }
 
-func (armoCivAdaptor *ArmoCivAdaptor) Login() error {
-	if armoCivAdaptor.armoAPI.IsLoggedIn() {
+func (ksCivAdaptor *KSCivAdaptor) Login() error {
+	if ksCivAdaptor.ksCloudAPI.IsLoggedIn() {
 		return nil
 	}
-	return armoCivAdaptor.armoAPI.Login()
+	return ksCivAdaptor.ksCloudAPI.Login()
 }
-func (armoCivAdaptor *ArmoCivAdaptor) GetImagesVulnerabilities(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageVulnerabilityReport, error) {
+func (ksCivAdaptor *KSCivAdaptor) GetImagesVulnerabilities(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageVulnerabilityReport, error) {
 	resultList := make([]registryvulnerabilities.ContainerImageVulnerabilityReport, 0)
 	for _, imageID := range imageIDs {
-		result, err := armoCivAdaptor.GetImageVulnerability(&imageID)
+		result, err := ksCivAdaptor.GetImageVulnerability(&imageID)
 		if err == nil {
 			resultList = append(resultList, *result)
 		} else {
@@ -36,9 +36,9 @@ func (armoCivAdaptor *ArmoCivAdaptor) GetImagesVulnerabilities(imageIDs []regist
 	return resultList, nil
 }
 
-func (armoCivAdaptor *ArmoCivAdaptor) GetImageVulnerability(imageID *registryvulnerabilities.ContainerImageIdentifier) (*registryvulnerabilities.ContainerImageVulnerabilityReport, error) {
+func (ksCivAdaptor *KSCivAdaptor) GetImageVulnerability(imageID *registryvulnerabilities.ContainerImageIdentifier) (*registryvulnerabilities.ContainerImageVulnerabilityReport, error) {
 	// First
-	containerScanId, err := armoCivAdaptor.getImageLastScanId(imageID)
+	containerScanId, err := ksCivAdaptor.getImageLastScanId(imageID)
 	if err != nil {
 		return nil, err
 	}
@@ -51,9 +51,9 @@ func (armoCivAdaptor *ArmoCivAdaptor) GetImageVulnerability(imageID *registryvul
 	pageNumber := 1
 	request := V2ListRequest{PageSize: &pageSize, PageNum: &pageNumber, InnerFilters: filter, OrderBy: "timestamp:desc"}
 	requestBody, _ := json.Marshal(request)
-	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsDetails?customerGUID=%s", armoCivAdaptor.armoAPI.GetApiURL(), armoCivAdaptor.armoAPI.GetAccountID())
+	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsDetails?customerGUID=%s", ksCivAdaptor.ksCloudAPI.GetApiURL(), ksCivAdaptor.ksCloudAPI.GetAccountID())
 
-	resp, err := armoCivAdaptor.armoAPI.Post(requestUrl, map[string]string{"Content-Type": "application/json"}, requestBody)
+	resp, err := ksCivAdaptor.ksCloudAPI.Post(requestUrl, map[string]string{"Content-Type": "application/json"}, requestBody)
 	if err != nil {
 		return nil, err
 	}
@@ -82,16 +82,16 @@ func (armoCivAdaptor *ArmoCivAdaptor) GetImageVulnerability(imageID *registryvul
 	return &resultImageVulnerabilityReport, nil
 }
 
-func (armoCivAdaptor *ArmoCivAdaptor) DescribeAdaptor() string {
+func (ksCivAdaptor *KSCivAdaptor) DescribeAdaptor() string {
 	return "armo image vulnerabilities scanner, docs: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities"
 }
 
-func (armoCivAdaptor *ArmoCivAdaptor) GetImagesInformation(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageInformation, error) {
+func (ksCivAdaptor *KSCivAdaptor) GetImagesInformation(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageInformation, error) {
 	// TODO
 	return []registryvulnerabilities.ContainerImageInformation{}, nil
 }
 
-func (armoCivAdaptor *ArmoCivAdaptor) GetImagesScanStatus(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageScanStatus, error) {
+func (ksCivAdaptor *KSCivAdaptor) GetImagesScanStatus(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageScanStatus, error) {
 	// TODO
 	return []registryvulnerabilities.ContainerImageScanStatus{}, nil
 }

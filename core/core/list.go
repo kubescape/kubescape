@@ -66,8 +66,8 @@ func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
 	getTenantConfig(&listPolicies.Credentials, "", getKubernetesApi())
 
 	var exceptionsNames []string
-	armoAPI := getExceptionsGetter("")
-	exceptions, err := armoAPI.GetExceptions("")
+	ksCloudAPI := getExceptionsGetter("")
+	exceptions, err := ksCloudAPI.GetExceptions("")
 	if err != nil {
 		return exceptionsNames, err
 	}

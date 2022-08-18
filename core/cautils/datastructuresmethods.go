@@ -22,7 +22,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}
 			for r := range frameworks[i].Controls[j].Rules {
-				if !ruleWithArmoOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) {
+				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
@@ -35,7 +35,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 	}
 }
 
-func ruleWithArmoOpaDependency(attributes map[string]interface{}) bool {
+func ruleWithKSOpaDependency(attributes map[string]interface{}) bool {
 	if attributes == nil {
 		return false
 	}

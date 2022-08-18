@@ -11,11 +11,11 @@ import (
 
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
 type K8SResources map[string][]string
-type ArmoResources map[string][]string
+type KSResources map[string][]string
 
 type OPASessionObj struct {
 	K8SResources          *K8SResources                          // input k8s objects
-	ArmoResource          *ArmoResources                         // input ARMO objects
+	ArmoResource          *KSResources                           // input ARMO objects
 	Policies              []reporthandling.Framework             // list of frameworks to scan
 	AllResources          map[string]workloadinterface.IMetadata // all scanned resources, map[<rtesource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result     // resources scan results, map[<rtesource ID>]<resource result>

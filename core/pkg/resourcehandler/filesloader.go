@@ -30,7 +30,7 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.ArmoResources, error) {
+func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 
 	//
 	// build resources map
@@ -38,7 +38,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
-	armoResources := &cautils.ArmoResources{}
+	ksResources := &cautils.KSResources{}
 
 	workloads := []workloadinterface.IMetadata{}
 
@@ -179,14 +179,14 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		}
 	}
 
-	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, armoResources); err != nil {
+	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
 		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
 	}
 
 	cautils.StopSpinner()
 	logger.L().Success("Accessed to local objects")
 
-	return k8sResources, allResources, armoResources, nil
+	return k8sResources, allResources, ksResources, nil
 }
 
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info {

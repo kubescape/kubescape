@@ -11,12 +11,12 @@ import (
 
 var NativeFrameworks = []string{"nsa", "mitre", "armobest", "devopsbest"}
 
-func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
+func (api *KSCloudAPI) getFrameworkURL(frameworkName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
+	q.Add("customerGUID", api.getCustomerGUIDFallBack())
 	if isNativeFramework(frameworkName) {
 		q.Add("frameworkName", strings.ToUpper(frameworkName))
 	} else {
@@ -28,23 +28,23 @@ func (armoAPI *ArmoAPI) getFrameworkURL(frameworkName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getListFrameworkURL() string {
+func (api *KSCloudAPI) getListFrameworkURL() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
+	q.Add("customerGUID", api.getCustomerGUIDFallBack())
 	u.RawQuery = q.Encode()
 
 	return u.String()
 }
-func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
+func (api *KSCloudAPI) getExceptionsURL(clusterName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
 	u.Path = "api/v1/armoPostureExceptions"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
+	q.Add("customerGUID", api.getCustomerGUIDFallBack())
 	// if clusterName != "" { // TODO - fix customer name support in Armo BE
 	// 	q.Add("clusterName", clusterName)
 	// }
@@ -53,13 +53,13 @@ func (armoAPI *ArmoAPI) getExceptionsURL(clusterName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
+func (api *KSCloudAPI) exceptionsURL(exceptionsPolicyName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
 	u.Path = "api/v1/postureExceptionPolicy"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
+	q.Add("customerGUID", api.getCustomerGUIDFallBack())
 	if exceptionsPolicyName != "" { // for delete
 		q.Add("policyName", exceptionsPolicyName)
 	}
@@ -69,19 +69,19 @@ func (armoAPI *ArmoAPI) exceptionsURL(exceptionsPolicyName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getAccountConfigDefault(clusterName string) string {
-	config := armoAPI.getAccountConfig(clusterName)
+func (api *KSCloudAPI) getAccountConfigDefault(clusterName string) string {
+	config := api.getAccountConfig(clusterName)
 	url := config + "&scope=customer"
 	return url
 }
 
-func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
+func (api *KSCloudAPI) getAccountConfig(clusterName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
 	u.Path = "api/v1/armoCustomerConfiguration"
 
 	q := u.Query()
-	q.Add("customerGUID", armoAPI.getCustomerGUIDFallBack())
+	q.Add("customerGUID", api.getCustomerGUIDFallBack())
 	if clusterName != "" { // TODO - fix customer name support in Armo BE
 		q.Add("clusterName", clusterName)
 	}
@@ -90,49 +90,49 @@ func (armoAPI *ArmoAPI) getAccountConfig(clusterName string) string {
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getAccountURL() string {
+func (api *KSCloudAPI) getAccountURL() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
 	u.Path = "api/v1/createTenant"
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getApiToken() string {
+func (api *KSCloudAPI) getApiToken() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetAuthURL())
+	u.Scheme, u.Host = parseHost(api.GetAuthURL())
 	u.Path = "identity/resources/auth/v1/api-token"
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getOpenidCustomers() string {
+func (api *KSCloudAPI) getOpenidCustomers() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(armoAPI.GetApiURL())
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
 	u.Path = "api/v1/openid_customers"
 	return u.String()
 }
 
-func (armoAPI *ArmoAPI) getAuthCookie() (string, error) {
-	selectCustomer := ArmoSelectCustomer{SelectedCustomerGuid: armoAPI.accountID}
+func (api *KSCloudAPI) getAuthCookie() (string, error) {
+	selectCustomer := KSCloudSelectCustomer{SelectedCustomerGuid: api.accountID}
 	requestBody, _ := json.Marshal(selectCustomer)
 	client := &http.Client{}
-	httpRequest, err := http.NewRequest(http.MethodPost, armoAPI.getOpenidCustomers(), bytes.NewBuffer(requestBody))
+	httpRequest, err := http.NewRequest(http.MethodPost, api.getOpenidCustomers(), bytes.NewBuffer(requestBody))
 	if err != nil {
 		return "", err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("Authorization", fmt.Sprintf("Bearer %s", armoAPI.feToken.Token))
+	httpRequest.Header.Set("Authorization", fmt.Sprintf("Bearer %s", api.feToken.Token))
 	httpResponse, err := client.Do(httpRequest)
 	if err != nil {
 		return "", err
 	}
 	defer httpResponse.Body.Close()
 	if httpResponse.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to get cookie from %s: status %d", armoAPI.getOpenidCustomers(), httpResponse.StatusCode)
+		return "", fmt.Errorf("failed to get cookie from %s: status %d", api.getOpenidCustomers(), httpResponse.StatusCode)
 	}
 
 	cookies := httpResponse.Header.Get("set-cookie")
 	if len(cookies) == 0 {
-		return "", fmt.Errorf("no cookie field in response from %s", armoAPI.getOpenidCustomers())
+		return "", fmt.Errorf("no cookie field in response from %s", api.getOpenidCustomers())
 	}
 
 	authCookie := ""
@@ -144,24 +144,24 @@ func (armoAPI *ArmoAPI) getAuthCookie() (string, error) {
 	}
 
 	if len(authCookie) == 0 {
-		return "", fmt.Errorf("no auth cookie field in response from %s", armoAPI.getOpenidCustomers())
+		return "", fmt.Errorf("no auth cookie field in response from %s", api.getOpenidCustomers())
 	}
 
 	return authCookie, nil
 }
-func (armoAPI *ArmoAPI) appendAuthHeaders(headers map[string]string) {
+func (api *KSCloudAPI) appendAuthHeaders(headers map[string]string) {
 
-	if armoAPI.feToken.Token != "" {
-		headers["Authorization"] = fmt.Sprintf("Bearer %s", armoAPI.feToken.Token)
+	if api.feToken.Token != "" {
+		headers["Authorization"] = fmt.Sprintf("Bearer %s", api.feToken.Token)
 	}
-	if armoAPI.authCookie != "" {
-		headers["Cookie"] = fmt.Sprintf("auth=%s", armoAPI.authCookie)
+	if api.authCookie != "" {
+		headers["Cookie"] = fmt.Sprintf("auth=%s", api.authCookie)
 	}
 }
 
-func (armoAPI *ArmoAPI) getCustomerGUIDFallBack() string {
-	if armoAPI.accountID != "" {
-		return armoAPI.accountID
+func (api *KSCloudAPI) getCustomerGUIDFallBack() string {
+	if api.accountID != "" {
+		return api.accountID
 	}
 	return "11111111-1111-1111-1111-111111111111"
 }
