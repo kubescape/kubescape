@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
 )
 

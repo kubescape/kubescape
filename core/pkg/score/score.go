@@ -3,7 +3,7 @@ package score
 import (
 	"fmt"
 
-	"github.com/armosec/opa-utils/score"
+	"github.com/kubescape/opa-utils/score"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 )

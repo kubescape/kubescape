@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/armosec/opa-utils/reporthandling"
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 type PrometheusPrinter struct {

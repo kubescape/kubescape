@@ -5,16 +5,16 @@ import (
 	"fmt"
 	"os"
 
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/google/uuid"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/meta"
 	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
 	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	"github.com/spf13/cobra"
 )

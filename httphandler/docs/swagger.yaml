@@ -116,7 +116,7 @@ definitions:
         type: boolean
         x-go-name: UseCachedArtifacts
     type: object
-    x-go-package: github.com/armosec/opa-utils/httpserver/meta/v1
+    x-go-package: github.com/kubescape/opa-utils/httpserver/meta/v1
   Response:
     description: A Scan Response object
     properties:
@@ -158,7 +158,7 @@ definitions:
           ready ReadyScanResponseType  ReadyScanResponseType indicates that a server has successfully completed a request
         x-go-name: Type
     type: object
-    x-go-package: github.com/armosec/opa-utils/httpserver/meta/v1
+    x-go-package: github.com/kubescape/opa-utils/httpserver/meta/v1
 info:
   description: 'The Kubescape Microservice API allows clients to interact with a Kubescape
     instance running in a Kubernetes cluster: trigger scans, retrieve and delete their

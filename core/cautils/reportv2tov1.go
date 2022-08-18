@@ -1,10 +1,10 @@
 package cautils
 
 import (
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/reporthandling"
-	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {

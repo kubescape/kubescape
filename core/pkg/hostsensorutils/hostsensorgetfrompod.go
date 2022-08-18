@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
-	"github.com/armosec/opa-utils/reporthandling/apis"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 
 	"sigs.k8s.io/yaml"
 )

@@ -4,9 +4,9 @@ import (
 	"os"
 
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
-	"github.com/dwertent/go-logger/zaplogger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/zaplogger"
 )
 
 func initialize() error {

@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 
 	"github.com/mattn/go-isatty"
 )
@@ -79,8 +79,8 @@ func initEnvironment() {
 	case 3, 4:
 		var ksAuthURL string
 		ksEventReceiverURL := urlSlices[0] // mandatory
-		ksBackendURL := urlSlices[1] // mandatory
-		ksFrontendURL := urlSlices[2] // mandatory
+		ksBackendURL := urlSlices[1]       // mandatory
+		ksFrontendURL := urlSlices[2]      // mandatory
 		if len(urlSlices) >= 4 {
 			ksAuthURL = urlSlices[3]
 		}

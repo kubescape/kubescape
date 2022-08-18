@@ -5,8 +5,8 @@ import (
 
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error {
