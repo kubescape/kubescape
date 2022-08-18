@@ -48,10 +48,6 @@ func (rbacObjects *RBACObjects) ListAllResources() (map[string]workloadinterface
 	return allresources, nil
 }
 
-func mapToMetadata(m map[string]interface{}) workloadinterface.IMetadata {
-	return workloadinterface.NewBaseObject(m)
-}
-
 func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.RbacObjects) (map[string]workloadinterface.IMetadata, error) {
 	allresources := map[string]workloadinterface.IMetadata{}
 
