@@ -3,15 +3,15 @@ package resourcehandler
 import (
 	"fmt"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	armosecadaptorv1 "github.com/armosec/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
 	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
-	"github.com/armosec/opa-utils/shared"
+	"github.com/kubescape/opa-utils/shared"
 )
 
 const (

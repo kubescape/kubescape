@@ -3,8 +3,8 @@ package cautils
 import (
 	"golang.org/x/mod/semver"
 
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/armosec/utils-go/boolutils"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 func NewPolicies() *Policies {

@@ -5,8 +5,8 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
 
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {

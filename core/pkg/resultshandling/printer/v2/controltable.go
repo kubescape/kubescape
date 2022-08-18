@@ -5,9 +5,9 @@ import (
 	"sort"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/opa-utils/reporthandling/apis"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/fatih/color"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
 

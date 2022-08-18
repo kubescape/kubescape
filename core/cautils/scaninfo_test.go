@@ -3,7 +3,7 @@ package cautils
 import (
 	"testing"
 
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
 

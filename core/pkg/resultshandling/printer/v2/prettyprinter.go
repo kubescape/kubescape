@@ -6,14 +6,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/armosec/opa-utils/objectsenvelopes"
-	"github.com/armosec/opa-utils/reporthandling/apis"
-	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/enescakir/emoji"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
 

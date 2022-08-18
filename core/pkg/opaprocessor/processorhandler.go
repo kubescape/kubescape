@@ -8,19 +8,19 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/pkg/score"
-	"github.com/armosec/opa-utils/objectsenvelopes"
-	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/opa-utils/reporthandling/apis"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 
 	"github.com/open-policy-agent/opa/storage"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
-	"github.com/armosec/opa-utils/resources"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/kubescape/opa-utils/resources"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
 )

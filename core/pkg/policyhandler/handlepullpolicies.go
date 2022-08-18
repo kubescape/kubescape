@@ -4,13 +4,13 @@ import (
 	"fmt"
 	"strings"
 
-	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/opa-utils/reporthandling"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.PolicyIdentifier, policiesAndResources *cautils.OPASessionObj) error {

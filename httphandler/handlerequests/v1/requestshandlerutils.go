@@ -10,12 +10,12 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/kubescape/v2/core/core"
-	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
-	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/armosec/utils-go/boolutils"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // executeScan execute the scan request passed in the channel

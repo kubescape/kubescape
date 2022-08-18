@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 )

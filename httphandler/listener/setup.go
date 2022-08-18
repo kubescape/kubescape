@@ -9,8 +9,8 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/httphandler/docs"
 	handlerequestsv1 "github.com/armosec/kubescape/v2/httphandler/handlerequests/v1"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 
 	"github.com/gorilla/mux"
 )

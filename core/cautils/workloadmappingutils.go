@@ -3,7 +3,7 @@ package cautils
 import (
 	"strings"
 
-	"github.com/armosec/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 var (

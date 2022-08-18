@@ -2,11 +2,11 @@ package cautils
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/reporthandling"
-	apis "github.com/armosec/opa-utils/reporthandling/apis"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
+	apis "github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>

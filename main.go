@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/armosec/kubescape/v2/cmd"
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
 )
 
 func main() {

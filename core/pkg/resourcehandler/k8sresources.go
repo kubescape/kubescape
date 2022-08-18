@@ -7,14 +7,14 @@ import (
 
 	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/armosec/opa-utils/objectsenvelopes"
-	"github.com/armosec/opa-utils/reporthandling/apis"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 
-	"github.com/armosec/k8s-interface/cloudsupport"
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/kubescape/k8s-interface/cloudsupport"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	"github.com/armosec/armoapi-go/armotypes"
 

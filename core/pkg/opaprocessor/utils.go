@@ -2,8 +2,8 @@ package opaprocessor
 
 import (
 	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 // ConvertFrameworksToPolicies convert list of frameworks to list of policies

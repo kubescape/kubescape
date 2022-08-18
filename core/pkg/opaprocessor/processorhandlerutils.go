@@ -2,14 +2,14 @@ package opaprocessor
 
 import (
 	"github.com/armosec/kubescape/v2/core/cautils"
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/opa-utils/reporthandling/apis"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
-	resources "github.com/armosec/opa-utils/resources"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	resources "github.com/kubescape/opa-utils/resources"
 )
 
 // updateResults update the results objects and report objects. This is a critical function - DO NOT CHANGE

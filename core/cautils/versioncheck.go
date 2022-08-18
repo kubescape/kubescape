@@ -8,8 +8,8 @@ import (
 
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	"github.com/armosec/utils-go/boolutils"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 
 	"golang.org/x/mod/semver"
 )

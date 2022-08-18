@@ -9,15 +9,15 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	giturl "github.com/armosec/go-git-url"
-	"github.com/armosec/k8s-interface/k8sinterface"
 	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/opa-utils/reporthandling"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
 	"github.com/google/uuid"
 )
