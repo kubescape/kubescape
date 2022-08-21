@@ -4,7 +4,7 @@ kind: Namespace
 metadata:
   labels:
     app: kubescape
-  name: ks-scanner
+  name: kubescape
 ---
 # ------------------- Kubescape Service Account ------------------- #
 apiVersion: v1
@@ -13,7 +13,7 @@ metadata:
   labels:
     app: kubescape
   name: kubescape-discovery
-  namespace: ks-scanner
+  namespace: kubescape
 ---
 # ------------------- Kubescape Cluster Role & Cluster Role Binding ------------------- #
 kind: ClusterRole
@@ -38,13 +38,13 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubescape-discovery
-  namespace: ks-scanner
+  namespace: kubescape
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: kubescape
-  namespace: ks-scanner
+  namespace: kubescape
   labels:
     app: kubescape
 spec:
@@ -61,7 +61,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kubescape
-  namespace: ks-scanner
+  namespace: kubescape
   labels:
     app: kubescape
 spec:
