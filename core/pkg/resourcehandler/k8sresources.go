@@ -158,14 +158,18 @@ func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.I
 	}
 	for _, resource := range allResources {
 		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
-			ownerReferences, _ := obj.GetOwnerReferences()
-			// if object is highest level and belong to namespace (except Job), add to map
-			if len(ownerReferences) == 0 {
-				if obj.GetKind() != "Job" {
-					if ns := resource.GetNamespace(); ns != "" {
-						sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources[ns]++
+			ownerReferences, err := obj.GetOwnerReferences()
+			if err == nil {
+				// if object is highest level and belong to namespace (except Job), add to map
+				if len(ownerReferences) == 0 {
+					if obj.GetKind() != "Job" {
+						if ns := resource.GetNamespace(); ns != "" {
+							sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources[ns]++
+						}
 					}
 				}
+			} else {
+				logger.L().Error("failed to get owner references", helpers.Error(err))
 			}
 		}
 	}
