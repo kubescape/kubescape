@@ -162,8 +162,8 @@ func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.I
 			if err == nil {
 				// if object is highest level and belong to namespace (except Job), add to map
 				if len(ownerReferences) == 0 {
-					if obj.GetKind() != "Job" {
-						if ns := resource.GetNamespace(); ns != "" {
+					if ns := resource.GetNamespace(); ns != "" {
+						if obj.GetKind() != "Job" {
 							sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources[ns]++
 						}
 					}
