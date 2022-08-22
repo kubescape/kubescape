@@ -118,6 +118,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	}
 
 	cloudResources := cautils.MapCloudResources(ksResourceMap)
+
+	setMapNamespaceToNumOfResources(allResources, sessionObj)
+
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
 		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
@@ -145,6 +148,27 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 		return nil
 	}
 	return clusterAPIServerInfo
+}
+
+// set  namespaceToNumOfResources map in report
+func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
+
+	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources == nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources = make(map[string]int)
+	}
+	for _, resource := range allResources {
+		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
+			ownerReferences, _ := obj.GetOwnerReferences()
+			// if object is highest level and belong to namespace (except Job), add to map
+			if len(ownerReferences) == 0 {
+				if obj.GetKind() != "Job" {
+					if ns := resource.GetNamespace(); ns != "" {
+						sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources[ns]++
+					}
+				}
+			}
+		}
+	}
 }
 
 func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
