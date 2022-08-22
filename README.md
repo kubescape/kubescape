@@ -68,7 +68,7 @@ Want to contribute? Want to discuss something? Have an issue?
 * Open a issue, we are trying to respond within 48 hours
 * [Join us](https://discord.com/invite/WKZRaCtBxN) in a discussion on our discord server!
 
-[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
+[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
 ![discord](https://img.shields.io/discord/893048809884643379)
 
 
