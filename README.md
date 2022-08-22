@@ -31,7 +31,10 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 ```sh
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
-
+##Test(For Testing in you own Repository):
+---sh
+url -s https://raw.githubusercontent.com/Please_Enter_Your_GitHub_Name/kubescape/master/install.sh | /bin/bash
+---
 [Install on windows](#install-on-windows)
 
 [Install on macOS](#install-on-macos)
