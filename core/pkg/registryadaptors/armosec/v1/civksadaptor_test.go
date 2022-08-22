@@ -3,7 +3,7 @@ package v1
 import (
 	"testing"
 
-	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
+	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 	"github.com/stretchr/testify/assert"
 )
 

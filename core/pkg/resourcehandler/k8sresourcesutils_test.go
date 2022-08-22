@@ -1,8 +1,8 @@
 package resourcehandler
 
 import (
-	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 

@@ -8,7 +8,7 @@ import (
 
 func TestLoadResourcesFromUrl(t *testing.T) {
 	{
-		workloads, err := loadResourcesFromUrl([]string{"https://github.com/armosec/kubescape/tree/master/examples/online-boutique"})
+		workloads, err := loadResourcesFromUrl([]string{"https://github.com/kubescape/kubescape/tree/master/examples/online-boutique"})
 		assert.NoError(t, err)
 		assert.Equal(t, 12, len(workloads))
 
@@ -22,7 +22,7 @@ func TestLoadResourcesFromUrl(t *testing.T) {
 		}
 	}
 	{
-		workloads, err := loadResourcesFromUrl([]string{"https://github.com/armosec/kubescape"})
+		workloads, err := loadResourcesFromUrl([]string{"https://github.com/kubescape/kubescape"})
 		assert.NoError(t, err)
 		assert.Less(t, 12, len(workloads))
 
@@ -36,7 +36,7 @@ func TestLoadResourcesFromUrl(t *testing.T) {
 		}
 	}
 	{
-		workloads, err := loadResourcesFromUrl([]string{"https://github.com/armosec/kubescape/blob/master/examples/online-boutique/adservice.yaml"})
+		workloads, err := loadResourcesFromUrl([]string{"https://github.com/kubescape/kubescape/blob/master/examples/online-boutique/adservice.yaml"})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, len(workloads))
 

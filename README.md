@@ -1,7 +1,7 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 
-[![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
+[![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/kubescape/kubescape/actions/workflows/build.yaml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
 
 
 
@@ -53,7 +53,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
+### Click [👍](https://github.com/kubescape/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
 
 </br>
 
@@ -200,7 +200,7 @@ kubescape scan *.yaml --submit
 
 #### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
-kubescape scan https://github.com/armosec/kubescape --submit
+kubescape scan https://github.com/kubescape/kubescape --submit
 ```
 
 #### Display all scanned resources (including the resources who passed) 
@@ -411,7 +411,7 @@ The results by default printed in a pretty "console friendly" manner, but they c
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
 
 ## Thanks to all the contributors ❤️
-<a href = "https://github.com/armosec/kubescape/graphs/contributors">
+<a href = "https://github.com/kubescape/kubescape/graphs/contributors">
   <img src = "https://contrib.rocks/image?repo=armosec/kubescape"/>
 </a>
 

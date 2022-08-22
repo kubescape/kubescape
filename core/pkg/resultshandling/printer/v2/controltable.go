@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/fatih/color"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"

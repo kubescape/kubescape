@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
