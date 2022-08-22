@@ -89,8 +89,6 @@ Want to contribute? Want to discuss something? Have an issue?
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
 * Customize controls configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
-<details><summary>Windows</summary>
-
 ## Install on Windows
 
 **Requires powershell v5.0+**
@@ -104,9 +102,6 @@ Note: if you get an error you might need to change the execution policy (i.e. en
 ``` powershell
 Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
-</details>
-
-<details><summary>MacOS</summary>
 
 ## Install on macOS
 
@@ -116,9 +111,6 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 2. ```sh
     brew install kubescape-cli
     ```
-</details>
-
-<details><summary>Nix/NixOS</summary>
 
 ## Install on NixOS or with nix (Community)
 
@@ -151,8 +143,6 @@ home-manager:
 ```
 
 Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
-
-</details>
 
 ## Usage & Examples
 
