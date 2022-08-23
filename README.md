@@ -13,19 +13,10 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 
 </br>
 
-<!-- # Kubescape Coverage
-<img src="docs/ksfromcodetodeploy.png">
-
-</br> -->
-
-
 # Kubescape CLI:
 <img src="docs/demo.gif">
 
 </br>
-
-<!-- # Kubescape overview:
-<img src="docs/ARMO-header-2022.gif"> -->
 
 # TL;DR
 ## Install:
@@ -300,9 +291,9 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 # Building Kubescape
 
-<details><summary>Windows</summary>
+## Build on Windows
 
-## Windows
+<details><summary>Windows</summary>
 
 1. Install MSYS2 & build libgit _(needed only for the first time)_
 
@@ -325,9 +316,9 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
     ```
 </details>
 
-<details><summary>Linux / MacOS</summary>
+## Build on Linux/MacOS
 
-## Linux / MacOS
+<details><summary>Linux / MacOS</summary>
 
 1. Install libgit2 dependency _(needed only for the first time)_
    
