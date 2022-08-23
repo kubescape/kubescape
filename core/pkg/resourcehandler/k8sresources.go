@@ -76,9 +76,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	if err != nil {
 		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
 	} else {
-		if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
-			sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = numberOfWorkerNodes
-		}
+		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
 	}
 
 	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
@@ -152,10 +150,7 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 
 // set  namespaceToNumOfResources map in report
 func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
-
-	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources == nil {
-		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources = make(map[string]int)
-	}
+	mapNamespaceToNumberOfResources := make(map[string]int)
 	for _, resource := range allResources {
 		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
 			ownerReferences, err := obj.GetOwnerReferences()
@@ -164,7 +159,7 @@ func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.I
 				if len(ownerReferences) == 0 {
 					if ns := resource.GetNamespace(); ns != "" {
 						if obj.GetKind() != "Job" {
-							sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources[ns]++
+							mapNamespaceToNumberOfResources[ns]++
 						}
 					}
 				}
@@ -173,6 +168,7 @@ func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.I
 			}
 		}
 	}
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
 func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
