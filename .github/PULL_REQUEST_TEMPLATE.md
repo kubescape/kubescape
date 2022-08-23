@@ -11,4 +11,4 @@
 - [ ] If it is a core feature, I have added thorough tests.
 - [ ] New and existing unit tests pass locally with my changes
 
-**Please open the PR agains the `dev` branch (Unless the PR contains only documentation changes)**
+**Please open the PR against the `dev` branch (Unless the PR contains only documentation changes)**
