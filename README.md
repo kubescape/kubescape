@@ -5,9 +5,10 @@
 
 
 
-Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer and image vulnerabilities scanning. 
+Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer, and image vulnerabilities scanning. 
 Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
-It has became one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins’ precious time, effort, and resources.
+
+It has become one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins precious time, effort, and resources.
 Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack, and supports multi-cloud K8s deployments like EKS, GKE, and AKS.
 
 </br>
@@ -87,7 +88,7 @@ Want to contribute? Want to discuss something? Have an issue?
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
-* Customize controls configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
+* Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
 <details><summary>Windows</summary>
 
@@ -357,7 +358,7 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 ## VS code configuration samples
 
-You can use the samples files below to setup your VS code environment for building and debugging purposes.
+You can use the sample files below to setup your VS code environment for building and debugging purposes.
 
 
 <details><summary>.vscode/settings.json</summary>
@@ -402,7 +403,7 @@ You can use the samples files below to setup your VS code environment for buildi
 # Under the hood
 
 ## Technology
-Kubescape is based on [OPA engine](https://github.com/open-policy-agent/opa) and ARMO's posture controls.
+Kubescape is based on the [OPA engine](https://github.com/open-policy-agent/opa) and ARMO's posture controls.
 
 The tools retrieve Kubernetes objects from the API server and run a set of [rego's snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
 
