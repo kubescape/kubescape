@@ -9,7 +9,7 @@ When contributing, we categorize contributions into two:
 If you have a small change, feel free to fire up a Pull Request.
 
 When planning a bigger change, please first discuss the change you wish to make via issue,
-email, or any other method with the owners of this repository before making a change. Most likely your changes or features are great, but sometimes we might already going to this direction (or the exact opposite ;-) ) and we don't want to waste your time.
+email, or any other method with the owners of this repository before making a change. Most likely your changes or features are great, but sometimes we might already be going in this direction (or the exact opposite ;-) ) and we don't want to waste your time.
 
 Please note we have a code of conduct, please follow it in all your interactions with the project.
 
@@ -20,7 +20,7 @@ Please note we have a code of conduct, please follow it in all your interactions
 2. Update the README.md with details of changes to the interface, this includes new environment 
    variables, exposed ports, useful file locations and container parameters.
 3. Open Pull Request to `dev` branch - we test the component before merging into the `master` branch
-4. We will merge the Pull Request in once you have the sign-off.
+4. We will merge the Pull Request once you have the sign-off.
 
 ## Code of Conduct
 
@@ -55,7 +55,7 @@ advances
 * Other conduct which could reasonably be considered inappropriate in a
   professional setting
 
-We will distance those who are constantly adhere to unacceptable behavior.
+We will distance those who constantly adhere to unacceptable behavior.
 
 ### Our Responsibilities
 
