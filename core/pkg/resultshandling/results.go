@@ -3,13 +3,13 @@ package resultshandling
 import (
 	"encoding/json"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	printerv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v1"
-	printerv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v2"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	printerv1 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v1"
+	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 

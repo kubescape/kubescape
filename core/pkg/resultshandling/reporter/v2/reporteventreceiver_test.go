@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/stretchr/testify/assert"
 )
 

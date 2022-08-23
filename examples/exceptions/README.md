@@ -24,7 +24,7 @@ e.g. When a `kube-system` resource fails and it is ok, simply add the resource t
     * `controlID` - Control ID can be find [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
     * `ruleName` - Rule names can be find [here](https://github.com/armosec/regolibrary/tree/master/rules) (regex supported)
  
-You can find [here](https://github.com/armosec/kubescape/tree/master/examples/exceptions) some examples of exceptions files
+You can find [here](https://github.com/kubescape/kubescape/tree/master/examples/exceptions) some examples of exceptions files
 
 ## Usage
 

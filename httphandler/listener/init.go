@@ -3,10 +3,10 @@ package listener
 import (
 	"os"
 
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 func initialize() error {

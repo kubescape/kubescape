@@ -1,4 +1,4 @@
-module github.com/armosec/kubescape/v2
+module github.com/kubescape/kubescape/v2
 
 go 1.18
 
