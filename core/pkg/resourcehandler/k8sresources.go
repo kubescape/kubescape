@@ -150,12 +150,13 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 
 // set  namespaceToNumOfResources map in report
 func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
+
 	mapNamespaceToNumberOfResources := make(map[string]int)
 	for _, resource := range allResources {
 		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
 			ownerReferences, err := obj.GetOwnerReferences()
 			if err == nil {
-				// if object is highest level and belong to namespace (except Job), add to map
+				// Add an object to the map if the object does not have a parent but is contained within a namespace (except Job)
 				if len(ownerReferences) == 0 {
 					if ns := resource.GetNamespace(); ns != "" {
 						if obj.GetKind() != "Job" {
@@ -164,7 +165,7 @@ func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.I
 					}
 				}
 			} else {
-				logger.L().Error("failed to get owner references", helpers.Error(err))
+				logger.L().Warning(fmt.Sprintf("failed to get owner references. Resource %s will not be counted", obj.GetName()), helpers.Error(err))
 			}
 		}
 	}

@@ -29,6 +29,21 @@ type OPASessionObj struct {
 	SessionID             string                     // SessionID
 }
 
+func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {
+	return &OPASessionObj{
+		Report:                &reporthandlingv2.PostureReport{},
+		Policies:              frameworks,
+		K8SResources:          k8sResources,
+		AllResources:          make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:       make(map[string]resourcesresults.Result),
+		InfoMap:               make(map[string]apis.StatusInfo),
+		ResourceToControlsMap: make(map[string][]string),
+		ResourceSource:        make(map[string]reporthandling.Source),
+		SessionID:             scanInfo.ScanID,
+		Metadata:              scanInfoToScanMetadata(scanInfo),
+	}
+}
+
 func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources map[string]int) {
 	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
@@ -44,21 +59,6 @@ func (sessionObj *OPASessionObj) SetNumberOfWorkerNodes(n int) {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 	}
 	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = n
-}
-
-func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {
-	return &OPASessionObj{
-		Report:                &reporthandlingv2.PostureReport{},
-		Policies:              frameworks,
-		K8SResources:          k8sResources,
-		AllResources:          make(map[string]workloadinterface.IMetadata),
-		ResourcesResult:       make(map[string]resourcesresults.Result),
-		InfoMap:               make(map[string]apis.StatusInfo),
-		ResourceToControlsMap: make(map[string][]string),
-		ResourceSource:        make(map[string]reporthandling.Source),
-		SessionID:             scanInfo.ScanID,
-		Metadata:              scanInfoToScanMetadata(scanInfo),
-	}
 }
 
 func NewOPASessionObjMock() *OPASessionObj {
