@@ -84,7 +84,7 @@ func TestCalculateFixed(t *testing.T) {
 		ImgTag:  "",
 		Version: "",
 	}})
-	if 0 != res {
+	if res != 0 {
 		t.Errorf("wrong fix status: %v", res)
 	}
 }
