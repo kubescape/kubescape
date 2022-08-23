@@ -44,6 +44,23 @@ func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SRe
 	}
 }
 
+func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources map[string]int) {
+	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+	}
+	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources == nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources = make(map[string]int)
+	}
+	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources = mapNamespaceToNumberOfResources
+}
+
+func (sessionObj *OPASessionObj) SetNumberOfWorkerNodes(n int) {
+	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+	}
+	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = n
+}
+
 func NewOPASessionObjMock() *OPASessionObj {
 	return &OPASessionObj{
 		Policies:        nil,

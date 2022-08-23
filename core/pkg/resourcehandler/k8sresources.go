@@ -76,9 +76,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	if err != nil {
 		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
 	} else {
-		if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
-			sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = numberOfWorkerNodes
-		}
+		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
 	}
 
 	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
@@ -118,6 +116,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	}
 
 	cloudResources := cautils.MapCloudResources(ksResourceMap)
+
+	setMapNamespaceToNumOfResources(allResources, sessionObj)
+
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
 		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
@@ -145,6 +146,30 @@ func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
 		return nil
 	}
 	return clusterAPIServerInfo
+}
+
+// set  namespaceToNumOfResources map in report
+func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
+
+	mapNamespaceToNumberOfResources := make(map[string]int)
+	for _, resource := range allResources {
+		if obj := workloadinterface.NewWorkloadObj(resource.GetObject()); obj != nil {
+			ownerReferences, err := obj.GetOwnerReferences()
+			if err == nil {
+				// Add an object to the map if the object does not have a parent but is contained within a namespace (except Job)
+				if len(ownerReferences) == 0 {
+					if ns := resource.GetNamespace(); ns != "" {
+						if obj.GetKind() != "Job" {
+							mapNamespaceToNumberOfResources[ns]++
+						}
+					}
+				}
+			} else {
+				logger.L().Warning(fmt.Sprintf("failed to get owner references. Resource %s will not be counted", obj.GetName()), helpers.Error(err))
+			}
+		}
+	}
+	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
 func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
