@@ -89,7 +89,7 @@ spec:
             port: 8080
           initialDelaySeconds: 3
           periodSeconds: 3
-        image: quay.io/armosec/kubescape:latest
+        image: quay.io/kubescape/kubescape:latest
         imagePullPolicy: Always
         env:
         - name: KS_DEFAULT_CONFIGMAP_NAMESPACE

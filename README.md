@@ -29,7 +29,7 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 # TL;DR
 ## Install:
 ```sh
-curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
+curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 ```
 
 [Install on windows](#install-on-windows)
@@ -96,7 +96,7 @@ Want to contribute? Want to discuss something? Have an issue?
 **Requires powershell v5.0+**
 
 ``` powershell
-iwr -useb https://raw.githubusercontent.com/armosec/kubescape/master/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex
 ```
 
 Note: if you get an error you might need to change the execution policy (i.e. enable Powershell) with
@@ -412,6 +412,6 @@ Kubescape is an open source project, we welcome your feedback and ideas for impr
 
 ## Thanks to all the contributors ❤️
 <a href = "https://github.com/kubescape/kubescape/graphs/contributors">
-  <img src = "https://contrib.rocks/image?repo=armosec/kubescape"/>
+  <img src = "https://contrib.rocks/image?repo=kubescape/kubescape"/>
 </a>
 

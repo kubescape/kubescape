@@ -158,8 +158,8 @@ func TestIsMasterNodeTaints(t *testing.T) {
 		},
 		{
 			"names": [
-				"quay.io/armosec/kubescape@sha256:6196f766be50d94b45d903a911f5ee95ac99bc392a1324c3e063bec41efd98ba",
-				"quay.io/armosec/kubescape:v2.0.153"
+				"quay.io/kubescape/kubescape@sha256:6196f766be50d94b45d903a911f5ee95ac99bc392a1324c3e063bec41efd98ba",
+				"quay.io/kubescape/kubescape:v2.0.153"
 			],
 			"sizeBytes": 110345054
 		},
@@ -423,8 +423,8 @@ func TestIsMasterNodeTaints(t *testing.T) {
             },
             {
                 "names": [
-                    "quay.io/armosec/kubescape@sha256:6196f766be50d94b45d903a911f5ee95ac99bc392a1324c3e063bec41efd98ba",
-                    "quay.io/armosec/kubescape:v2.0.153"
+                    "quay.io/kubescape/kubescape@sha256:6196f766be50d94b45d903a911f5ee95ac99bc392a1324c3e063bec41efd98ba",
+                    "quay.io/kubescape/kubescape:v2.0.153"
                 ],
                 "sizeBytes": 110345054
             },
