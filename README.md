@@ -33,63 +33,6 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
 ```
 
-[Install on windows](#install-on-windows)
-
-[Install on macOS](#install-on-macos)
-
-[Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix-community)
-
-[Install using Go](#install-using-go)
-
-## Run:
-```sh
-kubescape scan --submit --enable-host-scan --verbose
-```
-
-<img src="docs/summary.png">
-
-</br>
-
-> Kubescape is an open source project. We welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
-
-</br>
-
-### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
-
-</br>
-
-
-# Being a part of the team
-
-We invite you to our team! We are excited about this project and want to return the love we get.
-
-Want to contribute? Want to discuss something? Have an issue?
-
-* Feel free to pick a task from the [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
-* Open an issue, we are trying to respond within 48 hours
-* [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
-
-[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
-![discord](https://img.shields.io/discord/893048809884643379)
-
-
-# Options and examples
-
-[Kubescape docs](https://hub.armosec.io/docs?utm_source=github&utm_medium=repository)
-
-## Playground
-* [Kubescape playground](https://killercoda.com/saiyampathak/scenario/kubescape)
-
-## Tutorials
-
-* [Overview](https://youtu.be/wdBkt_0Qhbg)
-* [How To Secure Kubernetes Clusters With Kubescape And Armo](https://youtu.be/ZATGiDIDBQk)
-* [Scan Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
-* [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
-* [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
-* [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
-* Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
-
 <details><summary>Windows</summary>
 
 ## Install on Windows
@@ -154,6 +97,57 @@ home-manager:
 Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 
 </details>
+
+[Install using Go](#install-using-go)
+
+## Run:
+```sh
+kubescape scan --submit --enable-host-scan --verbose
+```
+
+<img src="docs/summary.png">
+
+</br>
+
+> Kubescape is an open source project. We welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
+
+</br>
+
+### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
+
+</br>
+
+
+# Being a part of the team
+
+We invite you to our team! We are excited about this project and want to return the love we get.
+
+Want to contribute? Want to discuss something? Have an issue?
+
+* Feel free to pick a task from the [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
+* Open an issue, we are trying to respond within 48 hours
+* [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
+
+[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
+![discord](https://img.shields.io/discord/893048809884643379)
+
+
+# Options and examples
+
+[Kubescape docs](https://hub.armosec.io/docs?utm_source=github&utm_medium=repository)
+
+## Playground
+* [Kubescape playground](https://killercoda.com/saiyampathak/scenario/kubescape)
+
+## Tutorials
+
+* [Overview](https://youtu.be/wdBkt_0Qhbg)
+* [How To Secure Kubernetes Clusters With Kubescape And Armo](https://youtu.be/ZATGiDIDBQk)
+* [Scan Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
+* [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
+* [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
+* Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
 ## Usage & Examples
 
