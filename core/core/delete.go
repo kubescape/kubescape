@@ -3,10 +3,10 @@ package core
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 )
 
 func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error {

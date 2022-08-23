@@ -10,10 +10,10 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 // FileResourceHandler handle resources from files and URLs

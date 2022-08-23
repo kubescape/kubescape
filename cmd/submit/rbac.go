@@ -3,16 +3,16 @@ package submit
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/meta"
-	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
-	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
-	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 	"github.com/google/uuid"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
+	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"github.com/spf13/cobra"

@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 
 	"github.com/gorilla/schema"

@@ -5,11 +5,14 @@ import (
 
 	"github.com/kubescape/opa-utils/score"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
-/* provides a wrapper for scoreUtils, since there's no common interface between postureReportV1 and PostureReportV2
+/*
+	provides a wrapper for scoreUtils, since there's no common interface between postureReportV1 and PostureReportV2
+
 and the need of concrete objects
+
 	I've decided to create scoreWrapper that will allow calculating score regardless (as long as opaSessionObj is there)
 */
 type ScoreWrapper struct {

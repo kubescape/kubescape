@@ -1,11 +1,11 @@
-module github.com/armosec/kubescape/v2/httphandler
+module github.com/kubescape/kubescape/v2/httphandler
 
 go 1.18
 
-replace github.com/armosec/kubescape/v2 => ../
+replace github.com/kubescape/kubescape/v2 => ../
 
 require (
-	github.com/armosec/kubescape/v2 v2.0.0-00010101000000-000000000000
+	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
 	github.com/armosec/utils-go v0.0.12
 	github.com/go-openapi/runtime v0.24.1
 	github.com/google/uuid v1.3.0

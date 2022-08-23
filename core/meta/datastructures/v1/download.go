@@ -1,6 +1,6 @@
 package v1
 
-import "github.com/armosec/kubescape/v2/core/cautils"
+import "github.com/kubescape/kubescape/v2/core/cautils"
 
 type DownloadInfo struct {
 	Path        string // directory to save artifact. Default is "~/.kubescape/"

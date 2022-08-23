@@ -1,7 +1,7 @@
 package config
 
 import (
-	"github.com/armosec/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v2/core/meta"
 	"github.com/spf13/cobra"
 )
 

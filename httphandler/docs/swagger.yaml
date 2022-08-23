@@ -20,7 +20,7 @@ definitions:
 
           Same as `kubescape scan --excluded-namespaces`.
         example:
-        - armo-system
+        - kubescape
         - kube-system
         items:
           type: string

@@ -8,10 +8,10 @@ import (
 
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/meta"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/meta"
 
 	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
