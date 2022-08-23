@@ -2,8 +2,8 @@ package resourcehandler
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/v2/core/cautils"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"k8s.io/apimachinery/pkg/version"
 )
 

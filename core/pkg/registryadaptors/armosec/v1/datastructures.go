@@ -3,7 +3,7 @@ package v1
 import (
 	"time"
 
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 type V2ListRequest struct {

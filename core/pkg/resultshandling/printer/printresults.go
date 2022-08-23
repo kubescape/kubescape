@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 var INDENT = "   "

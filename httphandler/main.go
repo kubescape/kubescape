@@ -1,9 +1,9 @@
 package main
 
 import (
-	_ "github.com/armosec/kubescape/v2/httphandler/docs"
-	"github.com/armosec/kubescape/v2/httphandler/listener"
 	logger "github.com/kubescape/go-logger"
+	_ "github.com/kubescape/kubescape/v2/httphandler/docs"
+	"github.com/kubescape/kubescape/v2/httphandler/listener"
 )
 
 func main() {

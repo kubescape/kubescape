@@ -8,7 +8,7 @@
 
 # Set environment variables
 echo 'Set environment variables'
-export kubescape_namespace=armo-system
+export kubescape_namespace=kubescape
 export kubescape_serviceaccount=armo-kubescape-service-account
 
 # Get current context
@@ -65,4 +65,4 @@ eksctl create iamserviceaccount \
 
 # Install/Upgrade Kubescape chart
 echo 'Install/Upgrade Kubescape chart'
-helm upgrade --install armo  armo-components/ -n armo-system --create-namespace --set clusterName=$cluster_name --set cloud_provider_engine=eks --set createKubescapeServiceAccount=false --set cloudRegion=$cluster_region
+helm upgrade --install armo  armo-components/ -n kubescape --create-namespace --set clusterName=$cluster_name --set cloud_provider_engine=eks --set createKubescapeServiceAccount=false --set cloudRegion=$cluster_region

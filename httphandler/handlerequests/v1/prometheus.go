@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	"github.com/google/uuid"

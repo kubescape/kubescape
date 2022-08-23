@@ -7,17 +7,17 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/armosec/kubescape/v2/core/pkg/opaprocessor"
-	"github.com/armosec/kubescape/v2/core/pkg/policyhandler"
-	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v2/core/pkg/policyhandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 
 	"github.com/kubescape/opa-utils/resources"
 )

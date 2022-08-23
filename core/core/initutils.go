@@ -3,15 +3,15 @@ package core
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
-	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
 	"github.com/google/uuid"
 
