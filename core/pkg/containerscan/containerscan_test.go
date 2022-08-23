@@ -29,8 +29,8 @@ func TestDecodeScanWIthDangearousArtifacts(t *testing.T) {
 	if sumObj.Status != "Success" {
 		t.Errorf("sumObj.Status = %v", sumObj.Status)
 	}
-	if len(sumObj.ListOfDangerousArtifcats) != 3 {
-		t.Errorf("sumObj.ListOfDangerousArtifcats = %v", sumObj.ListOfDangerousArtifcats)
+	if len(sumObj.ListOfDangerousArtifacts) != 3 {
+		t.Errorf("sumObj.ListOfDangerousArtifacts = %v", sumObj.ListOfDangerousArtifacts)
 	}
 }
 
@@ -84,7 +84,7 @@ func TestCalculateFixed(t *testing.T) {
 		ImgTag:  "",
 		Version: "",
 	}})
-	if 0 != res {
+	if res != 0 {
 		t.Errorf("wrong fix status: %v", res)
 	}
 }
