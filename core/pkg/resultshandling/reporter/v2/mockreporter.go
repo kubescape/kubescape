@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 const NO_SUBMIT_QUERY = "utm_source=GitHub&utm_medium=CLI&utm_campaign=no_submit"
@@ -32,7 +32,7 @@ func (reportMock *ReportMock) SetClusterName(clusterName string) {
 }
 
 func (reportMock *ReportMock) GetURL() string {
-	u := fmt.Sprintf("https://%s/account/sign-up", getter.GetArmoAPIConnector().GetFrontendURL())
+	u := fmt.Sprintf("https://%s/account/sign-up", getter.GetKSCloudAPIConnector().GetFrontendURL())
 	if reportMock.query != "" {
 		u += fmt.Sprintf("?%s", reportMock.query)
 	}

@@ -5,7 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 )
 
 func TestRemoveData(t *testing.T) {

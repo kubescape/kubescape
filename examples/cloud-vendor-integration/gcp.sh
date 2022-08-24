@@ -17,7 +17,7 @@ gcloud iam service-accounts create kubescape --display-name=kubescape
 
 # Set environment variables
 echo 'Set environment variables'
-export kubescape_namespace=armo-system
+export kubescape_namespace=kubescape
 export kubescape_serviceaccount=armo-kubescape-service-account
 
 # Get current GCP project
@@ -46,4 +46,4 @@ gcloud iam service-accounts add-iam-policy-binding $gcp_service_account --role r
 
 # Install/Upgrade Kubescape chart
 echo 'Install/Upgrade Kubescape chart'
-helm upgrade --install armo  armo-components/ -n armo-system --create-namespace --set cloud_provider_engine=gke --set gke_service_account=$gcp_service_account --set cloudRegion=$CLUSTER_REGION --set clusterName=$CLUSTER_NAME --set gkeProject=$gcp_project
+helm upgrade --install armo  armo-components/ -n kubescape --create-namespace --set cloud_provider_engine=gke --set gke_service_account=$gcp_service_account --set cloudRegion=$CLUSTER_REGION --set clusterName=$CLUSTER_NAME --set gkeProject=$gcp_project

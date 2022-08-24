@@ -15,9 +15,9 @@ kubescape_object_failed_count{framework="NSA",control="Immutable container files
 # Failed object from "NSA" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "NSA" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Immutable container filesystem"
@@ -43,9 +43,9 @@ kubescape_object_failed_count{framework="NSA",control="Immutable container files
 # Failed object from "NSA" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "NSA" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="NSA",control="Immutable container filesystem",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Number of resources found as part of NSA control Privileged container
@@ -57,9 +57,9 @@ kubescape_resources_failed_count{framework="NSA",control="Privileged container"}
 # Failed object from "NSA" control "Privileged container"
 kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "NSA" control "Privileged container"
-kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Privileged container"
-kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Privileged container"
 kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Privileged container"
@@ -95,9 +95,9 @@ kubescape_object_failed_count{framework="NSA",control="Privileged container",nam
 # Failed object from "NSA" control "Privileged container"
 kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "NSA" control "Privileged container"
-kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Privileged container"
-kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of NSA control Allowed hostPath
 kubescape_resources_found_count{framework="NSA",control="Allowed hostPath"} 22
 # Number of resources excluded as part of NSA control Allowed hostPath
@@ -117,9 +117,9 @@ kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespa
 # Failed object from "NSA" control "Allowed hostPath"
 kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allowed hostPath"
 kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allowed hostPath"
@@ -141,9 +141,9 @@ kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespa
 # Failed object from "NSA" control "Allowed hostPath"
 kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Allowed hostPath"
 kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "NSA" control "Allowed hostPath"
@@ -155,11 +155,11 @@ kubescape_resources_excluded_count{framework="NSA",control="Automatic mapping of
 # Number of resources failed as part of NSA control Automatic mapping of service account
 kubescape_resources_failed_count{framework="NSA",control="Automatic mapping of service account"} 47
 # Failed object from "NSA" control "Automatic mapping of service account"
-kubescape_object_failed_count{framework="NSA",control="Automatic mapping of service account",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="NSA",control="Automatic mapping of service account",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "NSA" control "Automatic mapping of service account"
-kubescape_object_failed_count{framework="NSA",control="Automatic mapping of service account",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="NSA",control="Automatic mapping of service account",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "NSA" control "Automatic mapping of service account"
-kubescape_object_failed_count{framework="NSA",control="Automatic mapping of service account",namespace="armo-system",name="default",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="NSA",control="Automatic mapping of service account",namespace="kubescape",name="default",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "NSA" control "Automatic mapping of service account"
 kubescape_object_failed_count{framework="NSA",control="Automatic mapping of service account",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "NSA" control "Automatic mapping of service account"
@@ -267,9 +267,9 @@ kubescape_object_failed_count{framework="NSA",control="hostNetwork access",names
 # Failed object from "NSA" control "hostNetwork access"
 kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "NSA" control "hostNetwork access"
-kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "hostNetwork access"
-kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "hostNetwork access"
 kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "hostNetwork access"
@@ -295,9 +295,9 @@ kubescape_object_failed_count{framework="NSA",control="hostNetwork access",names
 # Failed object from "NSA" control "hostNetwork access"
 kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "hostNetwork access"
-kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "hostNetwork access"
-kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="hostNetwork access",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of NSA control Resource policies
 kubescape_resources_found_count{framework="NSA",control="Resource policies"} 22
 # Number of resources excluded as part of NSA control Resource policies
@@ -319,13 +319,13 @@ kubescape_object_failed_count{framework="NSA",control="Resource policies",namesp
 # Failed object from "NSA" control "Resource policies"
 kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "NSA" control "Resource policies"
-kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Resource policies"
-kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Resource policies"
-kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Resource policies"
-kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Resource policies"
 kubescape_object_failed_count{framework="NSA",control="Resource policies",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Resource policies"
@@ -365,9 +365,9 @@ kubescape_object_failed_count{framework="NSA",control="Allow privilege escalatio
 # Failed object from "NSA" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "NSA" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Allow privilege escalation"
@@ -393,9 +393,9 @@ kubescape_object_failed_count{framework="NSA",control="Allow privilege escalatio
 # Failed object from "NSA" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "NSA" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="NSA",control="Allow privilege escalation",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Number of resources found as part of NSA control Applications credentials in configuration files
@@ -405,7 +405,7 @@ kubescape_resources_excluded_count{framework="NSA",control="Applications credent
 # Number of resources failed as part of NSA control Applications credentials in configuration files
 kubescape_resources_failed_count{framework="NSA",control="Applications credentials in configuration files"} 8
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
@@ -431,15 +431,15 @@ kubescape_object_failed_count{framework="NSA",control="Applications credentials 
 # Failed object from "NSA" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
@@ -465,9 +465,9 @@ kubescape_object_failed_count{framework="NSA",control="Applications credentials 
 # Failed object from "NSA" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="NSA",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="ca-notification-server",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Applications credentials in configuration files"
@@ -527,9 +527,9 @@ kubescape_object_failed_count{framework="NSA",control="Cluster-admin binding",na
 # Failed object from "NSA" control "Cluster-admin binding"
 kubescape_object_failed_count{framework="NSA",control="Cluster-admin binding",name="system:anonymous",groupVersionKind="rbac.authorization.k8s.io/User"} 1
 # Failed object from "NSA" control "Cluster-admin binding"
-kubescape_object_failed_count{framework="NSA",control="Cluster-admin binding",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="NSA",control="Cluster-admin binding",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "NSA" control "Cluster-admin binding"
-kubescape_object_failed_count{framework="NSA",control="Cluster-admin binding",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="NSA",control="Cluster-admin binding",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "NSA" control "Cluster-admin binding"
 kubescape_object_failed_count{framework="NSA",control="Cluster-admin binding",namespace="kube-system",name="daemon-set-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "NSA" control "Cluster-admin binding"
@@ -625,9 +625,9 @@ kubescape_object_failed_count{framework="NSA",control="Exec into container",name
 # Failed object from "NSA" control "Exec into container"
 kubescape_object_failed_count{framework="NSA",control="Exec into container",name="system:masters",groupVersionKind="rbac.authorization.k8s.io/Group"} 1
 # Failed object from "NSA" control "Exec into container"
-kubescape_object_failed_count{framework="NSA",control="Exec into container",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="NSA",control="Exec into container",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "NSA" control "Exec into container"
-kubescape_object_failed_count{framework="NSA",control="Exec into container",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="NSA",control="Exec into container",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "NSA" control "Exec into container"
 kubescape_object_failed_count{framework="NSA",control="Exec into container",namespace="kube-system",name="replication-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "NSA" control "Exec into container"
@@ -737,13 +737,13 @@ kubescape_resources_failed_count{framework="NSA",control="Insecure capabilities"
 # Failed object from "NSA" control "Insecure capabilities"
 kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Insecure capabilities"
-kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Insecure capabilities"
-kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Insecure capabilities"
-kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Insecure capabilities"
-kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Insecure capabilities"
 kubescape_object_failed_count{framework="NSA",control="Insecure capabilities",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Insecure capabilities"
@@ -787,9 +787,9 @@ kubescape_resources_failed_count{framework="NSA",control="Linux hardening"} 17
 # Failed object from "NSA" control "Linux hardening"
 kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "NSA" control "Linux hardening"
-kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Linux hardening"
-kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Linux hardening"
 kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Linux hardening"
@@ -815,9 +815,9 @@ kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespac
 # Failed object from "NSA" control "Linux hardening"
 kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "NSA" control "Linux hardening"
-kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Linux hardening"
-kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Linux hardening"
 kubescape_object_failed_count{framework="NSA",control="Linux hardening",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Linux hardening"
@@ -835,9 +835,9 @@ kubescape_resources_excluded_count{framework="NSA",control="Ingress and Egress b
 # Number of resources failed as part of NSA control Ingress and Egress blocked
 kubescape_resources_failed_count{framework="NSA",control="Ingress and Egress blocked"} 22
 # Failed object from "NSA" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Ingress and Egress blocked"
 kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "Ingress and Egress blocked"
@@ -865,9 +865,9 @@ kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocke
 # Failed object from "NSA" control "Ingress and Egress blocked"
 kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "NSA" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Ingress and Egress blocked"
 kubescape_object_failed_count{framework="NSA",control="Ingress and Egress blocked",namespace="kube-system",name="etcd-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "NSA" control "Ingress and Egress blocked"
@@ -885,7 +885,7 @@ kubescape_resources_excluded_count{framework="NSA",control="Network policies"} 0
 # Number of resources failed as part of NSA control Network policies
 kubescape_resources_failed_count{framework="NSA",control="Network policies"} 7
 # Failed object from "NSA" control "Network policies"
-kubescape_object_failed_count{framework="NSA",control="Network policies",name="armo-system",groupVersionKind="v1/Namespace"} 1
+kubescape_object_failed_count{framework="NSA",control="Network policies",name="kubescape",groupVersionKind="v1/Namespace"} 1
 # Failed object from "NSA" control "Network policies"
 kubescape_object_failed_count{framework="NSA",control="Network policies",name="cyberarmor-system",groupVersionKind="v1/Namespace"} 1
 # Failed object from "NSA" control "Network policies"
@@ -907,9 +907,9 @@ kubescape_resources_failed_count{framework="NSA",control="CVE-2021-25742-nginx-i
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
@@ -949,13 +949,13 @@ kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingr
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="nginx-ingress",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="NSA",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="cyberarmor-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "NSA" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
@@ -983,7 +983,7 @@ kubescape_resources_excluded_count{framework="MITRE",control="Access container s
 # Number of resources failed as part of MITRE control Access container service account
 kubescape_resources_failed_count{framework="MITRE",control="Access container service account"} 31
 # Failed object from "MITRE" control "Access container service account"
-kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Access container service account"
 kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kube-system",name="system:persistent-volume-provisioner",groupVersionKind="rbac.authorization.k8s.io/v1/RoleBinding"} 1
 # Failed object from "MITRE" control "Access container service account"
@@ -1019,9 +1019,9 @@ kubescape_object_failed_count{framework="MITRE",control="Access container servic
 # Failed object from "MITRE" control "Access container service account"
 kubescape_object_failed_count{framework="MITRE",control="Access container service account",name="nginx-ingress-roles-binding",groupVersionKind="rbac.authorization.k8s.io/v1/ClusterRoleBinding"} 1
 # Failed object from "MITRE" control "Access container service account"
-kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Access container service account"
-kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Access container service account"
 kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="cyberarmor-system",name="ca-rbac",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Access container service account"
@@ -1179,13 +1179,13 @@ kubescape_object_failed_count{framework="MITRE",control="Access container servic
 # Failed object from "MITRE" control "Access container service account"
 kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kube-system",name="kube-scheduler-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "MITRE" control "Access container service account"
-kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Access container service account"
-kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "MITRE" control "Access container service account"
-kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "MITRE" control "Access container service account"
-kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="armo-system",name="default",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="kubescape",name="default",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "MITRE" control "Access container service account"
 kubescape_object_failed_count{framework="MITRE",control="Access container service account",namespace="cyberarmor-system",name="default",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "MITRE" control "Access container service account"
@@ -1421,7 +1421,7 @@ kubescape_resources_excluded_count{framework="MITRE",control="Applications crede
 # Number of resources failed as part of MITRE control Applications credentials in configuration files
 kubescape_resources_failed_count{framework="MITRE",control="Applications credentials in configuration files"} 8
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
@@ -1437,9 +1437,9 @@ kubescape_object_failed_count{framework="MITRE",control="Applications credential
 # Failed object from "MITRE" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kube-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
@@ -1477,9 +1477,9 @@ kubescape_object_failed_count{framework="MITRE",control="Applications credential
 # Failed object from "MITRE" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kube-system",name="etcd-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kube-system",name="kubelet-config-1.22",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
@@ -1491,11 +1491,11 @@ kubescape_object_failed_count{framework="MITRE",control="Applications credential
 # Failed object from "MITRE" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="nginx-ingress",name="ingress-controller-leader-nginx",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="armo-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="kubescape",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="MITRE",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "Applications credentials in configuration files"
@@ -1523,9 +1523,9 @@ kubescape_object_failed_count{framework="MITRE",control="Cluster-admin binding",
 # Failed object from "MITRE" control "Cluster-admin binding"
 kubescape_object_failed_count{framework="MITRE",control="Cluster-admin binding",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Cluster-admin binding"
-kubescape_object_failed_count{framework="MITRE",control="Cluster-admin binding",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Cluster-admin binding",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Cluster-admin binding"
-kubescape_object_failed_count{framework="MITRE",control="Cluster-admin binding",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Cluster-admin binding",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Cluster-admin binding"
 kubescape_object_failed_count{framework="MITRE",control="Cluster-admin binding",namespace="kube-system",name="kube-scheduler",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Cluster-admin binding"
@@ -1641,7 +1641,7 @@ kubescape_object_failed_count{framework="MITRE",control="Cluster internal networ
 # Failed object from "MITRE" control "Cluster internal networking"
 kubescape_object_failed_count{framework="MITRE",control="Cluster internal networking",name="nginx-ingress",groupVersionKind="v1/Namespace"} 1
 # Failed object from "MITRE" control "Cluster internal networking"
-kubescape_object_failed_count{framework="MITRE",control="Cluster internal networking",name="armo-system",groupVersionKind="v1/Namespace"} 1
+kubescape_object_failed_count{framework="MITRE",control="Cluster internal networking",name="kubescape",groupVersionKind="v1/Namespace"} 1
 # Failed object from "MITRE" control "Cluster internal networking"
 kubescape_object_failed_count{framework="MITRE",control="Cluster internal networking",name="cyberarmor-system",groupVersionKind="v1/Namespace"} 1
 # Failed object from "MITRE" control "Cluster internal networking"
@@ -1661,9 +1661,9 @@ kubescape_object_failed_count{framework="MITRE",control="Exec into container",na
 # Failed object from "MITRE" control "Exec into container"
 kubescape_object_failed_count{framework="MITRE",control="Exec into container",name="system:masters",groupVersionKind="rbac.authorization.k8s.io/Group"} 1
 # Failed object from "MITRE" control "Exec into container"
-kubescape_object_failed_count{framework="MITRE",control="Exec into container",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Exec into container",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Exec into container"
-kubescape_object_failed_count{framework="MITRE",control="Exec into container",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Exec into container",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Exec into container"
 kubescape_object_failed_count{framework="MITRE",control="Exec into container",namespace="kube-system",name="endpointslice-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Exec into container"
@@ -1779,19 +1779,19 @@ kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespa
 # Failed object from "MITRE" control "hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "MITRE" control "hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "MITRE" control "hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="hostPath mount",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "hostPath mount"
@@ -1821,9 +1821,9 @@ kubescape_resources_excluded_count{framework="MITRE",control="Kubernetes CronJob
 # Number of resources failed as part of MITRE control Kubernetes CronJob
 kubescape_resources_failed_count{framework="MITRE",control="Kubernetes CronJob"} 2
 # Failed object from "MITRE" control "Kubernetes CronJob"
-kubescape_object_failed_count{framework="MITRE",control="Kubernetes CronJob",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Kubernetes CronJob",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Kubernetes CronJob"
-kubescape_object_failed_count{framework="MITRE",control="Kubernetes CronJob",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Kubernetes CronJob",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of MITRE control List Kubernetes secrets
 kubescape_resources_found_count{framework="MITRE",control="List Kubernetes secrets"} 74
 # Number of resources excluded as part of MITRE control List Kubernetes secrets
@@ -1831,9 +1831,9 @@ kubescape_resources_excluded_count{framework="MITRE",control="List Kubernetes se
 # Number of resources failed as part of MITRE control List Kubernetes secrets
 kubescape_resources_failed_count{framework="MITRE",control="List Kubernetes secrets"} 15
 # Failed object from "MITRE" control "List Kubernetes secrets"
-kubescape_object_failed_count{framework="MITRE",control="List Kubernetes secrets",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="List Kubernetes secrets",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "List Kubernetes secrets"
-kubescape_object_failed_count{framework="MITRE",control="List Kubernetes secrets",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="List Kubernetes secrets",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "List Kubernetes secrets"
 kubescape_object_failed_count{framework="MITRE",control="List Kubernetes secrets",namespace="cyberarmor-system",name="ca-controller-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "List Kubernetes secrets"
@@ -1961,13 +1961,13 @@ kubescape_object_failed_count{framework="MITRE",control="Mount service principal
 # Failed object from "MITRE" control "Mount service principal"
 kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="kube-system",name="kube-scheduler-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "MITRE" control "Mount service principal"
-kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Mount service principal"
 kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Mount service principal"
 kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Mount service principal"
-kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Mount service principal"
 kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="cyberarmor-system",name="ca-posture",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Mount service principal"
@@ -1991,9 +1991,9 @@ kubescape_object_failed_count{framework="MITRE",control="Mount service principal
 # Failed object from "MITRE" control "Mount service principal"
 kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "MITRE" control "Mount service principal"
-kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Mount service principal"
-kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Mount service principal"
 kubescape_object_failed_count{framework="MITRE",control="Mount service principal",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Number of resources found as part of MITRE control Network mapping
@@ -2003,7 +2003,7 @@ kubescape_resources_excluded_count{framework="MITRE",control="Network mapping"} 
 # Number of resources failed as part of MITRE control Network mapping
 kubescape_resources_failed_count{framework="MITRE",control="Network mapping"} 7
 # Failed object from "MITRE" control "Network mapping"
-kubescape_object_failed_count{framework="MITRE",control="Network mapping",name="armo-system",groupVersionKind="v1/Namespace"} 1
+kubescape_object_failed_count{framework="MITRE",control="Network mapping",name="kubescape",groupVersionKind="v1/Namespace"} 1
 # Failed object from "MITRE" control "Network mapping"
 kubescape_object_failed_count{framework="MITRE",control="Network mapping",name="cyberarmor-system",groupVersionKind="v1/Namespace"} 1
 # Failed object from "MITRE" control "Network mapping"
@@ -2029,9 +2029,9 @@ kubescape_object_failed_count{framework="MITRE",control="Privileged container",n
 # Failed object from "MITRE" control "Privileged container"
 kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Privileged container"
-kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Privileged container"
-kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Privileged container"
 kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Privileged container"
@@ -2063,9 +2063,9 @@ kubescape_object_failed_count{framework="MITRE",control="Privileged container",n
 # Failed object from "MITRE" control "Privileged container"
 kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "MITRE" control "Privileged container"
-kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Privileged container"
-kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Privileged container",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of MITRE control Writable hostPath mount
 kubescape_resources_found_count{framework="MITRE",control="Writable hostPath mount"} 22
 # Number of resources excluded as part of MITRE control Writable hostPath mount
@@ -2077,7 +2077,7 @@ kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount
 # Failed object from "MITRE" control "Writable hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
@@ -2093,7 +2093,7 @@ kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount
 # Failed object from "MITRE" control "Writable hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="cyberarmor-system",name="ca-rbac",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
@@ -2113,9 +2113,9 @@ kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount
 # Failed object from "MITRE" control "Writable hostPath mount"
 kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "MITRE" control "Writable hostPath mount"
-kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="MITRE",control="Writable hostPath mount",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of MITRE control Malicious admission controller (mutating)
 kubescape_resources_found_count{framework="MITRE",control="Malicious admission controller (mutating)"} 1
 # Number of resources excluded as part of MITRE control Malicious admission controller (mutating)
@@ -2151,9 +2151,9 @@ kubescape_object_failed_count{framework="MITRE",control="Delete Kubernetes event
 # Failed object from "MITRE" control "Delete Kubernetes events"
 kubescape_object_failed_count{framework="MITRE",control="Delete Kubernetes events",name="system:masters",groupVersionKind="rbac.authorization.k8s.io/Group"} 1
 # Failed object from "MITRE" control "Delete Kubernetes events"
-kubescape_object_failed_count{framework="MITRE",control="Delete Kubernetes events",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Delete Kubernetes events",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Delete Kubernetes events"
-kubescape_object_failed_count{framework="MITRE",control="Delete Kubernetes events",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Delete Kubernetes events",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Delete Kubernetes events"
 kubescape_object_failed_count{framework="MITRE",control="Delete Kubernetes events",namespace="kube-system",name="deployment-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Delete Kubernetes events"
@@ -2277,9 +2277,9 @@ kubescape_object_failed_count{framework="MITRE",control="CoreDNS poisoning",name
 # Failed object from "MITRE" control "CoreDNS poisoning"
 kubescape_object_failed_count{framework="MITRE",control="CoreDNS poisoning",name="system:anonymous",groupVersionKind="rbac.authorization.k8s.io/User"} 1
 # Failed object from "MITRE" control "CoreDNS poisoning"
-kubescape_object_failed_count{framework="MITRE",control="CoreDNS poisoning",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="CoreDNS poisoning",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "CoreDNS poisoning"
-kubescape_object_failed_count{framework="MITRE",control="CoreDNS poisoning",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="CoreDNS poisoning",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "CoreDNS poisoning"
 kubescape_object_failed_count{framework="MITRE",control="CoreDNS poisoning",namespace="kube-system",name="namespace-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "CoreDNS poisoning"
@@ -2415,9 +2415,9 @@ kubescape_object_failed_count{framework="MITRE",control="Data Destruction",names
 # Failed object from "MITRE" control "Data Destruction"
 kubescape_object_failed_count{framework="MITRE",control="Data Destruction",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Data Destruction"
-kubescape_object_failed_count{framework="MITRE",control="Data Destruction",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Data Destruction",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Data Destruction"
-kubescape_object_failed_count{framework="MITRE",control="Data Destruction",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="MITRE",control="Data Destruction",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Data Destruction"
 kubescape_object_failed_count{framework="MITRE",control="Data Destruction",namespace="kube-system",name="pv-protection-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "MITRE" control "Data Destruction"
@@ -2501,9 +2501,9 @@ kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-in
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
@@ -2561,13 +2561,13 @@ kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-in
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="nginx-ingress",name="ingress-controller-leader-nginx",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "MITRE" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="MITRE",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
 # Number of resources found as part of ArmoBest control Immutable container filesystem
 kubescape_resources_found_count{framework="ArmoBest",control="Immutable container filesystem"} 22
 # Number of resources excluded as part of ArmoBest control Immutable container filesystem
@@ -2585,9 +2585,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Immutable container 
 # Failed object from "ArmoBest" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "ArmoBest" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Immutable container filesystem"
@@ -2613,9 +2613,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Immutable container 
 # Failed object from "ArmoBest" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Immutable container filesystem"
-kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Immutable container filesystem"
 kubescape_object_failed_count{framework="ArmoBest",control="Immutable container filesystem",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Number of resources found as part of ArmoBest control Privileged container
@@ -2627,9 +2627,9 @@ kubescape_resources_failed_count{framework="ArmoBest",control="Privileged contai
 # Failed object from "ArmoBest" control "Privileged container"
 kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "Privileged container"
-kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Privileged container"
-kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Privileged container"
 kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="cyberarmor-system",name="ca-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Privileged container"
@@ -2665,9 +2665,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Privileged container
 # Failed object from "ArmoBest" control "Privileged container"
 kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "ArmoBest" control "Privileged container"
-kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Privileged container"
-kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of ArmoBest control Allowed hostPath
 kubescape_resources_found_count{framework="ArmoBest",control="Allowed hostPath"} 22
 # Number of resources excluded as part of ArmoBest control Allowed hostPath
@@ -2683,7 +2683,7 @@ kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",na
 # Failed object from "ArmoBest" control "Allowed hostPath"
 kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="etcd-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
 kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
@@ -2693,7 +2693,7 @@ kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",na
 # Failed object from "ArmoBest" control "Allowed hostPath"
 kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
 kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
@@ -2711,9 +2711,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",na
 # Failed object from "ArmoBest" control "Allowed hostPath"
 kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
 kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "ArmoBest" control "Allowed hostPath"
@@ -2729,11 +2729,11 @@ kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of
 # Failed object from "ArmoBest" control "Automatic mapping of service account"
 kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Automatic mapping of service account"
-kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Automatic mapping of service account"
-kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Automatic mapping of service account"
-kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="armo-system",name="default",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="kubescape",name="default",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Automatic mapping of service account"
 kubescape_object_failed_count{framework="ArmoBest",control="Automatic mapping of service account",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Automatic mapping of service account"
@@ -2837,9 +2837,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",
 # Failed object from "ArmoBest" control "hostNetwork access"
 kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "hostNetwork access"
-kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "hostNetwork access"
-kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "hostNetwork access"
 kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="cyberarmor-system",name="ca-posture",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "hostNetwork access"
@@ -2865,9 +2865,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",
 # Failed object from "ArmoBest" control "hostNetwork access"
 kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "hostNetwork access"
-kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "hostNetwork access"
-kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="hostNetwork access",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of ArmoBest control Resource policies
 kubescape_resources_found_count{framework="ArmoBest",control="Resource policies"} 22
 # Number of resources excluded as part of ArmoBest control Resource policies
@@ -2889,15 +2889,15 @@ kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",n
 # Failed object from "ArmoBest" control "Resource policies"
 kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "Resource policies"
-kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Resource policies"
-kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Resource policies"
 kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Resource policies"
-kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Resource policies"
-kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Resource policies"
 kubescape_object_failed_count{framework="ArmoBest",control="Resource policies",namespace="cyberarmor-system",name="ca-notification-server",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Resource policies"
@@ -2935,9 +2935,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege esca
 # Failed object from "ArmoBest" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
 # Failed object from "ArmoBest" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="cyberarmor-system",name="ca-rbac",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Allow privilege escalation"
@@ -2963,9 +2963,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege esca
 # Failed object from "ArmoBest" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Allow privilege escalation"
-kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Allow privilege escalation"
 kubescape_object_failed_count{framework="ArmoBest",control="Allow privilege escalation",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Number of resources found as part of ArmoBest control Applications credentials in configuration files
@@ -2975,7 +2975,7 @@ kubescape_resources_excluded_count{framework="ArmoBest",control="Applications cr
 # Number of resources failed as part of ArmoBest control Applications credentials in configuration files
 kubescape_resources_failed_count{framework="ArmoBest",control="Applications credentials in configuration files"} 8
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
@@ -2991,9 +2991,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Applications credent
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kube-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kube-public",name="cluster-info",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
@@ -3007,11 +3007,11 @@ kubescape_object_failed_count{framework="ArmoBest",control="Applications credent
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="nginx-ingress",name="ingress-controller-leader-nginx",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
@@ -3023,9 +3023,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Applications credent
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="default",name="kubescape",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
-kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
 kubescape_object_failed_count{framework="ArmoBest",control="Applications credentials in configuration files",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Applications credentials in configuration files"
@@ -3077,9 +3077,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Cluster-admin bindin
 # Failed object from "ArmoBest" control "Cluster-admin binding"
 kubescape_object_failed_count{framework="ArmoBest",control="Cluster-admin binding",name="system:masters",groupVersionKind="rbac.authorization.k8s.io/Group"} 1
 # Failed object from "ArmoBest" control "Cluster-admin binding"
-kubescape_object_failed_count{framework="ArmoBest",control="Cluster-admin binding",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Cluster-admin binding",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Cluster-admin binding"
-kubescape_object_failed_count{framework="ArmoBest",control="Cluster-admin binding",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Cluster-admin binding",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Cluster-admin binding"
 kubescape_object_failed_count{framework="ArmoBest",control="Cluster-admin binding",namespace="kube-system",name="daemon-set-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Cluster-admin binding"
@@ -3275,9 +3275,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Exec into container"
 # Failed object from "ArmoBest" control "Exec into container"
 kubescape_object_failed_count{framework="ArmoBest",control="Exec into container",namespace="kube-system",name="service-controller",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Exec into container"
-kubescape_object_failed_count{framework="ArmoBest",control="Exec into container",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Exec into container",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Exec into container"
-kubescape_object_failed_count{framework="ArmoBest",control="Exec into container",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Exec into container",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Exec into container"
 kubescape_object_failed_count{framework="ArmoBest",control="Exec into container",name="system:bootstrappers:kubeadm:default-node-token",groupVersionKind="rbac.authorization.k8s.io/Group"} 6
 # Failed object from "ArmoBest" control "Exec into container"
@@ -3307,9 +3307,9 @@ kubescape_resources_failed_count{framework="ArmoBest",control="Insecure capabili
 # Failed object from "ArmoBest" control "Insecure capabilities"
 kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Insecure capabilities"
-kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Insecure capabilities"
-kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Insecure capabilities"
 kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="cyberarmor-system",name="ca-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Insecure capabilities"
@@ -3345,9 +3345,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilitie
 # Failed object from "ArmoBest" control "Insecure capabilities"
 kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="kube-system",name="kube-controller-manager-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "ArmoBest" control "Insecure capabilities"
-kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Insecure capabilities"
-kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Insecure capabilities",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of ArmoBest control Linux hardening
 kubescape_resources_found_count{framework="ArmoBest",control="Linux hardening"} 22
 # Number of resources excluded as part of ArmoBest control Linux hardening
@@ -3359,9 +3359,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",nam
 # Failed object from "ArmoBest" control "Linux hardening"
 kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
-kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
-kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
 kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
@@ -3385,9 +3385,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",nam
 # Failed object from "ArmoBest" control "Linux hardening"
 kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
-kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
-kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
 kubescape_object_failed_count{framework="ArmoBest",control="Linux hardening",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Failed object from "ArmoBest" control "Linux hardening"
@@ -3417,9 +3417,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress b
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
 kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
 kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
@@ -3445,9 +3445,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress b
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
 kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Ingress and Egress blocked"
-kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Ingress and Egress blocked",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Number of resources found as part of ArmoBest control Network policies
 kubescape_resources_found_count{framework="ArmoBest",control="Network policies"} 7
 # Number of resources excluded as part of ArmoBest control Network policies
@@ -3455,7 +3455,7 @@ kubescape_resources_excluded_count{framework="ArmoBest",control="Network policie
 # Number of resources failed as part of ArmoBest control Network policies
 kubescape_resources_failed_count{framework="ArmoBest",control="Network policies"} 7
 # Failed object from "ArmoBest" control "Network policies"
-kubescape_object_failed_count{framework="ArmoBest",control="Network policies",name="armo-system",groupVersionKind="v1/Namespace"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Network policies",name="kubescape",groupVersionKind="v1/Namespace"} 1
 # Failed object from "ArmoBest" control "Network policies"
 kubescape_object_failed_count{framework="ArmoBest",control="Network policies",name="cyberarmor-system",groupVersionKind="v1/Namespace"} 1
 # Failed object from "ArmoBest" control "Network policies"
@@ -3481,13 +3481,13 @@ kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="nginx-ingress",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="cyberarmor-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
@@ -3521,9 +3521,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kube-system",name="kube-proxy",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="ArmoBest",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
@@ -3561,9 +3561,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="No impersonation",na
 # Failed object from "ArmoBest" control "No impersonation"
 kubescape_object_failed_count{framework="ArmoBest",control="No impersonation",name="system:masters",groupVersionKind="rbac.authorization.k8s.io/Group"} 1
 # Failed object from "ArmoBest" control "No impersonation"
-kubescape_object_failed_count{framework="ArmoBest",control="No impersonation",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="No impersonation",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "No impersonation"
-kubescape_object_failed_count{framework="ArmoBest",control="No impersonation",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="No impersonation",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "No impersonation"
 kubescape_object_failed_count{framework="ArmoBest",control="No impersonation",namespace="kube-system",name="root-ca-cert-publisher",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "No impersonation"
@@ -3675,9 +3675,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Portforwarding privi
 # Failed object from "ArmoBest" control "Portforwarding privileges"
 kubescape_object_failed_count{framework="ArmoBest",control="Portforwarding privileges",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Portforwarding privileges"
-kubescape_object_failed_count{framework="ArmoBest",control="Portforwarding privileges",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Portforwarding privileges",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Portforwarding privileges"
-kubescape_object_failed_count{framework="ArmoBest",control="Portforwarding privileges",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Portforwarding privileges",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Portforwarding privileges"
 kubescape_object_failed_count{framework="ArmoBest",control="Portforwarding privileges",namespace="cyberarmor-system",name="ca-controller-service-account",groupVersionKind="/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Portforwarding privileges"
@@ -3789,9 +3789,9 @@ kubescape_resources_excluded_count{framework="ArmoBest",control="Image pull poli
 # Number of resources failed as part of ArmoBest control Image pull policy on latest image tag
 kubescape_resources_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag"} 2
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
-kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="armo-system",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
-kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="armo-system",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
 kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="cyberarmor-system",name="ca-posture",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
@@ -3817,9 +3817,9 @@ kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
 kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
-kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
-kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
 kubescape_object_failed_count{framework="ArmoBest",control="Image pull policy on latest image tag",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
 # Failed object from "ArmoBest" control "Image pull policy on latest image tag"
@@ -3845,7 +3845,7 @@ kubescape_object_failed_count{framework="ArmoBest",control="Namespace without se
 # Failed object from "ArmoBest" control "Namespace without service accounts"
 kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",name="kube-node-lease",groupVersionKind="v1/Namespace"} 1
 # Failed object from "ArmoBest" control "Namespace without service accounts"
-kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",name="armo-system",groupVersionKind="v1/Namespace"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",name="kubescape",groupVersionKind="v1/Namespace"} 1
 # Failed object from "ArmoBest" control "Namespace without service accounts"
 kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",name="cyberarmor-system",groupVersionKind="v1/Namespace"} 1
 # Failed object from "ArmoBest" control "Namespace without service accounts"
@@ -3941,11 +3941,11 @@ kubescape_object_failed_count{framework="ArmoBest",control="Namespace without se
 # Failed object from "ArmoBest" control "Namespace without service accounts"
 kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",namespace="nginx-ingress",name="default",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Namespace without service accounts"
-kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",namespace="armo-system",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",namespace="kubescape",name="armo-kubescape-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Namespace without service accounts"
-kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",namespace="armo-system",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",namespace="kubescape",name="armo-scanner-service-account",groupVersionKind="v1/ServiceAccount"} 1
 # Failed object from "ArmoBest" control "Namespace without service accounts"
-kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",namespace="armo-system",name="default",groupVersionKind="v1/ServiceAccount"} 1
+kubescape_object_failed_count{framework="ArmoBest",control="Namespace without service accounts",namespace="kubescape",name="default",groupVersionKind="v1/ServiceAccount"} 1
 # Number of resources found as part of cve-scanning control CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability
 kubescape_resources_found_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"} 36
 # Number of resources excluded as part of cve-scanning control CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability
@@ -3975,13 +3975,13 @@ kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-n
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="nginx-ingress",name="ingress-controller-leader-nginx",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-be-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-kubescape-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
+kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-scan-scheduler-config",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
@@ -3999,9 +3999,9 @@ kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-n
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kube-node-lease",name="kube-root-ca.crt",groupVersionKind="v1/ConfigMap"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
-kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="armo-system",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"
 kubescape_object_failed_count{framework="cve-scanning",control="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
 # Failed object from "cve-scanning" control "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"

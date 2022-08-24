@@ -59,7 +59,7 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 * Image vulnerability scanning based controls 
 * Assisted remediation (telling where/what to fix)
 * Integration with Prometheus
-* Confiugration of controls (customizing rules for a given environment)
+* Configuration of controls (customizing rules for a given environment)
 * Installation in the cluster for continuous monitoring
 * Host scanner 
 * Cloud vendor API integration

@@ -1,7 +1,7 @@
 package v2
 
 import (
-	"github.com/armosec/k8s-interface/workloadinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 )
 
 type ResourceTableView []ResourceResult

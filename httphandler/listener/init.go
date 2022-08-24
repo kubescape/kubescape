@@ -3,10 +3,10 @@ package listener
 import (
 	"os"
 
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
-	"github.com/dwertent/go-logger/zaplogger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/zaplogger"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 func initialize() error {
@@ -44,12 +44,12 @@ func initializeSaaSEnv() {
 	switch saasEnv {
 	case "dev", "development":
 		logger.L().Debug("setting dev env")
-		getter.SetARMOAPIConnector(getter.NewARMOAPIDev())
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIDev())
 	case "stage", "staging":
 		logger.L().Debug("setting staging env")
-		getter.SetARMOAPIConnector(getter.NewARMOAPIStaging())
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIStaging())
 	default:
 		logger.L().Debug("setting prod env")
-		getter.SetARMOAPIConnector(getter.NewARMOAPIProd())
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIProd())
 	}
 }
