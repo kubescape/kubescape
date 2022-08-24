@@ -1,7 +1,7 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 
-[![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
+[![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
 
 
 :sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
@@ -14,12 +14,6 @@ It has become one of the fastest-growing Kubernetes tools among developers due t
 Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack, and supports multi-cloud K8s deployments like EKS, GKE, and AKS.
 
 </br>
-
-<!-- # Kubescape Coverage
-<img src="docs/ksfromcodetodeploy.png">
-
-</br> -->
-
 
 # Kubescape CLI:
 <img src="docs/demo.gif">
