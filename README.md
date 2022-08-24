@@ -1,4 +1,4 @@
-<a href="https://cloud.armosec.io/account/login?utm_campaign=Community%20Classroom%20%7C%20Kunal%20Kushwaha&utm_source=Influencers%20&utm_medium=Community%20Classroom%20&utm_content=Kubescape%20registration%20"><img src="docs/kubescape.png" width="300" alt="logo" align="center"></a>
+<a href="https://cloud.armosec.io/"><img src="docs/kubescape.png" width="300" alt="logo" align="center"></a>
 
 [![build](https://github.com/armosec/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/armosec/kubescape)](https://goreportcard.com/report/github.com/armosec/kubescape)
