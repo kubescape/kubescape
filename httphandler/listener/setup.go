@@ -19,7 +19,7 @@ const (
 	scanPath              = "/v1/scan"
 	statusPath            = "/v1/status"
 	resultsPath           = "/v1/results"
-	prometheusMmeticsPath = "/v1/metrics"
+	prometheusMetricsPath = "/v1/metrics"
 	livePath              = "/livez"
 	readyPath             = "/readyz"
 )
@@ -45,7 +45,7 @@ func SetupHTTPListener() error {
 	// listen
 	httpHandler := handlerequestsv1.NewHTTPHandler()
 
-	rtr.HandleFunc(prometheusMmeticsPath, httpHandler.Metrics)
+	rtr.HandleFunc(prometheusMetricsPath, httpHandler.Metrics)
 	rtr.HandleFunc(scanPath, httpHandler.Scan)
 	rtr.HandleFunc(statusPath, httpHandler.Status)
 	rtr.HandleFunc(resultsPath, httpHandler.Results)
@@ -75,7 +75,7 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("filed to load key pair: %v", err)
+		return nil, fmt.Errorf("failed to load key pair: %v", err)
 	}
 	return &pair, nil
 }
