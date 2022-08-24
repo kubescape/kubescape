@@ -8,12 +8,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/dwertent/go-logger/helpers"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 
-	"github.com/armosec/opa-utils/objectsenvelopes"
-	"github.com/armosec/opa-utils/objectsenvelopes/localworkload"
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 
 	"gopkg.in/yaml.v2"
 )

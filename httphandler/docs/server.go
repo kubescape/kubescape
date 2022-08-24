@@ -6,8 +6,8 @@ import (
 
 	_ "embed"
 
-	logger "github.com/dwertent/go-logger"
 	"github.com/go-openapi/runtime/middleware"
+	logger "github.com/kubescape/go-logger"
 )
 
 const (

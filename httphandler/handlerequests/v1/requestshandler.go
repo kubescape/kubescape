@@ -5,13 +5,13 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 
-	utilsapisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
-	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
-	"github.com/dwertent/go-logger/helpers"
+	"github.com/kubescape/go-logger/helpers"
+	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 
 	"github.com/gorilla/schema"
 
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
 
 	"github.com/google/uuid"
 )

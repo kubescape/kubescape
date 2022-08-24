@@ -1,8 +1,8 @@
 package hostsensorutils
 
 import (
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/opa-utils/reporthandling/apis"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 var (

@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/mod/semver"
 )

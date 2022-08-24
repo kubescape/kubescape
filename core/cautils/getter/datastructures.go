@@ -12,7 +12,7 @@ type FeLoginResponse struct {
 	Expires      string `json:"expires"`
 }
 
-type ArmoSelectCustomer struct {
+type KSCloudSelectCustomer struct {
 	SelectedCustomerGuid string `json:"selectedCustomer"`
 }
 

@@ -4,7 +4,7 @@ import hashlib
 import platform
 import subprocess
 
-BASE_GETTER_CONST = "github.com/armosec/kubescape/v2/core/cautils/getter"
+BASE_GETTER_CONST = "github.com/kubescape/kubescape/v2/core/cautils/getter"
 
 def checkStatus(status, msg):
     if status != 0:
@@ -36,7 +36,7 @@ def main():
 
     # Set some variables
     packageName = getPackageName()
-    buildUrl = "github.com/armosec/kubescape/v2/core/cautils.BuildNumber"
+    buildUrl = "github.com/kubescape/kubescape/v2/core/cautils.BuildNumber"
     releaseVersion = os.getenv("RELEASE")
 
     # Create build directory

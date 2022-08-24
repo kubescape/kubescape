@@ -1,8 +1,8 @@
 package hostsensorutils
 
 import (
-	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
-	"github.com/armosec/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 type HostSensorHandlerMock struct {
