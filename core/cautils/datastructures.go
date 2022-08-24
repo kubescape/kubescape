@@ -2,20 +2,20 @@ package cautils
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/reporthandling"
-	apis "github.com/armosec/opa-utils/reporthandling/apis"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
+	apis "github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
 type K8SResources map[string][]string
-type ArmoResources map[string][]string
+type KSResources map[string][]string
 
 type OPASessionObj struct {
 	K8SResources          *K8SResources                          // input k8s objects
-	ArmoResource          *ArmoResources                         // input ARMO objects
+	ArmoResource          *KSResources                           // input ARMO objects
 	Policies              []reporthandling.Framework             // list of frameworks to scan
 	AllResources          map[string]workloadinterface.IMetadata // all scanned resources, map[<rtesource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result     // resources scan results, map[<rtesource ID>]<resource result>
@@ -42,6 +42,23 @@ func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SRe
 		SessionID:             scanInfo.ScanID,
 		Metadata:              scanInfoToScanMetadata(scanInfo),
 	}
+}
+
+func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources map[string]int) {
+	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+	}
+	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources == nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources = make(map[string]int)
+	}
+	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources = mapNamespaceToNumberOfResources
+}
+
+func (sessionObj *OPASessionObj) SetNumberOfWorkerNodes(n int) {
+	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+	}
+	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = n
 }
 
 func NewOPASessionObjMock() *OPASessionObj {

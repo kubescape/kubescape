@@ -3,18 +3,18 @@ package submit
 import (
 	"fmt"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/meta"
-	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
-	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
-	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
 	"github.com/google/uuid"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
+	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
-	"github.com/armosec/rbac-utils/rbacscanner"
+	"github.com/kubescape/rbac-utils/rbacscanner"
 	"github.com/spf13/cobra"
 )
 
@@ -79,7 +79,7 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 }
 func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), credentials, clusterName)
+		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), credentials, clusterName)
+	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName)
 }

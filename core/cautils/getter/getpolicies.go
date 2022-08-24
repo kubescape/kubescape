@@ -2,7 +2,7 @@ package getter
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 // supported listing

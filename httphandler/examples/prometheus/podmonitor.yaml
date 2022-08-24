@@ -2,7 +2,7 @@ apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
   name: kubescape
-  namespace: ks-scanner
+  namespace: kubescape
   labels:
     app: kubescape
 spec:

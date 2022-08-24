@@ -3,7 +3,7 @@ package cautils
 import (
 	"testing"
 
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -20,7 +20,7 @@ func TestSetContextMetadata(t *testing.T) {
 	}
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
-		setContextMetadata(&ctx, "https://github.com/armosec/kubescape")
+		setContextMetadata(&ctx, "https://github.com/kubescape/kubescape")
 
 		assert.Nil(t, ctx.ClusterContextMetadata)
 		assert.Nil(t, ctx.DirectoryContextMetadata)
@@ -29,7 +29,7 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.NotNil(t, ctx.RepoContextMetadata)
 
 		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Repo)
-		assert.Equal(t, "armosec", ctx.RepoContextMetadata.Owner)
+		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Owner)
 		assert.Equal(t, "master", ctx.RepoContextMetadata.Branch)
 	}
 }
@@ -40,8 +40,5 @@ func TestGetHostname(t *testing.T) {
 
 func TestGetScanningContext(t *testing.T) {
 	assert.Equal(t, ContextCluster, GetScanningContext(""))
-	// assert.Equal(t, ContextDir, GetScanningContext("/"))
-	assert.Equal(t, ContextGitURL, GetScanningContext("https://github.com/armosec/kubescape"))
-	// assert.Equal(t, ContextFile, GetScanningContext(path.Join(".", "testdata", "localrepo.git")))
-	// assert.Equal(t, ContextGitLocal, GetScanningContext(path.Join(".", "testdata")))
+	assert.Equal(t, ContextGitURL, GetScanningContext("https://github.com/kubescape/kubescape"))
 }

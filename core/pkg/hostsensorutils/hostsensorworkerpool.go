@@ -3,9 +3,9 @@ package hostsensorutils
 import (
 	"sync"
 
-	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 )
 
 const noOfWorkers int = 10

@@ -1,7 +1,7 @@
 package v2
 
 import (
-	"github.com/armosec/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 type SilentPrinter struct {

@@ -1,12 +1,12 @@
 package core
 
 import (
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
 
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
@@ -52,12 +52,12 @@ func (ks *Kubescape) SubmitExceptions(credentials *cautils.Credentials, excPath 
 	}
 
 	// login kubescape SaaS
-	armoAPI := getter.GetArmoAPIConnector()
-	if err := armoAPI.Login(); err != nil {
+	ksCloudAPI := getter.GetKSCloudAPIConnector()
+	if err := ksCloudAPI.Login(); err != nil {
 		return err
 	}
 
-	if err := armoAPI.PostExceptions(exceptions); err != nil {
+	if err := ksCloudAPI.PostExceptions(exceptions); err != nil {
 		return err
 	}
 	logger.L().Success("Exceptions submitted successfully")

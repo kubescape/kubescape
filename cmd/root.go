@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/v2/cmd/completion"
-	"github.com/armosec/kubescape/v2/cmd/config"
-	"github.com/armosec/kubescape/v2/cmd/delete"
-	"github.com/armosec/kubescape/v2/cmd/download"
-	"github.com/armosec/kubescape/v2/cmd/list"
-	"github.com/armosec/kubescape/v2/cmd/scan"
-	"github.com/armosec/kubescape/v2/cmd/submit"
-	"github.com/armosec/kubescape/v2/cmd/version"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/core"
-	"github.com/armosec/kubescape/v2/core/meta"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/cmd/completion"
+	"github.com/kubescape/kubescape/v2/cmd/config"
+	"github.com/kubescape/kubescape/v2/cmd/delete"
+	"github.com/kubescape/kubescape/v2/cmd/download"
+	"github.com/kubescape/kubescape/v2/cmd/list"
+	"github.com/kubescape/kubescape/v2/cmd/scan"
+	"github.com/kubescape/kubescape/v2/cmd/submit"
+	"github.com/kubescape/kubescape/v2/cmd/version"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/core"
+	"github.com/kubescape/kubescape/v2/core/meta"
 
 	"github.com/spf13/cobra"
 )
@@ -51,8 +51,8 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		Example: ksExamples,
 	}
 
-	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLsDep, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLs, "env", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLsDep, "environment", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLs, "env", "", envFlagUsage)
 	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
