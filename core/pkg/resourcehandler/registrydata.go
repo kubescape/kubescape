@@ -3,15 +3,15 @@ package resourcehandler
 import (
 	"fmt"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	armosecadaptorv1 "github.com/armosec/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
-	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	armosecadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
+	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 
-	"github.com/armosec/opa-utils/shared"
+	"github.com/kubescape/opa-utils/shared"
 )
 
 const (
@@ -35,7 +35,7 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	return registryAdaptors, nil
 }
 
-func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, armoResourceMap *cautils.ArmoResources) error {
+func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
 	logger.L().Debug("Collecting images vulnerabilities")
 
 	if len(registryAdaptors.adaptors) == 0 {
@@ -75,7 +75,7 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	for i := range metaObjs {
 		allResources[metaObjs[i].GetID()] = metaObjs[i]
 	}
-	(*armoResourceMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
+	(*ksResourceMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
 
 	return nil
 }
@@ -151,10 +151,10 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 
 	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
 
-	armoAPI := getter.GetArmoAPIConnector()
-	if armoAPI != nil {
-		if armoAPI.GetSecretKey() != "" && armoAPI.GetClientID() != "" && armoAPI.GetAccountID() != "" {
-			adaptors = append(adaptors, armosecadaptorv1.NewArmoAdaptor(getter.GetArmoAPIConnector()))
+	ksCloudAPI := getter.GetKSCloudAPIConnector()
+	if ksCloudAPI != nil {
+		if ksCloudAPI.GetSecretKey() != "" && ksCloudAPI.GetClientID() != "" && ksCloudAPI.GetAccountID() != "" {
+			adaptors = append(adaptors, armosecadaptorv1.NewKSAdaptor(getter.GetKSCloudAPIConnector()))
 		}
 	}
 

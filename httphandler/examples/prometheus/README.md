@@ -23,7 +23,7 @@
 
 All kubescape related metrics begin with `kubescape`
 
-> `riskScore` is the output of an algorithm calculating the risk of the vulinrability. `0` indicates there is no risk and `100` indicates highest risk. 
+> `riskScore` is the output of an algorithm calculating the risk of the vulnerability. `0` indicates there is no risk and `100` indicates highest risk. 
 
 #### Cluster scope metrics
 
