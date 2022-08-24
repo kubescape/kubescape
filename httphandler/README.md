@@ -155,7 +155,7 @@ curl --header "Content-Type: application/json" \
 
 #### Data profiling
 Analyze profiled data using [pprof](https://github.com/google/pprof/blob/main/doc/README.md).
-[How ro use](https://pkg.go.dev/net/http/pprof)
+[How to use](https://pkg.go.dev/net/http/pprof)
 
 example:
 ```bash
