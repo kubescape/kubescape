@@ -9,7 +9,7 @@ When contributing, we categorize contributions into two:
 If you have a small change, feel free to fire up a Pull Request.
 
 When planning a bigger change, please first discuss the change you wish to make via issue,
-email, or any other method with the owners of this repository before making a change. Most likely your changes or features are great, but sometimes we might already going to this direction (or the exact opposite ;-) ) and we don't want to waste your time.
+email, or any other method with the owners of this repository before making a change. Most likely your changes or features are great, but sometimes we might be already going to this direction (or the exact opposite ;-) ) and we don't want to waste your time.
 
 Please note we have a code of conduct, please follow it in all your interactions with the project.
 
@@ -55,12 +55,12 @@ advances
 * Other conduct which could reasonably be considered inappropriate in a
   professional setting
 
-We will distance those who are constantly adhere to unacceptable behavior.
+We will distance those who are constantly adhering to unacceptable behavior.
 
 ### Our Responsibilities
 
 Project maintainers are responsible for clarifying the standards of acceptable
-behavior and are expected to take appropriate and fair corrective action in
+behavior and are expected to take appropriate and fair corrective actions in
 response to any instances of unacceptable behavior.
 
 Project maintainers have the right and responsibility to remove, edit, or
