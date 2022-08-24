@@ -3,7 +3,7 @@ package v1
 import (
 	"time"
 
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 type V2ListRequest struct {
@@ -30,6 +30,7 @@ type V2ListRequest struct {
 	FieldsList              []string          `json:"includeFields,omitempty"`
 	FieldsReverseKeywordMap map[string]string `json:"-,omitempty"`
 }
-type ArmoCivAdaptor struct {
-	armoAPI *getter.ArmoAPI
+
+type KSCivAdaptor struct {
+	ksCloudAPI *getter.KSCloudAPI
 }

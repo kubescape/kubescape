@@ -1,8 +1,7 @@
 <img src="docs/kubescape.png" width="300" alt="logo" align="center">
 
-[![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/armosec/kubescape/actions/workflows/build.yaml)
+[![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/kubescape/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
-
 
 :sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
 
@@ -20,13 +19,10 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 
 </br>
 
-<!-- # Kubescape overview:
-<img src="docs/ARMO-header-2022.gif"> -->
-
 # TL;DR
 ## Install:
 ```sh
-curl -s https://raw.githubusercontent.com/armosec/kubescape/master/install.sh | /bin/bash
+curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 ```
 
 [Install on windows](#install-on-windows)
@@ -50,7 +46,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-### Click [👍](https://github.com/armosec/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
+### Click [👍](https://github.com/kubescape/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
 
 </br>
 
@@ -86,14 +82,14 @@ Want to contribute? Want to discuss something? Have an issue?
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
 * Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
-<details><summary>Windows</summary>
-
 ## Install on Windows
+
+<details><summary>Windows</summary>
 
 **Requires powershell v5.0+**
 
 ``` powershell
-iwr -useb https://raw.githubusercontent.com/armosec/kubescape/master/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex
 ```
 
 Note: if you get an error you might need to change the execution policy (i.e. enable Powershell) with
@@ -103,9 +99,10 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
 </details>
 
-<details><summary>MacOS</summary>
 
 ## Install on macOS
+
+<details><summary>MacOS</summary>
 
 1. ```sh
     brew tap kubescape/tap
@@ -115,9 +112,9 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
     ```
 </details>
 
-<details><summary>Nix/NixOS</summary>
-
 ## Install on NixOS or with nix (Community)
+
+<details><summary>Nix/NixOS</summary>
 
 Direct issues installing `kubescape` via `nix` through the channels mentioned [here](https://nixos.wiki/wiki/Support)
 
@@ -197,7 +194,7 @@ kubescape scan *.yaml --submit
 
 #### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
-kubescape scan https://github.com/armosec/kubescape --submit
+kubescape scan https://github.com/kubescape/kubescape --submit
 ```
 
 #### Display all scanned resources (including the resources which passed) 
@@ -295,9 +292,9 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 # Building Kubescape
 
-<details><summary>Windows</summary>
+## Build on Windows
 
-## Windows
+<details><summary>Windows</summary>
 
 1. Install MSYS2 & build libgit _(needed only for the first time)_
 
@@ -320,9 +317,9 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
     ```
 </details>
 
-<details><summary>Linux / MacOS</summary>
+## Build on Linux/MacOS
 
-## Linux / MacOS
+<details><summary>Linux / MacOS</summary>
 
 1. Install libgit2 dependency _(needed only for the first time)_
    
@@ -408,7 +405,7 @@ The results by default are printed in a pretty "console friendly" manner, but th
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
 
 ## Thanks to all the contributors ❤️
-<a href = "https://github.com/armosec/kubescape/graphs/contributors">
-  <img src = "https://contrib.rocks/image?repo=armosec/kubescape"/>
+<a href = "https://github.com/kubescape/kubescape/graphs/contributors">
+  <img src = "https://contrib.rocks/image?repo=kubescape/kubescape"/>
 </a>
 
