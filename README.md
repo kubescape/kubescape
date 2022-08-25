@@ -42,7 +42,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-> Kubescape is an open source project. We welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
+> Kubescape is an open-source project. We welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
 
 </br>
 
