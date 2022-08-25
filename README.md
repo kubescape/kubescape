@@ -3,28 +3,21 @@
 [![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/kubescape/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
 
+:sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
 
 
-Kubescape is a K8s open-source tool providing a multi-cloud K8s single pane of glass, including risk analysis, security compliance, RBAC visualizer and image vulnerabilities scanning. 
+Kubescape is a K8s open-source tool providing a Kubernetes single pane of glass, including risk analysis, security compliance, RBAC visualizer, and image vulnerabilities scanning. 
 Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
-It became one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins’ precious time, effort, and resources.
+
+It has become one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins precious time, effort, and resources.
 Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack, and supports multi-cloud K8s deployments like EKS, GKE, and AKS.
 
 </br>
-
-<!-- # Kubescape Coverage
-<img src="docs/ksfromcodetodeploy.png">
-
-</br> -->
-
 
 # Kubescape CLI:
 <img src="docs/demo.gif">
 
 </br>
-
-<!-- # Kubescape overview:
-<img src="docs/ARMO-header-2022.gif"> -->
 
 # TL;DR
 ## Install:
@@ -49,7 +42,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-> Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
+> Kubescape is an open source project. We welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
 
 </br>
 
@@ -58,17 +51,17 @@ kubescape scan --submit --enable-host-scan --verbose
 </br>
 
 
-# Being part of the team
+# Being a part of the team
 
 We invite you to our team! We are excited about this project and want to return the love we get.
 
 Want to contribute? Want to discuss something? Have an issue?
 
-* Feel free to pick a task from the [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
-* Open a issue, we are trying to respond within 48 hours
-* [Join us](https://armosec.github.io/kubescape) in a discussion on our discord server!
+* Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
+* Open an issue, we are trying to respond within 48 hours
+* [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
 
-[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://armosec.github.io/kubescape/)
+[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
 ![discord](https://img.shields.io/discord/893048809884643379)
 
 
@@ -87,11 +80,11 @@ Want to contribute? Want to discuss something? Have an issue?
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
-* Customize controls configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
-
-<details><summary>Windows</summary>
+* Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
 ## Install on Windows
+
+<details><summary>Windows</summary>
 
 **Requires powershell v5.0+**
 
@@ -106,9 +99,10 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
 ```
 </details>
 
-<details><summary>MacOS</summary>
 
 ## Install on macOS
+
+<details><summary>MacOS</summary>
 
 1. ```sh
     brew tap kubescape/tap
@@ -118,9 +112,9 @@ Set-ExecutionPolicy RemoteSigned -scope CurrentUser
     ```
 </details>
 
-<details><summary>Nix/NixOS</summary>
-
 ## Install on NixOS or with nix (Community)
+
+<details><summary>Nix/NixOS</summary>
 
 Direct issues installing `kubescape` via `nix` through the channels mentioned [here](https://nixos.wiki/wiki/Support)
 
@@ -203,7 +197,7 @@ kubescape scan *.yaml --submit
 kubescape scan https://github.com/kubescape/kubescape --submit
 ```
 
-#### Display all scanned resources (including the resources who passed) 
+#### Display all scanned resources (including the resources which passed) 
 ```
 kubescape scan --verbose
 ```
@@ -243,7 +237,7 @@ kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 ```
 kubescape scan </path/to/directory> --submit
 ```
-> Kubescape will load the default values file
+> Kubescape will load the default value file
 
 ### Offline/Air-gaped Environment Support
 
@@ -263,11 +257,11 @@ kubescape download artifacts --output path/to/local/dir
 kubescape scan --use-artifacts-from path/to/local/dir
 ```
 
-#### Download a single artifacts
+#### Download a single artifact
 
-You can also download a single artifacts and scan with the `--use-from` flag
+You can also download a single artifact and scan with the `--use-from` flag
 
-1. Download and save in file, if file name not specified, will save in `~/.kubescape/<framework name>.json`
+1. Download and save in file, if file name is not specified, will save in `~/.kubescape/<framework name>.json`
 ```
 kubescape download framework nsa --output /path/nsa.json
 ```
@@ -298,9 +292,9 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 # Building Kubescape
 
-<details><summary>Windows</summary>
+## Build on Windows
 
-## Windows
+<details><summary>Windows</summary>
 
 1. Install MSYS2 & build libgit _(needed only for the first time)_
 
@@ -323,9 +317,9 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
     ```
 </details>
 
-<details><summary>Linux / MacOS</summary>
+## Build on Linux/MacOS
 
-## Linux / MacOS
+<details><summary>Linux / MacOS</summary>
 
 1. Install libgit2 dependency _(needed only for the first time)_
    
@@ -357,7 +351,7 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 ## VS code configuration samples
 
-You can use the samples files below to setup your VS code environment for building and debugging purposes.
+You can use the sample files below to setup your VS code environment for building and debugging purposes.
 
 
 <details><summary>.vscode/settings.json</summary>
@@ -402,13 +396,13 @@ You can use the samples files below to setup your VS code environment for buildi
 # Under the hood
 
 ## Technology
-Kubescape based on [OPA engine](https://github.com/open-policy-agent/opa) and ARMO's posture controls.
+Kubescape is based on the [OPA engine](https://github.com/open-policy-agent/opa) and ARMO's posture controls.
 
-The tools retrieves Kubernetes objects from the API server and runs a set of [rego's snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
+The tools retrieve Kubernetes objects from the API server and run a set of [rego's snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
 
-The results by default printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
+The results by default are printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
 
-Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests themselves more robust and complete as Kubernetes develops.
+Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
 
 ## Thanks to all the contributors ❤️
 <a href = "https://github.com/kubescape/kubescape/graphs/contributors">
