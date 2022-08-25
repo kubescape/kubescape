@@ -50,7 +50,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-### Please [Star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
+### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
 </br>
 
