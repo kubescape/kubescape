@@ -149,13 +149,13 @@ curl --header "Content-Type: application/json" --request POST --data '{"hostScan
 ```bash
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"hostScanner":true, "submit":true, "includeNamespaces": ["ks-scanner"], "targetType": "framework", "targetNames": ["nsa"] }' \
+  --data '{"hostScanner":true, "submit":true, "includeNamespaces": ["kubescape"], "targetType": "framework", "targetNames": ["nsa"] }' \
   http://127.0.0.1:8080/v1/scan
 ```
 
 #### Data profiling
 Analyze profiled data using [pprof](https://github.com/google/pprof/blob/main/doc/README.md).
-[How ro use](https://pkg.go.dev/net/http/pprof)
+[How to use](https://pkg.go.dev/net/http/pprof)
 
 example:
 ```bash

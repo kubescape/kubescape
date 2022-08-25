@@ -3,9 +3,9 @@ package submit
 import (
 	"fmt"
 
-	"github.com/armosec/kubescape/v2/core/meta"
-	metav1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
-	logger "github.com/dwertent/go-logger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v2/core/meta"
+	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 
 	"github.com/spf13/cobra"
 )

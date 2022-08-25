@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 
 	"github.com/gorilla/schema"
 )
@@ -65,7 +65,6 @@ type ScanQueryParams struct {
 	KeepResults bool `schema:"keep" json:"keep"`
 }
 
-
 // swagger:parameters getScanResults
 type GetResultsQueryParams struct {
 	// ID of the requested scan. If empty or not provided, defaults to the latest scan.
@@ -79,7 +78,6 @@ type GetResultsQueryParams struct {
 	// in: query
 	// default: false
 	KeepResults bool `schema:"keep" json:"keep"`
-
 }
 
 // swagger:parameters deleteScanResults

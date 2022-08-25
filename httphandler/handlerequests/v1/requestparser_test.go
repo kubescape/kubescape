@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"testing"
 
-	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
 	"github.com/armosec/utils-go/boolutils"
+	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"github.com/stretchr/testify/assert"
 )
 
