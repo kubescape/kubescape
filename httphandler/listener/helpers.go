@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	logger "github.com/dwertent/go-logger"
-	"github.com/dwertent/go-logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 // RecoverFunc recover function for http requests

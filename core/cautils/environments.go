@@ -1,6 +1,6 @@
 package cautils
 
-// CA environment vars
+// Kubescape Cloud environment vars
 var (
 	CustomerGUID = ""
 	ClusterName  = ""

@@ -88,10 +88,6 @@ jobs:
         env:
           RELEASE: v2.0.${{ github.run_number }} 
           CLIENT: release-dev
-          ArmoBEServer: api.armo.cloud
-          ArmoAuthServer: auth.armo.cloud
-          ArmoERServer: report.armo.cloud
-          ArmoWebsite: portal.armo.cloud
           CGO_ENABLED: 1
         run: python3 --version && python3 build.py
       
@@ -110,7 +106,7 @@ jobs:
   build-docker:
     name: Build docker container, tag and upload to registry
     needs: build
-    if: ${{ github.repository == 'armosec/kubescape' }} # TODO
+    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
     runs-on: ubuntu-latest
     permissions:
       id-token: write

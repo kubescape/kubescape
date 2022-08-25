@@ -3,8 +3,8 @@ package getter
 import (
 	"strings"
 
-	"github.com/armosec/opa-utils/gitregostore"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/gitregostore"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 // =======================================================================================================================

@@ -1,23 +1,23 @@
-module github.com/armosec/kubescape/v2
+module github.com/kubescape/kubescape/v2
 
 go 1.18
 
 require (
-	github.com/armosec/armoapi-go v0.0.98
+	github.com/armosec/armoapi-go v0.0.115
 	github.com/armosec/go-git-url v0.0.15
-	github.com/armosec/k8s-interface v0.0.79
-	github.com/armosec/opa-utils v0.0.166
-	github.com/armosec/rbac-utils v0.0.14
-	github.com/armosec/utils-go v0.0.9
-	github.com/armosec/utils-k8s-go v0.0.7
+	github.com/armosec/utils-go v0.0.12
+	github.com/armosec/utils-k8s-go v0.0.12
 	github.com/briandowns/spinner v1.18.1
-	github.com/dwertent/go-logger v0.0.2
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
 	github.com/francoispqt/gojay v1.2.13
 	github.com/go-git/go-git/v5 v5.4.2
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.37.0
+	github.com/kubescape/go-logger v0.0.5
+	github.com/kubescape/k8s-interface v0.0.82
+	github.com/kubescape/opa-utils v0.0.172
+	github.com/kubescape/rbac-utils v0.0.17
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.14
 	github.com/olekukonko/tablewriter v0.0.5
@@ -28,9 +28,9 @@ require (
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3
 	gopkg.in/yaml.v2 v2.4.0
 	helm.sh/helm/v3 v3.9.0
-	k8s.io/api v0.24.2
-	k8s.io/apimachinery v0.24.2
-	k8s.io/client-go v0.24.2
+	k8s.io/api v0.24.3
+	k8s.io/apimachinery v0.24.3
+	k8s.io/client-go v0.24.3
 	k8s.io/utils v0.0.0-20220706174534-f6158b442e7c
 	sigs.k8s.io/yaml v1.3.0
 )
@@ -94,7 +94,6 @@ require (
 	github.com/gobwas/glob v0.2.3 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.2.0 // indirect
-	github.com/golang/glog v1.0.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
@@ -140,7 +139,7 @@ require (
 	go.opencensus.io v0.23.0 // indirect
 	go.uber.org/atomic v1.7.0 // indirect
 	go.uber.org/multierr v1.6.0 // indirect
-	go.uber.org/zap v1.21.0 // indirect
+	go.uber.org/zap v1.22.0 // indirect
 	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e // indirect
 	golang.org/x/net v0.0.0-20220624214902-1bab6f366d9e // indirect
 	golang.org/x/oauth2 v0.0.0-20220630143837-2104d58473e0 // indirect
