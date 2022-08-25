@@ -22,7 +22,7 @@ const (
 var specJSONBytes []byte
 
 // ServeOpenAPISpec returns the OpenAPI specification file
-func ServeOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+func ServeOpenAPISpec(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(specJSONBytes)
 }
