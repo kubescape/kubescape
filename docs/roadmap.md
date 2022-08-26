@@ -17,7 +17,7 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 * [Wishlist](#wishlist) -  features we are dreaming of in 😀 and want to push them gradually forward
 
 
-## Planning 👷
+## [Planning] 👷
 
 * ##### Storing scan results in cluster
   We want Kubescape scan results (both cluster and image scan) to be stored in the cluster locally as `CRD`s. This will enable easier integration with results by other projects as well as with scripting via `kubectl`. This will also make image scan based controls to avoid accessing external resources for image vulnerability scan results.
