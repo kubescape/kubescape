@@ -12,12 +12,12 @@ The features serve different stages of the workflow of the users:
 
 The items in the Kubescape roadmap are split into 3 major groups based on the feature planning maturity:
 
-* [Planning](#planning) - we have tickets open for these issues with a more or less clear vision of design.
+* [Planning](#Planning) - we have tickets open for these issues with a more or less clear vision of design.
 * [Backlog](#backlog)  -  features that were discussed at a high level but are not ready for development 
 * [Wishlist](#wishlist) -  features we are dreaming of in 😀 and want to push them gradually forward
 
 
-## [Planning] 👷
+## Planning 👷
 
 * ##### Storing scan results in cluster
   We want Kubescape scan results (both cluster and image scan) to be stored in the cluster locally as `CRD`s. This will enable easier integration with results by other projects as well as with scripting via `kubectl`. This will also make image scan based controls to avoid accessing external resources for image vulnerability scan results.
