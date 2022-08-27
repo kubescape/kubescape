@@ -83,7 +83,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	// check that controls use image vulnerability resources
 	if len(imgVulnResources) > 0 {
 		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
-			logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
+			fmt.Println("well done!!!!")
+			logger.L().Warning("failed to collect image vulnerabilities.......", helpers.Error(err))
 			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
 		} else {
 			if isEmptyImgVulns(*ksResourceMap) {

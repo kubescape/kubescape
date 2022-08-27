@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	armosecadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
+	gcpadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/GCP/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 
 	"github.com/kubescape/opa-utils/shared"
@@ -66,7 +67,7 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 
 	// convert result to IMetadata object
 	metaObjs := vulnerabilitiesToIMetadata(imagesVulnerability)
-
+	fmt.Println("sign ",len(metaObjs), metaObjs)
 	if len(metaObjs) == 0 {
 		return fmt.Errorf("no vulnerabilities found for any of the images")
 	}
@@ -155,6 +156,13 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 	if ksCloudAPI != nil {
 		if ksCloudAPI.GetSecretKey() != "" && ksCloudAPI.GetClientID() != "" && ksCloudAPI.GetAccountID() != "" {
 			adaptors = append(adaptors, armosecadaptorv1.NewKSAdaptor(getter.GetKSCloudAPIConnector()))
+		}
+	}
+
+	gcpCloudAPI := getter.GetGlobalGCPCloudAPIConnector()
+	if gcpCloudAPI != nil {
+		if !gcpCloudAPI.GetCredentials() {
+			adaptors = append(adaptors, gcpadaptorv1.NewGCPAdaptor(getter.GetGlobalGCPCloudAPIConnector()) )
 		}
 	}
 

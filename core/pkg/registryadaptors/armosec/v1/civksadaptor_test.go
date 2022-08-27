@@ -1,6 +1,7 @@
 package v1
 
 import (
+	//"fmt"
 	"testing"
 
 	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
@@ -20,4 +21,5 @@ func TestSum(t *testing.T) {
 	assert.NoError(t, err)
 
 	assert.Equal(t, 25, len(imageVulnerabilityReport.Vulnerabilities))
+
 }
