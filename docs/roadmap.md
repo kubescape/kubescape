@@ -29,7 +29,7 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
   Create a security issue prioritization engine which scores resources based on control based attack chains. All of Kubescape controls can be arranged into attack categories of MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls are to be categorized in these system and Kubescape will calculate priority score based on the interconnections between failed controls.
 
 * ##### Integration with image registries 
- We want to expand Kubescape to integrate with different image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities. Container registry integration
+  We want to expand Kubescape to integrate with different image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities. Container registry integration
 * ##### Kubescape CLI control over cluster operations 
   Add functionality to Kubescape CLI to trigger operations in Kubescape cluster components (example: trigger image scans, etc.)
 * ##### Git integration for pull requests 
