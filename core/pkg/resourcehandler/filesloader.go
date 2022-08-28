@@ -47,12 +47,12 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	cautils.StartSpinner()
 
 	for path := range fileHandler.inputPatterns {
-		workloadIDToSource, workloads, err := GetResourcesFromPath(fileHandler.inputPatterns[path])
+		workloadIDToSource, workloads, err := getResourcesFromPath(fileHandler.inputPatterns[path])
 		if err != nil {
 			return nil, allResources, nil, err
 		}
 		if len(workloads) == 0 {
-			return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
+			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", fileHandler.inputPatterns[path]))
 		}
 
 		for k, v := range workloadIDToSource {
@@ -86,7 +86,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	return k8sResources, allResources, ksResources, nil
 }
 
-func GetResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	workloads := []workloadinterface.IMetadata{}
 
