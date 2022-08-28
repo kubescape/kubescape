@@ -3,13 +3,13 @@
 First, it is awesome that you are considering contributing to Kubescape! Contributing is important and fun and we welcome your efforts.
 
 When contributing, we categorize contributions into two:
-* Small code changes or fixes, whose scope are limited to a single or two files
-* Complex features and improvements, whose are not limited
+* Small code changes or fixes, whose scope is limited to a single or two files
+* Complex features and improvements, that are not limited
 
 If you have a small change, feel free to fire up a Pull Request.
 
 When planning a bigger change, please first discuss the change you wish to make via issue,
-email, or any other method with the owners of this repository before making a change. Most likely your changes or features are great, but sometimes we might be already going to this direction (or the exact opposite ;-) ) and we don't want to waste your time.
+email, or any other method with the owners of this repository before making a change. Most likely your changes or features are great, but sometimes we might be already going in this direction (or the exact opposite ;-) ) and we don't want to waste your time.
 
 Please note we have a code of conduct, please follow it in all your interactions with the project.
 
@@ -27,7 +27,7 @@ Please note we have a code of conduct, please follow it in all your interactions
 ### Our Pledge
 
 In the interest of fostering an open and welcoming environment, we as
-contributors and maintainers pledge to making participation in our project and
+contributors and maintainers pledge to make participation in our project and
 our community a harassment-free experience for everyone, regardless of age, body
 size, disability, ethnicity, gender identity and expression, level of experience,
 nationality, personal appearance, race, religion, or sexual identity and
