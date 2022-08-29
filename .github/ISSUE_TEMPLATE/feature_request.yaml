@@ -1,0 +1,23 @@
+name: Feature Request
+description: Request/Suggest any feature you think is missing
+title: "Title: "
+labels: "Feature Request"
+body:
+  - type: textarea #description
+    attributes:
+      label: Is your feature request related to a problem? Please describe.
+      description: A clear and concise description of what the problem is.
+      placeholder: Ex. I'm always frustrated when [...]
+
+  - type: textarea #solution
+    attributes:
+      label: Describe the solution you'd like.
+      description: A clear and concise description of what you want to happen.
+      placeholder: Kindly elaborate.
+    validations:
+      required: true
+
+  - type: textarea #Additional Context
+    attributes:
+      label: Add any other context or screenshots about the feature request here.
+      description: Any miscellaneous suggestions you'd like to give.
