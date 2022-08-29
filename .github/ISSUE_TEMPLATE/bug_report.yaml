@@ -19,15 +19,33 @@ body:
   - type: textarea #reproduce
     attributes:
       label: Environment
-      description: The OS + version you’re running Kubescape on, e.g Ubuntu 22.04 LTS
-Version: the version that Kubescape reports when you run `kubescape version`
+      description:
+        "The OS + version you’re running Kubescape on, e.g Ubuntu 22.04 LTS
+        Version: the version that Kubescape reports when you run `kubescape version`"
       placeholder: Kindly elaborate.
 
-  - type: dropdown #urgent
+  - type: textarea #description
     attributes:
-      label: Urgency (Optional)
-      description: How urgent do you think it is to fix this bug?
-      options:
-        - Low priority
-        - Medium priority
-        - High priority
+      label: Steps To Reproduce
+      description: "Steps to reproduce the behavior:
+1. Go to '...'
+2. Click on '....'
+3. Scroll down to '....'
+4. See error"
+      
+
+  - type: textarea #description
+    attributes:
+      label:  Expected behavior
+      description: A clear and concise description of what you expected to happen.
+    
+  - type: textarea #description
+    attributes:
+      label: Actual Behavior
+      description: A clear and concise description of what happened. If applicable, add screenshots to help explain your problem.
+     
+  - type: textarea #description
+    attributes:
+      label:  Additional context
+      description:Add any other context about the problem here.
+
