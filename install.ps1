@@ -4,7 +4,7 @@ $BASE_DIR=$env:USERPROFILE + "\.kubescape"
 $packageName = "/kubescape-windows-latest"
 
 # Get latest release url
-$config = Invoke-WebRequest "https://api.github.com/repos/kubescape/kubescape/releases/latest" | ConvertFrom-Json
+$config = Invoke-WebRequest -UseBasicParsing "https://api.github.com/repos/kubescape/kubescape/releases/latest" | ConvertFrom-Json
 $url = $config.html_url.Replace("/tag/","/download/")
 $fullUrl = $url + $packageName
 
