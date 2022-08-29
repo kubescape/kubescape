@@ -81,7 +81,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	}
 
 	cautils.StopSpinner()
-	logger.L().Success("Accessed to local objects")
+	logger.L().Success("Done accessing local objects")
 
 	return k8sResources, allResources, ksResources, nil
 }
