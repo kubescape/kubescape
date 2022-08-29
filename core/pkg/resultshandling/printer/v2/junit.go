@@ -155,7 +155,9 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
 	var testCases []JUnitTestCase
 
-	for _, cID := range controls.ListControlsIDs().All() {
+	iter := controls.ListControlsIDs().All()
+	for iter.HasNext() {
+		cID := iter.Next()
 		testCase := JUnitTestCase{}
 		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, cID)
 

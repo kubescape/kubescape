@@ -56,7 +56,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 
 		rulesv1 := map[string]reporthandling.RuleReport{}
 
-		for _, resourceID := range crv2.ListResourcesIDs().All() {
+		iter := crv2.ListResourcesIDs().All()
+		for iter.HasNext() {
+			resourceID := iter.Next()
 			if result, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
 				for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
 

@@ -261,7 +261,7 @@ func controlCountersForSummary(counters reportsummary.ICounters) string {
 }
 
 func controlCountersForResource(l *helpersv1.AllLists) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", len(l.All()), len(l.Failed()), len(l.Excluded()))
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", l.All().Len(), len(l.Failed()), len(l.Excluded()))
 }
 func getSeparator(sep string) string {
 	s := ""
