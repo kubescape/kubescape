@@ -30,7 +30,7 @@ func isGitRepoPublic(URL string) bool {
 }
 
 // cloneRepo clones a repository to a local temporary directory and returns the directory
-func cloneRepo(gitURL giturl.IGitURL) (string, error) {
+func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 
 	// Create temp directory
 	tmpDir, err := os.MkdirTemp("", "")
