@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"errors"
 	"fmt"
 	nethttp "net/http"
 	"os"
@@ -29,6 +30,14 @@ func isGitRepoPublic(URL string) bool {
 	return false
 }
 
+// Check if the GITHUB_TOKEN is present
+func isGitTokenPresent(gitURL giturl.IGitAPI) bool {
+	if token := gitURL.GetToken(); token == "" {
+		return false
+	}
+	return true
+}
+
 // cloneRepo clones a repository to a local temporary directory and returns the directory
 func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 
@@ -50,6 +59,11 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 		// No authentication needed if repository is public
 		auth = nil
 	} else {
+
+		// Return Error if the GITHUB_TOKEN is not present
+		if isGitTokenPresent := isGitTokenPresent(gitURL); !isGitTokenPresent {
+			return "", fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
+		}
 		auth = &http.BasicAuth{
 			Username: "anything Except Empty String",
 			Password: os.Getenv("GITHUB_TOKEN"),
