@@ -13,7 +13,6 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
-	"github.com/kubescape/opa-utils/objectsenvelopes/listworkloads"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 
 	"gopkg.in/yaml.v2"
@@ -191,8 +190,10 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, error) {
 		}
 		if obj, ok := j.(map[string]interface{}); ok {
 			if o := objectsenvelopes.NewObject(obj); o != nil {
-				if list, ok := o.(*listworkloads.ListWorkloads); ok && list != nil {
-					yamlObjs = append(yamlObjs, handleListObject(list)...)
+				if o.GetObjectType() == workloadinterface.TypeListWorkloads {
+					if list := workloadinterface.NewListWorkloadsObj(o.GetObject()); list != nil {
+						yamlObjs = append(yamlObjs, list.GetItems()...)
+					}
 				} else {
 					yamlObjs = append(yamlObjs, o)
 				}
@@ -323,20 +324,4 @@ func GetFileFormat(filePath string) FileFormat {
 	} else {
 		return FileFormat(filePath)
 	}
-}
-
-// handleListObject handle a List manifest
-func handleListObject(list *listworkloads.ListWorkloads) []workloadinterface.IMetadata {
-
-	yamlObjs := []workloadinterface.IMetadata{}
-	if items := list.GetItems(); items != nil {
-		for item := range items {
-			if m, ok := items[item].(map[string]interface{}); ok && m != nil {
-				if o := objectsenvelopes.NewObject(m); o != nil {
-					yamlObjs = append(yamlObjs, o)
-				}
-			}
-		}
-	}
-	return yamlObjs
 }
