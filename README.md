@@ -55,7 +55,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 We invite you to our team! We are excited about this project and want to return the love we get.
 
-Want to contribute? Want to discuss something? Have an issue?
+[Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue?
 
 * Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
 * Open an issue, we are trying to respond within 48 hours
