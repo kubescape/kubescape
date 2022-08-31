@@ -66,7 +66,7 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 		}
 		auth = &http.BasicAuth{
 			Username: "anything Except Empty String",
-			Password: os.Getenv("GITHUB_TOKEN"),
+			Password: gitURL.GetToken(),
 		}
 	}
 
