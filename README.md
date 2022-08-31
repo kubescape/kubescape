@@ -80,8 +80,9 @@ We invite you to our team! We are excited about this project and want to return 
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
-* Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4) 
-* [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
+* Customize control configurations: 
+  - [Kubescape CLI](https://youtu.be/955psg6TVu4) 
+  - [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
 ## Install on Windows
 
