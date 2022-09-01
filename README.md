@@ -2,6 +2,7 @@
 
 [![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/kubescape/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
+[![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/kubescape/kubescape)
 
 :sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
 
@@ -55,10 +56,10 @@ kubescape scan --submit --enable-host-scan --verbose
 
 We invite you to our team! We are excited about this project and want to return the love we get.
 
-Want to contribute? Want to discuss something? Have an issue?
+[Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
 
 * Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
-* Open an issue, we are trying to respond within 48 hours
+* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
 * [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
@@ -80,7 +81,9 @@ Want to contribute? Want to discuss something? Have an issue?
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
-* Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
+* Customize control configurations: 
+  - [Kubescape CLI](https://youtu.be/955psg6TVu4) 
+  - [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
 ## Install on Windows
 
@@ -187,12 +190,12 @@ kubescape scan --include-namespaces development,staging,production
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 
-#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI) Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
+#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI). Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
 kubescape scan *.yaml --submit
 ```
 
-#### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
+#### Scan Kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
 kubescape scan https://github.com/kubescape/kubescape --submit
 ```
@@ -261,7 +264,7 @@ kubescape scan --use-artifacts-from path/to/local/dir
 
 You can also download a single artifact and scan with the `--use-from` flag
 
-1. Download and save in file, if file name is not specified, will save in `~/.kubescape/<framework name>.json`
+1. Download and save in a file, if the file name is not specified, will save in `~/.kubescape/<framework name>.json`
 ```
 kubescape download framework nsa --output /path/nsa.json
 ```
