@@ -195,7 +195,7 @@ kubescape scan --exclude-namespaces kube-system,kube-public
 kubescape scan *.yaml --submit
 ```
 
-#### Scan kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
+#### Scan Kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
 kubescape scan https://github.com/kubescape/kubescape --submit
 ```
@@ -264,7 +264,7 @@ kubescape scan --use-artifacts-from path/to/local/dir
 
 You can also download a single artifact and scan with the `--use-from` flag
 
-1. Download and save in file, if file name is not specified, will save in `~/.kubescape/<framework name>.json`
+1. Download and save in a file, if the file name is not specified, will save in `~/.kubescape/<framework name>.json`
 ```
 kubescape download framework nsa --output /path/nsa.json
 ```
