@@ -26,7 +26,7 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
   Implementing an eBPF agent (based on Falco or Tracee) which tracks file activity in workloads to prioritize container image vulnerabilities.
 
 * ##### Prioritization engine using MITRE Attack matrix based attack chains
-  Create a security issue prioritization engine which scores resources based on control based attack chains. All of Kubescape controls can be arranged into attack categories of MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls are to be categorized in these system and Kubescape will calculate priority score based on the interconnections between failed controls.
+  Create a security issue prioritization engine that scores resources based on control based attack chains. All Kubescape controls can be arranged into attack categories of the MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls is to be categorized in these system and Kubescape will calculate a priority score based on the interconnections between failed controls.
 
 * ##### Integration with image registries 
  We want to expand Kubescape to integrate with different image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities. Container registry integration
@@ -48,7 +48,7 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 * ##### Integrate with other Kubernetes CLI tools
   Use Kubescape as a YAML validator for `kubectl` and others.
 * ##### Kubernetes audit log integration 
-  Connect Kubescape to audit log stream to enable it to produce more contextual security information based on how the API service is used.
+  Connect Kubescape to the audit log stream to enable it to produce more contextual security information based on how the API service is used.
 * ##### TUI for Kubescape 
   Interactive terminal based user interface which helps to analyze and fix issues
 * ##### Scanning images with GO for vulnerabilities
