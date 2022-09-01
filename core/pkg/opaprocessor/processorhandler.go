@@ -122,7 +122,7 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 
 	// ruleResults := make(map[string][]resourcesresults.ResourceAssociatedRule)
 	for i := range control.Rules {
-		resourceAssociatedRule, err := opap.processRule(&control.Rules[i])
+		resourceAssociatedRule, err := opap.processRule(&control.Rules[i], control.FixedInput)
 		if err != nil {
 			logger.L().Error(err.Error())
 			continue
@@ -150,9 +150,14 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 	return resourcesAssociatedControl, errs
 }
 
-func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 
 	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
+
+	// Merge configurable control input and fixed control input
+	for k, v := range fixedControlInputs {
+		postureControlInputs[k] = v
+	}
 
 	inputResources, err := reporthandling.RegoResourcesAggregator(rule, getAllSupportedObjects(opap.K8SResources, opap.ArmoResource, opap.AllResources, rule))
 	if err != nil {
