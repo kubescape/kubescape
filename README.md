@@ -4,8 +4,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
 [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/kubescape/kubescape)
 
-:sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
-
+# About <img src="docs/kubescape.png" width="50" alt="logo" align="center">
 
 Kubescape is a K8s open-source tool providing a Kubernetes single pane of glass, including risk analysis, security compliance, RBAC visualizer, and image vulnerabilities scanning. 
 Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
@@ -13,12 +12,18 @@ Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigur
 It has become one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins precious time, effort, and resources.
 Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack, and supports multi-cloud K8s deployments like EKS, GKE, and AKS.
 
-</br>
+# Contributing to the Project
+[CONTRIBUTING.md](https://github.com/PoojasGH/kubescape/blob/master/CONTRIBUTING.md)
 
+# Follow & Connect with us
+<a href = "https://twitter.com/KubeScape">
+<img width="30px" src="https://www.vectorlogo.zone/logos/twitter/twitter-icon.svg" />
+<a href = "https://Discord.com/KubeScape">
+<img width="30px" src="https://www.vectorlogo.zone/logos/discordapp/discordapp-icon.svg" />
+  
+  
 # Kubescape CLI:
 <img src="docs/demo.gif">
-
-</br>
 
 # TL;DR
 ## Install:
@@ -41,30 +46,17 @@ kubescape scan --submit --enable-host-scan --verbose
 
 <img src="docs/summary.png">
 
-</br>
 
 > Kubescape is an open source project. We welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
-
-</br>
-
-### Click [👍](https://github.com/kubescape/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
-
-</br>
-
 
 # Being a part of the team
 
 We invite you to our team! We are excited about this project and want to return the love we get.
 
-[Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
+[Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
 
 * Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
-* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
-* [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
-
-[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
-![discord](https://img.shields.io/discord/893048809884643379)
-
+* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose)
 
 # Options and examples
 
