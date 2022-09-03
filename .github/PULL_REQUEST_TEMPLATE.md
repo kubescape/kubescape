@@ -2,9 +2,11 @@
 
 ## Screenshots - If Any (Optional)
 
-## Issue ticket number and link
+This PR fixes #
 
 ## Checklist before requesting a review
+<!-- put an [x] in the box to get it checked -->
+
 - [ ] My code follows the style guidelines of this project
 - [ ] I have commented on my code, particularly in hard-to-understand areas
 - [ ] I have performed a self-review of my code
