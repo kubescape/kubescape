@@ -47,7 +47,7 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 		if err == nil {
 			wls, errs := chart.GetWorkloadsWithDefaultValues()
 			if len(errs) > 0 {
-				logger.L().Error(fmt.Sprintf("Rendering of Helm chart template failed: %v", errs))
+				logger.L().Error(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
 
