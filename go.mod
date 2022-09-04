@@ -14,7 +14,7 @@ require (
 	github.com/go-git/go-git/v5 v5.4.2
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.37.0
-	github.com/kubescape/go-logger v0.0.5
+	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/k8s-interface v0.0.83
 	github.com/kubescape/opa-utils v0.0.180
 	github.com/kubescape/rbac-utils v0.0.17
