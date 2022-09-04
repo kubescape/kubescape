@@ -18,7 +18,7 @@ func cloneGitRepo(path *string) (string, error) {
 	var clonedDir string
 
 	// Clone git repository if needed
-	gitURL, err := giturl.NewGitURL(*path)
+	gitURL, err := giturl.NewGitAPI(*path)
 	if err == nil {
 		logger.L().Info("cloning", helpers.String("repository url", gitURL.GetURL().String()))
 		cautils.StartSpinner()
