@@ -98,6 +98,6 @@ type RegoInputData struct {
 }
 
 type Policies struct {
-	Frameworks []string
 	Controls   map[string]reporthandling.Control // map[<control ID>]<control>
+	Frameworks []string
 }
