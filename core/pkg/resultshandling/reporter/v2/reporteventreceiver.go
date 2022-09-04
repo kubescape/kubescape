@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -124,17 +125,36 @@ func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cau
 
 	counter := 0
 	reportCounter := 0
-	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, &counter, &reportCounter, host); err != nil {
+
+	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
 		return err
 	}
-	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
+
+	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter, host); err != nil {
 		return err
 	}
 
 	return report.sendReport(host, splittedPostureReport, reportCounter, true)
 }
-func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
+
+func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int, host string) error {
 	for _, v := range results {
+		// set result.RawResource
+		resourceID := v.GetResourceID()
+		if _, ok := allResources[resourceID]; !ok {
+			return fmt.Errorf("expected to find raw resource object for '%s'", resourceID)
+		}
+		resource := reporthandling.NewResourceIMetadata(allResources[resourceID])
+		if r, ok := resourcesSource[resourceID]; ok {
+			resource.SetSource(&r)
+		}
+		v.RawResource = *resource
+
+		// set result.PrioritizedResource
+		if _, ok := prioritizedResources[resourceID]; ok {
+			v.PrioritizedResource = prioritizedResources[resourceID]
+		}
+
 		r, err := json.Marshal(v)
 		if err != nil {
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
@@ -162,8 +182,13 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
-func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, counter, reportCounter *int, host string) error {
+func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
 	for resourceID, v := range allResources {
+		// process only resources which have no result because these resources will be sent on the result object
+		if _, hasResult := results[resourceID]; hasResult {
+			continue
+		}
+
 		resource := reporthandling.NewResourceIMetadata(v)
 		if r, ok := resourcesSource[resourceID]; ok {
 			resource.SetSource(&r)
