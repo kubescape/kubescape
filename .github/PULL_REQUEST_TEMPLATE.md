@@ -2,7 +2,9 @@
 
 ## Screenshots - If Any (Optional)
 
-This PR fixes #
+## This PR fixes:
+
+* Resolved #
 
 ## Checklist before requesting a review
 <!-- put an [x] in the box to get it checked -->
