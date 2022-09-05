@@ -33,7 +33,7 @@ spec:
         effect: NoSchedule
       containers:
       - name: host-sensor
-        image: quay.io/armosec/kube-host-sensor:latest
+        image: quay.io/kubescape/host-scanner:latest
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
