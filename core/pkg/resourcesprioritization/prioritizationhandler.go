@@ -21,7 +21,7 @@ func NewResourcesPrioritizationHandler(skipZeroScore bool) *ResourcesPrioritizat
 
 func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *cautils.OPASessionObj) error {
 	for resourceId, result := range sessionObj.ResourcesResult {
-		resourcePriorityVector := []prioritization.IPriorityVector{}
+		resourcePriorityVector := []prioritization.ControlsVector{}
 		resource, exist := sessionObj.AllResources[resourceId]
 		if !exist {
 			return fmt.Errorf("expected to find resource id '%s' in scanned resources map", resourceId)
@@ -51,7 +51,7 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 				cVector.SetSeverity(apis.ControlSeverityToInt(controlScoreFactor))
 				cVector.SetScore(float64(controlScoreFactor) + (replicaCount / 10))
-				resourcePriorityVector = append(resourcePriorityVector, cVector)
+				resourcePriorityVector = append(resourcePriorityVector, *cVector)
 			}
 		}
 
