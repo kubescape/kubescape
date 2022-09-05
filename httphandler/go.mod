@@ -5,14 +5,14 @@ go 1.18
 replace github.com/kubescape/kubescape/v2 => ../
 
 require (
-	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
 	github.com/armosec/utils-go v0.0.12
 	github.com/go-openapi/runtime v0.24.1
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
-	github.com/kubescape/go-logger v0.0.5
-	github.com/kubescape/opa-utils v0.0.172
+	github.com/kubescape/go-logger v0.0.6
+	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
+	github.com/kubescape/opa-utils v0.0.181
 	github.com/stretchr/testify v1.8.0
 	k8s.io/utils v0.0.0-20220706174534-f6158b442e7c
 )
@@ -108,7 +108,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/kevinburke/ssh_config v0.0.0-20201106050909-4977a11b4351 // indirect
-	github.com/kubescape/k8s-interface v0.0.82 // indirect
+	github.com/kubescape/k8s-interface v0.0.83 // indirect
 	github.com/kubescape/rbac-utils v0.0.17 // indirect
 	github.com/libgit2/git2go/v33 v33.0.9 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -150,9 +150,9 @@ require (
 	go.uber.org/zap v1.22.0 // indirect
 	golang.org/x/crypto v0.0.0-20220525230936-793ad666bf5e // indirect
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3 // indirect
-	golang.org/x/net v0.0.0-20220624214902-1bab6f366d9e // indirect
+	golang.org/x/net v0.0.0-20220722155237-a158d28d115b // indirect
 	golang.org/x/oauth2 v0.0.0-20220630143837-2104d58473e0 // indirect
-	golang.org/x/sys v0.0.0-20220610221304-9f5ed59c137d // indirect
+	golang.org/x/sys v0.0.0-20220829200755-d48e67d00261 // indirect
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
