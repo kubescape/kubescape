@@ -30,7 +30,7 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 ```
 
-[Install on windows](#install-on-windows)
+[Install on Windows](#install-on-windows)
 
 [Install on macOS](#install-on-macos)
 
@@ -61,8 +61,8 @@ We invite you to our team! We are excited about this project and want to return 
 
 [Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
 
-* Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
-* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
+* Feel free to pick a task from the [Issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [Roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
+* [Open an Issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
 * [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
