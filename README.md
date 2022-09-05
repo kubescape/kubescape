@@ -1,4 +1,8 @@
-<img src="docs/kubescape.png" width="300" alt="logo" align="center">
+<div align="center">
+    <img src="docs/kubescape.png" width="300" alt="logo">
+</div>
+
+---
 
 [![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/kubescape/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
@@ -47,10 +51,9 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-### Click [👍](https://github.com/kubescape/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
+### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
 </br>
-
 
 # Being a part of the team
 

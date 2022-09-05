@@ -186,11 +186,11 @@ TODO - supprot:
 KS_CACHE // path to cached files
 */
 type ClusterConfig struct {
+	backendAPI         getter.IBackend
 	k8s                *k8sinterface.KubernetesApi
+	configObj          *ConfigObj
 	configMapName      string
 	configMapNamespace string
-	backendAPI         getter.IBackend
-	configObj          *ConfigObj
 }
 
 func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, credentials *Credentials, clusterName string, customClusterName string) *ClusterConfig {
