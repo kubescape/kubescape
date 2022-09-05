@@ -126,6 +126,7 @@ type ScanInfo struct {
 	KubeContext        string             // context name
 	FrameworkScan      bool               // false if scanning control
 	ScanAll            bool               // true if scan all frameworks
+	CustomClusterName  string 			  // Custom name of the cluster
 }
 
 type Getters struct {
