@@ -15,7 +15,6 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v2/core/pkg/policyhandler"
 	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/kubescape/kubescape/v2/core/pkg/resourcesprioritization"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
@@ -153,11 +152,15 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
 
-	// ======================== prioritization ===================
-	priotizationHandler := resourcesprioritization.NewResourcesPrioritizationHandler(true)
-	if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
-		return resultsHandling, fmt.Errorf("%w", err)
-	}
+	/*
+
+		// ======================== prioritization ===================
+		priotizationHandler := resourcesprioritization.NewResourcesPrioritizationHandler(true)
+		if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
+			return resultsHandling, fmt.Errorf("%w", err)
+		}
+
+	*/
 
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
