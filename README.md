@@ -57,8 +57,12 @@ kubescape scan --submit --enable-host-scan --verbose
 
 # Being a part of the team
 
-We invite you to our team! We are excited about this project and want to return the love we get.
+## Community
+We invite you to our community! We are excited about this project and want to return the love we get.
 
+We hold community meetings in [Zoom](https://us02web.zoom.us/j/84020231442) on the first Tuesday of every month at 14:00 GMT! :sunglasses:
+
+## Contributions 
 [Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
 
 * Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
