@@ -3,16 +3,21 @@ on:
     types: [opened, labeled]
 
 jobs:
-  build:
-    if: ${{ github.event.label.name == 'typo' }}
+  open_PR_message:
+    if: github.event.label.name == 'typo'
     runs-on: ubuntu-latest
+    steps:
+      - uses: ben-z/actions-comment-on-issue@1.0.2
+        with:
+          message: "Hello! :wave:\n\nThis issue is being automatically closed, Please open a PR with a relevant fix."
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+          
+          
   auto_close_issues:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-      - name: Automatically close typo issues
-        uses: lucasbento/auto-close-issues@v1.0.2
+      - uses: lee-dohm/close-matching-issues@v2
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-close-message: "@${issue.user.login}: Hello! :wave:\n\nThis issue is being automatically closed, Please open a PR with a relevant fix."
+          query: 'label:typo'
+          token: ${{ secrets.GITHUB_TOKEN }}
