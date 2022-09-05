@@ -38,7 +38,7 @@ func finalizeResults(results []resourcesresults.Result, resourcesResult map[stri
 
 		// Add prioritization information to the result
 		if v, exist := prioritizedResources[resourceID]; exist {
-			results[index].PrioritizedResource = v
+			results[index].PrioritizedResource = &v
 		}
 		index++
 	}
