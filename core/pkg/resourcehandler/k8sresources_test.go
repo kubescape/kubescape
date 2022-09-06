@@ -238,8 +238,8 @@ func TestIsMasterNodeTaints(t *testing.T) {
 		},
 		{
 			"names": [
-				"quay.io/armosec/kube-host-sensor@sha256:82139d2561039726be060df2878ef023c59df7c536fbd7f6d766af5a99569fee",
-				"quay.io/armosec/kube-host-sensor:latest"
+				"quay.io/kubescape/host-scanner@sha256:82139d2561039726be060df2878ef023c59df7c536fbd7f6d766af5a99569fee",
+				"quay.io/kubescape/host-scanner:latest"
 			],
 			"sizeBytes": 11796788
 		},
@@ -503,8 +503,8 @@ func TestIsMasterNodeTaints(t *testing.T) {
             },
             {
                 "names": [
-                    "quay.io/armosec/kube-host-sensor@sha256:82139d2561039726be060df2878ef023c59df7c536fbd7f6d766af5a99569fee",
-                    "quay.io/armosec/kube-host-sensor:latest"
+                    "quay.io/kubescape/host-scanner@sha256:82139d2561039726be060df2878ef023c59df7c536fbd7f6d766af5a99569fee",
+                    "quay.io/kubescape/host-scanner:latest"
                 ],
                 "sizeBytes": 11796788
             },

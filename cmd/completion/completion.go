@@ -43,7 +43,3 @@ func GetCompletionCmd() *cobra.Command {
 	}
 	return completionCmd
 }
-
-// func init() {
-// 	rootCmd.AddCommand(completionCmd)
-// }

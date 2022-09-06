@@ -152,6 +152,16 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
 
+	/*
+
+		// ======================== prioritization ===================
+		priotizationHandler := resourcesprioritization.NewResourcesPrioritizationHandler(true)
+		if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
+			return resultsHandling, fmt.Errorf("%w", err)
+		}
+
+	*/
+
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
 
