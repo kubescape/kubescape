@@ -25,7 +25,6 @@ def get_build_dir():
 
 def get_package_name():
     package_name = "kubescape"
-    # if platform.system() == "Windows": package_name += ".exe"
 
     return package_name
 

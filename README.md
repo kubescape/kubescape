@@ -1,12 +1,17 @@
-<img src="docs/kubescape.png" width="300" alt="logo" align="center">
+<div align="center">
+    <img src="docs/kubescape.png" width="300" alt="logo">
+</div>
+
+---
 
 [![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/kubescape/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
+[![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/kubescape/kubescape)
 
 :sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
 
 
-Kubescape is a K8s open-source tool providing a Kubernetes single pane of glass, including risk analysis, security compliance, RBAC visualizer, and image vulnerabilities scanning. 
+Kubescape is a K8s open-source tool providing a Kubernetes single pane of glass, including risk analysis, security compliance, RBAC visualizer, and image vulnerability scanning. 
 Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
 
 It has become one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins precious time, effort, and resources.
@@ -46,19 +51,22 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-### Click [👍](https://github.com/kubescape/kubescape/stargazers) if you want us to continue to develop and improve Kubescape 😀
+### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
 </br>
 
-
 # Being a part of the team
 
-We invite you to our team! We are excited about this project and want to return the love we get.
+## Community
+We invite you to our community! We are excited about this project and want to return the love we get.
 
-Want to contribute? Want to discuss something? Have an issue?
+We hold community meetings in [Zoom](https://us02web.zoom.us/j/84020231442) on the first Tuesday of every month at 14:00 GMT! :sunglasses:
+
+## Contributions 
+[Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
 
 * Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
-* Open an issue, we are trying to respond within 48 hours
+* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
 * [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
@@ -80,7 +88,9 @@ Want to contribute? Want to discuss something? Have an issue?
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
-* Customize control configurations. [Kubescape CLI](https://youtu.be/955psg6TVu4), [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
+* Customize control configurations: 
+  - [Kubescape CLI](https://youtu.be/955psg6TVu4) 
+  - [Kubescape SaaS](https://youtu.be/lIMVSVhH33o)
 
 ## Install on Windows
 
@@ -187,7 +197,7 @@ kubescape scan --include-namespaces development,staging,production
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 
-#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI) Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
+#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI). Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
 ```
 kubescape scan *.yaml --submit
 ```
