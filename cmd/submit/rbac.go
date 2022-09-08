@@ -36,6 +36,10 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 		Short:   "Submit cluster's Role-Based Access Control(RBAC)",
 		Long:    ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			
+			if err := flagValidationSubmit(submitInfo); err != nil {
+				return err
+			}
 
 			k8s := k8sinterface.NewKubernetesApi()
 
@@ -82,4 +86,14 @@ func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *
 		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName)
 	}
 	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName)
+}
+
+// Check if the flag entered are valid
+func flagValidationSubmit(submitInfo *v1.Submit) error {
+
+	accountID := submitInfo.Credentials.Account
+	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
+		return fmt.Errorf("bad argument: account must be a valid UUID")
+	}
+	return nil
 }

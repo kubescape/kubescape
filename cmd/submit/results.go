@@ -54,6 +54,11 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 		Short: "Submit a pre scanned results file. The file must be in json format",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
+
+			if err := flagValidationSubmit(submitInfo); err != nil {
+				return err
+			}
+
 			if len(args) == 0 {
 				return fmt.Errorf("missing results file")
 			}

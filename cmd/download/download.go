@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
+	"github.com/google/uuid"
 )
 
 var (
@@ -59,6 +60,10 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if err := flagValidationDownload(&downloadInfo); err != nil {
+				return err
+			}
+
 			if filepath.Ext(downloadInfo.Path) == ".json" {
 				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
 			}
@@ -79,4 +84,14 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 	return downloadCmd
+}
+
+// Check if the flag entered are valid
+func flagValidationDownload(downloadInfo *v1.DownloadInfo) error {
+
+	accountID := downloadInfo.Credentials.Account
+	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
+		return fmt.Errorf("bad argument: account must be a valid UUID")
+	}
+	return nil
 }

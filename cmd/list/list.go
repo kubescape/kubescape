@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
+	"github.com/google/uuid"
 )
 
 var (
@@ -51,6 +52,11 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			
+			if err := flagValidationList(&listPolicies); err != nil {
+				return err
+			}
+
 			listPolicies.Target = args[0]
 
 			if err := ks.List(&listPolicies); err != nil {
@@ -66,4 +72,14 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	listCmd.PersistentFlags().BoolVarP(&listPolicies.ListIDs, "id", "", false, "List control ID's instead of controls names")
 
 	return listCmd
+}
+
+// Check if the flag entered are valid
+func flagValidationList(listPolicies *v1.ListPolicies) error {
+
+	accountID := listPolicies.Credentials.Account
+	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
+		return fmt.Errorf("bad argument: account must be a valid UUID")
+	}
+	return nil
 }
