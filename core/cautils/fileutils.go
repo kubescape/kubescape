@@ -61,6 +61,30 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 	return sourceToWorkloads, sourceToChartName
 }
 
+// If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
+// generate yaml files using "Kustomize" & renders a map of workloads from those yaml files
+func LoadResourcesFromKustomizeDirectory(basePath string) map[string][]workloadinterface.IMetadata {
+	if ok := IsKustomizeDirectory(basePath); !ok {
+		return nil
+	}
+
+	logger.L().Info("Kustomize Directory Detected, Scanning the rendered Kubernetes Objects...")
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	kustomizeDirectory := NewKustomizeDirectory(basePath)
+
+	wls, errs := kustomizeDirectory.GetWorkloads(basePath)
+
+	if len(errs) > 0 {
+		logger.L().Error(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
+	}
+
+	for k, v := range wls {
+		sourceToWorkloads[k] = v
+	}
+	return sourceToWorkloads
+}
+
 func LoadResourcesFromFiles(input, rootPath string) map[string][]workloadinterface.IMetadata {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {

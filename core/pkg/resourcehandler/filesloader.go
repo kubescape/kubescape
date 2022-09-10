@@ -196,6 +196,43 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
+	// Load resources from Kustomize directory
+	kustomizeSourceToWorkloads := cautils.LoadResourcesFromKustomizeDirectory(path)
+
+	// update workloads and workloadIDToSource with workloads from Kustomize Directory
+	for source, ws := range kustomizeSourceToWorkloads {
+		workloads = append(workloads, ws...)
+		relSource, err := filepath.Rel(repoRoot, source)
+
+		if err == nil {
+			source = relSource
+		}
+
+		var lastCommit reporthandling.LastCommit
+		if gitRepo != nil {
+			commitInfo, _ := gitRepo.GetFileLastCommit(source)
+			if commitInfo != nil {
+				lastCommit = reporthandling.LastCommit{
+					Hash:           commitInfo.SHA,
+					Date:           commitInfo.Author.Date,
+					CommitterName:  commitInfo.Author.Name,
+					CommitterEmail: commitInfo.Author.Email,
+					Message:        commitInfo.Message,
+				}
+			}
+		}
+
+		workloadSource := reporthandling.Source{
+			RelativePath: source,
+			FileType:     reporthandling.SourceTypeYaml,
+			LastCommit:   lastCommit,
+		}
+
+		for i := range ws {
+			workloadIDToSource[ws[i].GetID()] = workloadSource
+		}
+	}
+
 	return workloadIDToSource, workloads, nil
 }
 
