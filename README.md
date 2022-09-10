@@ -249,6 +249,12 @@ kubescape scan </path/to/directory> --submit
 ```
 > Kubescape will load the default value file
 
+#### Scan Kustomize Directory 
+```
+kubescape scan </path/to/directory> --submit
+```
+> Kubescape will generate Kubernetes Yaml Objects using 'Kustomize' file and scans them for security.
+
 ### Offline/Air-gaped Environment Support
 
 [Video tutorial](https://youtu.be/IGXL9s37smM)
