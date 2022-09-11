@@ -14,42 +14,33 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const SKIP_VERSION_CHECK_DEPRECATED = "KUBESCAPE_SKIP_UPDATE_CHECK"
-const SKIP_VERSION_CHECK = "KS_SKIP_UPDATE_CHECK"
-
-var BuildNumber string
-var Client string
-var LatestReleaseVersion string
-
-const UnknownBuildNumber = "unknown"
-
-type IVersionCheckHandler interface {
-	CheckLatestVersion(*VersionCheckRequest) error
+type IVersionCheckHandlerU interface {
+	CheckLatestVersionU(*VersionCheckRequestU) error
 }
 
-func NewIVersionCheckHandler() IVersionCheckHandler {
+func NewIVersionCheckHandlerU() IVersionCheckHandlerU {
 	if BuildNumber == "" {
 		logger.L().Warning("unknown build number, this might affect your scan results. Please make sure you are updated to latest version")
 	}
 	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && boolutils.StringToBool(v) {
-		return NewVersionCheckHandlerMock()
+		return NewVersionCheckHandlerMockU()
 	} else if v, ok := os.LookupEnv(SKIP_VERSION_CHECK_DEPRECATED); ok && boolutils.StringToBool(v) {
-		return NewVersionCheckHandlerMock()
+		return NewVersionCheckHandlerMockU()
 	}
-	return NewVersionCheckHandler()
+	return NewVersionCheckHandlerU()
 }
 
-type VersionCheckHandlerMock struct {
+type VersionCheckHandlerMockU struct {
 }
 
-func NewVersionCheckHandlerMock() *VersionCheckHandlerMock {
-	return &VersionCheckHandlerMock{}
+func NewVersionCheckHandlerMockU() *VersionCheckHandlerMockU {
+	return &VersionCheckHandlerMockU{}
 }
 
-type VersionCheckHandler struct {
+type VersionCheckHandlerU struct {
 	versionURL string
 }
-type VersionCheckRequest struct {
+type VersionCheckRequestU struct {
 	Client           string `json:"client"`           // kubescape
 	ClientBuild      string `json:"clientBuild"`      // client build environment
 	ClientVersion    string `json:"clientVersion"`    // kubescape version
@@ -59,7 +50,7 @@ type VersionCheckRequest struct {
 	ScanningContext  string `json:"context"`          // scanning context- cluster/file/gitURL/localGit/dir
 }
 
-type VersionCheckResponse struct {
+type VersionCheckResponseU struct {
 	Client          string `json:"client"`          // kubescape
 	ClientUpdate    string `json:"clientUpdate"`    // kubescape latest version
 	Framework       string `json:"framework"`       // framework name
@@ -67,12 +58,12 @@ type VersionCheckResponse struct {
 	Message         string `json:"message"`         // alert message
 }
 
-func NewVersionCheckHandler() *VersionCheckHandler {
-	return &VersionCheckHandler{
+func NewVersionCheckHandlerU() *VersionCheckHandlerU {
+	return &VersionCheckHandlerU{
 		versionURL: "https://us-central1-elated-pottery-310110.cloudfunctions.net/ksgf1v1",
 	}
 }
-func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanningTarget string) *VersionCheckRequest {
+func NewVersionCheckRequestU(buildNumber, frameworkName, frameworkVersion, scanningTarget string) *VersionCheckRequestU {
 	if buildNumber == "" {
 		buildNumber = UnknownBuildNumber
 	}
@@ -82,7 +73,7 @@ func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanni
 	if Client == "" {
 		Client = "local-build"
 	}
-	return &VersionCheckRequest{
+	return &VersionCheckRequestU{
 		Client:           "kubescape",
 		ClientBuild:      Client,
 		ClientVersion:    buildNumber,
@@ -92,19 +83,19 @@ func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanni
 	}
 }
 
-func (v *VersionCheckHandlerMock) CheckLatestVersion(versionData *VersionCheckRequest) error {
+func (v *VersionCheckHandlerMockU) CheckLatestVersionU(versionData *VersionCheckRequestU) error {
 	logger.L().Info("Skipping version check")
 	return nil
 }
 
-func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckRequest) error {
+func (v *VersionCheckHandlerU) CheckLatestVersionU(versionData *VersionCheckRequestU) error {
 	defer func() {
 		if err := recover(); err != nil {
 			logger.L().Warning("failed to get latest version", helpers.Interface("error", err))
 		}
 	}()
 
-	latestVersion, err := v.getLatestVersion(versionData)
+	latestVersion, err := v.getLatestVersionU(versionData)
 	if err != nil || latestVersion == nil {
 		return fmt.Errorf("failed to get latest version")
 	}
@@ -117,11 +108,6 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 		}
 	}
 
-	// TODO - Enable after supporting framework version
-	// if latestVersion.FrameworkUpdate != "" {
-	// 	fmt.Println(warningMessage(latestVersion.Framework, latestVersion.FrameworkUpdate))
-	// }
-
 	if latestVersion.Message != "" {
 		logger.L().Info(latestVersion.Message)
 	}
@@ -129,7 +115,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 	return nil
 }
 
-func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest) (*VersionCheckResponse, error) {
+func (v *VersionCheckHandlerU) getLatestVersionU(versionData *VersionCheckRequestU) (*VersionCheckResponseU, error) {
 
 	reqBody, err := json.Marshal(*versionData)
 	if err != nil {
@@ -141,13 +127,13 @@ func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest)
 		return nil, err
 	}
 
-	vResp := &VersionCheckResponse{}
+	vResp := &VersionCheckResponseU{}
 	if err = getter.JSONDecoder(resp).Decode(vResp); err != nil {
 		return nil, err
 	}
 	return vResp, nil
 }
 
-func warningMessage(release string) string {
-	return fmt.Sprintf("current version '%s' is not updated to the latest release: '%s'", BuildNumber, release)
+func warningMessageU(release string) string {
+	return fmt.Sprintf("Updating your current version '%s' to the latest release: '%s' ...", BuildNumber, release)
 }

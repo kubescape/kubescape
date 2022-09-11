@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v2/cmd/list"
 	"github.com/kubescape/kubescape/v2/cmd/scan"
 	"github.com/kubescape/kubescape/v2/cmd/submit"
+	"github.com/kubescape/kubescape/v2/cmd/update"
 	"github.com/kubescape/kubescape/v2/cmd/version"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -64,8 +65,8 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable Color output for logging")
-	rootCmd.PersistentFlags().StringVar(&rootInfo.KubeConfig, "kubeconfig", "", "newflag")//kubeconfig flag added 
-	                                                                                     //TODO flag functionality should be added further
+	rootCmd.PersistentFlags().StringVar(&rootInfo.KubeConfig, "kubeconfig", "", "newflag") //kubeconfig flag added
+	//TODO flag functionality should be added further
 
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
@@ -78,6 +79,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(completion.GetCompletionCmd())
 	rootCmd.AddCommand(version.GetVersionCmd())
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
+	rootCmd.AddCommand(update.GetUpdateCmd())
 
 	return rootCmd
 }
