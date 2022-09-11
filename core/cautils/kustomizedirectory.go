@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"os"
+	"path/filepath"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -45,14 +46,19 @@ func IsKustomizeDirectory(path string) bool {
 		logger.L().Info("Multiple kustomize files found while checking Kustomize Directory")
 		return false
 	}
-
-	return true
 }
 
 func NewKustomizeDirectory(path string) *KustomizeDirectory {
 	return &KustomizeDirectory{
 		path: path,
 	}
+}
+
+func GetKustomizeDirectoryName(path string) string {
+	if isKustomizeDirectory := IsKustomizeDirectory(path); !isKustomizeDirectory {
+		return ""
+	}
+	return filepath.Dir(path)
 }
 
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and

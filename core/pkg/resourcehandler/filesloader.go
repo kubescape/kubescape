@@ -197,7 +197,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	}
 
 	// Load resources from Kustomize directory
-	kustomizeSourceToWorkloads := cautils.LoadResourcesFromKustomizeDirectory(path)
+	kustomizeSourceToWorkloads, kustomizeDirectoryName := cautils.LoadResourcesFromKustomizeDirectory(path)
 
 	// update workloads and workloadIDToSource with workloads from Kustomize Directory
 	for source, ws := range kustomizeSourceToWorkloads {
@@ -223,9 +223,10 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		}
 
 		workloadSource := reporthandling.Source{
-			RelativePath: source,
-			FileType:     reporthandling.SourceTypeYaml,
-			LastCommit:   lastCommit,
+			RelativePath:           source,
+			FileType:               reporthandling.SourceTypeKustomizeDirectory,
+			KustomizeDirectoryName: kustomizeDirectoryName,
+			LastCommit:             lastCommit,
 		}
 
 		for i := range ws {
