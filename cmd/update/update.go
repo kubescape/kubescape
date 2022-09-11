@@ -1,11 +1,8 @@
 package update
 
-//This update command takes one argument for the type of OS installed(linux/windows/macos)
-//and updates to the latest kubescape release.
-//Examples:-
-//          kubescape update linux
-//          kubescape update windows
-//          kubescape update macos
+//This update command updates to the latest kubescape release.
+//Example:-
+//          kubescape update
 
 import (
 	"fmt"
