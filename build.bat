@@ -12,6 +12,8 @@ if exist C:\MSYS64\ (
 ) else (
     mkdir temp_install & cd temp_install
 
+    if exist C:\Windows\System32\curl (
+        
     echo "Downloading MSYS2..."
     curl -L https://github.com/msys2/msys2-installer/releases/download/2022-06-03/msys2-x86_64-20220603.exe > msys2-x86_64-20220603.exe
 
@@ -19,6 +21,11 @@ if exist C:\MSYS64\ (
     msys2-x86_64-20220603.exe install --root C:\MSYS64 --confirm-command
 
     cd .. && rmdir /s /q temp_install
+    
+    ) else (
+        echo "unable to find curl command"
+        echo "install it from here 'https://curl.se/download.html' "
+    )
 )
 
 
