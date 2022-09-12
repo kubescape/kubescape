@@ -237,7 +237,7 @@ kubescape scan --format pdf --output results.pdf
 kubescape scan --format prometheus
 ```
 
-### Output in `html` format
+#### Output in `html` format
 
 ```
 kubescape scan --format html --output results.html
