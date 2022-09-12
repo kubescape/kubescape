@@ -4,12 +4,12 @@
 
 ### Layers
 
-* Controls and Rules: that actual control logic implementation, the "tests" themselves. Implemented in rego
-* OPA engine: the [OPA](https://github.com/open-policy-agent/opa) rego interpreter 
-* Rules processor: Kubescape component, it enumerates and runs the controls while also preparing the all the input data that the controls need for running
-* Data sources: set of different modules providing data to the Rules processor so it can run the controls with them. Examples: Kubernetes objects, cloud vendor API objects and adding in this proposal the vulnerability infomration
+* Controls and Rules: that actual control logic implementation, the "tests" themselves. Implemented in rego.
+* OPA engine: the [OPA](https://github.com/open-policy-agent/opa) rego interpreter.
+* Rules processor: Kubescape component, it enumerates and runs the controls while preparing all of the input data that the controls need for running.
+* Data sources: set of different modules providing data to the Rules processor so it can run the controls with them. Examples: Kubernetes objects, cloud vendor API objects and adding in this proposal the vulnerability information.
 * Cloud Image Vulnerability adaption interface: the subject of this proposal, it gives a common interface for different registry/vulnerability vendors to adapt to.
-* CIV adaptors: specific implementation of the CIV interface, example Harbor adaption
+* CIV adaptors: specific implementation of the CIV interface, example Harbor adaption.
 ```
  -----------------------
 | Controls/Rules (rego) |
@@ -88,7 +88,7 @@ type ContainerImageInformation struct {
 
 type IContainerImageVulnerabilityAdaptor interface {
 	// Credentials are coming from user input (CLI or configuration file) and they are abstracted at string to string map level
-	// so and example use would be like registry: "simpledockerregistry:80" and credentials like {"username":"joedoe","password":"abcd1234"}
+	// so an example use would be like registry: "simpledockerregistry:80" and credentials like {"username":"joedoe","password":"abcd1234"}
 	Login(registry string, credentials map[string]string) error
 
 	// For "help" purposes

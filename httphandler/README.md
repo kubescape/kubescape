@@ -23,7 +23,7 @@ Running `kubescape` will start up a web-server on port `8080` which will serve t
 
 ### Get results
 * GET `/v1/results` -  request kubescape scan results
-* * query `id=<string>` -> request results of a specific scan ID. If empty will return latest results
+* * query `id=<string>` -> request results of a specific scan ID. If empty will return the latest results
 * * query `keep=true` -> keep the results in the local storage after returning. default is `keep=false` - the results will be deleted from local storage after they are returned
 
 [Response](#response-object):
@@ -55,7 +55,7 @@ When scanning is in progress
 }
 ```
 ### Check scanning progress status
-Check the scanning status - is the scanning in progress or done. This is meant for a waiting mechanize since the API does not return the entire results object when the scanning is done
+Check the scanning status - is the scanning in progress or done? This is meant for a waiting mechanize since the API does not return the entire results object when the scanning is done
 
 * GET `/v1/status` -  Request kubescape scan status
 * * query `id=<string>` -> Check status of a specific scan. If empty will check if any scan is in progress
@@ -81,15 +81,15 @@ When scanning is not in progress
 ```
 
 ### Delete cached results
-* DELETE `/v1/results` - Delete kubescape scan results from storage. If empty will delete latest results
+* DELETE `/v1/results` - Delete kubescape scan results from storage. If empty will delete the latest results
 * * query `id=<string>`: Delete ID of specific results 
 * * query `all`: Delete all cached results
 
 ### Prometheus support API
 
 * GET/POST `/v1/metrics` - will trigger cluster scan. will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
-* `/livez` - will respond 200 is server is alive
-* `/readyz` - will respond 200 if server can receive requests 
+* `/livez` - will respond 200 if the server is alive
+* `/readyz` - will respond 200 if the server can receive requests 
 
 ## Objects
 
@@ -140,7 +140,7 @@ When scanning is not in progress
   curl --request GET http://127.0.0.1:8080/v1/results -o response.json
   ```
 
-#### Trigger scan and wait for scan to end  
+#### Trigger scan and wait for the scan to end  
 
 ```bash
 curl --header "Content-Type: application/json" --request POST --data '{"hostScanner":true, "submit": true}' http://127.0.0.1:8080/v1/scan?wait -o scan_results.json
@@ -171,7 +171,7 @@ go tool pprof http://localhost:6060/debug/pprof/heap
 ## Supported environment variables
 
 * `KS_ACCOUNT`: Account ID
-* `KS_SUBMIT`: Submit the results to Kubescape SaaS version
+* `KS_SUBMIT`: Submit the results to the Kubescape SaaS version
 * `KS_EXCLUDE_NAMESPACES`: List of namespaces to exclude, e.g. `KS_EXCLUDE_NAMESPACES=kube-system,kube-public`
 * `KS_INCLUDE_NAMESPACES`: List of namespaces to include, rest of the namespaces will be ignored. e.g. `KS_INCLUDE_NAMESPACES=dev,prod`
 * `KS_HOST_SCAN_YAML`: Full path to the host scanner YAML

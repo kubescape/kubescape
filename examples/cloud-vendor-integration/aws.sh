@@ -27,7 +27,7 @@ export cluster_name=$(echo "$cluster_arn" | awk -F'/' '{print $NF}')
 echo 'Get cluster region'
 export cluster_region=$(echo "$cluster_arn" | awk -F':' '{print $4}')
 
-# First step, Create IAM OIDC provider for the cluster (Not required if the third step runs as is):
+# First step, Create IAM OIDC provider for the cluster (Not required if the third step runs as it is):
 echo 'Create IAM OIDC provider for the cluster'
 eksctl utils associate-iam-oidc-provider --cluster $cluster_name --approve
 

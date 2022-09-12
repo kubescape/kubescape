@@ -20,7 +20,6 @@ WORKDIR /work
 ADD . .
 
 # install libgit2
-WORKDIR /work
 RUN rm -rf git2go && make libgit2
 
 # build kubescape server
@@ -34,16 +33,16 @@ RUN python build.py
 
 RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts
 
-FROM alpine
+FROM alpine:3.16.2
 
 RUN addgroup -S armo && adduser -S armo -G armo
 
-RUN mkdir /home/armo/.kubescape
 COPY --from=builder /work/artifacts/ /home/armo/.kubescape
 
 RUN chown -R armo:armo /home/armo/.kubescape
 
 USER armo
+
 WORKDIR /home/armo
 
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/ksserver
