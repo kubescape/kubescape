@@ -7,7 +7,7 @@
 [![build](https://github.com/kubescape/kubescape/actions/workflows/build.yaml/badge.svg)](https://github.com/kubescape/kubescape/actions/workflows/build.yaml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/kubescape/kubescape)](https://goreportcard.com/report/github.com/kubescape/kubescape)
 [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/kubescape/kubescape)
-[![View Code Diagram badge for CodeSee](https://codesee-docs.s3.amazonaws.com/badge.svg)](https://app.codesee.io/maps/public/ea279b60-31d6-11ed-ae63-7d65ece0c3cb)
+[![Code Diagram](https://codesee-docs.s3.amazonaws.com/badge.svg)](https://app.codesee.io/maps/public/ea279b60-31d6-11ed-ae63-7d65ece0c3cb)
 
 :sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
 
