@@ -55,6 +55,7 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 		} else {
 			for _, ctrl := range framework.Controls {
 				if strings.EqualFold(ctrl.Name, controlName) || strings.EqualFold(ctrl.ControlID, controlName) {
+					ctrl := ctrl
 					control = &ctrl
 					break
 				}
