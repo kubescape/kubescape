@@ -237,6 +237,12 @@ kubescape scan --format pdf --output results.pdf
 kubescape scan --format prometheus
 ```
 
+#### Output in `html` format
+
+```
+kubescape scan --format html --output results.html
+```
+
 #### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
 [Full documentation](examples/exceptions/README.md)
 ```
