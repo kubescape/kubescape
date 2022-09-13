@@ -89,6 +89,11 @@ type JUnitFailure struct {
 	Contents string `xml:",chardata"`
 }
 
+const (
+	lineSeparator         = "\n===================================================================================================================\n\n"
+	testCaseTypeResources = "Resources"
+)
+
 func NewJunitPrinter(verbose bool) *JunitPrinter {
 	return &JunitPrinter{
 		verbose: verbose,
@@ -188,14 +193,14 @@ func testsCases(results *cautils.OPASessionObj, resourcesResult []resourcesresul
 	var testCases []JUnitTestCase
 	testCase := JUnitTestCase{}
 	testCaseFailure := JUnitFailure{}
-	testCaseFailure.Type = "Resources"
+	testCaseFailure.Type = testCaseTypeResources
 	message := ""
 
 	// severityCounter represents the severities, 0: Unknown, 1: Low, 2: Medium, 3: High, 4: Critical
-	severityCounter := make([]int, 5, 5)
+	severityCounter := make([]int, apis.NumberOfSeverities, apis.NumberOfSeverities)
 
 	for i := range resourcesResult {
-		message += "\n===================================================================================================================\n\n"
+		message += lineSeparator
 		if failedControls := failedControlsToFailureMessage(results, resourcesResult[i].ListControls(), severityCounter); failedControls != "" {
 			message += fmt.Sprintf("Resource: %s\n\n%s", resourceNameToString(results.AllResources[resourcesResult[i].GetResourceID()]), failedControls)
 		}
@@ -214,7 +219,7 @@ func getSummaryMessage(severityCounter []int) string {
 	total := 0
 	severities := ""
 	for i, count := range severityCounter {
-		if apis.SeverityNumberToString(i) == "Unknown" {
+		if apis.SeverityNumberToString(i) == apis.SeverityNumberToString(apis.SeverityUnknown) {
 			continue
 		}
 		severities += fmt.Sprintf("%s: %d, ", apis.SeverityNumberToString(i), count)
