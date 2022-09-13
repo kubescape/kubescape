@@ -368,9 +368,7 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 
 * Clone the official GitHub repository of `Kubescape`.
-* Install cmake.
-* Install `libgit2` dependency inside 'kubescape' directory.
-* Execute `make build` inside 'kubescape' directory.
+* [Automate the build process on Linux](https://github.com/kubescape/kubescape#build-on-linuxmacos)
 * The entire process involves executing multiple commands in order and it takes around 5-6 minutes to execute them all.
 
 </details>
@@ -379,7 +377,7 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 <summary>Instructions to use the playground</summary>
 
 * Apply changes you wish to make to the kubescape directory using text editors like `Vim`.
-* Execute `make build` after the changes. (This will build the `kubescape` binary)
+* [Build on Linux](https://github.com/kubescape/kubescape#build-on-linuxmacos)
 * Now, you can use Kubescape just like a normal user. Instead of using `kubescape`, use `./kubescape`. (Make sure you are inside kubescape directory because the command will execute the binary named `kubescape` in `kubescape directory`.
 
 </details>
