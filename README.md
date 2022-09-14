@@ -32,9 +32,9 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 
 [Install on Windows](#install-on-windows)
 
-[Install on MacOS](#install-on-macos)
+[Install on macOS](#install-on-macos)
 
-[Install on NixOS or Linux/MacOS via nix](#install-on-nixos-or-with-nix-community)
+[Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix-community)
 
 [Install using Go](#install-using-go)
 
