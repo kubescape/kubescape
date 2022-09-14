@@ -37,19 +37,62 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
-	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	ksResources := &cautils.KSResources{}
-
-	workloads := []workloadinterface.IMetadata{}
 
 	if len(fileHandler.inputPatterns) == 0 {
 		return nil, nil, nil, fmt.Errorf("missing input")
 	}
-	path := fileHandler.inputPatterns[0]
+
+	logger.L().Info("Accessing local objects")
+	cautils.StartSpinner()
+
+	for path := range fileHandler.inputPatterns {
+		workloadIDToSource, workloads, err := getResourcesFromPath(fileHandler.inputPatterns[path])
+		if err != nil {
+			return nil, allResources, nil, err
+		}
+		if len(workloads) == 0 {
+			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", fileHandler.inputPatterns[path]))
+		}
+
+		for k, v := range workloadIDToSource {
+			sessionObj.ResourceSource[k] = v
+		}
+
+		// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
+		mappedResources := mapResources(workloads)
+
+		// save only relevant resources
+		for i := range mappedResources {
+			if _, ok := (*k8sResources)[i]; ok {
+				ids := []string{}
+				for j := range mappedResources[i] {
+					ids = append(ids, mappedResources[i][j].GetID())
+					allResources[mappedResources[i][j].GetID()] = mappedResources[i][j]
+				}
+				(*k8sResources)[i] = append((*k8sResources)[i], ids...)
+			}
+		}
+
+	}
+
+	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
+		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
+	}
+
+	cautils.StopSpinner()
+	logger.L().Success("Done accessing local objects")
+
+	return k8sResources, allResources, ksResources, nil
+}
+
+func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+	workloadIDToSource := make(map[string]reporthandling.Source, 0)
+	workloads := []workloadinterface.IMetadata{}
 
 	clonedRepo, err := cloneGitRepo(&path)
 	if err != nil {
-		return nil, allResources, nil, err
+		return nil, nil, err
 	}
 	if clonedRepo != "" {
 		defer os.RemoveAll(clonedRepo)
@@ -63,9 +106,6 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	}
 
 	// load resource from local file system
-	logger.L().Info("Accessing local objects")
-	cautils.StartSpinner()
-
 	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
 
 	// update workloads and workloadIDToSource
@@ -156,37 +196,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
 	}
 
-	// addCommitData(fileHandler.inputPatterns[0], workloadIDToSource)
-
-	if len(workloads) == 0 {
-		return nil, allResources, nil, fmt.Errorf("empty list of workloads - no workloads found")
-	}
-
-	sessionObj.ResourceSource = workloadIDToSource
-
-	// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
-	mappedResources := mapResources(workloads)
-
-	// save only relevant resources
-	for i := range mappedResources {
-		if _, ok := (*k8sResources)[i]; ok {
-			ids := []string{}
-			for j := range mappedResources[i] {
-				ids = append(ids, mappedResources[i][j].GetID())
-				allResources[mappedResources[i][j].GetID()] = mappedResources[i][j]
-			}
-			(*k8sResources)[i] = ids
-		}
-	}
-
-	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
-		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
-	}
-
-	cautils.StopSpinner()
-	logger.L().Success("Accessed to local objects")
-
-	return k8sResources, allResources, ksResources, nil
+	return workloadIDToSource, workloads, nil
 }
 
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info {

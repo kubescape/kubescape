@@ -42,8 +42,8 @@ type KSCloudAPI struct {
 	accountID  string
 	clientID   string
 	secretKey  string
-	feToken    FeLoginResponse
 	authCookie string
+	feToken    FeLoginResponse
 	loggedIn   bool
 }
 

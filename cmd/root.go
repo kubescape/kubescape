@@ -63,6 +63,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
+	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable Color output for logging")
 
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
