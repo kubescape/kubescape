@@ -17,7 +17,7 @@ var (
 	downloadExample = `
   # Download all artifacts and save them in the default path (~/.kubescape)
   kubescape download artifacts
-  download
+  
   # Download all artifacts and save them in /tmp path
   kubescape download artifacts --output /tmp
   
