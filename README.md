@@ -69,7 +69,7 @@ We hold community meetings in [Zoom](https://us02web.zoom.us/j/84020231442) on t
 * [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
 * [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
 
-[<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
+<a href="https://discord.com/invite/WKZRaCtBxN" target="_blank" rel="noopener noreferrer"><img src="https://img.shields.io/badge/Discord-KubeScape%20-purple?logo=Discird&logoColor=purple&color=0f14b8" /></a>
 ![discord](https://img.shields.io/discord/893048809884643379)
 
 
