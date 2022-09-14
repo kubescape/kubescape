@@ -30,11 +30,11 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 ```
 
-[Install on windows](#install-on-windows)
+[Install on Windows](#install-on-windows)
 
-[Install on macOS](#install-on-macos)
+[Install on MacOS](#install-on-macos)
 
-[Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix-community)
+[Install on NixOS or Linux/MacOS via nix](#install-on-nixos-or-with-nix-community)
 
 [Install using Go](#install-using-go)
 
@@ -51,7 +51,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
+### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀.
 
 </br>
 
@@ -66,7 +66,7 @@ We hold community meetings in [Zoom](https://us02web.zoom.us/j/84020231442) on t
 [Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
 
 * Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
-* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
+* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours.
 * [Join us](https://discord.com/invite/WKZRaCtBxN) in the discussion on our discord server!
 
 [<img src="docs/discord-banner.png" width="100" alt="logo" align="center">](https://discord.com/invite/WKZRaCtBxN)
@@ -266,32 +266,32 @@ It is possible to run Kubescape offline!
 ```
 kubescape download artifacts --output path/to/local/dir
 ```
-2. Copy the downloaded artifacts to the air-gaped/offline environment
+2. Copy the downloaded artifacts to the air-gaped/offline environment.
 
-3. Scan using the downloaded artifacts
+3. Scan using the downloaded artifacts.
 ```
 kubescape scan --use-artifacts-from path/to/local/dir
 ```
 
 #### Download a single artifact
 
-You can also download a single artifact and scan with the `--use-from` flag
+You can also download a single artifact and scan with the `--use-from` flag.
 
 1. Download and save in a file, if the file name is not specified, will save in `~/.kubescape/<framework name>.json`
 ```
 kubescape download framework nsa --output /path/nsa.json
 ```
-2. Copy the downloaded artifacts to the air-gaped/offline environment
+2. Copy the downloaded artifacts to the air-gaped/offline environment.
 
-3. Scan using the downloaded framework
+3. Scan using the downloaded framework.
 ```
 kubescape scan framework nsa --use-from /path/nsa.json
 ```
 
 
 ## Scan Periodically using Helm 
-[Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster?utm_source=github&utm_medium=repository)
-[helm chart repo](https://github.com/armosec/armo-helm)
+Please follow the instructions [here](https://hub.armosec.io/docs/installation-of-armo-in-cluster?utm_source=github&utm_medium=repository)
+, helm chart [repo](https://github.com/armosec/armo-helm)
 
 # Integrations
 
@@ -299,11 +299,11 @@ kubescape scan framework nsa --use-from /path/nsa.json
 
 ![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/kubescape.kubescape?label=VScode) ![Open VSX](https://img.shields.io/open-vsx/dt/kubescape/kubescape?label=openVSX&color=yellowgreen)
 
-Scan the YAML files while writing them using the [vs code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
+Scan the YAML files while writing them using the [vs code extension.](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
 
 ## Lens Extension
 
-View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using kubescape [Lens extension](https://github.com/armosec/lens-kubescape/blob/master/README.md)
+View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using kubescape [Lens extension.](https://github.com/armosec/lens-kubescape/blob/master/README.md)
 
 
 # Building Kubescape
