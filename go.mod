@@ -16,7 +16,7 @@ require (
 	github.com/johnfercher/maroto v0.37.0
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/k8s-interface v0.0.83
-	github.com/kubescape/opa-utils v0.0.183
+	github.com/kubescape/opa-utils v0.0.186
 	github.com/kubescape/rbac-utils v0.0.17
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.14
