@@ -291,7 +291,7 @@ kubescape scan framework nsa --use-from /path/nsa.json
 
 ## Scan Periodically using Helm 
 Please follow the instructions [here](https://hub.armosec.io/docs/installation-of-armo-in-cluster?utm_source=github&utm_medium=repository)
-, helm chart [repo](https://github.com/armosec/armo-helm)
+, helm chart [repo](https://github.com/armosec/armo-helm).
 
 # Integrations
 
