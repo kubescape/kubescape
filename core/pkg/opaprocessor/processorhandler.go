@@ -44,6 +44,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 func (opap *OPAProcessor) ProcessRulesListenner() error {
 
 	policies := ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
+	opap.OPASessionObj.AllPolicies = policies
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, policies)
 

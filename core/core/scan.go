@@ -123,6 +123,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
 	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
+	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
@@ -154,8 +155,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	// ======================== prioritization ===================
-	priotizationHandler := resourcesprioritization.NewResourcesPrioritizationHandler(true)
-	if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
+
+	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter); err != nil {
+		logger.L().Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
+	} else if err := priotizationHandler.PrioritizeResources(scanData, true); err != nil {
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
 
