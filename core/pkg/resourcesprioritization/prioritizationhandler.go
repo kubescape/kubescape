@@ -11,8 +11,7 @@ import (
 )
 
 type ResourcesPrioritizationHandler struct {
-	skipZeroScores bool
-	attackTracks   []v1alpha1.IAttackTrack
+	attackTracks []v1alpha1.IAttackTrack
 }
 
 func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGetter) (*ResourcesPrioritizationHandler, error) {
@@ -39,7 +38,7 @@ func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGe
 	return handler, nil
 }
 
-func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *cautils.OPASessionObj, skipZeroScore bool) error {
+func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *cautils.OPASessionObj) error {
 	if sessionObj.AllPolicies == nil {
 		return fmt.Errorf("expected to find policies map")
 	} else if len(sessionObj.AllPolicies.Controls) == 0 {
@@ -111,7 +110,7 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 		prioritizedResource.SetSeverity(prioritizedResource.CalculateSeverity())
 		prioritizedResource.SetScore(prioritizedResource.CalculateScore())
 
-		if skipZeroScore && prioritizedResource.GetScore() == 0 {
+		if prioritizedResource.GetScore() == 0 {
 			continue
 		}
 

@@ -170,7 +170,7 @@ func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			handler, _ := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{})
 			sessionObj := OPASessionObjMock(tt.allPoliciesControls, tt.results, tt.controls, tt.resources)
-			err := handler.PrioritizeResources(sessionObj, true)
+			err := handler.PrioritizeResources(sessionObj)
 			assert.NoError(t, err, "expected to have no errors in PrioritizeResources()")
 
 			assert.Equalf(t, len(tt.results), len(sessionObj.ResourcesPrioritized), "expected prioritized resources to be not empty")

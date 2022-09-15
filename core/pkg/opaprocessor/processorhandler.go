@@ -43,13 +43,12 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 }
 func (opap *OPAProcessor) ProcessRulesListenner() error {
 
-	policies := ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
-	opap.OPASessionObj.AllPolicies = policies
+	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
 
-	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, policies)
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
 	// process
-	if err := opap.Process(policies); err != nil {
+	if err := opap.Process(opap.OPASessionObj.AllPolicies); err != nil {
 		logger.L().Error(err.Error())
 		// Return error?
 	}
