@@ -223,3 +223,17 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	}
 	return getter.NativeFrameworks
 }
+
+func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+	if accountID != "" {
+		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
+		return g
+	}
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil {
+		logger.L().Warning("failed to get attack tracks from github release, this may affect the scanning results", helpers.Error(err))
+	}
+	return downloadReleasedPolicy
+}

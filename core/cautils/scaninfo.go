@@ -132,6 +132,7 @@ type Getters struct {
 	ExceptionsGetter     getter.IExceptionsGetter
 	ControlsInputsGetter getter.IControlsInputsGetter
 	PolicyGetter         getter.IPolicyGetter
+	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
 func (scanInfo *ScanInfo) Init() {
