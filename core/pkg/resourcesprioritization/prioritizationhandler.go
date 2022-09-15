@@ -52,7 +52,7 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 	}
 
 	for resourceId, result := range sessionObj.ResourcesResult {
-		resourcePriorityVector := []*prioritization.ControlsVector{}
+		resourcePriorityVector := []prioritization.ControlsVector{}
 		resource, exist := sessionObj.AllResources[resourceId]
 		if !exist {
 			return fmt.Errorf("expected to find resource id '%s' in scanned resources map", resourceId)
