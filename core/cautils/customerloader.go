@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -468,7 +469,11 @@ func DeleteConfigFile() error {
 }
 
 func AdoptClusterName(clusterName string) string {
-	return strings.ReplaceAll(clusterName, "/", "-")
+	re, err := regexp.Compile(`[^\w]+`)
+	if err != nil {
+		return clusterName
+	}
+	return re.ReplaceAllString(clusterName, "-")
 }
 
 func getConfigMapName() string {
