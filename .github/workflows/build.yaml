@@ -36,7 +36,7 @@ jobs:
           submodules: recursive
 
       - name: Cache Go modules (Linux)
-        if: matrix.os == 'ubuntu-latest' 
+        if: matrix.os == 'ubuntu-latest'
         uses: actions/cache@v3
         with:
           path: |
@@ -47,7 +47,7 @@ jobs:
             ${{ runner.os }}-go-
 
       - name: Cache Go modules (macOS)
-        if: matrix.os == 'macos-latest' 
+        if: matrix.os == 'macos-latest'
         uses: actions/cache@v3
         with:
           path: |
@@ -94,14 +94,14 @@ jobs:
 
       - name: Build
         env:
-          RELEASE: v2.0.${{ github.run_number }} 
+          RELEASE: v2.0.${{ github.run_number }}
           CLIENT: release
           CGO_ENABLED: 1
         run: python3 --version && python3 build.py
-      
+
       - name: Smoke Testing
         env:
-          RELEASE: v2.0.${{ github.run_number }} 
+          RELEASE: v2.0.${{ github.run_number }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
 
@@ -170,16 +170,15 @@ jobs:
       #     registry: ghcr.io
       #     username: ${{ github.actor }}
       #     password: ${{ secrets.GITHUB_TOKEN }}
-    
-      # TODO - Wait for casign to support fixed tags -> https://github.com/sigstore/cosign/issues/1424
-      # - name: Install cosign
-      #   uses: sigstore/cosign-installer@main
-      #   with:
-      #     cosign-release: 'v1.5.1' # optional
-      # - name: sign kubescape container image
-      #   env:
-      #     COSIGN_EXPERIMENTAL: "true"
-      #   run: |
-      #       cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
-      #       cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@main
+        with:
+          cosign-release: 'v1.12.0' # optional
+      - name: sign kubescape container image
+        env:
+          COSIGN_EXPERIMENTAL: "true"
+        run: |
+            cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:latest
+            cosign sign --force ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }}
 
