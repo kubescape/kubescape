@@ -10,6 +10,7 @@ import (
 	"github.com/armosec/kubescape/v2/core/cautils/logger"
 	armosecadaptorv1 "github.com/armosec/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
 	"github.com/armosec/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
+	gcpadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/GCP/v1"
 
 	"github.com/armosec/opa-utils/shared"
 )
@@ -146,6 +147,13 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 	if armoAPI != nil {
 		if armoAPI.GetSecretKey() != "" && armoAPI.GetClientID() != "" && armoAPI.GetAccountID() != "" {
 			adaptors = append(adaptors, armosecadaptorv1.NewArmoAdaptor(getter.GetArmoAPIConnector()))
+		}
+	}
+
+	gcpCloudAPI := getter.GetGlobalGCPCloudAPIConnector()
+	if gcpCloudAPI != nil {
+		if !gcpCloudAPI.GetCredentials() {
+			adaptors = append(adaptors, gcpadaptorv1.NewGCPAdaptor(getter.GetGlobalGCPCloudAPIConnector()))
 		}
 	}
 
