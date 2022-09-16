@@ -51,7 +51,7 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
-### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀.
+### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
 </br>
 
@@ -299,11 +299,11 @@ Please follow the instructions [here](https://hub.armosec.io/docs/installation-o
 
 ![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/kubescape.kubescape?label=VScode) ![Open VSX](https://img.shields.io/open-vsx/dt/kubescape/kubescape?label=openVSX&color=yellowgreen)
 
-Scan the YAML files while writing them using the [vs code extension.](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
+Scan the YAML files while writing them using the [vs code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md).
 
 ## Lens Extension
 
-View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using kubescape [Lens extension.](https://github.com/armosec/lens-kubescape/blob/master/README.md)
+View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using kubescape [Lens extension](https://github.com/armosec/lens-kubescape/blob/master/README.md).
 
 
 # Building Kubescape
