@@ -1,14 +1,15 @@
 package v2
 
 import (
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/resourcesresults"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // finalizeV2Report finalize the results objects by copying data from map to lists
@@ -24,16 +25,21 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	}
 
 	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
-	finalizeResults(report.Results, data.ResourcesResult)
+	finalizeResults(report.Results, data.ResourcesResult, data.ResourcesPrioritized)
 
 	report.Resources = finalizeResources(report.Results, data.AllResources, data.ResourceSource)
 
 	return &report
 }
-func finalizeResults(results []resourcesresults.Result, resourcesResult map[string]resourcesresults.Result) {
+func finalizeResults(results []resourcesresults.Result, resourcesResult map[string]resourcesresults.Result, prioritizedResources map[string]prioritization.PrioritizedResource) {
 	index := 0
 	for resourceID := range resourcesResult {
 		results[index] = resourcesResult[resourceID]
+
+		// Add prioritization information to the result
+		if v, exist := prioritizedResources[resourceID]; exist {
+			results[index].PrioritizedResource = &v
+		}
 		index++
 	}
 }

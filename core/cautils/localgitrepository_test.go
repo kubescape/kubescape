@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,11 +12,13 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
+var TEST_REPOS = [...]string{"localrepo", "withoutremotes"}
+
 type LocalGitRepositoryTestSuite struct {
 	suite.Suite
-	archive           *zip.ReadCloser
-	gitRepositoryPath string
-	destinationPath   string
+	archives           map[string]*zip.ReadCloser
+	gitRepositoryPaths map[string]string
+	destinationPath    string
 }
 
 func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
@@ -62,17 +63,21 @@ func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
 }
 
 func (s *LocalGitRepositoryTestSuite) SetupSuite() {
-	zippedFixturePath := path.Join(".", "testdata", "localrepo.git")
-	destinationPath := path.Join(".", "testdata", "temp")
-	gitRepositoryPath := path.Join(destinationPath, "localrepo")
+	s.archives = make(map[string]*zip.ReadCloser)
+	s.gitRepositoryPaths = make(map[string]string)
 
+	destinationPath := filepath.Join(".", "testdata", "temp")
+	s.destinationPath = destinationPath
 	os.RemoveAll(destinationPath)
-	archive, err := unzipFile(zippedFixturePath, destinationPath)
+	for _, repo := range TEST_REPOS {
+		zippedFixturePath := filepath.Join(".", "testdata", repo+".git")
+		gitRepositoryPath := filepath.Join(destinationPath, repo)
+		archive, err := unzipFile(zippedFixturePath, destinationPath)
 
-	if err == nil {
-		s.archive = archive
-		s.gitRepositoryPath = gitRepositoryPath
-		s.destinationPath = destinationPath
+		if err == nil {
+			s.archives[repo] = archive
+			s.gitRepositoryPaths[repo] = gitRepositoryPath
+		}
 	}
 }
 
@@ -81,9 +86,14 @@ func TestLocalGitRepositoryTestSuite(t *testing.T) {
 }
 
 func (s *LocalGitRepositoryTestSuite) TearDownSuite() {
-	if s.archive != nil {
-		s.archive.Close()
+	if s.archives != nil {
+		for _, archive := range s.archives {
+			if archive != nil {
+				archive.Close()
+			}
+		}
 	}
+
 	os.RemoveAll(s.destinationPath)
 }
 
@@ -93,14 +103,20 @@ func (s *LocalGitRepositoryTestSuite) TestInvalidRepositoryPath() {
 	}
 }
 
+func (s *LocalGitRepositoryTestSuite) TestRepositoryWithoutRemotes() {
+	if _, err := NewLocalGitRepository(s.gitRepositoryPaths["withoutremotes"]); s.Error(err) {
+		s.Equal("no remotes found", err.Error())
+	}
+}
+
 func (s *LocalGitRepositoryTestSuite) TestGetBranchName() {
-	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
+	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
 		s.Equal("master", localRepo.GetBranchName())
 	}
 }
 
 func (s *LocalGitRepositoryTestSuite) TestGetName() {
-	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
+	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
 		if name, err := localRepo.GetName(); s.NoError(err) {
 			s.Equal("localrepo", name)
 		}
@@ -109,7 +125,7 @@ func (s *LocalGitRepositoryTestSuite) TestGetName() {
 }
 
 func (s *LocalGitRepositoryTestSuite) TestGetOriginUrl() {
-	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
+	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
 		if url, err := localRepo.GetRemoteUrl(); s.NoError(err) {
 			s.Equal("git@github.com:testuser/localrepo", url)
 		}
@@ -117,7 +133,7 @@ func (s *LocalGitRepositoryTestSuite) TestGetOriginUrl() {
 }
 
 func (s *LocalGitRepositoryTestSuite) TestGetLastCommit() {
-	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
+	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
 		if commit, err := localRepo.GetLastCommit(); s.NoError(err) {
 			s.Equal("7e09312b8017695fadcd606882e3779f10a5c832", commit.SHA)
 			s.Equal("Amir Malka", commit.Author.Name)
@@ -130,7 +146,8 @@ func (s *LocalGitRepositoryTestSuite) TestGetLastCommit() {
 
 func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
 	s.Run("fileA", func() {
-		if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
+		if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
+
 			if commit, err := localRepo.GetFileLastCommit("fileA"); s.NoError(err) {
 				s.Equal("9fae4be19624297947d2b605cefbff516628612d", commit.SHA)
 				s.Equal("Amir Malka", commit.Author.Name)
@@ -138,11 +155,13 @@ func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
 				s.Equal("2022-05-22 18:55:48 +0300 +0300", commit.Author.Date.String())
 				s.Equal("added file A\n", commit.Message)
 			}
+
 		}
 	})
 
 	s.Run("fileB", func() {
-		if localRepo, err := NewLocalGitRepository(s.gitRepositoryPath); s.NoError(err) {
+		if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
+
 			if commit, err := localRepo.GetFileLastCommit("dirA/fileB"); s.NoError(err) {
 				s.Equal("7e09312b8017695fadcd606882e3779f10a5c832", commit.SHA)
 				s.Equal("Amir Malka", commit.Author.Name)
@@ -150,6 +169,7 @@ func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
 				s.Equal("2022-05-22 19:11:57 +0300 +0300", commit.Author.Date.String())
 				s.Equal("added file B\n", commit.Message)
 			}
+
 		}
 	})
 }

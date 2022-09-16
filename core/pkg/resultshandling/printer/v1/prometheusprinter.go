@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/armosec/opa-utils/reporthandling"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 type PrometheusPrinter struct {
@@ -87,9 +87,9 @@ func (printer *PrometheusPrinter) printReports(allResources map[string]workloadi
 }
 
 func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	cautils.ReportV2ToV1(opaSessionObj)
+	report := cautils.ReportV2ToV1(opaSessionObj)
 
-	err := printer.printReports(opaSessionObj.AllResources, opaSessionObj.PostureReport.FrameworkReports)
+	err := printer.printReports(opaSessionObj.AllResources, report.FrameworkReports)
 	if err != nil {
 		logger.L().Fatal(err.Error())
 	}

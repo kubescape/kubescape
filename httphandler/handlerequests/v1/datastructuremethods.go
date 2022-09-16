@@ -3,12 +3,12 @@ package v1
 import (
 	"strings"
 
-	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
-	utilsmetav1 "github.com/armosec/opa-utils/httpserver/meta/v1"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"k8s.io/utils/strings/slices"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {

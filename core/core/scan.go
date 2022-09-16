@@ -3,23 +3,24 @@ package core
 import (
 	"fmt"
 
-	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/armosec/kubescape/v2/core/pkg/opaprocessor"
-	"github.com/armosec/kubescape/v2/core/pkg/policyhandler"
-	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v2/core/pkg/policyhandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resourcesprioritization"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 
-	"github.com/armosec/opa-utils/resources"
+	"github.com/kubescape/opa-utils/resources"
 )
 
 type componentInterfaces struct {
@@ -86,7 +87,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan)
+	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, scanInfo.GetScanningContext())
 
 	// setup printer
 	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
@@ -104,7 +105,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 }
 
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
-	logger.L().Info("ARMO security scanner starting")
+	logger.L().Info("Kubescape scanner starting")
 
 	// ===================== Initialization =====================
 	scanInfo.Init() // initialize scan info
@@ -122,6 +123,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
 	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
+	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
@@ -149,6 +151,14 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
 	if err := reportResults.ProcessRulesListenner(); err != nil {
 		// TODO - do something
+		return resultsHandling, fmt.Errorf("%w", err)
+	}
+
+	// ======================== prioritization ===================
+
+	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter); err != nil {
+		logger.L().Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
+	} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
 

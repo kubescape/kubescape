@@ -2,10 +2,10 @@ package resourcehandler
 
 import (
 	giturl "github.com/armosec/go-git-url"
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
@@ -33,7 +33,7 @@ func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterfac
 
 	for i, j := range files {
 		w, e := cautils.ReadFile(j, cautils.GetFileFormat(i))
-		if len(e) != 0 || len(w) == 0 {
+		if e != nil || len(w) == 0 {
 			continue
 		}
 		if _, ok := workloads[i]; !ok {

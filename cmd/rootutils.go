@@ -5,9 +5,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 
 	"github.com/mattn/go-isatty"
 )
@@ -16,6 +16,7 @@ const envFlagUsage = "Send report results to specific URL. Format:<ReportReceive
 
 func initLogger() {
 	logger.DisableColor(rootInfo.DisableColor)
+	logger.EnableColor(rootInfo.EnableColor)
 
 	if rootInfo.LoggerName == "" {
 		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
@@ -55,10 +56,10 @@ func initCacheDir() {
 	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 }
 func initEnvironment() {
-	if rootInfo.ArmoBEURLs == "" {
-		rootInfo.ArmoBEURLs = rootInfo.ArmoBEURLsDep
+	if rootInfo.KSCloudBEURLs == "" {
+		rootInfo.KSCloudBEURLs = rootInfo.KSCloudBEURLsDep
 	}
-	urlSlices := strings.Split(rootInfo.ArmoBEURLs, ",")
+	urlSlices := strings.Split(rootInfo.KSCloudBEURLs, ",")
 	if len(urlSlices) != 1 && len(urlSlices) < 3 {
 		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
 	}
@@ -66,24 +67,24 @@ func initEnvironment() {
 	case 1:
 		switch urlSlices[0] {
 		case "dev", "development":
-			getter.SetARMOAPIConnector(getter.NewARMOAPIDev())
+			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIDev())
 		case "stage", "staging":
-			getter.SetARMOAPIConnector(getter.NewARMOAPIStaging())
+			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIStaging())
 		case "":
-			getter.SetARMOAPIConnector(getter.NewARMOAPIProd())
+			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIProd())
 		default:
 			logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 		}
 	case 2:
 		logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 	case 3, 4:
-		var armoAUTHURL string
-		armoERURL := urlSlices[0] // mandatory
-		armoBEURL := urlSlices[1] // mandatory
-		armoFEURL := urlSlices[2] // mandatory
+		var ksAuthURL string
+		ksEventReceiverURL := urlSlices[0] // mandatory
+		ksBackendURL := urlSlices[1]       // mandatory
+		ksFrontendURL := urlSlices[2]      // mandatory
 		if len(urlSlices) >= 4 {
-			armoAUTHURL = urlSlices[3]
+			ksAuthURL = urlSlices[3]
 		}
-		getter.SetARMOAPIConnector(getter.NewARMOAPICustomized(armoERURL, armoBEURL, armoFEURL, armoAUTHURL))
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPICustomized(ksEventReceiverURL, ksBackendURL, ksFrontendURL, ksAuthURL))
 	}
 }

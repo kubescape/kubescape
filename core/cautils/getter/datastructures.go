@@ -8,11 +8,11 @@ type FeLoginData struct {
 type FeLoginResponse struct {
 	Token        string `json:"accessToken"`
 	RefreshToken string `json:"refreshToken"`
-	ExpiresIn    int32  `json:"expiresIn"`
 	Expires      string `json:"expires"`
+	ExpiresIn    int32  `json:"expiresIn"`
 }
 
-type ArmoSelectCustomer struct {
+type KSCloudSelectCustomer struct {
 	SelectedCustomerGuid string `json:"selectedCustomer"`
 }
 

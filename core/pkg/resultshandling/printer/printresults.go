@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 var INDENT = "   "
@@ -17,6 +17,7 @@ const (
 	JunitResultFormat string = "junit"
 	PrometheusFormat  string = "prometheus"
 	PdfFormat         string = "pdf"
+	HtmlFormat        string = "html"
 )
 
 type IPrinter interface {

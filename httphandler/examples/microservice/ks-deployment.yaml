@@ -4,7 +4,7 @@ kind: Namespace
 metadata:
   labels:
     app: kubescape
-  name: ks-scanner
+  name: kubescape
 ---
 # ------------------- Kubescape Service Account ------------------- #
 apiVersion: v1
@@ -13,7 +13,7 @@ metadata:
   labels:
     app: kubescape
   name: kubescape-discovery
-  namespace: ks-scanner
+  namespace: kubescape
 ---
 # ------------------- Kubescape Cluster Role & Cluster Role Binding ------------------- #
 kind: ClusterRole
@@ -38,13 +38,13 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: kubescape-discovery
-  namespace: ks-scanner
+  namespace: kubescape
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: kubescape
-  namespace: ks-scanner
+  namespace: kubescape
   labels:
     app: kubescape
 spec:
@@ -61,7 +61,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kubescape
-  namespace: ks-scanner
+  namespace: kubescape
   labels:
     app: kubescape
 spec:
@@ -89,7 +89,7 @@ spec:
             port: 8080
           initialDelaySeconds: 3
           periodSeconds: 3
-        image: quay.io/armosec/kubescape:latest
+        image: quay.io/kubescape/kubescape:latest
         imagePullPolicy: Always
         env:
         - name: KS_DEFAULT_CONFIGMAP_NAMESPACE
@@ -99,7 +99,7 @@ spec:
               fieldPath: metadata.namespace
         - name: "KS_SKIP_UPDATE_CHECK" # do not check latest version
           value: "true"
-        - name: KS_ENABLE_HOST_SCANNER # enable host scanner -> https://hub.armo.cloud/docs/host-sensor
+        - name: KS_ENABLE_HOST_SCANNER # enable host scanner -> https://hub.armosec.io/docs/host-sensor
           value: "true"              
         - name: KS_DOWNLOAD_ARTIFACTS  # When set to true the artifacts will be downloaded every scan execution
           value: "true" 

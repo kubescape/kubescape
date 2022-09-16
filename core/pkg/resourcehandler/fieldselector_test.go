@@ -3,7 +3,7 @@ package resourcehandler
 import (
 	"testing"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )

@@ -4,20 +4,20 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/armosec/kubescape/v2/cmd/completion"
-	"github.com/armosec/kubescape/v2/cmd/config"
-	"github.com/armosec/kubescape/v2/cmd/delete"
-	"github.com/armosec/kubescape/v2/cmd/download"
-	"github.com/armosec/kubescape/v2/cmd/list"
-	"github.com/armosec/kubescape/v2/cmd/scan"
-	"github.com/armosec/kubescape/v2/cmd/submit"
-	"github.com/armosec/kubescape/v2/cmd/version"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/core"
-	"github.com/armosec/kubescape/v2/core/meta"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/cmd/completion"
+	"github.com/kubescape/kubescape/v2/cmd/config"
+	"github.com/kubescape/kubescape/v2/cmd/delete"
+	"github.com/kubescape/kubescape/v2/cmd/download"
+	"github.com/kubescape/kubescape/v2/cmd/list"
+	"github.com/kubescape/kubescape/v2/cmd/scan"
+	"github.com/kubescape/kubescape/v2/cmd/submit"
+	"github.com/kubescape/kubescape/v2/cmd/version"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/core"
+	"github.com/kubescape/kubescape/v2/core/meta"
 
 	"github.com/spf13/cobra"
 )
@@ -47,13 +47,12 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:     "kubescape",
-		Version: cautils.BuildNumber,
-		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://hub.armo.cloud/docs",
+		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://hub.armosec.io/docs",
 		Example: ksExamples,
 	}
 
-	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLsDep, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&rootInfo.ArmoBEURLs, "env", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLsDep, "environment", "", envFlagUsage)
+	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLs, "env", "", envFlagUsage)
 	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
@@ -64,6 +63,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
+	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable Color output for logging")
 
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 

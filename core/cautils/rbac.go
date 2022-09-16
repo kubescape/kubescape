@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/rbac-utils/rbacscanner"
-	"github.com/armosec/rbac-utils/rbacutils"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+
 	"github.com/google/uuid"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/rbac-utils/rbacscanner"
+	"github.com/kubescape/rbac-utils/rbacutils"
 )
 
 type RBACObjects struct {
@@ -19,12 +20,19 @@ func NewRBACObjects(scanner *rbacscanner.RbacScannerFromK8sAPI) *RBACObjects {
 	return &RBACObjects{scanner: scanner}
 }
 
-func (rbacObjects *RBACObjects) SetResourcesReport() (*reporthandling.PostureReport, error) {
-	return &reporthandling.PostureReport{
+func (rbacObjects *RBACObjects) SetResourcesReport() (*reporthandlingv2.PostureReport, error) {
+	return &reporthandlingv2.PostureReport{
 		ReportID:             uuid.NewString(),
 		ReportGenerationTime: time.Now().UTC(),
 		CustomerGUID:         rbacObjects.scanner.CustomerGUID,
 		ClusterName:          rbacObjects.scanner.ClusterName,
+		Metadata: reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				ClusterContextMetadata: &reporthandlingv2.ClusterMetadata{
+					ContextName: rbacObjects.scanner.ClusterName,
+				},
+			},
+		},
 	}, nil
 }
 
@@ -46,26 +54,30 @@ func (rbacObjects *RBACObjects) rbacObjectsToResources(resources *rbacutils.Rbac
 	/*
 		************************************************************************************************************************
 			This code is adding a non valid ID ->
-				(github.com/armosec/rbac-utils v0.0.11): "//SA2WLIDmap/SA2WLIDmap"
-				(github.com/armosec/rbac-utils v0.0.12): "armo.rbac.com/v0beta1//SAID2WLIDmap/SAID2WLIDmap"
+				(github.com/kubescape/opa-utils v0.0.11): "//SA2WLIDmap/SA2WLIDmap"
+				(github.com/kubescape/opa-utils v0.0.12): "armo.rbac.com/v0beta1//SAID2WLIDmap/SAID2WLIDmap"
 
 			Should be investigated
 		************************************************************************************************************************
 	*/
 
-	// wrap rbac aggregated objects in IMetadata and add to allresources
+	// wrap rbac aggregated objects in IMetadata and add to AllResources
 	// TODO - DEPRECATE SA2WLIDmap
-	SA2WLIDmapIMeta, err := rbacutils.SA2WLIDmapIMetadataWrapper(resources.SA2WLIDmap)
+	m, err := rbacutils.SA2WLIDmapIMetadataWrapper(resources.SA2WLIDmap)
 	if err != nil {
 		return nil, err
 	}
-	allresources[SA2WLIDmapIMeta.GetID()] = SA2WLIDmapIMeta
 
-	SAID2WLIDmapIMeta, err := rbacutils.SAID2WLIDmapIMetadataWrapper(resources.SAID2WLIDmap)
+	sa2WLIDmapIMeta := workloadinterface.NewBaseObject(m)
+	allresources[sa2WLIDmapIMeta.GetID()] = sa2WLIDmapIMeta
+
+	m2, err := rbacutils.SAID2WLIDmapIMetadataWrapper(resources.SAID2WLIDmap)
 	if err != nil {
 		return nil, err
 	}
-	allresources[SAID2WLIDmapIMeta.GetID()] = SAID2WLIDmapIMeta
+
+	saID2WLIDmapIMeta := workloadinterface.NewBaseObject(m2)
+	allresources[saID2WLIDmapIMeta.GetID()] = saID2WLIDmapIMeta
 
 	// convert rbac k8s resources to IMetadata and add to allresources
 	for _, cr := range resources.ClusterRoles.Items {

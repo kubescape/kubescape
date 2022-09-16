@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	metav1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 )
 
 var downloadFunc = map[string]func(*metav1.DownloadInfo) error{

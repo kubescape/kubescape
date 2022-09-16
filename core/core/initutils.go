@@ -3,18 +3,19 @@ package core
 import (
 	"fmt"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/armosec/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
-	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+
 	"github.com/google/uuid"
 
-	"github.com/armosec/rbac-utils/rbacscanner"
+	"github.com/kubescape/rbac-utils/rbacscanner"
 )
 
 // getKubernetesApi
@@ -26,9 +27,9 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 }
 func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetArmoAPIConnector(), credentials, clusterName)
+		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetArmoAPIConnector(), credentials, clusterName)
+	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName)
 }
 
 func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
@@ -36,7 +37,7 @@ func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
 		// load exceptions from file
 		return getter.NewLoadPolicy([]string{useExceptions})
 	} else {
-		return getter.GetArmoAPIConnector()
+		return getter.GetKSCloudAPIConnector()
 	}
 }
 
@@ -47,9 +48,13 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool) reporter.IReport {
+func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanningContext cautils.ScanningContext) reporter.IReport {
 	if submit {
-		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID)
+		submitData := reporterv2.SubmitContextScan
+		if scanningContext != cautils.ContextCluster {
+			submitData = reporterv2.SubmitContextRepository
+		}
+		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID, submitData)
 	}
 	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework
@@ -68,7 +73,7 @@ func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenant
 		// scanInfo.HostSensor.SetBool(false)
 		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns, registryAdaptors)
 	}
-	getter.GetArmoAPIConnector()
+	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
 	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors)
 }
@@ -119,7 +124,7 @@ func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
 	return policiesNames
 }
 
-// setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Armo BE
+// setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Kubescape Cloud BE
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
@@ -160,13 +165,13 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 }
 
-// setPolicyGetter set the policy getter - local file/github release/ArmoAPI
+// setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
 func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
 	if tennatEmail != "" && frameworkScope {
-		g := getter.GetArmoAPIConnector() // download policy from ARMO backend
+		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
 	}
 	if downloadReleasedPolicy == nil {
@@ -176,13 +181,13 @@ func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, framewor
 
 }
 
-// setConfigInputsGetter sets the config input getter - local file/github release/ArmoAPI
+// setConfigInputsGetter sets the config input getter - local file/github release/Kubescape Cloud API
 func getConfigInputsGetter(ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
 	}
 	if accountID != "" {
-		g := getter.GetArmoAPIConnector() // download config from ARMO backend
+		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
 		return g
 	}
 	if downloadReleasedPolicy == nil {
@@ -217,4 +222,18 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 		return fw
 	}
 	return getter.NativeFrameworks
+}
+
+func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+	if accountID != "" {
+		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
+		return g
+	}
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil {
+		logger.L().Warning("failed to get attack tracks from github release, this may affect the scanning results", helpers.Error(err))
+	}
+	return downloadReleasedPolicy
 }

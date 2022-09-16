@@ -2,7 +2,8 @@ package getter
 
 import (
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
 
 // supported listing
@@ -37,4 +38,8 @@ type IBackend interface {
 
 type IControlsInputsGetter interface {
 	GetControlsInputs(clusterName string) (map[string][]string, error)
+}
+
+type IAttackTracksGetter interface {
+	GetAttackTracks() ([]v1alpha1.AttackTrack, error)
 }

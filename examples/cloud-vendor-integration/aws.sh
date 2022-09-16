@@ -8,7 +8,7 @@
 
 # Set environment variables
 echo 'Set environment variables'
-export kubescape_namespace=armo-system
+export kubescape_namespace=kubescape
 export kubescape_serviceaccount=armo-kubescape-service-account
 
 # Get current context
@@ -27,7 +27,7 @@ export cluster_name=$(echo "$cluster_arn" | awk -F'/' '{print $NF}')
 echo 'Get cluster region'
 export cluster_region=$(echo "$cluster_arn" | awk -F':' '{print $4}')
 
-# First step, Create IAM OIDC provider for the cluster (Not required if the third step runs as is):
+# First step, Create IAM OIDC provider for the cluster (Not required if the third step runs as it is):
 echo 'Create IAM OIDC provider for the cluster'
 eksctl utils associate-iam-oidc-provider --cluster $cluster_name --approve
 
@@ -65,4 +65,4 @@ eksctl create iamserviceaccount \
 
 # Install/Upgrade Kubescape chart
 echo 'Install/Upgrade Kubescape chart'
-helm upgrade --install armo  armo-components/ -n armo-system --create-namespace --set clusterName=$cluster_name --set cloud_provider_engine=eks --set createKubescapeServiceAccount=false --set cloudRegion=$cluster_region
+helm upgrade --install armo  armo-components/ -n kubescape --create-namespace --set clusterName=$cluster_name --set cloud_provider_engine=eks --set createKubescapeServiceAccount=false --set cloudRegion=$cluster_region

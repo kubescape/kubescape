@@ -1,0 +1,92 @@
+name: pr-checks
+
+on:
+  pull_request:
+    branches: [ master, dev ]
+    types: [ edited, opened, synchronize, reopened ]
+    paths-ignore:
+      # Do not run the pipeline if only Markdown files changed
+      - '**.md'
+jobs:
+  build:
+    name: Create cross-platform build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Cache Go modules (Linux)
+        if: matrix.os == 'ubuntu-latest' 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (macOS)
+        if: matrix.os == 'macos-latest' 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.18
+
+      - name: Install MSYS2 & libgit2 (Windows)
+        shell: cmd
+        run: .\build.bat all
+        if: matrix.os == 'windows-latest'
+
+      - name: Install libgit2 (Linux/macOS)
+        run: make libgit2
+        if: matrix.os != 'windows-latest'
+
+      # - name: Test cmd pkg
+      #   run: cd cmd && go test -v ./...
+      
+      - name: Test core pkg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: go test -tags=static -v ./...
+
+      - name: Test httphandler pkg
+        run: cd httphandler && go test -tags=static -v ./...
+
+      - name: Build
+        env:
+          RELEASE: v2.0.${{ github.run_number }} 
+          CLIENT: test
+          CGO_ENABLED: 1
+        run: python3 --version && python3 build.py
+
+      - name: Smoke Testing
+        env:
+          RELEASE: v2.0.${{ github.run_number }} 
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
+        

@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/opa-utils/objectsenvelopes/hostsensor"
-	"github.com/armosec/opa-utils/reporthandling/apis"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+
 	"sigs.k8s.io/yaml"
 )
 
@@ -32,7 +33,23 @@ func (hsh *HostSensorHandler) HTTPGetToPod(podName, path string) ([]byte, error)
 
 	restProxy := hsh.k8sObj.KubernetesClient.CoreV1().Pods(hsh.DaemonSet.Namespace).ProxyGet("http", podName, fmt.Sprintf("%d", hsh.HostSensorPort), path, map[string]string{})
 	return restProxy.DoRaw(hsh.k8sObj.Context)
+}
 
+func (hsh *HostSensorHandler) getResourcesFromPod(podName, nodeName, resourceKind, path string) (hostsensor.HostSensorDataEnvelope, error) {
+	//  send the request and pack the response as an hostSensorDataEnvelope
+
+	resBytes, err := hsh.HTTPGetToPod(podName, path)
+	if err != nil {
+		return hostsensor.HostSensorDataEnvelope{}, err
+	}
+
+	hostSensorDataEnvelope := hostsensor.HostSensorDataEnvelope{}
+	hostSensorDataEnvelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
+	hostSensorDataEnvelope.SetKind(resourceKind)
+	hostSensorDataEnvelope.SetName(nodeName)
+	hostSensorDataEnvelope.SetData(resBytes)
+
+	return hostSensorDataEnvelope, nil
 }
 
 func (hsh *HostSensorHandler) ForwardToPod(podName, path string) ([]byte, error) {
@@ -59,35 +76,26 @@ func (hsh *HostSensorHandler) ForwardToPod(podName, path string) ([]byte, error)
 
 // sendAllPodsHTTPGETRequest fills the raw byte response in the envelope and the node name, but not the GroupVersionKind
 // so the caller is responsible to convert the raw data to some structured data and add the GroupVersionKind details
+//
+// The function produces a worker-pool with a fixed number of workers.
+// For each node the request is pushed to the jobs channel, the worker sends the request and pushes the result to the result channel.
+// When all workers have finished, the function returns a list of results
 func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string) ([]hostsensor.HostSensorDataEnvelope, error) {
 	podList, err := hsh.getPodList()
 	if err != nil {
 		return nil, fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
 	}
-	res := make([]hostsensor.HostSensorDataEnvelope, 0, len(podList))
-	resLock := sync.Mutex{}
-	wg := sync.WaitGroup{}
-	wg.Add(len(podList))
-	for podName := range podList {
-		go func(podName, path string) {
-			defer wg.Done()
-			resBytes, err := hsh.HTTPGetToPod(podName, path)
-			if err != nil {
-				logger.L().Error("failed to get data", helpers.String("path", path), helpers.String("podName", podName), helpers.Error(err))
-			} else {
-				resLock.Lock()
-				defer resLock.Unlock()
-				hostSensorDataEnvelope := hostsensor.HostSensorDataEnvelope{}
-				hostSensorDataEnvelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
-				hostSensorDataEnvelope.SetKind(requestKind)
-				hostSensorDataEnvelope.SetName(podList[podName])
-				hostSensorDataEnvelope.SetData(resBytes)
-				res = append(res, hostSensorDataEnvelope)
-			}
 
-		}(podName, path)
-	}
-	wg.Wait()
+	res := make([]hostsensor.HostSensorDataEnvelope, 0, len(podList))
+	var wg sync.WaitGroup
+	// initialization of the channels
+	hsh.workerPool.init(len(podList))
+
+	hsh.workerPool.hostSensorApplyJobs(podList, path, requestKind)
+	hsh.workerPool.hostSensorGetResults(&res)
+	hsh.workerPool.createWorkerPool(hsh, &wg)
+	hsh.workerPool.waitForDone(&wg)
+
 	return res, nil
 }
 
@@ -107,6 +115,18 @@ func (hsh *HostSensorHandler) GetOpenPortsList() ([]hostsensor.HostSensorDataEnv
 func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	return hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening", "LinuxSecurityHardeningStatus")
+}
+
+// return list of KubeletInfo
+func (hsh *HostSensorHandler) GetKubeletInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/kubeletInfo", "KubeletInfo")
+}
+
+// return list of KubeProxyInfo
+func (hsh *HostSensorHandler) GetKubeProxyInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/kubeProxyInfo", "KubeProxyInfo")
 }
 
 // return list of KubeletCommandLine
@@ -228,6 +248,27 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
+
+	// GetKubeletInfo
+	kcData, err = hsh.GetKubeletInfo()
+	if err != nil {
+		addInfoToMap(KubeletInfo, infoMap, err)
+		logger.L().Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
+
+	// GetKubeProxyInfo
+	kcData, err = hsh.GetKubeProxyInfo()
+	if err != nil {
+		addInfoToMap(KubeProxyInfo, infoMap, err)
+		logger.L().Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
+
 	logger.L().Debug("Done reading information from host scanner")
 	return res, infoMap, nil
 }

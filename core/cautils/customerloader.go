@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -124,7 +125,7 @@ func (lc *LocalConfig) GetToken() string         { return lc.configObj.Token }
 func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
-	// ARMO tenant GUID
+	// Kubescape Cloud tenant GUID
 	if err := getTenantConfigFromBE(lc.backendAPI, lc.configObj); err != nil {
 		return err
 	}
@@ -145,7 +146,7 @@ func (lc *LocalConfig) DeleteCachedConfig() error {
 
 func getTenantConfigFromBE(backendAPI getter.IBackend, configObj *ConfigObj) error {
 
-	// get from armoBE
+	// get from Kubescape Cloud API
 	tenantResponse, err := backendAPI.GetTenant()
 	if err == nil && tenantResponse != nil {
 		if tenantResponse.AdminMail != "" { // registered tenant
@@ -182,11 +183,11 @@ TODO - supprot:
 KS_CACHE // path to cached files
 */
 type ClusterConfig struct {
+	backendAPI         getter.IBackend
 	k8s                *k8sinterface.KubernetesApi
+	configObj          *ConfigObj
 	configMapName      string
 	configMapNamespace string
-	backendAPI         getter.IBackend
-	configObj          *ConfigObj
 }
 
 func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, credentials *Credentials, clusterName string) *ClusterConfig {
@@ -468,7 +469,11 @@ func DeleteConfigFile() error {
 }
 
 func AdoptClusterName(clusterName string) string {
-	return strings.ReplaceAll(clusterName, "/", "-")
+	re, err := regexp.Compile(`[^\w]+`)
+	if err != nil {
+		return clusterName
+	}
+	return re.ReplaceAllString(clusterName, "-")
 }
 
 func getConfigMapName() string {
@@ -487,13 +492,13 @@ func getConfigMapNamespace() string {
 
 func getAccountFromEnv(credentials *Credentials) {
 	// load from env
-	if accountID := os.Getenv("KS_ACCOUNT_ID"); credentials.Account != "" && accountID != "" {
+	if accountID := os.Getenv("KS_ACCOUNT_ID"); credentials.Account == "" && accountID != "" {
 		credentials.Account = accountID
 	}
-	if clientID := os.Getenv("KS_CLIENT_ID"); credentials.ClientID != "" && clientID != "" {
+	if clientID := os.Getenv("KS_CLIENT_ID"); credentials.ClientID == "" && clientID != "" {
 		credentials.ClientID = clientID
 	}
-	if secretKey := os.Getenv("KS_SECRET_KEY"); credentials.SecretKey != "" && secretKey != "" {
+	if secretKey := os.Getenv("KS_SECRET_KEY"); credentials.SecretKey == "" && secretKey != "" {
 		credentials.SecretKey = secretKey
 	}
 }

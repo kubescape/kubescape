@@ -1,17 +1,18 @@
 package core
 
 import (
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
+
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
 
 	// list resources
-	postureReport, err := submitInterfaces.SubmitObjects.SetResourcesReport()
+	report, err := submitInterfaces.SubmitObjects.SetResourcesReport()
 	if err != nil {
 		return err
 	}
@@ -20,7 +21,12 @@ func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) err
 		return err
 	}
 	// report
-	if err := submitInterfaces.Reporter.Submit(&cautils.OPASessionObj{PostureReport: postureReport, AllResources: allresources}); err != nil {
+	o := &cautils.OPASessionObj{
+		Report:       report,
+		AllResources: allresources,
+		Metadata:     &report.Metadata,
+	}
+	if err := submitInterfaces.Reporter.Submit(o); err != nil {
 		return err
 	}
 	logger.L().Success("Data has been submitted successfully")
@@ -46,12 +52,12 @@ func (ks *Kubescape) SubmitExceptions(credentials *cautils.Credentials, excPath 
 	}
 
 	// login kubescape SaaS
-	armoAPI := getter.GetArmoAPIConnector()
-	if err := armoAPI.Login(); err != nil {
+	ksCloudAPI := getter.GetKSCloudAPIConnector()
+	if err := ksCloudAPI.Login(); err != nil {
 		return err
 	}
 
-	if err := armoAPI.PostExceptions(exceptions); err != nil {
+	if err := ksCloudAPI.PostExceptions(exceptions); err != nil {
 		return err
 	}
 	logger.L().Success("Exceptions submitted successfully")

@@ -1,8 +1,8 @@
 package hostsensorutils
 
 import (
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/opa-utils/reporthandling/apis"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 var (
@@ -13,6 +13,8 @@ var (
 	OpenPortsList                = "OpenPortsList"
 	LinuxKernelVariables         = "LinuxKernelVariables"
 	KubeletCommandLine           = "KubeletCommandLine"
+	KubeletInfo                  = "KubeletInfo"
+	KubeProxyInfo                = "KubeProxyInfo"
 
 	MapHostSensorResourceToApiGroup = map[string]string{
 		KubeletConfiguration:         "hostdata.kubescape.cloud/v1beta0",
@@ -22,6 +24,8 @@ var (
 		LinuxSecurityHardeningStatus: "hostdata.kubescape.cloud/v1beta0",
 		OpenPortsList:                "hostdata.kubescape.cloud/v1beta0",
 		LinuxKernelVariables:         "hostdata.kubescape.cloud/v1beta0",
+		KubeletInfo:                  "hostdata.kubescape.cloud/v1beta0",
+		KubeProxyInfo:                "hostdata.kubescape.cloud/v1beta0",
 	}
 )
 

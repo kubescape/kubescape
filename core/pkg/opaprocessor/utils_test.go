@@ -5,9 +5,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/armosec/kubescape/v2/core/mocks"
-	"github.com/armosec/opa-utils/reporthandling"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/kubescape/v2/core/mocks"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 func TestConvertFrameworksToPolicies(t *testing.T) {

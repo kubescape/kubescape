@@ -9,15 +9,16 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	giturl "github.com/armosec/go-git-url"
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/opa-utils/reporthandling"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/opa-utils/reporthandling"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+
 	"github.com/google/uuid"
 )
 
@@ -116,9 +117,9 @@ type ScanInfo struct {
 	InputPatterns      []string           // Yaml files input patterns
 	Silent             bool               // Silent mode - Do not print progress logs
 	FailThreshold      float32            // Failure score threshold
-	Submit             bool               // Submit results to Armo BE
+	Submit             bool               // Submit results to Kubescape Cloud BE
 	ScanID             string             // Report id of the current scan
-	HostSensorEnabled  BoolPtrFlag        // Deploy ARMO K8s host scanner to collect data from certain controls
+	HostSensorEnabled  BoolPtrFlag        // Deploy Kubescape K8s host scanner to collect data from certain controls
 	HostSensorYamlPath string             // Path to hostsensor file
 	Local              bool               // Do not submit results
 	Credentials        Credentials        // account ID
@@ -131,6 +132,7 @@ type Getters struct {
 	ExceptionsGetter     getter.IExceptionsGetter
 	ControlsInputsGetter getter.IControlsInputsGetter
 	PolicyGetter         getter.IPolicyGetter
+	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
 func (scanInfo *ScanInfo) Init() {
@@ -266,10 +268,23 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	if len(scanInfo.InputPatterns) > 0 {
 		inputFiles = scanInfo.InputPatterns[0]
 	}
-
-	metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
-	if GetScanningContext(inputFiles) != ContextCluster {
+	switch GetScanningContext(inputFiles) {
+	case ContextCluster:
+		// cluster
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
+	case ContextFile:
+		// local file
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+	case ContextGitURL:
+		// url
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Repo
+	case ContextGitLocal:
+		// local-git
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.GitLocal
+	case ContextDir:
+		// directory
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
+
 	}
 
 	setContextMetadata(&metadata.ContextMetadata, inputFiles)

@@ -3,16 +3,17 @@ package v2
 import (
 	"net/url"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
 	"github.com/google/uuid"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj := url.URL{}
-	urlObj.Host = getter.GetArmoAPIConnector().GetReportReceiverURL()
-	ParseHost(&urlObj)
+	urlObj.Host = getter.GetKSCloudAPIConnector().GetReportReceiverURL()
+	parseHost(&urlObj)
+
 	urlObj.Path = "/k8s/v2/postureReport"
 	q := urlObj.Query()
 	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())

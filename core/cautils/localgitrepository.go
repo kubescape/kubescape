@@ -4,26 +4,30 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/armosec/go-git-url/apis"
 	gitv5 "github.com/go-git/go-git/v5"
 	configv5 "github.com/go-git/go-git/v5/config"
 	plumbingv5 "github.com/go-git/go-git/v5/plumbing"
+	git2go "github.com/libgit2/git2go/v33"
 )
 
 type LocalGitRepository struct {
-	repo   *gitv5.Repository
-	head   *plumbingv5.Reference
-	config *configv5.Config
+	goGitRepo        *gitv5.Repository
+	git2GoRepo       *git2go.Repository
+	head             *plumbingv5.Reference
+	config           *configv5.Config
+	fileToLastCommit map[string]*git2go.Commit
 }
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
-	gitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
+	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
 	if err != nil {
 		return nil, err
 	}
 
-	head, err := gitRepo.Head()
+	head, err := goGitRepo.Head()
 	if err != nil {
 		return nil, err
 	}
@@ -32,16 +36,30 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 		return nil, fmt.Errorf("current HEAD reference is not a branch")
 	}
 
-	config, err := gitRepo.Config()
+	config, err := goGitRepo.Config()
 	if err != nil {
 		return nil, err
 	}
 
-	return &LocalGitRepository{
-		repo:   gitRepo,
-		head:   head,
-		config: config,
-	}, nil
+	if len(config.Remotes) == 0 {
+		return nil, fmt.Errorf("no remotes found")
+	}
+
+	l := &LocalGitRepository{
+		goGitRepo: goGitRepo,
+		head:      head,
+		config:    config,
+	}
+
+	if repoRoot, err := l.GetRootDir(); err == nil {
+		git2GoRepo, err := git2go.OpenRepository(repoRoot)
+		if err != nil {
+			return l, err
+		}
+		l.git2GoRepo = git2GoRepo
+	}
+
+	return l, nil
 }
 
 // GetBranchName get current branch name
@@ -80,20 +98,7 @@ func (g *LocalGitRepository) GetName() (string, error) {
 
 // GetLastCommit get latest commit object
 func (g *LocalGitRepository) GetLastCommit() (*apis.Commit, error) {
-	return g.GetFileLastCommit("")
-}
-
-// GetFileLastCommit get file latest commit object, if empty will return latest commit
-func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error) {
-	// By default, returns commit information from current HEAD
-	logOptions := &gitv5.LogOptions{}
-
-	if filePath != "" {
-		logOptions.FileName = &filePath
-		logOptions.Order = gitv5.LogOrderCommitterTime // faster -> LogOrderDFSPost
-	}
-
-	cIter, err := g.repo.Log(logOptions)
+	cIter, err := g.goGitRepo.Log(&gitv5.LogOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -117,8 +122,122 @@ func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, e
 	}, nil
 }
 
+func (g *LocalGitRepository) getAllCommits() ([]*git2go.Commit, error) {
+	logItr, itrErr := g.git2GoRepo.Walk()
+	if itrErr != nil {
+
+		return nil, itrErr
+	}
+
+	pushErr := logItr.PushHead()
+	if pushErr != nil {
+		return nil, pushErr
+	}
+
+	var allCommits []*git2go.Commit
+	err := logItr.Iterate(func(commit *git2go.Commit) bool {
+		if commit != nil {
+			allCommits = append(allCommits, commit)
+			return true
+		}
+		return false
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return allCommits, nil
+}
+
+func (g *LocalGitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error) {
+	if len(g.fileToLastCommit) == 0 {
+		filePathToCommitTime := map[string]time.Time{}
+		filePathToCommit := map[string]*git2go.Commit{}
+		allCommits, _ := g.getAllCommits()
+
+		// builds a map of all files to their last commit
+		for _, commit := range allCommits {
+			// Ignore merge commits (2+ parents)
+			if commit.ParentCount() <= 1 {
+				tree, err := commit.Tree()
+				if err != nil {
+					continue
+				}
+
+				// ParentCount can be either 1 or 0 (initial commit)
+				// In case it's the initial commit, prevTree is nil
+				var prevTree *git2go.Tree
+				if commit.ParentCount() == 1 {
+					prevCommit := commit.Parent(0)
+					prevTree, err = prevCommit.Tree()
+					if err != nil {
+						continue
+					}
+				}
+
+				diff, err := g.git2GoRepo.DiffTreeToTree(prevTree, tree, nil)
+				if err != nil {
+					continue
+				}
+
+				numDeltas, err := diff.NumDeltas()
+				if err != nil {
+					continue
+				}
+
+				for i := 0; i < numDeltas; i++ {
+					delta, err := diff.Delta(i)
+					if err != nil {
+						continue
+					}
+
+					deltaFilePath := delta.NewFile.Path
+					commitTime := commit.Author().When
+
+					// In case we have the commit information for the file which is not the latest - we override it
+					if currentCommitTime, exists := filePathToCommitTime[deltaFilePath]; exists {
+						if currentCommitTime.Before(commitTime) {
+							filePathToCommitTime[deltaFilePath] = commitTime
+							filePathToCommit[deltaFilePath] = commit
+						}
+					} else {
+						filePathToCommitTime[deltaFilePath] = commitTime
+						filePathToCommit[deltaFilePath] = commit
+					}
+				}
+			}
+		}
+		g.fileToLastCommit = filePathToCommit
+	}
+
+	if relevantCommit, exists := g.fileToLastCommit[filePath]; exists {
+		return g.getCommit(relevantCommit), nil
+	}
+
+	return nil, fmt.Errorf("failed to get commit information for file: %s", filePath)
+}
+
+func (g *LocalGitRepository) getCommit(commit *git2go.Commit) *apis.Commit {
+	return &apis.Commit{
+		SHA: commit.Id().String(),
+		Author: apis.Committer{
+			Name:  commit.Author().Name,
+			Email: commit.Author().Email,
+			Date:  commit.Author().When,
+		},
+		Message:   commit.Message(),
+		Committer: apis.Committer{},
+		Files:     []apis.Files{},
+	}
+}
+
 func (g *LocalGitRepository) GetRootDir() (string, error) {
-	wt, err := g.repo.Worktree()
+	wt, err := g.goGitRepo.Worktree()
 	if err != nil {
 		return "", fmt.Errorf("failed to get repo root")
 	}

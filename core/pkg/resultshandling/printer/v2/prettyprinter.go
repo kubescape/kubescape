@@ -6,14 +6,14 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/armosec/opa-utils/objectsenvelopes"
-	"github.com/armosec/opa-utils/reporthandling/apis"
-	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/enescakir/emoji"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -188,6 +188,10 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 }
 func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
 
+	if summaryDetails.NumberOfControls().All() == 0 {
+		fmt.Fprintf(prettyPrinter.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
+		return
+	}
 	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n\n")
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
@@ -196,10 +200,16 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.SetHeaderLine(true)
 	summaryTable.SetColumnAlignment(getColumnsAlignments())
 
+	printAll := prettyPrinter.verboseMode
+	if summaryDetails.NumberOfResources().Failed() == 0 {
+		// if there are no failed controls, print the resource table and detailed information
+		printAll = true
+	}
+
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
 	for i := len(sortedControlNames) - 1; i >= 0; i-- {
 		for _, c := range sortedControlNames[i] {
-			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfo, prettyPrinter.verboseMode)
+			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfo, printAll)
 			if len(row) > 0 {
 				summaryTable.Append(row)
 			}
@@ -243,7 +253,7 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 }
 
 func getControlLink(controlID string) string {
-	return fmt.Sprintf("https://hub.armo.cloud/docs/%s", strings.ToLower(controlID))
+	return fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(controlID))
 }
 
 func controlCountersForSummary(counters reportsummary.ICounters) string {
@@ -251,7 +261,7 @@ func controlCountersForSummary(counters reportsummary.ICounters) string {
 }
 
 func controlCountersForResource(l *helpersv1.AllLists) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", len(l.All()), len(l.Failed()), len(l.Excluded()))
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", l.All().Len(), len(l.Failed()), len(l.Excluded()))
 }
 func getSeparator(sep string) string {
 	s := ""

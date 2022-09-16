@@ -3,14 +3,14 @@ package resultshandling
 import (
 	"encoding/json"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer"
-	printerv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v1"
-	printerv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/printer/v2"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
-	reporthandlingv2 "github.com/armosec/opa-utils/reporthandling/v2"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	printerv1 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v1"
+	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 type ResultsHandler struct {
@@ -95,6 +95,8 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType ca
 		return printerv2.NewPrometheusPrinter(verboseMode)
 	case printer.PdfFormat:
 		return printerv2.NewPdfPrinter()
+	case printer.HtmlFormat:
+		return printerv2.NewHtmlPrinter()
 	default:
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
 	}

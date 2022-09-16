@@ -3,9 +3,9 @@ package config
 import (
 	"os"
 
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/meta"
-	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v2/core/meta"
+	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 

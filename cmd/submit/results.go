@@ -4,20 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/meta"
-	"github.com/armosec/kubescape/v2/core/meta/cliinterfaces"
-	v1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
-	reporterv1 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v1"
-	reporterv2 "github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter/v2"
-
-	"github.com/armosec/opa-utils/reporthandling"
 	"github.com/google/uuid"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
+	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+
 	"github.com/spf13/cobra"
 )
 
@@ -37,19 +35,13 @@ func NewResultsObject(customerGUID, clusterName, filePath string) *ResultsObject
 	}
 }
 
-func (resultsObject *ResultsObject) SetResourcesReport() (*reporthandling.PostureReport, error) {
+func (resultsObject *ResultsObject) SetResourcesReport() (*reporthandlingv2.PostureReport, error) {
 	// load framework results from json file
-	frameworkReports, err := loadResultsFromFile(resultsObject.filePath)
+	report, err := loadResultsFromFile(resultsObject.filePath)
 	if err != nil {
 		return nil, err
 	}
-	return &reporthandling.PostureReport{
-		FrameworkReports:     frameworkReports,
-		ReportID:             uuid.NewString(),
-		ReportGenerationTime: time.Now().UTC(),
-		CustomerGUID:         resultsObject.customerGUID,
-		ClusterName:          resultsObject.clusterName,
-	}, nil
+	return report, nil
 }
 
 func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinterface.IMetadata, error) {
@@ -76,15 +68,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 
 			resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetContextName(), args[0])
 
-			// submit resources
-			var r reporter.IReport
-			switch formatVersion {
-			case "v2":
-				r = reporterv2.NewReportEventReceiver(clusterConfig.GetConfigObj(), "")
-			default:
-				logger.L().Warning("Deprecated results version. run with '--format-version' flag", helpers.String("your version", formatVersion), helpers.String("latest version", "v2"))
-				r = reporterv1.NewReportEventReceiver(clusterConfig.GetConfigObj())
-			}
+			r := reporterv2.NewReportEventReceiver(clusterConfig.GetConfigObj(), uuid.NewString(), reporterv2.SubmitContextScan)
 
 			submitInterfaces := cliinterfaces.SubmitInterfaces{
 				ClusterConfig: clusterConfig,
@@ -102,18 +86,14 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 
 	return resultsCmd
 }
-func loadResultsFromFile(filePath string) ([]reporthandling.FrameworkReport, error) {
-	frameworkReports := []reporthandling.FrameworkReport{}
+func loadResultsFromFile(filePath string) (*reporthandlingv2.PostureReport, error) {
+	report := &reporthandlingv2.PostureReport{}
 	f, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
 	}
-	if err = json.Unmarshal(f, &frameworkReports); err != nil {
-		frameworkReport := reporthandling.FrameworkReport{}
-		if err = json.Unmarshal(f, &frameworkReport); err != nil {
-			return frameworkReports, err
-		}
-		frameworkReports = append(frameworkReports, frameworkReport)
+	if err = json.Unmarshal(f, report); err != nil {
+		return report, fmt.Errorf("failed to unmarshal results file: %s, make sure you run kubescape with '--format=json --format-version=v2'", err.Error())
 	}
-	return frameworkReports, nil
+	return report, nil
 }

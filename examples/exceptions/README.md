@@ -1,6 +1,6 @@
 # Kubescape Exceptions
 
-Kubescape Exceptions is the proper way of excluding failed resources from effecting the risk score.
+Kubescape Exceptions is the proper way of excluding failed resources from affecting the risk score.
 
 e.g. When a `kube-system` resource fails and it is ok, simply add the resource to the exceptions configurations.
 
@@ -9,7 +9,7 @@ e.g. When a `kube-system` resource fails and it is ok, simply add the resource t
 
 * `name`- Exception name - unique name representing the exception
 * `policyType`- Do not change
-* `actions`- List of available actions. Currently alertOnly is supported
+* `actions`- List of available actions. Currently, alertOnly is supported
 * `resources`- List of resources to apply this exception on
     * `designatorType: Attributes`- An attribute-based declaration {key: value}
     Supported keys:
@@ -19,19 +19,19 @@ e.g. When a `kube-system` resource fails and it is ok, simply add the resource t
     * `cluster`: k8s cluster name (usually it is the `current-context`) (case-sensitive, regex supported)
     * resource labels as key value (case-sensitive, regex NOT supported)
 * `posturePolicies`- An attribute-based declaration {key: value}
-    * `frameworkName` - Framework names can be find [here](https://github.com/armosec/regolibrary/tree/master/frameworks) (regex supported)
-    * `controlName` - Control names can be find [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
-    * `controlID` - Control ID can be find [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
-    * `ruleName` - Rule names can be find [here](https://github.com/armosec/regolibrary/tree/master/rules) (regex supported)
+    * `frameworkName` - Framework names can be found [here](https://github.com/armosec/regolibrary/tree/master/frameworks) (regex supported)
+    * `controlName` - Control names can be found [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
+    * `controlID` - Control ID can be found [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
+    * `ruleName` - Rule names can be found [here](https://github.com/armosec/regolibrary/tree/master/rules) (regex supported)
  
-You can find [here](https://github.com/armosec/kubescape/tree/master/examples/exceptions) some examples of exceptions files
+You can find [here](https://github.com/kubescape/kubescape/tree/master/examples/exceptions) some examples of exceptions files
 
 ## Usage
 
-The `resources` list and `posturePolicies` list are design to be a combination of the resources and policies to exclude
+The `resources` list and `posturePolicies` list are designed to be a combination of the resources and policies to exclude
 > You must declare at least one resource and one policy
 
-e.g. If you wish to exclude all namespaces with the label `"environment": "dev"`, the resource list should look as following:
+e.g. If you wish to exclude all namespaces with the label `"environment": "dev"`, the resource list should look as follows:
 ```
 "resources": [
     {
@@ -44,7 +44,7 @@ e.g. If you wish to exclude all namespaces with the label `"environment": "dev"`
 ]
 ```
 
-But if you wish to exclude all namespaces **OR** any resource with the label `"environment": "dev"`, the resource list should look as following:
+But if you wish to exclude all namespaces **OR** any resource with the label `"environment": "dev"`, the resource list should look as follows:
 ```
 "resources": [
     {
@@ -64,7 +64,7 @@ But if you wish to exclude all namespaces **OR** any resource with the label `"e
 
 Same works with the `posturePolicies` list ->
 
-e.g. If you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **AND** failed the `Allowed hostPath` control, the `posturePolicies` list should look as following:
+e.g. If you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **AND** failed the `Allowed hostPath` control, the `posturePolicies` list should look as follows:
 ```
 "posturePolicies": [
     {
@@ -74,7 +74,7 @@ e.g. If you wish to exclude the resources declared in the `resources` list that 
 ]
 ```
 
-But if you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **OR** failed the `Allowed hostPath` control, the `posturePolicies` list should look as following:
+But if you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **OR** failed the `Allowed hostPath` control, the `posturePolicies` list should look as follows:
 ```
 "posturePolicies": [
     {

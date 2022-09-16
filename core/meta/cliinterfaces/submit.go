@@ -1,14 +1,14 @@
 package cliinterfaces
 
 import (
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/pkg/resultshandling/reporter"
-	"github.com/armosec/opa-utils/reporthandling"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 type ISubmitObjects interface {
-	SetResourcesReport() (*reporthandling.PostureReport, error)
+	SetResourcesReport() (*reporthandlingv2.PostureReport, error)
 	ListAllResources() (map[string]workloadinterface.IMetadata, error)
 }
 

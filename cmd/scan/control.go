@@ -6,12 +6,13 @@ import (
 	"os"
 	"strings"
 
-	apisv1 "github.com/armosec/opa-utils/httpserver/apis/v1"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
-	"github.com/armosec/kubescape/v2/core/meta"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/meta"
+
 	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
@@ -30,7 +31,7 @@ var (
   Run 'kubescape list controls' for the list of supported controls
   
   Control documentation:
-  https://hub.armo.cloud/docs/controls
+  https://hub.armosec.io/docs/controls
 `
 )
 
@@ -69,7 +70,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
-						scanInfo.InputPatterns = []string{args[1]}
+						scanInfo.InputPatterns = args[1:]
 					} else { // store stdin to file - do NOT move to separate function !!
 						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
 						if err != nil {

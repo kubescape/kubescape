@@ -4,11 +4,7 @@ import hashlib
 import platform
 import subprocess
 
-BASE_GETTER_CONST = "github.com/armosec/kubescape/v2/core/cautils/getter"
-BE_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoBEURL"
-ER_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoERURL"
-WEBSITE_CONST     = BASE_GETTER_CONST + ".ArmoFEURL"
-AUTH_SERVER_CONST = BASE_GETTER_CONST + ".armoAUTHURL"
+BASE_GETTER_CONST = "github.com/kubescape/kubescape/v2/core/cautils/getter"
 
 def check_status(status, msg):
     if status != 0:
@@ -29,7 +25,6 @@ def get_build_dir():
 
 def get_package_name():
     package_name = "kubescape"
-    # if platform.system() == "Windows": package_name += ".exe"
 
     return package_name
 
@@ -39,14 +34,10 @@ def main():
 
     # Set some variables
     package_name = get_package_name()
-    build_url = "github.com/armosec/kubescape/v2/core/cautils.BuildNumber"
+    build_url = "github.com/kubescape/kubescape/v2/core/cautils.BuildNumber"
     release_version = os.getenv("RELEASE")
-    armo_be_server = os.getenv("ArmoBEServer")
-    armo_er_server = os.getenv("ArmoERServer")
-    armo_website = os.getenv("ArmoWebsite")
-    armo_auth_server = os.getenv("ArmoAuthServer")
 
-    client_var = "github.com/armosec/kubescape/v2/core/cautils.Client"
+    client_var = "github.com/kubescape/kubescape/v2/core/cautils.Client"
     client_name = os.getenv("CLIENT")
     
     # Create build directory
@@ -64,16 +55,8 @@ def main():
         ldflags += " -X {}={}".format(build_url, release_version)
     if client_name:
         ldflags += " -X {}={}".format(client_var, client_name)
-    if armo_be_server:
-        ldflags += " -X {}={}".format(BE_SERVER_CONST, armo_be_server)
-    if armo_er_server:
-        ldflags += " -X {}={}".format(ER_SERVER_CONST, armo_er_server)
-    if armo_website:
-        ldflags += " -X {}={}".format(WEBSITE_CONST, armo_website)
-    if armo_auth_server:
-        ldflags += " -X {}={}".format(AUTH_SERVER_CONST, armo_auth_server)
  
-    build_command = ["go", "build", "-o", ks_file, "-ldflags" ,ldflags]
+    build_command = ["go", "build", "-tags=static", "-o", ks_file, "-ldflags" ,ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))

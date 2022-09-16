@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/armosec/k8s-interface/k8sinterface"
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/kubescape/v2/core/cautils"
-	"github.com/armosec/kubescape/v2/core/cautils/logger"
-	"github.com/armosec/kubescape/v2/core/cautils/logger/helpers"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v2/core/cautils"
+
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,6 +36,7 @@ type HostSensorHandler struct {
 	DaemonSet                     *appsv1.DaemonSet
 	podListLock                   sync.RWMutex
 	gracePeriod                   int64
+	workerPool                    workerPool
 }
 
 func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile string) (*HostSensorHandler, error) {
@@ -54,6 +56,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 		HostSensorPodNames:            map[string]string{},
 		HostSensorUnscheduledPodNames: map[string]string{},
 		gracePeriod:                   int64(15),
+		workerPool:                    NewWorkerPool(),
 	}
 	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
 	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
@@ -89,7 +92,7 @@ func (hsh *HostSensorHandler) Init() error {
 
 func (hsh *HostSensorHandler) applyYAML() error {
 	workloads, err := cautils.ReadFile([]byte(hostSensorYAML), cautils.YAML_FILE_FORMAT)
-	if len(err) != 0 {
+	if err != nil {
 		return fmt.Errorf("failed to read YAML files, reason: %v", err)
 	}
 

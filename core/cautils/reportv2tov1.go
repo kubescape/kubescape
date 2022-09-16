@@ -1,17 +1,14 @@
 package cautils
 
 import (
-	"github.com/armosec/k8s-interface/workloadinterface"
-	"github.com/armosec/opa-utils/reporthandling"
-	helpersv1 "github.com/armosec/opa-utils/reporthandling/helpers/v1"
-	"github.com/armosec/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-func ReportV2ToV1(opaSessionObj *OPASessionObj) {
-	if len(opaSessionObj.PostureReport.FrameworkReports) > 0 {
-		return // report already converted
-	}
-	//	opaSessionObj.PostureReport.ClusterCloudProvider = opaSessionObj.Report.ClusterCloudProvider
+func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
+	report := &reporthandling.PostureReport{}
 
 	frameworks := []reporthandling.FrameworkReport{}
 
@@ -33,27 +30,14 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) {
 		fwv1.Score = opaSessionObj.Report.SummaryDetails.Score
 	}
 
-	// // remove unused data
-	// opaSessionObj.Report = nil
-	// opaSessionObj.ResourcesResult = nil
-
 	// setup counters and score
 	for f := range frameworks {
-		// // set exceptions
-		// exceptions.SetFrameworkExceptions(frameworks, opap.Exceptions, cautils.ClusterName)
-
 		// set counters
 		reporthandling.SetUniqueResourcesCounter(&frameworks[f])
-
-		// set default score
-		// reporthandling.SetDefaultScore(&frameworks[f])
 	}
 
-	// // update score
-	// scoreutil := score.NewScore(opaSessionObj.AllResources)
-	// scoreutil.Calculate(frameworks)
-
-	opaSessionObj.PostureReport.FrameworkReports = frameworks
+	report.FrameworkReports = frameworks
+	return report
 }
 
 func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, controls map[string]reportsummary.ControlSummary) []reporthandling.ControlReport {
@@ -65,7 +49,6 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.Name = crv2.GetName()
 		crv1.Score = crv2.GetScore()
 		crv1.Control_ID = controlID
-		// crv1.Attributes = crv2.
 
 		// TODO - add fields
 		crv1.Description = crv2.Description
@@ -73,7 +56,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 
 		rulesv1 := map[string]reporthandling.RuleReport{}
 
-		for _, resourceID := range crv2.ListResourcesIDs().All() {
+		iter := crv2.ListResourcesIDs().All()
+		for iter.HasNext() {
+			resourceID := iter.Next()
 			if result, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
 				for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
 

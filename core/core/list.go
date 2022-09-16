@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/armosec/kubescape/v2/core/cautils/getter"
-	metav1 "github.com/armosec/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 )
 
 var listFunc = map[string]func(*metav1.ListPolicies) ([]string, error){
@@ -66,8 +66,8 @@ func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
 	getTenantConfig(&listPolicies.Credentials, "", getKubernetesApi())
 
 	var exceptionsNames []string
-	armoAPI := getExceptionsGetter("")
-	exceptions, err := armoAPI.GetExceptions("")
+	ksCloudAPI := getExceptionsGetter("")
+	exceptions, err := ksCloudAPI.GetExceptions("")
 	if err != nil {
 		return exceptionsNames, err
 	}

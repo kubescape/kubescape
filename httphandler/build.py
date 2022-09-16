@@ -4,11 +4,7 @@ import hashlib
 import platform
 import subprocess
 
-BASE_GETTER_CONST = "github.com/armosec/kubescape/v2/core/cautils/getter"
-BE_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoBEURL"
-ER_SERVER_CONST   = BASE_GETTER_CONST + ".ArmoERURL"
-WEBSITE_CONST     = BASE_GETTER_CONST + ".ArmoFEURL"
-AUTH_SERVER_CONST = BASE_GETTER_CONST + ".armoAUTHURL"
+BASE_GETTER_CONST = "github.com/kubescape/kubescape/v2/core/cautils/getter"
 
 def checkStatus(status, msg):
     if status != 0:
@@ -40,12 +36,8 @@ def main():
 
     # Set some variables
     packageName = getPackageName()
-    buildUrl = "github.com/armosec/kubescape/v2/core/cautils.BuildNumber"
+    buildUrl = "github.com/kubescape/kubescape/v2/core/cautils.BuildNumber"
     releaseVersion = os.getenv("RELEASE")
-    ArmoBEServer = os.getenv("ArmoBEServer")
-    ArmoERServer = os.getenv("ArmoERServer")
-    ArmoWebsite = os.getenv("ArmoWebsite")
-    ArmoAuthServer = os.getenv("ArmoAuthServer")
 
     # Create build directory
     buildDir = getBuildDir()
@@ -60,16 +52,8 @@ def main():
     ldflags = "-w -s"
     if releaseVersion:
         ldflags += " -X {}={}".format(buildUrl, releaseVersion)
-    if ArmoBEServer:
-        ldflags += " -X {}={}".format(BE_SERVER_CONST, ArmoBEServer)
-    if ArmoERServer:
-        ldflags += " -X {}={}".format(ER_SERVER_CONST, ArmoERServer)
-    if ArmoWebsite:
-        ldflags += " -X {}={}".format(WEBSITE_CONST, ArmoWebsite)
-    if ArmoAuthServer:
-        ldflags += " -X {}={}".format(AUTH_SERVER_CONST, ArmoAuthServer)
 
-    build_command = ["go", "build", "-o", ks_file, "-ldflags" ,ldflags]
+    build_command = ["go", "build", "-tags=static", "-o", ks_file, "-ldflags" ,ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))
