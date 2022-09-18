@@ -7,7 +7,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"regexp"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -105,10 +104,10 @@ func NewLocalConfig(
 
 	updateCredentials(lc.configObj, credentials)
 
-	// If a custom cluster name is provided then set that name, else use the cluster's original name	
-	if customClusterName != ""{
+	// If a custom cluster name is provided then set that name, else use the cluster's original name
+	if customClusterName != "" {
 		lc.configObj.ClusterName = AdoptCustomClusterName(customClusterName)
-	}else if clusterName != "" {
+	} else if clusterName != "" {
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 
@@ -476,7 +475,7 @@ func DeleteConfigFile() error {
 }
 
 // To check if the custom cluster name is valid:
-func AdoptCustomClusterName(customClusterName string) string{
+func AdoptCustomClusterName(customClusterName string) string {
 	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(customClusterName)
 
 	// Check it does not contain special-characters
