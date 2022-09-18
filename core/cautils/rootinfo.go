@@ -9,7 +9,6 @@ type RootInfo struct {
 
 	KSCloudBEURLs    string // Kubescape Cloud URL
 	KSCloudBEURLsDep string // Kubescape Cloud URL
-        KubeConfig       string //kubeconfig flag
 }
 
 type Credentials struct {
