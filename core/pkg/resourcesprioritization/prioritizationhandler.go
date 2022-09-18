@@ -27,7 +27,8 @@ func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGe
 				return nil, fmt.Errorf("invalid attack track: %s", attackTrack.GetName())
 			}
 
-			handler.attackTracks = append(handler.attackTracks, &attackTrack)
+			t := attackTrack
+			handler.attackTracks = append(handler.attackTracks, &t)
 		}
 	}
 
