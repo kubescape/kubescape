@@ -61,7 +61,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			k8s := getKubernetesApi()
 
 			// get config
-			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", k8s)
+			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", "", k8s)
 			if err := clusterConfig.SetTenant(); err != nil {
 				logger.L().Error("failed setting account ID", helpers.Error(err))
 			}
