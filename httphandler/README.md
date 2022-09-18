@@ -4,9 +4,9 @@ Running `kubescape` will start up a web-server on port `8080` which will serve t
 
 ### Trigger scan
 
-* POST `/v1/scan` - trigger a kubescape scan. The server will return an ID and will execute the scanning asynchronously. the request body should look [as followed](#trigger-scan-object).
-* * `wait=true`: scan synchronously (return results and not ID). Use only in small clusters or with an increased timeout. default is `wait=false`
-* * `keep=true`: do not delete results from local storage after returning. default is `keep=false`
+* POST `/v1/scan` - triggers a Kubescape scan. The server will return an ID and will execute the scanning asynchronously. The request body should look [as follows](#trigger-scan-object).
+* * `wait=true`: scan synchronously (return results and not ID). Use only in small clusters or with an increased timeout. Default is `wait=false`
+* * `keep=true`: do not delete results from local storage after returning. Default is `keep=false`
 * POST `/v1/metrics` - trigger kubescape for Prometheus support. [read more](examples/prometheus/README.md)
 
 [Response](#response-object):
@@ -15,7 +15,7 @@ Running `kubescape` will start up a web-server on port `8080` which will serve t
 {
   "id": <str>,                      // scan ID
   "type": "busy",                   // response object type
-  "response": <message:string>      // message indicating scanning is still in process
+  "response": <message:string>      // message indicating scanning is still in progress
 }
 ```
 
@@ -51,14 +51,14 @@ When scanning is in progress
 {
   "id": <str>,                    // scan ID
   "type": "busy",                 // response object type
-  "response": <message:string>    // message indicating scanning is still in process
+  "response": <message:string>    // message indicating scanning is still in progress
 }
 ```
 ### Check scanning progress status
 Check the scanning status - is the scanning in progress or done? This is meant for a waiting mechanize since the API does not return the entire results object when the scanning is done
 
 * GET `/v1/status` -  Request kubescape scan status
-* * query `id=<string>` -> Check status of a specific scan. If empty will check if any scan is in progress
+* * query `id=<string>` -> Check status of a specific scan. If empty, it will check if any scan is still in progress
 
 [Response](#response-object):
 
@@ -76,7 +76,7 @@ When scanning is not in progress
 {
   "id": <str>,                    // scan ID
   "type": "notBusy",              // response object type
-  "response": <message:string>    // message indicating scanning is done in process
+  "response": <message:string>    // message indicating scanning is successfully done
 }
 ```
 
@@ -102,7 +102,7 @@ When scanning is not in progress
   "includeNamespaces": [<str>],  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
   "useCachedArtifacts"`: <bool>, // use the cached artifacts instead of downloading (offline support)
   "submit": <bool>,              // submit results to Kubescape cloud (same as 'kubescape scan --submit')
-  "hostScanner": <bool>,         // deploy kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
+  "hostScanner": <bool>,         // deploy Kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
   "keepLocal": <bool>,           // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
   "account": <str>,              // account ID (same as 'kubescape scan --account')
   "targetType": <str>,           // framework/control

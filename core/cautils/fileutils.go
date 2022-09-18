@@ -30,7 +30,7 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-// LoadResourcesFromHelmCharts scans a given path (recuresively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
+// LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
 func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
@@ -287,7 +287,7 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 			return err
 		}
 
-		// listing only directotries
+		// listing only directories
 		if onlyDirectories {
 			if info.IsDir() {
 				if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {

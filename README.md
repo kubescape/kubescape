@@ -30,13 +30,13 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 ```
 
+*OR:*
+
 [Install on windows](#install-on-windows)
 
 [Install on macOS](#install-on-macos)
 
 [Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix-community)
-
-[Install using Go](#install-using-go)
 
 ## Run:
 ```sh
@@ -235,6 +235,12 @@ kubescape scan --format pdf --output results.pdf
 
 ```
 kubescape scan --format prometheus
+```
+
+#### Output in `html` format
+
+```
+kubescape scan --format html --output results.html
 ```
 
 #### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`

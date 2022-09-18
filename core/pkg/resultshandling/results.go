@@ -61,7 +61,7 @@ func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureRepo
 	return printerv2.FinalizeResults(resultsHandler.scanData)
 }
 
-// HandleResults handle the scan results according to the pre defind interfaces
+// HandleResults handle the scan results according to the pre defined interfaces
 func (resultsHandler *ResultsHandler) HandleResults() error {
 
 	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
@@ -77,7 +77,7 @@ func (resultsHandler *ResultsHandler) HandleResults() error {
 	return nil
 }
 
-// NewPrinter defind output format
+// NewPrinter defined output format
 func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType cautils.ViewTypes) printer.IPrinter {
 
 	switch printFormat {

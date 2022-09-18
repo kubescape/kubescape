@@ -112,6 +112,7 @@ type ScanInfo struct {
 	Format                string             // Format results (table, json, junit ...)
 	Output                string             // Store results in an output file, Output file name
 	FormatVersion         string             // Output object can be differnet between versions, this is for testing and backward compatibility
+	CustomClusterName     string             // Set the custom name of the cluster
 	ExcludedNamespaces    string             // used for host scanner namespace
 	IncludeNamespaces     string             //
 	InputPatterns         []string           // Yaml files input patterns
@@ -209,13 +210,6 @@ func (scanInfo *ScanInfo) setOutputFile() {
 		}
 	}
 }
-
-// func (scanInfo *ScanInfo) GetScanningEnvironment() string {
-// 	if len(scanInfo.InputPatterns) != 0 {
-// 		return ScanLocalFiles
-// 	}
-// 	return ScanCluster
-// }
 
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
