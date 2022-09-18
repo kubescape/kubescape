@@ -151,8 +151,8 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 		v.RawResource = resource
 
 		// set result.PrioritizedResource
-		if _, ok := prioritizedResources[resourceID]; ok {
-			*(v.PrioritizedResource) = prioritizedResources[resourceID]
+		if results, ok := prioritizedResources[resourceID]; ok {
+			v.PrioritizedResource = &results
 		}
 
 		r, err := json.Marshal(v)
