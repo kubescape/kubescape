@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v2/core/pkg/policyhandler"
 	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resourcesprioritization"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
@@ -43,7 +44,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	// ================== setup tenant object ======================================
 
-	tenantConfig := getTenantConfig(&scanInfo.Credentials, scanInfo.KubeContext, k8s)
+	tenantConfig := getTenantConfig(&scanInfo.Credentials, scanInfo.KubeContext, scanInfo.CustomClusterName, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -122,6 +123,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
 	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions)
+	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
@@ -152,15 +154,13 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
 
-	/*
+	// ======================== prioritization ===================
 
-		// ======================== prioritization ===================
-		priotizationHandler := resourcesprioritization.NewResourcesPrioritizationHandler(true)
-		if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
-			return resultsHandling, fmt.Errorf("%w", err)
-		}
-
-	*/
+	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter); err != nil {
+		logger.L().Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
+	} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
+		return resultsHandling, fmt.Errorf("%w", err)
+	}
 
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)

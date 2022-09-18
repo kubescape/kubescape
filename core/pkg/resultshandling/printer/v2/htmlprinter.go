@@ -131,7 +131,7 @@ func buildResourceControlResult(resourceControl resourcesresults.ResourceAssocia
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
 	ctlURL := resourceControl.GetID()
-	failedPaths := failedPathsToString(&resourceControl)
+	failedPaths := append(failedPathsToString(&resourceControl), fixPathsToString(&resourceControl)...)
 
 	return ResourceControlResult{ctlSeverity, ctlName, ctlURL, failedPaths}
 }

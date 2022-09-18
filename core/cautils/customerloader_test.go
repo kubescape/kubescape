@@ -191,3 +191,34 @@ func TestLoadConfigFromData(t *testing.T) {
 	}
 
 }
+
+func TestAdoptClusterName(t *testing.T) {
+	tests := []struct {
+		name        string
+		clusterName string
+		want        string
+	}{
+		{
+			name:        "replace 1",
+			clusterName: "my-name__is--ks",
+			want:        "my-name__is-ks",
+		},
+		{
+			name:        "replace 2",
+			clusterName: "my-name1",
+			want:        "my-name1",
+		},
+		{
+			name:        "replace 3",
+			clusterName: "my:name",
+			want:        "my-name",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := AdoptClusterName(tt.clusterName); got != tt.want {
+				t.Errorf("AdoptClusterName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

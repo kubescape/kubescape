@@ -74,7 +74,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(controls[i].GetID()))
-		row[resourceColumnPath] = strings.Join(failedPathsToString(&controls[i]), "\n")
+		row[resourceColumnPath] = strings.Join(append(failedPathsToString(&controls[i]), fixPathsToString(&controls[i])...), "\n")
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, controls[i].GetName()); c != nil {
@@ -120,6 +120,16 @@ func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 			if p := control.ResourceAssociatedRules[j].Paths[k].FailedPath; p != "" {
 				paths = append(paths, p)
 			}
+		}
+	}
+	return paths
+}
+
+func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
 			if p := control.ResourceAssociatedRules[j].Paths[k].FixPath.Path; p != "" {
 				v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
 				paths = append(paths, fmt.Sprintf("%s=%s", p, v))
