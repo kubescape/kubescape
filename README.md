@@ -30,13 +30,13 @@ Kubescape integrates natively with other DevOps tools, including Jenkins, Circle
 curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 ```
 
+*OR:*
+
 [Install on windows](#install-on-windows)
 
 [Install on macOS](#install-on-macos)
 
 [Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix-community)
-
-[Install using Go](#install-using-go)
 
 ## Run:
 ```sh
