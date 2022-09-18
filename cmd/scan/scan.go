@@ -10,7 +10,7 @@ import (
 )
 
 var scanCmdExamples = `
-  Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defind frameworks 
+  Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
   # Scan current cluster with all frameworks
   kubescape scan --submit --enable-host-scan --verbose
