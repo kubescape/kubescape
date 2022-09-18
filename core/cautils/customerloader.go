@@ -182,7 +182,7 @@ KS_ACCOUNT_ID
 KS_CLIENT_ID
 KS_SECRET_KEY
 
-TODO - supprot:
+TODO - support:
 KS_CACHE // path to cached files
 */
 type ClusterConfig struct {

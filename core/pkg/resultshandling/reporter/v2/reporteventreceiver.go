@@ -151,8 +151,8 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 		v.RawResource = resource
 
 		// set result.PrioritizedResource
-		if resource, ok := prioritizedResources[resourceID]; ok {
-			v.PrioritizedResource = &resource
+		if _, ok := prioritizedResources[resourceID]; ok {
+			*(v.PrioritizedResource) = prioritizedResources[resourceID]
 		}
 
 		r, err := json.Marshal(v)
@@ -184,10 +184,14 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 
 func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
 	for resourceID, v := range allResources {
-		// process only resources which have no result because these resources will be sent on the result object
-		if _, hasResult := results[resourceID]; hasResult {
-			continue
-		}
+		/*
+
+			// process only resources which have no result because these resources will be sent on the result object
+			if _, hasResult := results[resourceID]; hasResult {
+				continue
+			}
+
+		*/
 
 		resource := reporthandling.NewResourceIMetadata(v)
 		if r, ok := resourcesSource[resourceID]; ok {
