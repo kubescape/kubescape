@@ -17,6 +17,6 @@ jobs:
       - uses: EddieHubCommunity/gh-action-community/src/welcome@main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          issue-message: '<h3>Hey, Welcome to this repo, Congratulations on opening your issue. Keep Contributing to Kubescape</h3>'
-          pr-message: '<h3>Hey, Welcome to this repo, Congratulations on opening your Pull Request. Keep Contributing to Kubescape</h3>'
-          footer: '<h4>We''ll try to review and add you work as soon as possible and a maintainer will get back to you soon!</h4>'
+          issue-message: '<h3>Hi! Welcome to Kubescape. Thank you for taking the time and reporting an issue</h3>'
+          pr-message: '<h3>Hi! Welcome to Kubescape. Thank you for taking the time and contributing to the open source community</h3>'
+          footer: '<h4>We will try to review as soon as possible!</h4>'
