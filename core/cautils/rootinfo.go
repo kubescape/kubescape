@@ -1,5 +1,11 @@
 package cautils
 
+import (
+	"fmt"
+	"github.com/google/uuid"
+)
+
+
 type RootInfo struct {
 	Logger       string // logger level
 	LoggerName   string // logger name ("pretty"/"zap"/"none")
@@ -16,4 +22,24 @@ type Credentials struct {
 	Account   string
 	ClientID  string
 	SecretKey string
+}
+
+// To check if the user's credentials: accountID / clientID / secretKey are valid.
+func ValidateCredentials (accountID string, clientID string, secretKey string) error {
+	
+	// Check if the Account-ID is valid
+	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
+		return fmt.Errorf("bad argument: account must be a valid UUID")
+	}
+	// Check if the Client-ID is valid
+	if _, err := uuid.Parse(clientID); clientID != "" && err != nil {
+		return fmt.Errorf("bad argument: account must be a valid UUID")
+	}
+
+	// Check if the Secret-Key is valid
+	if _, err := uuid.Parse(secretKey); secretKey != "" && err != nil {
+		return fmt.Errorf("bad argument: account must be a valid UUID")
+	}
+
+	return nil
 }

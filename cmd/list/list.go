@@ -10,7 +10,6 @@ import (
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
-	"github.com/google/uuid"
 )
 
 var (
@@ -77,9 +76,6 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 // Check if the flag entered are valid
 func flagValidationList(listPolicies *v1.ListPolicies) error {
 
-	accountID := listPolicies.Credentials.Account
-	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
-		return fmt.Errorf("bad argument: account must be a valid UUID")
-	}
-	return nil
+	// Validate the user's credentials : accountID, clientID, secretKey
+	return cautils.ValidateCredentials(listPolicies.Credentials.Account, listPolicies.Credentials.ClientID, listPolicies.Credentials.SecretKey)
 }

@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
-	"github.com/google/uuid"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command {
@@ -42,9 +42,7 @@ func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command 
 // Check if the flag entered are valid
 func flagValidationDelete(deleteInfo *v1.Delete) error {
 
-	accountID := deleteInfo.Credentials.Account
-	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
-		return fmt.Errorf("bad argument: account must be a valid UUID")
-	}
-	return nil
+
+	// Validate the user's credentials : accountID, clientID, secretKey
+	return cautils.ValidateCredentials(deleteInfo.Credentials.Account, deleteInfo.Credentials.ClientID, deleteInfo.Credentials.SecretKey)
 }

@@ -91,9 +91,6 @@ func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *
 // Check if the flag entered are valid
 func flagValidationSubmit(submitInfo *v1.Submit) error {
 
-	accountID := submitInfo.Credentials.Account
-	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
-		return fmt.Errorf("bad argument: account must be a valid UUID")
-	}
-	return nil
+	// Validate the user's credentials : accountID, clientID, secretKey
+	return cautils.ValidateCredentials(submitInfo.Credentials.Account, submitInfo.Credentials.ClientID, submitInfo.Credentials.SecretKey)
 }
