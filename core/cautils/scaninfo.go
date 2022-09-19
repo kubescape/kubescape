@@ -118,10 +118,7 @@ type ScanInfo struct {
 	InputPatterns         []string           // Yaml files input patterns
 	Silent                bool               // Silent mode - Do not print progress logs
 	FailThreshold         float32            // Failure score threshold
-	FailThresholdCritical int                // Threshold for failing based on the amount of resources with Critical severity failed controls
-	FailThresholdHigh     int                // Threshold for failing based on the amount of resources with High severity failed controls
-	FailThresholdMedium   int                // Threshold for failing based on the amount of resources with Medium severity failed controls
-	FailThresholdLow      int                // Threshold for failing based on the amount of resources with Low severity failed controls
+	FailThresholdSeverity string             // Severity at and above which the command should fail
 	Submit                bool               // Submit results to Kubescape Cloud BE
 	ScanID                string             // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag        // Deploy Kubescape K8s host scanner to collect data from certain controls

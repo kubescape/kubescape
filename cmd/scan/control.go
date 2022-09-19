@@ -92,6 +92,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 			scanInfo.FrameworkScan = false
 
+			if err := validateControlScanInfo(scanInfo); err != nil {
+				return err
+			}
+
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
@@ -110,4 +114,12 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			return nil
 		},
 	}
+}
+
+// validateControlScanInfo validates the ScanInfo struct for the `control` command
+func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
+	if err := validateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+		return err
+	}
+	return nil
 }
