@@ -80,7 +80,7 @@ func downloadArtifacts(downloadInfo *metav1.DownloadInfo) error {
 }
 
 func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
-	tenant := getTenantConfig(&downloadInfo.Credentials, "", getKubernetesApi())
+	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
 	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetAccountID(), nil)
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
@@ -104,7 +104,7 @@ func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
 
 func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 	var err error
-	tenant := getTenantConfig(&downloadInfo.Credentials, "", getKubernetesApi())
+	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
 	exceptionsGetter := getExceptionsGetter("")
 	exceptions := []armotypes.PostureExceptionPolicy{}
@@ -128,7 +128,7 @@ func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 
 func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 
-	tenant := getTenantConfig(&downloadInfo.Credentials, "", getKubernetesApi())
+	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), true, nil)
 
@@ -170,7 +170,7 @@ func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 
 func downloadControl(downloadInfo *metav1.DownloadInfo) error {
 
-	tenant := getTenantConfig(&downloadInfo.Credentials, "", getKubernetesApi())
+	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
 

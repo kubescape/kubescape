@@ -12,12 +12,12 @@ import (
 	resources "github.com/kubescape/opa-utils/resources"
 )
 
-// updateResults update the results objects and report objects. This is a critical function - DO NOT CHANGE
-/*
-	- remove sensible data
-	- adding exceptions
-	- summarize results
-*/
+// updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
+//
+// The function:
+//  - removes sensible data
+//  - adds exceptions
+//  - summarizes results
 func (opap *OPAProcessor) updateResults() {
 
 	// remove data from all objects
@@ -49,16 +49,6 @@ func (opap *OPAProcessor) updateResults() {
 	// map control to error
 	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
-	// for f := range opap.PostureReport.FrameworkReports {
-	// 	// set exceptions
-	// 	exceptions.SetFrameworkExceptions(&opap.PostureReport.FrameworkReports[f], opap.Exceptions, cautils.ClusterName)
-
-	// 	// set counters
-	// 	reporthandling.SetUniqueResourcesCounter(&opap.PostureReport.FrameworkReports[f])
-
-	// 	// set default score
-	// 	// reporthandling.SetDefaultScore(&opap.PostureReport.FrameworkReports[f])
-	// }
 }
 
 func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {
