@@ -2,9 +2,9 @@
 
 ## Planning principles
 
-Kubescape roadmap items are labeled based on where the feature is used and by their maturity.
+Kubescape roadmap items are label based where the feature is used by their maturity.
 
-The features serve different stages of the workflow of the users:
+The features serve different stages of the workflow to the users:
 * **Development phase** (writing Kubernetes manifests) - example: The VS Code extension is used while editing YAMLs.
 * **CI phase** (integrating manifests to GIT repo) - example: GitHub action validating HELM charts on PRs.
 * **CD phase** (deploying applications in Kubernetes) - example: running a cluster scan after a new deployment.
@@ -13,20 +13,20 @@ The features serve different stages of the workflow of the users:
 The items in the Kubescape roadmap are split into 3 major groups based on the feature planning maturity:
 
 * [Planning](#planning-) - we have tickets open for these issues with a more or less clear vision of design.
-* [Backlog](#backlog-)  -  features that were discussed at a high level but are not ready for development. 
-* [Wishlist](#wishlist-) -  features that we are dreaming of in 😀 and want to push them gradually forward.
+* [Backlog](#backlog-)   -  features that were discussed at a high level but are not ready for development. 
+* [Wishlist](#wishlist-) -  features that we are dreaming of 😀 and want to push gradually forward.
 
 
 ## Planning 👷
 
 * ##### Storing scan results in cluster
-  We want Kubescape scan results (both cluster and image scan) to be stored in the cluster locally as `CRD`s. This will enable easier integration with results by other projects as well as with scripting via `kubectl`. This will also make image scan based controls to avoid accessing external resources for image vulnerability scan results.
+  We want Kubescape scan results (both cluster and image scan) to be stored in cluster locally as `CRD`s. This will enable easier integration with results by other projects as well as with scripting via `kubectl`. This will also make image scan based controls to avoid accessing external resources for image vulnerability scan results.
 
 * ##### Vulnerability prioritization based on workload file activity
   Implementing an eBPF agent (based on Falco or Tracee) which tracks file activity in workloads to prioritize container image vulnerabilities.
 
 * ##### Prioritization engine using MITRE Attack matrix based attack chains
-  Create a security issue prioritization engine that scores resources based on control based attack chains. All Kubescape controls can be arranged into attack categories of the MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls is to be categorized in these system and Kubescape will calculate a priority score based on the interconnections between failed controls.
+  Create a security issue prioritization engine that scores resources based on control-based attack chains. All Kubescape controls can be arranged into attack categories of the MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls is to be categorized in these system and Kubescape will calculate a priority score based on the interconnections between failed controls.
 
 * ##### Integration with image registries 
  We want to expand Kubescape to integrate with different image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities. Container registry integration.
@@ -38,7 +38,7 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 
 ## Backlog 📅
 * ##### JSON path for HELM charts 
-  Today, Kubescape can point to issues in the Kubernetes object. We want to develop this feature so Kubescape will be able to point to the misconfigured source file (HELM).
+  Today, Kubescape can point to issues in the Kubernetes object. We want to develop this feature so Kubescape will be able to pointing misconfigured source file (HELM).
 * ##### Create Kubescape HELM plugin
   Producing scan results in the context of HELM.
 * ##### Kubescape based admission controller 
