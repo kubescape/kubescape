@@ -87,7 +87,7 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 
 // Check if the flag entered are valid
 func flagValidationDownload(downloadInfo *v1.DownloadInfo) error {
-	
-	// Validate the user's credentials : accountID, clientID, secretKey
-	return cautils.ValidateCredentials(downloadInfo.Credentials.Account, downloadInfo.Credentials.ClientID, downloadInfo.Credentials.SecretKey)
+
+	// Validate the user's credentials
+	return downloadInfo.Credentials.Validate()
 }

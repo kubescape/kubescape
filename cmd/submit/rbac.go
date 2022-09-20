@@ -36,7 +36,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 		Short:   "Submit cluster's Role-Based Access Control(RBAC)",
 		Long:    ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			
+
 			if err := flagValidationSubmit(submitInfo); err != nil {
 				return err
 			}
@@ -91,6 +91,6 @@ func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *
 // Check if the flag entered are valid
 func flagValidationSubmit(submitInfo *v1.Submit) error {
 
-	// Validate the user's credentials : accountID, clientID, secretKey
-	return cautils.ValidateCredentials(submitInfo.Credentials.Account, submitInfo.Credentials.ClientID, submitInfo.Credentials.SecretKey)
+	// Validate the user's credentials
+	return submitInfo.Credentials.Validate()
 }

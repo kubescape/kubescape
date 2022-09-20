@@ -126,7 +126,6 @@ func flagValidationFramework(scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("bad argument: out of range threshold")
 	}
 
-	// Validate the user's credentials : accountID, clientID, secretKey
-	return cautils.ValidateCredentials(scanInfo.Credentials.Account, scanInfo.Credentials.ClientID, scanInfo.Credentials.SecretKey)
-
+	// Validate the user's credentials
+	return scanInfo.Credentials.Validate()
 }

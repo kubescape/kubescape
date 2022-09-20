@@ -51,7 +51,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			
+
 			if err := flagValidationList(&listPolicies); err != nil {
 				return err
 			}
@@ -76,6 +76,6 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 // Check if the flag entered are valid
 func flagValidationList(listPolicies *v1.ListPolicies) error {
 
-	// Validate the user's credentials : accountID, clientID, secretKey
-	return cautils.ValidateCredentials(listPolicies.Credentials.Account, listPolicies.Credentials.ClientID, listPolicies.Credentials.SecretKey)
+	// Validate the user's credentials
+	return listPolicies.Credentials.Validate()
 }

@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
-	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command {
@@ -23,7 +22,7 @@ func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command 
 			return nil
 		},
 		Run: func(cmd *cobra.Command, args []string) {
-			
+
 			if err := flagValidationDelete(deleteInfo); err != nil {
 				logger.L().Fatal(err.Error())
 			}
@@ -42,7 +41,6 @@ func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command 
 // Check if the flag entered are valid
 func flagValidationDelete(deleteInfo *v1.Delete) error {
 
-
-	// Validate the user's credentials : accountID, clientID, secretKey
-	return cautils.ValidateCredentials(deleteInfo.Credentials.Account, deleteInfo.Credentials.ClientID, deleteInfo.Credentials.SecretKey)
+	// Validate the user's credentials
+	return deleteInfo.Credentials.Validate()
 }
