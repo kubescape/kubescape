@@ -37,6 +37,10 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 		Long:    ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if err := flagValidationSubmit(submitInfo); err != nil {
+				return err
+			}
+
 			k8s := k8sinterface.NewKubernetesApi()
 
 			// get config
@@ -82,4 +86,11 @@ func getTenantConfig(credentials *cautils.Credentials, clusterName string, custo
 		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
 	}
 	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
+}
+
+// Check if the flag entered are valid
+func flagValidationSubmit(submitInfo *v1.Submit) error {
+
+	// Validate the user's credentials
+	return submitInfo.Credentials.Validate()
 }

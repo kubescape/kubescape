@@ -155,5 +155,7 @@ func flagValidationFramework(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
 		return fmt.Errorf("bad argument: out of range threshold")
 	}
-	return nil
+
+	// Validate the user's credentials
+	return scanInfo.Credentials.Validate()
 }
