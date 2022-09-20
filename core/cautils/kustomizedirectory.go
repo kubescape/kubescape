@@ -48,6 +48,19 @@ func IsKustomizeDirectory(path string) bool {
 	}
 }
 
+// Used for checking if the path is Kustomization file.
+func IsKustomizeFile(path string) bool {
+	fileName := filepath.Base(path)
+
+	for _, kustomizationFileMatcher := range kustomizationFileMatchers {
+		if fileName == kustomizationFileMatcher {
+			return true
+		}
+	}
+
+	return false
+}
+
 func NewKustomizeDirectory(path string) *KustomizeDirectory {
 	return &KustomizeDirectory{
 		path: path,
