@@ -20,9 +20,9 @@ func NewGCPAdaptor(GCPCloudAPI *getter.GCPCloudAPI) *GCPAdaptor {
 }
 
 func (GCPAdaptor *GCPAdaptor) Login() error {
-	client, er := containeranalysis.NewClient(GCPAdaptor.GCPCloudAPI.GetContext(), option.WithCredentialsFile(GCPAdaptor.GCPCloudAPI.GetcrediantialsPath()))
-	if er != nil {
-		fmt.Printf("Error client: %v", er)
+	client, err := containeranalysis.NewClient(GCPAdaptor.GCPCloudAPI.GetContext(), option.WithCredentialsFile(GCPAdaptor.GCPCloudAPI.GetCrediantialsPath()))
+	if err != nil {
+		return err 
 	}
 	GCPAdaptor.GCPCloudAPI.SetClient(client)
 	return nil
@@ -50,7 +50,7 @@ func (GCPAdaptor *GCPAdaptor) GetImageVulnerability(imageID *registryvulnerabili
 		Filter: fmt.Sprintf(`resourceUrl=%q`, resourceUrl),
 	}
 
-	it := GCPAdaptor.GCPCloudAPI.Getclient().GetGrafeasClient().ListOccurrences(GCPAdaptor.GCPCloudAPI.GetContext(), req)
+	it := GCPAdaptor.GCPCloudAPI.GetClient().GetGrafeasClient().ListOccurrences(GCPAdaptor.GCPCloudAPI.GetContext(), req)
 	occs := []*grafeaspb.Occurrence{}
 	var count int
 	for {
@@ -59,8 +59,7 @@ func (GCPAdaptor *GCPAdaptor) GetImageVulnerability(imageID *registryvulnerabili
 			break
 		}
 		if err != nil {
-			fmt.Println(err)
-			break
+			return nil, err
 		}
 		occs = append(occs, occ)
 		count++

@@ -8,7 +8,7 @@ import (
 )
 
 type GCPAdaptorMock struct {
-	resultList *[]registryvulnerabilities.ContainerImageVulnerabilityReport
+	resultList []registryvulnerabilities.ContainerImageVulnerabilityReport
 }
 
 func NewGCPAdaptorMock() (*GCPAdaptorMock, error) {
@@ -32,8 +32,8 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImagesVulnerabilities(imageIDs []regist
 		return resultList, nil
 	}
 
-	GCPAdaptorMock.resultList = &resultList
-	return *GCPAdaptorMock.resultList, nil
+	GCPAdaptorMock.resultList = resultList
+	return GCPAdaptorMock.resultList, nil
 }
 
 func (GCPAdaptorMock *GCPAdaptorMock) GetImageVulnerability(imageID *registryvulnerabilities.ContainerImageIdentifier) (*registryvulnerabilities.ContainerImageVulnerabilityReport, error) {

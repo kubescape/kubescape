@@ -1,21 +1,15 @@
 package v1
 
 import (
-	"fmt"
-
 	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
 )
 
 func (GCPAdaptor *GCPAdaptor) getImageLastScanId(imageID *registryvulnerabilities.ContainerImageIdentifier) (string, error) {
-	var s string
-
-	return s, nil
+	// TODO
+	return "", nil
 }
 
-func GetResourceUrl(imageID *registryvulnerabilities.ContainerImageIdentifier) string {
-	return fmt.Sprintf("https:/%s/%s", imageID.Repository, imageID.Tag)
-}
 
 func responseObjectToVulnerabilities(vulnerabilityList []*grafeaspb.Occurrence, count int) []registryvulnerabilities.Vulnerability {
 	vulnerabilities := make([]registryvulnerabilities.Vulnerability, count)
