@@ -23,20 +23,22 @@ func GetUpdateCmd() *cobra.Command {
 			//Checking the user's version of kubescape to the latest release
 			if cautils.BuildNumber == cautils.LatestReleaseVersion {
 				//your version == latest version
-				fmt.Println("You are in the latest version")
-			} else {
+					logger.L().Info( ("You are in the latest version"))
+				} else {
 				//execute the install.sh if linux, install.ps1 for windows,.....depending on your OS
 				const OSTYPE string = runtime.GOOS
-				if OSTYPE == "linux" {
+				switch OSTYPE{
+				case "linux":
 					cautils.StartSpinner()
 					//run the installation command for linux
-					_, err := exec.Command("./install.sh").Output()
+					cmd, err := exec.Command("./install.sh").Output()
 					if err != nil {
 						logger.L().Fatal(err.Error())
 					}
+					fmt.Println(string(cmd))
 					cautils.StopSpinner()
 
-				} else if OSTYPE == "windows" {
+				case "windows":
 					cautils.StartSpinner()
 					//run the installation command for windows
 					_, err := exec.Command("./install.ps1").Output()
@@ -45,10 +47,10 @@ func GetUpdateCmd() *cobra.Command {
 					}
 					cautils.StopSpinner()
 
-				} else {
+				default :
 					cautils.StartSpinner()
 					//run the installation command for macOS
-					_, err := exec.Command("./macinstall/kubescape.rb").Output()
+					_, err := exec.Command("./install.sh").Output()
 					if err != nil {
 						logger.L().Fatal(err.Error())
 					}
