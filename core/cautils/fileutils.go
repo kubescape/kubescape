@@ -64,17 +64,27 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
 // generate yaml files using "Kustomize" & renders a map of workloads from those yaml files
 func LoadResourcesFromKustomizeDirectory(basePath string) (map[string][]workloadinterface.IMetadata, string) {
-	if ok := IsKustomizeDirectory(basePath); !ok {
+	isKustomizeDirectory := IsKustomizeDirectory(basePath)
+	isKustomizeFile := IsKustomizeFile(basePath)
+	if ok := isKustomizeDirectory || isKustomizeFile; !ok {
 		return nil, ""
 	}
-
-	logger.L().Info("Kustomize Directory Detected, Scanning the rendered Kubernetes Objects...")
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	kustomizeDirectory := NewKustomizeDirectory(basePath)
 
-	wls, errs := kustomizeDirectory.GetWorkloads(basePath)
-	kustomizeDirectoryName := GetKustomizeDirectoryName(basePath)
+	var newBasePath string
+
+	if isKustomizeFile {
+		newBasePath = filepath.Dir(basePath)
+		logger.L().Info("Kustomize File Detected, Scanning the rendered Kubernetes Objects...")
+	} else {
+		newBasePath = basePath
+		logger.L().Info("Kustomize Directory Detected, Scanning the rendered Kubernetes Objects...")
+	}
+
+	wls, errs := kustomizeDirectory.GetWorkloads(newBasePath)
+	kustomizeDirectoryName := GetKustomizeDirectoryName(newBasePath)
 
 	if len(errs) > 0 {
 		logger.L().Error(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
