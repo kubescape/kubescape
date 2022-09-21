@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	gcpadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/GCP/v1"
+	gcpadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/gcp/v1"
 	armosecadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 
@@ -161,7 +161,7 @@ func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdap
 
 	gcpCloudAPI := getter.GetGlobalGCPCloudAPIConnector()
 	if gcpCloudAPI != nil {
-		if !gcpCloudAPI.GetCredentials() {
+		if gcpCloudAPI.GetCredentialsCheck() {
 			adaptors = append(adaptors, gcpadaptorv1.NewGCPAdaptor(getter.GetGlobalGCPCloudAPIConnector()))
 		}
 	}
