@@ -192,7 +192,10 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 		fmt.Fprintf(prettyPrinter.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
 		return
 	}
-	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n\n")
+	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
+	cautils.InfoTextDisplay(prettyPrinter.writer, renderSeverityCountersSummary(&summaryDetails.SeverityCounters)+"\n\n")
+
+	// cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+"Severities: SOME OTHER"+"\n\n")
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
@@ -256,12 +259,25 @@ func getControlLink(controlID string) string {
 	return fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(controlID))
 }
 
+// renderSeverityCountersSummary renders the string that reports severity counters summary
+func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) string {
+	critical := counters.NumberOfResourcesWithCriticalSeverity()
+	high := counters.NumberOfResourcesWithHighSeverity()
+	medium := counters.NumberOfResourcesWithMediumSeverity()
+	low := counters.NumberOfResourcesWithLowSeverity()
+
+	return fmt.Sprintf(
+		"Failed Resources by Severity: Critical — %d, High — %d, Medium — %d, Low — %d",
+		critical, high, medium, low,
+	)
+}
+
 func controlCountersForSummary(counters reportsummary.ICounters) string {
 	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d, Skipped: %d)", counters.All(), counters.Failed(), counters.Excluded(), counters.Skipped())
 }
 
 func controlCountersForResource(l *helpersv1.AllLists) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", len(l.All()), len(l.Failed()), len(l.Excluded()))
+	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", l.All().Len(), len(l.Failed()), len(l.Excluded()))
 }
 func getSeparator(sep string) string {
 	s := ""

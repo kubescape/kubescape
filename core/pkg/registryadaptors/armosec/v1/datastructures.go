@@ -22,7 +22,7 @@ type V2ListRequest struct {
 	// How to order (sort) the list, field name + sort order (asc/desc), like https://www.w3schools.com/sql/sql_orderby.asp
 	// Example: "timestamp:asc,severity:desc"
 	OrderBy string `json:"orderBy,omitempty"`
-	// Cursor to the next page of former requset. Not supported yet
+	// Cursor to the next page of former request. Not supported yet
 	// Cursor cannot be used with another parameters of this struct
 	Cursor string `json:"cursor,omitempty"`
 	// FieldsList allow us to return only subset of the source document fields

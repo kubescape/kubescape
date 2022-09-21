@@ -28,6 +28,17 @@ func (api *KSCloudAPI) getFrameworkURL(frameworkName string) string {
 	return u.String()
 }
 
+func (api *KSCloudAPI) getAttackTracksURL() string {
+	u := url.URL{}
+	u.Scheme, u.Host = parseHost(api.GetApiURL())
+	u.Path = "api/v1/attackTracks"
+	q := u.Query()
+	q.Add("customerGUID", api.getCustomerGUIDFallBack())
+	u.RawQuery = q.Encode()
+
+	return u.String()
+}
+
 func (api *KSCloudAPI) getListFrameworkURL() string {
 	u := url.URL{}
 	u.Scheme, u.Host = parseHost(api.GetApiURL())

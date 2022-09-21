@@ -104,7 +104,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 				// using hostSensor mock
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				sessionObj.InfoMap = infoMap
+				if len(infoMap) > 0 {
+					sessionObj.InfoMap = infoMap
+				}
 			}
 		} else {
 			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor", hostResources, sessionObj.InfoMap)

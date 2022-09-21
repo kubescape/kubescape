@@ -30,7 +30,7 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-// LoadResourcesFromHelmCharts scans a given path (recuresively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
+// LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
 func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
@@ -47,7 +47,7 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 		if err == nil {
 			wls, errs := chart.GetWorkloadsWithDefaultValues()
 			if len(errs) > 0 {
-				logger.L().Error(fmt.Sprintf("Rendering of Helm chart template failed: %v", errs))
+				logger.L().Error(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
 
@@ -190,8 +190,10 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, error) {
 		}
 		if obj, ok := j.(map[string]interface{}); ok {
 			if o := objectsenvelopes.NewObject(obj); o != nil {
-				if o.GetKind() == "List" {
-					yamlObjs = append(yamlObjs, handleListObject(o)...)
+				if o.GetObjectType() == workloadinterface.TypeListWorkloads {
+					if list := workloadinterface.NewListWorkloadsObj(o.GetObject()); list != nil {
+						yamlObjs = append(yamlObjs, list.GetItems()...)
+					}
 				} else {
 					yamlObjs = append(yamlObjs, o)
 				}
@@ -260,7 +262,7 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 			return err
 		}
 
-		// listing only directotries
+		// listing only directories
 		if onlyDirectories {
 			if info.IsDir() {
 				if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {
@@ -322,21 +324,4 @@ func GetFileFormat(filePath string) FileFormat {
 	} else {
 		return FileFormat(filePath)
 	}
-}
-
-// handleListObject handle a List manifest
-func handleListObject(obj workloadinterface.IMetadata) []workloadinterface.IMetadata {
-	yamlObjs := []workloadinterface.IMetadata{}
-	if i, ok := workloadinterface.InspectMap(obj.GetObject(), "items"); ok && i != nil {
-		if items, ok := i.([]interface{}); ok && items != nil {
-			for item := range items {
-				if m, ok := items[item].(map[string]interface{}); ok && m != nil {
-					if o := objectsenvelopes.NewObject(m); o != nil {
-						yamlObjs = append(yamlObjs, o)
-					}
-				}
-			}
-		}
-	}
-	return yamlObjs
 }

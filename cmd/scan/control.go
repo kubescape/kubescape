@@ -70,7 +70,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
-						scanInfo.InputPatterns = []string{args[1]}
+						scanInfo.InputPatterns = args[1:]
 					} else { // store stdin to file - do NOT move to separate function !!
 						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
 						if err != nil {
@@ -101,6 +101,8 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
+
+			enforceSeverityThresholds(&results.GetResults().SummaryDetails.SeverityCounters, scanInfo)
 			return nil
 		},
 	}

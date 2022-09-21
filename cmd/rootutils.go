@@ -16,6 +16,7 @@ const envFlagUsage = "Send report results to specific URL. Format:<ReportReceive
 
 func initLogger() {
 	logger.DisableColor(rootInfo.DisableColor)
+	logger.EnableColor(rootInfo.EnableColor)
 
 	if rootInfo.LoggerName == "" {
 		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {

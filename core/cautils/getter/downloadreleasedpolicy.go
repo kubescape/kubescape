@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/opa-utils/gitregostore"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
 
 // =======================================================================================================================
@@ -68,6 +69,14 @@ func (drp *DownloadReleasedPolicy) GetControlsInputs(clusterName string) (map[st
 		return nil, err
 	}
 	return defaultConfigInputs.Settings.PostureControlInputs, err
+}
+
+func (drp *DownloadReleasedPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
+	attackTracks, err := drp.gs.GetAttackTracks()
+	if err != nil {
+		return nil, err
+	}
+	return attackTracks, err
 }
 
 func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
