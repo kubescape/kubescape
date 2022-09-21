@@ -5,12 +5,6 @@ import (
 	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
 )
 
-func (GCPAdaptor *GCPAdaptor) getImageLastScanId(imageID *registryvulnerabilities.ContainerImageIdentifier) (string, error) {
-	// TODO
-	return "", nil
-}
-
-
 func responseObjectToVulnerabilities(vulnerabilityList []*grafeaspb.Occurrence, count int) []registryvulnerabilities.Vulnerability {
 	vulnerabilities := make([]registryvulnerabilities.Vulnerability, count)
 	for i, vulnerabilityEntry := range vulnerabilityList {
