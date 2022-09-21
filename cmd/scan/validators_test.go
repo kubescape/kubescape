@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// Test_validateControlScanInfo tests how scan info is validated for the `scan control` command
 func Test_validateControlScanInfo(t *testing.T) {
 	testCases := []struct {
 		Description string
@@ -44,6 +45,7 @@ func Test_validateControlScanInfo(t *testing.T) {
 	}
 }
 
+// Test_validateFrameworkScanInfo tests how scan info is validated for the `scan framework` command
 func Test_validateFrameworkScanInfo(t *testing.T) {
 	testCases := []struct {
 		Description string
@@ -73,7 +75,7 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 			func(t *testing.T) {
 				var want error = tc.Want
 
-				got := flagValidationFramework(tc.ScanInfo)
+				got := validateFrameworkScanInfo(tc.ScanInfo)
 
 				if got != want {
 					t.Errorf("got: %v, want: %v", got, want)

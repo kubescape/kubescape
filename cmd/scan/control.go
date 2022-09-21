@@ -58,7 +58,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			if err := flagValidationFramework(scanInfo); err != nil {
+			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
 			}
 			

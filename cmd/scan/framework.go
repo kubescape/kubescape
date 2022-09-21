@@ -67,7 +67,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			if err := flagValidationFramework(scanInfo); err != nil {
+			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
 			}
 			scanInfo.FrameworkScan = true
@@ -193,7 +193,8 @@ func validateSeverity(severity string) error {
 
 }
 
-func flagValidationFramework(scanInfo *cautils.ScanInfo) error {
+// validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
+func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.Submit && scanInfo.Local {
 		return fmt.Errorf("you can use `keep-local` or `submit`, but not both")
 	}
