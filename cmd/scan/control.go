@@ -58,6 +58,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if err := flagValidationFramework(scanInfo); err != nil {
+				return err
+			}
+			
 			// flagValidationControl(scanInfo)
 			scanInfo.PolicyIdentifier = []cautils.PolicyIdentifier{}
 
@@ -101,6 +105,8 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
+
+			enforceSeverityThresholds(&results.GetResults().SummaryDetails.SeverityCounters, scanInfo)
 			return nil
 		},
 	}

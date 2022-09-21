@@ -30,7 +30,7 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
-// LoadResourcesFromHelmCharts scans a given path (recuresively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
+// LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
 func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
@@ -59,6 +59,41 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 		}
 	}
 	return sourceToWorkloads, sourceToChartName
+}
+
+// If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
+// generate yaml files using "Kustomize" & renders a map of workloads from those yaml files
+func LoadResourcesFromKustomizeDirectory(basePath string) (map[string][]workloadinterface.IMetadata, string) {
+	isKustomizeDirectory := IsKustomizeDirectory(basePath)
+	isKustomizeFile := IsKustomizeFile(basePath)
+	if ok := isKustomizeDirectory || isKustomizeFile; !ok {
+		return nil, ""
+	}
+
+	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
+	kustomizeDirectory := NewKustomizeDirectory(basePath)
+
+	var newBasePath string
+
+	if isKustomizeFile {
+		newBasePath = filepath.Dir(basePath)
+		logger.L().Info("Kustomize File Detected, Scanning the rendered Kubernetes Objects...")
+	} else {
+		newBasePath = basePath
+		logger.L().Info("Kustomize Directory Detected, Scanning the rendered Kubernetes Objects...")
+	}
+
+	wls, errs := kustomizeDirectory.GetWorkloads(newBasePath)
+	kustomizeDirectoryName := GetKustomizeDirectoryName(newBasePath)
+
+	if len(errs) > 0 {
+		logger.L().Error(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
+	}
+
+	for k, v := range wls {
+		sourceToWorkloads[k] = v
+	}
+	return sourceToWorkloads, kustomizeDirectoryName
 }
 
 func LoadResourcesFromFiles(input, rootPath string) map[string][]workloadinterface.IMetadata {
@@ -262,7 +297,7 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 			return err
 		}
 
-		// listing only directotries
+		// listing only directories
 		if onlyDirectories {
 			if info.IsDir() {
 				if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {

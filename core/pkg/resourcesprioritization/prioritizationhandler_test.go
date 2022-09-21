@@ -18,7 +18,7 @@ import (
 type AttackTracksGetterMock struct{}
 
 func (mock *AttackTracksGetterMock) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
-	data := v1alpha1.AttackTrackStep{
+	mock_1 := v1alpha1.AttackTrackMock(v1alpha1.AttackTrackStep{
 		Name: "A",
 		SubSteps: []v1alpha1.AttackTrackStep{
 			{
@@ -36,8 +36,14 @@ func (mock *AttackTracksGetterMock) GetAttackTracks() ([]v1alpha1.AttackTrack, e
 				Name: "E",
 			},
 		},
-	}
-	return []v1alpha1.AttackTrack{*v1alpha1.AttackTrackMock(data)}, nil
+	})
+
+	mock_2 := v1alpha1.AttackTrackMock(v1alpha1.AttackTrackStep{
+		Name: "Z",
+	})
+	mock_2.Metadata["name"] = "TestAttackTrack_2"
+
+	return []v1alpha1.AttackTrack{*mock_1, *mock_2}, nil
 }
 
 func ControlMock(id string, baseScore float32, tags, categories []string) reporthandling.Control {
@@ -88,6 +94,14 @@ func ResourceAssociatedControlMock(controlID string, status apis.ScanningStatus)
 			{Name: "Test", Status: status},
 		},
 	}
+}
+
+func TestNewResourcesPrioritizationHandler(t *testing.T) {
+	handler, err := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{})
+	assert.NoError(t, err)
+	assert.Len(t, handler.attackTracks, 2)
+	assert.Equal(t, handler.attackTracks[0].GetName(), "TestAttackTrack")
+	assert.Equal(t, handler.attackTracks[1].GetName(), "TestAttackTrack_2")
 }
 
 func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {

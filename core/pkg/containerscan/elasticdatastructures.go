@@ -12,7 +12,7 @@ type ElasticContainerVulnerabilityResult struct {
 	Timestamp         int64     `json:"timestamp"`
 	IsFixed           int       `json:"isFixed"`
 	IntroducedInLayer string    `json:"layerHash"`
-	RelevantLinks     []string  `json:"links"` // shitty SE practice
+	RelevantLinks     []string  `json:"links"` // Bad SE practice
 
 	Vulnerability `json:",inline"`
 }
