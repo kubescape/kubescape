@@ -1,6 +1,87 @@
 package scan
 
-import "testing"
+import (
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"testing"
+)
+
+func Test_validateControlScanInfo(t *testing.T) {
+	testCases := []struct {
+		Description string
+		ScanInfo    *cautils.ScanInfo
+		Want        error
+	}{
+		{
+			"Empty severity should be valid for scan info",
+			&cautils.ScanInfo{FailThresholdSeverity: ""},
+			nil,
+		},
+		{
+			"High severity should be valid for scan info",
+			&cautils.ScanInfo{FailThresholdSeverity: "High"},
+			nil,
+		},
+		{
+			"Unknown severity should be invalid for scan info",
+			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
+			ErrUnknownSeverity,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(
+			tc.Description,
+			func(t *testing.T) {
+				var want error = tc.Want
+
+				got := validateControlScanInfo(tc.ScanInfo)
+
+				if got != want {
+					t.Errorf("got: %v, want: %v", got, want)
+				}
+			},
+		)
+	}
+}
+
+func Test_validateFrameworkScanInfo(t *testing.T) {
+	testCases := []struct {
+		Description string
+		ScanInfo    *cautils.ScanInfo
+		Want        error
+	}{
+		{
+			"Empty severity should be valid for scan info",
+			&cautils.ScanInfo{FailThresholdSeverity: ""},
+			nil,
+		},
+		{
+			"High severity should be valid for scan info",
+			&cautils.ScanInfo{FailThresholdSeverity: "High"},
+			nil,
+		},
+		{
+			"Unknown severity should be invalid for scan info",
+			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
+			ErrUnknownSeverity,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(
+			tc.Description,
+			func(t *testing.T) {
+				var want error = tc.Want
+
+				got := flagValidationFramework(tc.ScanInfo)
+
+				if got != want {
+					t.Errorf("got: %v, want: %v", got, want)
+				}
+			},
+		)
+	}
+}
 
 func Test_validateSeverity(t *testing.T) {
 	testCases := []struct {

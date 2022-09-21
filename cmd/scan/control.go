@@ -110,7 +110,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
 
-			enforceSeverityThresholds(&results.GetResults().SummaryDetails.SeverityCounters, scanInfo)
+			enforceSeverityThresholds(&results.GetResults().SummaryDetails.SeverityCounters, scanInfo, terminateOnExceedingSeverity)
 			return nil
 		},
 	}
@@ -118,7 +118,9 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 // validateControlScanInfo validates the ScanInfo struct for the `control` command
 func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
-	if err := validateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+	severity := scanInfo.FailThresholdSeverity
+
+	if err := validateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 	return nil
