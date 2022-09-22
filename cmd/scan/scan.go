@@ -2,7 +2,6 @@ package scan
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
