@@ -38,7 +38,9 @@ func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 	fieldSelectors := ""
 	for _, n := range strings.Split(es.namespace, ",") {
 		if n != "" {
-			fieldSelectors += getNamespacesSelector(resource, n, "!=") + ","
+			if fs := getNamespacesSelector(resource, n, "!="); fs != "" { 
+				fieldSelectors += getNamespacesSelector(resource, n, "!=") + ","
+			}
 		}
 	}
 	return []string{fieldSelectors}

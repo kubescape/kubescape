@@ -60,7 +60,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	// get namespace and labels from designator (ignore cluster labels)
 	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
 
-	// pull k8s recourses
+	// pull k8s resourses
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// map of Kubescape resources to control_ids
@@ -208,6 +208,11 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 	listOptions := metav1.ListOptions{}
 	fieldSelectors := k8sHandler.fieldSelector.GetNamespacesSelectors(resource)
 	for i := range fieldSelectors {
+
+		// If field selector is an empty string, i.e. not a K8's namespaced resource, then return without getting the list of it's resources
+		if fieldSelectors[i] == "" {
+			return resourceList, nil
+		}
 
 		listOptions.FieldSelector = fieldSelectors[i]
 
