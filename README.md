@@ -383,7 +383,7 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 * Apply changes you wish to make to the kubescape directory using text editors like `Vim`.
 * [Build on Linux](https://github.com/kubescape/kubescape#build-on-linuxmacos)
-* Now, you can use Kubescape just like a normal user. Instead of using `kubescape`, use `./kubescape`. (Make sure you are inside kubescape directory because the command will execute the binary named `kubescape` in `kubescape directory`.
+* Now, you can use Kubescape just like a normal user. Instead of using `kubescape`, use `./kubescape`. (Make sure you are inside kubescape directory because the command will execute the binary named `kubescape` in `kubescape directory`.)
 
 </details>
 
