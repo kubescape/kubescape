@@ -87,7 +87,7 @@ When scanning is not in progress
 
 ### Prometheus support API
 
-* GET/POST `/v1/metrics` - will trigger cluster scan. Will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
+* GET/POST `/v1/metrics` - will trigger cluster scan. will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
 * `/livez` - will respond 200 if the server is alive
 * `/readyz` - will respond 200 if the server can receive requests 
 
