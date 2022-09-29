@@ -200,9 +200,8 @@ func testsCases(results *cautils.OPASessionObj, resourcesResult []resourcesresul
 	severityCounter := make([]int, apis.NumberOfSeverities, apis.NumberOfSeverities)
 
 	for i := range resourcesResult {
-		message += lineSeparator
 		if failedControls := failedControlsToFailureMessage(results, resourcesResult[i].ListControls(), severityCounter); failedControls != "" {
-			message += fmt.Sprintf("Resource: %s\n\n%s", resourceNameToString(results.AllResources[resourcesResult[i].GetResourceID()]), failedControls)
+			message += fmt.Sprintf("%sResource: %s\n\n%s", lineSeparator, resourceNameToString(results.AllResources[resourcesResult[i].GetResourceID()]), failedControls)
 		}
 	}
 	testCaseFailure.Message += fmt.Sprintf("%s\n%s", getSummaryMessage(severityCounter), message)

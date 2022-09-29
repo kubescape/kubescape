@@ -139,24 +139,21 @@ func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cau
 
 func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int, host string) error {
 	for _, v := range results {
-		/*
+		// set result.RawResource
+		resourceID := v.GetResourceID()
+		if _, ok := allResources[resourceID]; !ok {
+			return fmt.Errorf("expected to find raw resource object for '%s'", resourceID)
+		}
+		resource := reporthandling.NewResourceIMetadata(allResources[resourceID])
+		if r, ok := resourcesSource[resourceID]; ok {
+			resource.SetSource(&r)
+		}
+		v.RawResource = resource
 
-			// set result.RawResource
-			resourceID := v.GetResourceID()
-			if _, ok := allResources[resourceID]; !ok {
-				return fmt.Errorf("expected to find raw resource object for '%s'", resourceID)
-			}
-			resource := reporthandling.NewResourceIMetadata(allResources[resourceID])
-			if r, ok := resourcesSource[resourceID]; ok {
-				resource.SetSource(&r)
-			}
-			v.RawResource = resource
-
-			// set result.PrioritizedResource
-			if resource, ok := prioritizedResources[resourceID]; ok {
-				v.PrioritizedResource = &resource
-			}
-		*/
+		// set result.PrioritizedResource
+		if results, ok := prioritizedResources[resourceID]; ok {
+			v.PrioritizedResource = &results
+		}
 
 		r, err := json.Marshal(v)
 		if err != nil {

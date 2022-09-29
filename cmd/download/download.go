@@ -17,7 +17,7 @@ var (
 	downloadExample = `
   # Download all artifacts and save them in the default path (~/.kubescape)
   kubescape download artifacts
-  download
+  
   # Download all artifacts and save them in /tmp path
   kubescape download artifacts --output /tmp
   
@@ -59,6 +59,10 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if err := flagValidationDownload(&downloadInfo); err != nil {
+				return err
+			}
+
 			if filepath.Ext(downloadInfo.Path) == ".json" {
 				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
 			}
@@ -79,4 +83,11 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 	return downloadCmd
+}
+
+// Check if the flag entered are valid
+func flagValidationDownload(downloadInfo *v1.DownloadInfo) error {
+
+	// Validate the user's credentials
+	return downloadInfo.Credentials.Validate()
 }

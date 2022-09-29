@@ -58,6 +58,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if err := validateFrameworkScanInfo(scanInfo); err != nil {
+				return err
+			}
+			
 			// flagValidationControl(scanInfo)
 			scanInfo.PolicyIdentifier = []cautils.PolicyIdentifier{}
 
@@ -88,6 +92,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 			scanInfo.FrameworkScan = false
 
+			if err := validateControlScanInfo(scanInfo); err != nil {
+				return err
+			}
+
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
@@ -101,7 +109,19 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
+			enforceSeverityThresholds(&results.GetResults().SummaryDetails.SeverityCounters, scanInfo, terminateOnExceedingSeverity)
+
 			return nil
 		},
 	}
+}
+
+// validateControlScanInfo validates the ScanInfo struct for the `control` command
+func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
+	severity := scanInfo.FailThresholdSeverity
+
+	if err := validateSeverity(severity); severity != "" && err != nil {
+		return err
+	}
+	return nil
 }

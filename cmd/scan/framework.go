@@ -1,12 +1,15 @@
 package scan
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -36,6 +39,8 @@ var (
 
   Run 'kubescape list frameworks' for the list of supported frameworks
 `
+
+	ErrUnknownSeverity = errors.New("unknown severity")
 )
 
 func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -62,7 +67,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
-			if err := flagValidationFramework(scanInfo); err != nil {
+			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
 			}
 			scanInfo.FrameworkScan = true
@@ -113,17 +118,95 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
+
+			enforceSeverityThresholds(&results.GetData().Report.SummaryDetails.SeverityCounters, scanInfo, terminateOnExceedingSeverity)
 			return nil
 		},
 	}
 }
 
-func flagValidationFramework(scanInfo *cautils.ScanInfo) error {
+// countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
+func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) (bool, error) {
+	targetSeverity := scanInfo.FailThresholdSeverity
+	if err := validateSeverity(targetSeverity); err != nil {
+		return false, err
+	}
+
+	getFailedResourcesFuncsBySeverity := []struct {
+		SeverityName       string
+		GetFailedResources func() int
+	}{
+		{reporthandlingapis.SeverityLowString, severityCounters.NumberOfResourcesWithLowSeverity},
+		{reporthandlingapis.SeverityMediumString, severityCounters.NumberOfResourcesWithMediumSeverity},
+		{reporthandlingapis.SeverityHighString, severityCounters.NumberOfResourcesWithHighSeverity},
+		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfResourcesWithCriticalSeverity},
+	}
+
+	targetSeverityIdx := 0
+	for idx, description := range getFailedResourcesFuncsBySeverity {
+		if strings.EqualFold(description.SeverityName, targetSeverity) {
+			targetSeverityIdx = idx
+			break
+		}
+	}
+
+	for _, description := range getFailedResourcesFuncsBySeverity[targetSeverityIdx:] {
+		failedResourcesCount := description.GetFailedResources()
+		if failedResourcesCount > 0 {
+			return true, nil
+		}
+	}
+
+	return false, nil
+
+}
+
+// terminateOnExceedingSeverity terminates the application on exceeding severity
+func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l logger.ILogger) {
+	l.Fatal("result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
+}
+
+// enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
+//
+// The function forces the application to terminate with an exit code 1 if at least one control failed control that exceeds the set severity threshold
+func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo, onExceed func(*cautils.ScanInfo, logger.ILogger)) {
+	// If a severity threshold is not set, we don’t need to enforce it
+	if scanInfo.FailThresholdSeverity == "" {
+		return
+	}
+
+	if val, err := countersExceedSeverityThreshold(severityCounters, scanInfo); val && err == nil {
+		onExceed(scanInfo, logger.L())
+	} else if err != nil {
+		logger.L().Fatal(err.Error())
+	}
+}
+
+// validateSeverity returns an error if a given severity is not known, nil otherwise
+func validateSeverity(severity string) error {
+	for _, val := range reporthandlingapis.GetSupportedSeverities() {
+		if strings.EqualFold(severity, val) {
+			return nil
+		}
+	}
+	return ErrUnknownSeverity
+
+}
+
+// validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
+func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.Submit && scanInfo.Local {
 		return fmt.Errorf("you can use `keep-local` or `submit`, but not both")
 	}
 	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
 		return fmt.Errorf("bad argument: out of range threshold")
 	}
-	return nil
+
+	severity := scanInfo.FailThresholdSeverity
+	if err := validateSeverity(severity); severity != "" && err != nil {
+		return err
+	}
+
+	// Validate the user's credentials
+	return scanInfo.Credentials.Validate()
 }

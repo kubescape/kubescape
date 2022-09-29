@@ -13,6 +13,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
 
 var (
@@ -146,6 +147,20 @@ func (api *KSCloudAPI) GetReportReceiverURL() string  { return api.erURL }
 func (api *KSCloudAPI) SetAccountID(accountID string) { api.accountID = accountID }
 func (api *KSCloudAPI) SetClientID(clientID string)   { api.clientID = clientID }
 func (api *KSCloudAPI) SetSecretKey(secretKey string) { api.secretKey = secretKey }
+
+func (api *KSCloudAPI) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
+	respStr, err := api.Get(api.getAttackTracksURL(), nil)
+	if err != nil {
+		return nil, nil
+	}
+
+	attackTracks := []v1alpha1.AttackTrack{}
+	if err = JSONDecoder(respStr).Decode(&attackTracks); err != nil {
+		return nil, err
+	}
+
+	return attackTracks, err
+}
 
 func (api *KSCloudAPI) GetFramework(name string) (*reporthandling.Framework, error) {
 	respStr, err := api.Get(api.getFrameworkURL(name), nil)
