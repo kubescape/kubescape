@@ -35,15 +35,15 @@ RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts
 
 FROM alpine:3.16.2
 
-RUN addgroup -S armo && adduser -S armo -G armo
+RUN addgroup -S ks && adduser -S ks -G ks
 
-COPY --from=builder /work/artifacts/ /home/armo/.kubescape
+COPY --from=builder /work/artifacts/ /home/ks/.kubescape
 
-RUN chown -R armo:armo /home/armo/.kubescape
+RUN chown -R ks:ks /home/ks/.kubescape
 
-USER armo
+USER ks
 
-WORKDIR /home/armo
+WORKDIR /home/ks
 
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/ksserver
 COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kubescape
