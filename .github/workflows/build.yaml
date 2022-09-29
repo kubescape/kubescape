@@ -72,8 +72,6 @@ jobs:
         uses: actions/setup-go@v3
         with:
           go-version: 1.18
-      # - name: Test cmd pkg
-      #   run: cd cmd && go test -v ./...
 
       - name: Install MSYS2 & libgit2 (Windows)
         shell: cmd
@@ -137,7 +135,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
         with:
           submodules: recursive
 
@@ -164,17 +162,10 @@ jobs:
       - name: Build the Docker image
         run: docker buildx build . --file build/Dockerfile --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:${{ steps.image-version.outputs.IMAGE_VERSION }} --tag ${{ steps.image-name.outputs.IMAGE_NAME }}:latest --build-arg image_version=${{ steps.image-version.outputs.IMAGE_VERSION }} --build-arg client=image-release --push --platform linux/amd64,linux/arm64
 
-      # - name: Login to GitHub Container Registry
-      #   uses: docker/login-action@v1
-      #   with:
-      #     registry: ghcr.io
-      #     username: ${{ github.actor }}
-      #     password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Install cosign
         uses: sigstore/cosign-installer@main
         with:
-          cosign-release: 'v1.12.0' # optional
+          cosign-release: 'v1.12.0'
       - name: sign kubescape container image
         env:
           COSIGN_EXPERIMENTAL: "true"
