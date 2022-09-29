@@ -4,19 +4,74 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 )
 
-func OPASessionObjMock(mockResults map[string]resourcesresults.Result, mockControlsSummary map[string]reportsummary.ControlSummary, mockAllResources map[string]workloadinterface.IMetadata) *cautils.OPASessionObj {
+type AttackTracksGetterMock struct{}
+
+func (mock *AttackTracksGetterMock) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
+	mock_1 := v1alpha1.AttackTrackMock(v1alpha1.AttackTrackStep{
+		Name: "A",
+		SubSteps: []v1alpha1.AttackTrackStep{
+			{
+				Name: "B",
+				SubSteps: []v1alpha1.AttackTrackStep{
+					{
+						Name: "C",
+					},
+					{
+						Name: "D",
+					},
+				},
+			},
+			{
+				Name: "E",
+			},
+		},
+	})
+
+	mock_2 := v1alpha1.AttackTrackMock(v1alpha1.AttackTrackStep{
+		Name: "Z",
+	})
+	mock_2.Metadata["name"] = "TestAttackTrack_2"
+
+	return []v1alpha1.AttackTrack{*mock_1, *mock_2}, nil
+}
+
+func ControlMock(id string, baseScore float32, tags, categories []string) reporthandling.Control {
+	return reporthandling.Control{
+		ControlID: id,
+		BaseScore: baseScore,
+		PortalBase: armotypes.PortalBase{
+			Attributes: map[string]interface{}{
+				"controlTypeTags": tags,
+				"attackTracks": []reporthandling.AttackTrackCategories{
+					{
+						AttackTrack: "TestAttackTrack",
+						Categories:  categories,
+					},
+				},
+			},
+		},
+	}
+}
+
+func OPASessionObjMock(allPoliciesControls map[string]reporthandling.Control, mockResults map[string]resourcesresults.Result, mockControlsSummary map[string]reportsummary.ControlSummary, mockAllResources map[string]workloadinterface.IMetadata) *cautils.OPASessionObj {
 	mock := cautils.NewOPASessionObjMock()
 	mock.Report.SummaryDetails.Controls = mockControlsSummary
 	mock.ResourcesResult = mockResults
 	mock.AllResources = mockAllResources
+	mock.AllPolicies = cautils.NewPolicies()
+	mock.AllPolicies.Controls = allPoliciesControls
+
 	return mock
 }
 
@@ -41,9 +96,18 @@ func ResourceAssociatedControlMock(controlID string, status apis.ScanningStatus)
 	}
 }
 
+func TestNewResourcesPrioritizationHandler(t *testing.T) {
+	handler, err := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{})
+	assert.NoError(t, err)
+	assert.Len(t, handler.attackTracks, 2)
+	assert.Equal(t, handler.attackTracks[0].GetName(), "TestAttackTrack")
+	assert.Equal(t, handler.attackTracks[1].GetName(), "TestAttackTrack_2")
+}
+
 func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 	tests := []struct {
 		name                     string
+		allPoliciesControls      map[string]reporthandling.Control
 		results                  map[string]resourcesresults.Result
 		controls                 map[string]reportsummary.ControlSummary
 		resources                map[string]workloadinterface.IMetadata
@@ -53,6 +117,11 @@ func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 	}{
 		{
 			name: "non-empty report",
+			allPoliciesControls: map[string]reporthandling.Control{
+				"C-001": ControlMock("C-001", 3, []string{"security"}, []string{"D"}),
+				"C-002": ControlMock("C-002", 4, []string{"security"}, []string{"B", "C"}),
+				"C-003": ControlMock("C-003", 10, []string{"security", "compliance"}, []string{"E"}),
+			},
 			results: map[string]resourcesresults.Result{
 				"resource1": {
 					AssociatedControls: []resourcesresults.ResourceAssociatedControl{
@@ -95,9 +164,9 @@ func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 				"resource3": DeploymentWorkloadMock(1),
 			},
 			expectedScores: map[string]float64{
-				"resource1": float64(11),
-				"resource2": float64(7.199999999999999),
-				"resource3": float64(10.1),
+				"resource1": float64(84),
+				"resource2": float64(30.8),
+				"resource3": float64(11),
 			},
 			expectedSeverity: map[string]int{
 				"resource1": apis.SeverityMedium,
@@ -105,25 +174,23 @@ func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 				"resource3": apis.SeverityCritical,
 			},
 			expectedControlsInVector: map[string][]string{
-				"resource1": {"C-001", "C-002"},
-				"resource2": {"C-001", "C-002"},
+				"resource1": {"C-002", "C-002", "C-002", "C-001"},
+				"resource2": {"C-002", "C-002", "C-002", "C-001"},
 				"resource3": {"C-003"},
 			},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler := &ResourcesPrioritizationHandler{
-				skipZeroScores: false,
-			}
-			sessionObj := OPASessionObjMock(tt.results, tt.controls, tt.resources)
+			handler, _ := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{})
+			sessionObj := OPASessionObjMock(tt.allPoliciesControls, tt.results, tt.controls, tt.resources)
 			err := handler.PrioritizeResources(sessionObj)
 			assert.NoError(t, err, "expected to have no errors in PrioritizeResources()")
 
 			assert.Equalf(t, len(tt.results), len(sessionObj.ResourcesPrioritized), "expected prioritized resources to be not empty")
 			for rId, resource := range sessionObj.ResourcesPrioritized {
 				expectedScore := tt.expectedScores[rId]
-				assert.Equalf(t, expectedScore, resource.GetScore(), "expected score of resourceID '%s' to be '%v', got '%v'", rId, expectedScore, resource.GetScore())
+				assert.InDeltaf(t, expectedScore, resource.GetScore(), 0.01, "expected score of resourceID '%s' to be '%v', got '%v'", rId, expectedScore, resource.GetScore())
 
 				expectedSeverity := tt.expectedSeverity[rId]
 				assert.Equalf(t, expectedSeverity, resource.GetSeverity(), "expected severity of resourceID '%s' to be '%v', got '%v'", rId, expectedSeverity, resource.GetSeverity())

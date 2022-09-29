@@ -25,11 +25,11 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(credentials *cautils.Credentials, clusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+func getTenantConfig(credentials *cautils.Credentials, clusterName string, customClusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName)
+		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName)
+	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
 }
 
 func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
@@ -222,4 +222,18 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 		return fw
 	}
 	return getter.NativeFrameworks
+}
+
+func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+	if accountID != "" {
+		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
+		return g
+	}
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil {
+		logger.L().Warning("failed to get attack tracks from github release, this may affect the scanning results", helpers.Error(err))
+	}
+	return downloadReleasedPolicy
 }

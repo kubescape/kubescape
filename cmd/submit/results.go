@@ -54,6 +54,11 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 		Short: "Submit a pre scanned results file. The file must be in json format",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
+
+			if err := flagValidationSubmit(submitInfo); err != nil {
+				return err
+			}
+
 			if len(args) == 0 {
 				return fmt.Errorf("missing results file")
 			}
@@ -61,7 +66,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			k8s := getKubernetesApi()
 
 			// get config
-			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", k8s)
+			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", "", k8s)
 			if err := clusterConfig.SetTenant(); err != nil {
 				logger.L().Error("failed setting account ID", helpers.Error(err))
 			}

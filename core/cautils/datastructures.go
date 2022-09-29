@@ -17,6 +17,7 @@ type KSResources map[string][]string
 type OPASessionObj struct {
 	K8SResources          *K8SResources                                 // input k8s objects
 	ArmoResource          *KSResources                                  // input ARMO objects
+	AllPolicies           *Policies                                     // list of all frameworks
 	Policies              []reporthandling.Framework                    // list of frameworks to scan
 	AllResources          map[string]workloadinterface.IMetadata        // all scanned resources, map[<resource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
@@ -24,7 +25,7 @@ type OPASessionObj struct {
 	ResourcesPrioritized  map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>
 	Report                *reporthandlingv2.PostureReport               // scan results v2 - Remove
 	Exceptions            []armotypes.PostureExceptionPolicy            // list of exceptions to apply on scan results
-	RegoInputData         RegoInputData                                 // input passed to rgo for scanning. map[<control name>][<input arguments>]
+	RegoInputData         RegoInputData                                 // input passed to rego for scanning. map[<control name>][<input arguments>]
 	Metadata              *reporthandlingv2.Metadata
 	InfoMap               map[string]apis.StatusInfo // Map errors of resources to StatusInfo
 	ResourceToControlsMap map[string][]string        // map[<apigroup/apiversion/resource>] = [<control_IDs>]
