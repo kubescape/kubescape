@@ -13,12 +13,11 @@ The features serve different stages of the workflow of the users:
 The items in the Kubescape roadmap are split into 3 major groups based on the feature planning maturity:
 
 * [Planning](#planning-) - we have tickets open for these issues with a more or less clear vision of design.
-* [Backlog](#backlog-)  -  features that were discussed at a high level but are not ready for development. 
-* [Wishlist](#wishlist-) -  features that we are dreaming of in 😀 and want to push them gradually forward.
+* [Backlog](#backlog-) - features that were discussed at a high level but are not ready for development. 
+* [Wishlist](#wishlist-) - features that we are dreaming of in 😀 and want to push them gradually forward.
 
 
 ## Planning 👷
-
 * ##### Storing scan results in cluster
   We want Kubescape scan results (both cluster and image scan) to be stored in the cluster locally as `CRD`s. This will enable easier integration with results by other projects as well as with scripting via `kubectl`. This will also make image scan based controls to avoid accessing external resources for image vulnerability scan results.
 
@@ -26,11 +25,11 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
   Implementing an eBPF agent (based on Falco or Tracee) which tracks file activity in workloads to prioritize container image vulnerabilities.
 
 * ##### Prioritization engine using MITRE Attack matrix based attack chains
-  Create a security issue prioritization engine that scores resources based on control based attack chains. All Kubescape controls can be arranged into attack categories of the MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls is to be categorized in these system and Kubescape will calculate a priority score based on the interconnections between failed controls.
+  Create a security issue prioritization engine that scores resources based on control based attack chains. All Kubescape controls can be arranged into attack categories of the MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls are to be categorized in these system and Kubescape will calculate a priority score based on the interconnections between failed controls and success controls.
 
 * ##### Integration with image registries 
  We want to expand Kubescape to integrate with different image registries and read image vulnerability information from there. This will allow Kubescape to give contextual security information about vulnerabilities. Container registry integration.
-* ##### Kubescape CLI control over cluster operations 
+* ##### Kubescape CLI controls over cluster operations 
   Add functionality to Kubescape CLI to trigger operations in Kubescape cluster components (example: trigger image scans, etc.)
 * ##### Git integration for pull requests 
   Create insightful GitHub actions for Kubescape.
@@ -38,11 +37,12 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 
 ## Backlog 📅
 * ##### JSON path for HELM charts 
-  Today, Kubescape can point to issues in the Kubernetes object. We want to develop this feature so Kubescape will be able to point to the misconfigured source file (HELM).
+  Today, Kubescape can point to issues in the Kubernetes object. We want to develop this feature so Kubescape will be able to point to the misconfigured source file (HELM) in any project.
 * ##### Create Kubescape HELM plugin
   Producing scan results in the context of HELM.
 * ##### Kubescape based admission controller 
   Implement admission controller API for Kubescape microservice to enable users to use Kubescape rules as policies.
+
 
 ## Wishlist 💭
 * ##### Integrate with other Kubernetes CLI tools
@@ -54,22 +54,23 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 * ##### Scanning images with GO for vulnerabilities
   Images scanners cannot determine which packages were used to build Go executables and we want to scan them for vulnerabilities.
 * ##### Scanning Dockerfile-s for security best practices
-  Scan image or Dockerfile to determine whether it is using security best practices (like root containers).
+  Scan image or Dockerfile to determine whether it is using security best practices (like root containers) or not.
 * ##### Custom controls and rules
   Enable users to define their own Rego base rules.
 * ##### More CI/CD tool integration
-  Jenkins and etc. 😀
+  Like, for example, **Jenkins** and etc.😀
 
 
 ## Completed features 🎓
-* Kubelet configuration validation 
+* Kubelet configuration validation
 * API server configuration validation
-* Image vulnerability scanning based controls 
+* Image vulnerability scanning based controls
 * Assisted remediation (telling where/what to fix)
 * Integration with Prometheus
 * Configuration of controls (customizing rules for a given environment)
 * Installation in the cluster for continuous monitoring
-* Host scanner 
+* Host scanner
 * Cloud vendor API integration
 * Custom exceptions
 * Custom frameworks
+ 
