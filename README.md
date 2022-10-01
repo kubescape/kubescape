@@ -56,7 +56,7 @@ kubescape scan --submit --enable-host-scan --verbose
 <img src="docs/ks-cli-arch.png">
 
 ### Operator
-<img src="docs/ks-ks-operator-arch.png">
+<img src="docs/ks-operator-arch.png">
 
 ### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
