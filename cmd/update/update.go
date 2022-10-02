@@ -48,7 +48,7 @@ func GetUpdateCmd() *cobra.Command {
 					if err != nil {
 						logger.L().Fatal(err.Error())
 					}
-					//fmt.Println(string(cmd))
+
 					cautils.StopSpinner()
 				}
 			}
