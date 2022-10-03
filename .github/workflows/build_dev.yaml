@@ -2,7 +2,7 @@ name: build-dev
 
 on:
   push:
-    branches: [ master ]
+    branches: [ gh-testing ]
     paths-ignore:
       # Do not run the pipeline if only Markdown files changed
       - '**.md'
