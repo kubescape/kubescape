@@ -8,10 +8,8 @@ on:
       # Do not run the pipeline if only Markdown files changed
       - '**.yaml'
       - '**.md'
-  push:
-    branches: [ workflow-call-testing ]
 jobs:
-  trigger-test-workflow:
+  test:
     uses: ./.github/workflows/test.yaml
     with:
       release: "v2.0.${{ github.run_number }}"

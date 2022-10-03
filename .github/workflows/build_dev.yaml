@@ -2,7 +2,7 @@ name: build-dev
 
 on:
   push:
-    branches: [ gh-testing ]
+    branches: [ dev ]
     paths-ignore:
       # Do not run the pipeline if only Markdown files changed
       - '**.md'
@@ -14,7 +14,7 @@ jobs:
       client: test
  
   publish-dev-image:
-    # if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
+    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
     uses: ./.github/workflows/build-image.yaml
     needs: test
     with:

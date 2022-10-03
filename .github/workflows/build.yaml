@@ -77,7 +77,7 @@ jobs:
           asset_content_type: application/octet-stream
   
   publish-image:
-    # if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
+    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
     uses: ./.github/workflows/build-image.yaml
     needs: create-release
     with:
