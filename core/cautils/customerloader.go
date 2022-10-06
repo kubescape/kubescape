@@ -106,7 +106,7 @@ func NewLocalConfig(
 
 	// If a custom cluster name is provided then set that name, else use the cluster's original name
 	if customClusterName != "" {
-		lc.configObj.ClusterName = AdoptCustomClusterName(customClusterName)
+		lc.configObj.ClusterName = AdoptClusterName(customClusterName)
 	} else if clusterName != "" {
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
@@ -216,7 +216,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 
 	// If a custom cluster name is provided then set that name, else use the cluster's original name
 	if customClusterName != "" {
-		c.configObj.ClusterName = AdoptCustomClusterName(customClusterName)
+		c.configObj.ClusterName = AdoptClusterName(customClusterName)
 	} else if clusterName != "" {
 		c.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
@@ -472,19 +472,6 @@ func (clusterConfig *ClusterConfig) deleteConfigMap() error {
 
 func DeleteConfigFile() error {
 	return os.Remove(ConfigFileFullPath())
-}
-
-// To check if the custom cluster name is valid:
-func AdoptCustomClusterName(customClusterName string) string {
-	is_alphanumeric := regexp.MustCompile(`^[a-zA-Z0-9]*$`).MatchString(customClusterName)
-
-	// Check it does not contain special-characters
-	if is_alphanumeric == false {
-		logger.L().Fatal("custom cluster name cannot contain special characters")
-	} else if len(customClusterName) >= 256 { // Check it contains less than 256 characters
-		logger.L().Fatal("custom cluster name cannot contain more than 255 characters")
-	}
-	return customClusterName
 }
 
 func AdoptClusterName(clusterName string) string {
