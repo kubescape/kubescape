@@ -146,11 +146,30 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 				sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
 			}
 		}
+
+		// api server info resource
+		err = k8sHandler.collectAPIServerInfoResource(allResources, ksResourceMap)
+		if err != nil {
+			logger.L().Warning("failed to collect api server info resource", helpers.Error(err))
+		}
+
 		cautils.StopSpinner()
 		logger.L().Info("Requested cloud provider data")
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, nil
+}
+
+func (k8sHandler *K8sResourceHandler) collectAPIServerInfoResource(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
+	clusterAPIServerInfo, err := k8sHandler.k8s.DiscoveryClient.ServerVersion()
+	if err != nil {
+		return err
+	}
+	resource := cloudsupport.NewApiServerVersionInfo(clusterAPIServerInfo)
+	allResources[resource.GetID()] = resource
+	(*ksResourceMap)[fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind())] = []string{resource.GetID()}
+
+	return nil
 }
 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
