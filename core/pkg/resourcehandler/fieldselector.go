@@ -49,6 +49,7 @@ func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 	fieldSelectors := []string{}
 	for _, n := range strings.Split(is.namespace, ",") {
 		if n != "" {
+			// Do not add any fieldSelector for cluster-scoped resources
 			if namespaceSelector := getNamespacesSelector(resource, n, "=="); namespaceSelector != "" {
 				fieldSelectors = append(fieldSelectors, namespaceSelector)
 			}
