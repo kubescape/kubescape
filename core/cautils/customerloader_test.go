@@ -17,10 +17,10 @@ func mockConfigObj() *ConfigObj {
 		ClusterName:        "ddd",
 		CustomerAdminEMail: "ab@cd",
 		Token:              "eee",
-		CloudReport:        "report.armo.cloud",
-		CloudAPI:           "api.armosec.io",
-		CloudUI:            "cloud.armosec.io",
-		CloudAuth:          "auth.armosec.io",
+		CloudReportURL:     "report.armo.cloud",
+		CloudAPIURL:        "api.armosec.io",
+		CloudUIURL:         "cloud.armosec.io",
+		CloudAuthURL:       "auth.armosec.io",
 	}
 }
 func mockLocalConfig() *LocalConfig {
@@ -44,10 +44,10 @@ func TestConfig(t *testing.T) {
 	assert.Equal(t, co.AccountID, cop.AccountID)
 	assert.Equal(t, co.ClientID, cop.ClientID)
 	assert.Equal(t, co.SecretKey, cop.SecretKey)
-	assert.Equal(t, co.CloudReport, cop.CloudReport)
-	assert.Equal(t, co.CloudAPI, cop.CloudAPI)
-	assert.Equal(t, co.CloudUI, cop.CloudUI)
-	assert.Equal(t, co.CloudAuth, cop.CloudAuth)
+	assert.Equal(t, co.CloudReportURL, cop.CloudReportURL)
+	assert.Equal(t, co.CloudAPIURL, cop.CloudAPIURL)
+	assert.Equal(t, co.CloudUIURL, cop.CloudUIURL)
+	assert.Equal(t, co.CloudAuthURL, cop.CloudAuthURL)
 	assert.Equal(t, "", cop.ClusterName)        // Not copied to bytes
 	assert.Equal(t, "", cop.CustomerAdminEMail) // Not copied to bytes
 	assert.Equal(t, "", cop.Token)              // Not copied to bytes
@@ -69,10 +69,10 @@ func TestITenantConfig(t *testing.T) {
 	assert.Equal(t, co.ClusterName, lc.GetContextName())
 	assert.Equal(t, co.CustomerAdminEMail, lc.GetTenantEmail())
 	assert.Equal(t, co.Token, lc.GetToken())
-	assert.Equal(t, co.CloudReport, lc.GetCloudReport())
-	assert.Equal(t, co.CloudAPI, lc.GetCloudAPI())
-	assert.Equal(t, co.CloudUI, lc.GetCloudUI())
-	assert.Equal(t, co.CloudAuth, lc.GetCloudAuth())
+	assert.Equal(t, co.CloudReportURL, lc.GetCloudReportURL())
+	assert.Equal(t, co.CloudAPIURL, lc.GetCloudAPIURL())
+	assert.Equal(t, co.CloudUIURL, lc.GetCloudUIURL())
+	assert.Equal(t, co.CloudAuthURL, lc.GetCloudAuthURL())
 
 	// test ClusterConfig methods
 	assert.Equal(t, co.AccountID, c.GetAccountID())
@@ -81,10 +81,10 @@ func TestITenantConfig(t *testing.T) {
 	assert.Equal(t, co.ClusterName, c.GetContextName())
 	assert.Equal(t, co.CustomerAdminEMail, c.GetTenantEmail())
 	assert.Equal(t, co.Token, c.GetToken())
-	assert.Equal(t, co.CloudReport, c.GetCloudReport())
-	assert.Equal(t, co.CloudAPI, c.GetCloudAPI())
-	assert.Equal(t, co.CloudUI, c.GetCloudUI())
-	assert.Equal(t, co.CloudAuth, c.GetCloudAuth())
+	assert.Equal(t, co.CloudReportURL, c.GetCloudReportURL())
+	assert.Equal(t, co.CloudAPIURL, c.GetCloudAPIURL())
+	assert.Equal(t, co.CloudUIURL, c.GetCloudUIURL())
+	assert.Equal(t, co.CloudAuthURL, c.GetCloudAuthURL())
 }
 
 func TestUpdateConfigData(t *testing.T) {
@@ -97,10 +97,10 @@ func TestUpdateConfigData(t *testing.T) {
 	assert.Equal(t, c.GetAccountID(), configMap.Data["accountID"])
 	assert.Equal(t, c.GetClientID(), configMap.Data["clientID"])
 	assert.Equal(t, c.GetSecretKey(), configMap.Data["secretKey"])
-	assert.Equal(t, c.GetCloudReport(), configMap.Data["cloudReport"])
-	assert.Equal(t, c.GetCloudAPI(), configMap.Data["cloudAPI"])
-	assert.Equal(t, c.GetCloudUI(), configMap.Data["cloudUI"])
-	assert.Equal(t, c.GetCloudAuth(), configMap.Data["cloudAuth"])
+	assert.Equal(t, c.GetCloudReportURL(), configMap.Data["cloudReportURL"])
+	assert.Equal(t, c.GetCloudAPIURL(), configMap.Data["cloudAPIURL"])
+	assert.Equal(t, c.GetCloudUIURL(), configMap.Data["cloudUIURL"])
+	assert.Equal(t, c.GetCloudAuthURL(), configMap.Data["cloudAuthURL"])
 }
 
 func TestReadConfig(t *testing.T) {
@@ -118,10 +118,10 @@ func TestReadConfig(t *testing.T) {
 	assert.Equal(t, com.ClusterName, co.ClusterName)
 	assert.Equal(t, com.CustomerAdminEMail, co.CustomerAdminEMail)
 	assert.Equal(t, com.Token, co.Token)
-	assert.Equal(t, com.CloudReport, co.CloudReport)
-	assert.Equal(t, com.CloudAPI, co.CloudAPI)
-	assert.Equal(t, com.CloudUI, co.CloudUI)
-	assert.Equal(t, com.CloudAuth, co.CloudAuth)
+	assert.Equal(t, com.CloudReportURL, co.CloudReportURL)
+	assert.Equal(t, com.CloudAPIURL, co.CloudAPIURL)
+	assert.Equal(t, com.CloudUIURL, co.CloudUIURL)
+	assert.Equal(t, com.CloudAuthURL, co.CloudAuthURL)
 }
 
 func TestLoadConfigFromData(t *testing.T) {
@@ -145,10 +145,10 @@ func TestLoadConfigFromData(t *testing.T) {
 		assert.Equal(t, c.GetContextName(), co.ClusterName)
 		assert.Equal(t, c.GetTenantEmail(), co.CustomerAdminEMail)
 		assert.Equal(t, c.GetToken(), co.Token)
-		assert.Equal(t, c.GetCloudReport(), co.CloudReport)
-		assert.Equal(t, c.GetCloudAPI(), co.CloudAPI)
-		assert.Equal(t, c.GetCloudUI(), co.CloudUI)
-		assert.Equal(t, c.GetCloudAuth(), co.CloudAuth)
+		assert.Equal(t, c.GetCloudReportURL(), co.CloudReportURL)
+		assert.Equal(t, c.GetCloudAPIURL(), co.CloudAPIURL)
+		assert.Equal(t, c.GetCloudUIURL(), co.CloudUIURL)
+		assert.Equal(t, c.GetCloudAuthURL(), co.CloudAuthURL)
 	}
 
 	// use case: all data is in config.json
@@ -168,10 +168,10 @@ func TestLoadConfigFromData(t *testing.T) {
 		assert.Equal(t, c.GetAccountID(), co.AccountID)
 		assert.Equal(t, c.GetClientID(), co.ClientID)
 		assert.Equal(t, c.GetSecretKey(), co.SecretKey)
-		assert.Equal(t, c.GetCloudReport(), co.CloudReport)
-		assert.Equal(t, c.GetCloudAPI(), co.CloudAPI)
-		assert.Equal(t, c.GetCloudUI(), co.CloudUI)
-		assert.Equal(t, c.GetCloudAuth(), co.CloudAuth)
+		assert.Equal(t, c.GetCloudReportURL(), co.CloudReportURL)
+		assert.Equal(t, c.GetCloudAPIURL(), co.CloudAPIURL)
+		assert.Equal(t, c.GetCloudUIURL(), co.CloudUIURL)
+		assert.Equal(t, c.GetCloudAuthURL(), co.CloudAuthURL)
 	}
 
 	// use case: some data is in config.json
@@ -184,12 +184,12 @@ func TestLoadConfigFromData(t *testing.T) {
 		// add to map
 		configMap.Data["clientID"] = c.configObj.ClientID
 		configMap.Data["secretKey"] = c.configObj.SecretKey
-		configMap.Data["cloudReport"] = c.configObj.CloudReport
+		configMap.Data["cloudReportURL"] = c.configObj.CloudReportURL
 
 		// delete the content
 		c.configObj.ClientID = ""
 		c.configObj.SecretKey = ""
-		c.configObj.CloudReport = ""
+		c.configObj.CloudReportURL = ""
 
 		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
 		loadConfigFromData(c.configObj, configMap.Data)
@@ -197,7 +197,7 @@ func TestLoadConfigFromData(t *testing.T) {
 		assert.NotEmpty(t, c.GetAccountID())
 		assert.NotEmpty(t, c.GetClientID())
 		assert.NotEmpty(t, c.GetSecretKey())
-		assert.NotEmpty(t, c.GetCloudReport())
+		assert.NotEmpty(t, c.GetCloudReportURL())
 	}
 
 	// use case: some data is in config.json
@@ -261,10 +261,10 @@ func TestAdoptClusterName(t *testing.T) {
 
 func TestUpdateCloudURLs(t *testing.T) {
 	co := mockConfigObj()
-	mockCloudAPI := "1-2-3-4.com"
-	os.Setenv("KS_CLOUD_API_URL", mockCloudAPI)
+	mockCloudAPIURL := "1-2-3-4.com"
+	os.Setenv("KS_CLOUD_API_URL", mockCloudAPIURL)
 
-	assert.NotEqual(t, co.CloudAPI, mockCloudAPI)
+	assert.NotEqual(t, co.CloudAPIURL, mockCloudAPIURL)
 	updateCloudURLs(co)
-	assert.Equal(t, co.CloudAPI, mockCloudAPI)
+	assert.Equal(t, co.CloudAPIURL, mockCloudAPIURL)
 }

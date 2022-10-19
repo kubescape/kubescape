@@ -18,10 +18,10 @@ type RootInfo struct {
 
 }
 type CloudURLs struct {
-	CloudReport string
-	CloudAPI    string
-	CloudUI     string
-	CloudAuth   string
+	CloudReportURL string
+	CloudAPIURL    string
+	CloudUIURL     string
+	CloudAuthURL   string
 }
 
 type Credentials struct {

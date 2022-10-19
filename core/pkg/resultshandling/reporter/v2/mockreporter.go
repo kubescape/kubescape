@@ -32,7 +32,7 @@ func (reportMock *ReportMock) SetClusterName(clusterName string) {
 }
 
 func (reportMock *ReportMock) GetURL() string {
-	u := fmt.Sprintf("https://%s/account/sign-up", getter.GetKSCloudAPIConnector().GetCloudUI())
+	u := fmt.Sprintf("https://%s/account/sign-up", getter.GetKSCloudAPIConnector().GetCloudUIURL())
 	if reportMock.query != "" {
 		u += fmt.Sprintf("?%s", reportMock.query)
 	}

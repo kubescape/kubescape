@@ -3,13 +3,13 @@ package v1
 import "io"
 
 type SetConfig struct {
-	Account     string
-	ClientID    string
-	SecretKey   string
-	CloudReport string
-	CloudAPI    string
-	CloudUI     string
-	CloudAuth   string
+	Account        string
+	ClientID       string
+	SecretKey      string
+	CloudReportURL string
+	CloudAPIURL    string
+	CloudUIURL     string
+	CloudAuthURL   string
 }
 
 type ViewConfig struct {

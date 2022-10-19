@@ -33,17 +33,17 @@ var (
 
 // KSCloudAPI allows accessing the API of the Kubescape Cloud offering
 type KSCloudAPI struct {
-	httpClient  *http.Client
-	cloudAPI    string
-	cloudAuth   string
-	cloudReport string
-	cloudUI     string
-	accountID   string
-	clientID    string
-	secretKey   string
-	authCookie  string
-	feToken     FeLoginResponse
-	loggedIn    bool
+	httpClient     *http.Client
+	cloudAPIURL    string
+	cloudAuthURL   string
+	cloudReportURL string
+	cloudUIURL     string
+	accountID      string
+	clientID       string
+	secretKey      string
+	authCookie     string
+	feToken        FeLoginResponse
+	loggedIn       bool
 }
 
 var globalKSCloudAPIConnector *KSCloudAPI
@@ -62,10 +62,10 @@ func GetKSCloudAPIConnector() *KSCloudAPI {
 func NewKSCloudAPIDev() *KSCloudAPI {
 	apiObj := newKSCloudAPI()
 
-	apiObj.cloudAPI = ksCloudDevBEURL
-	apiObj.cloudAuth = ksCloudDevAUTHURL
-	apiObj.cloudReport = ksCloudDevERURL
-	apiObj.cloudUI = ksCloudDevFEURL
+	apiObj.cloudAPIURL = ksCloudDevBEURL
+	apiObj.cloudAuthURL = ksCloudDevAUTHURL
+	apiObj.cloudReportURL = ksCloudDevERURL
+	apiObj.cloudUIURL = ksCloudDevFEURL
 
 	return apiObj
 }
@@ -73,10 +73,10 @@ func NewKSCloudAPIDev() *KSCloudAPI {
 func NewKSCloudAPIProd() *KSCloudAPI {
 	apiObj := newKSCloudAPI()
 
-	apiObj.cloudAPI = ksCloudBEURL
-	apiObj.cloudReport = ksCloudERURL
-	apiObj.cloudUI = ksCloudFEURL
-	apiObj.cloudAuth = ksCloudAUTHURL
+	apiObj.cloudAPIURL = ksCloudBEURL
+	apiObj.cloudReportURL = ksCloudERURL
+	apiObj.cloudUIURL = ksCloudFEURL
+	apiObj.cloudAuthURL = ksCloudAUTHURL
 
 	return apiObj
 }
@@ -84,10 +84,10 @@ func NewKSCloudAPIProd() *KSCloudAPI {
 func NewKSCloudAPIStaging() *KSCloudAPI {
 	apiObj := newKSCloudAPI()
 
-	apiObj.cloudAPI = ksCloudStageBEURL
-	apiObj.cloudReport = ksCloudStageERURL
-	apiObj.cloudUI = ksCloudStageFEURL
-	apiObj.cloudAuth = ksCloudStageAUTHURL
+	apiObj.cloudAPIURL = ksCloudStageBEURL
+	apiObj.cloudReportURL = ksCloudStageERURL
+	apiObj.cloudUIURL = ksCloudStageFEURL
+	apiObj.cloudAuthURL = ksCloudStageAUTHURL
 
 	return apiObj
 }
@@ -95,10 +95,10 @@ func NewKSCloudAPIStaging() *KSCloudAPI {
 func NewKSCloudAPICustomized(ksCloudERURL, ksCloudBEURL, ksCloudFEURL, ksCloudAUTHURL string) *KSCloudAPI {
 	apiObj := newKSCloudAPI()
 
-	apiObj.cloudReport = ksCloudERURL
-	apiObj.cloudAPI = ksCloudBEURL
-	apiObj.cloudUI = ksCloudFEURL
-	apiObj.cloudAuth = ksCloudAUTHURL
+	apiObj.cloudReportURL = ksCloudERURL
+	apiObj.cloudAPIURL = ksCloudBEURL
+	apiObj.cloudUIURL = ksCloudFEURL
+	apiObj.cloudAuthURL = ksCloudAUTHURL
 
 	return apiObj
 }
@@ -133,38 +133,22 @@ func (api *KSCloudAPI) Get(fullURL string, headers map[string]string) (string, e
 	return HttpGetter(api.httpClient, fullURL, headers)
 }
 
-func (api *KSCloudAPI) GetAccountID() string   { return api.accountID }
-func (api *KSCloudAPI) IsLoggedIn() bool       { return api.loggedIn }
-func (api *KSCloudAPI) GetClientID() string    { return api.clientID }
-func (api *KSCloudAPI) GetSecretKey() string   { return api.secretKey }
-func (api *KSCloudAPI) GetCloudReport() string { return api.cloudReport }
-func (api *KSCloudAPI) GetCloudAPI() string    { return api.cloudAPI }
-func (api *KSCloudAPI) GetCloudUI() string     { return api.cloudUI }
-func (api *KSCloudAPI) GetCloudAuth() string   { return api.cloudAuth }
+func (api *KSCloudAPI) GetAccountID() string      { return api.accountID }
+func (api *KSCloudAPI) IsLoggedIn() bool          { return api.loggedIn }
+func (api *KSCloudAPI) GetClientID() string       { return api.clientID }
+func (api *KSCloudAPI) GetSecretKey() string      { return api.secretKey }
+func (api *KSCloudAPI) GetCloudReportURL() string { return api.cloudReportURL }
+func (api *KSCloudAPI) GetCloudAPIURL() string    { return api.cloudAPIURL }
+func (api *KSCloudAPI) GetCloudUIURL() string     { return api.cloudUIURL }
+func (api *KSCloudAPI) GetCloudAuthURL() string   { return api.cloudAuthURL }
 
-func (api *KSCloudAPI) SetAccountID(accountID string) { api.accountID = accountID }
-func (api *KSCloudAPI) SetClientID(clientID string)   { api.clientID = clientID }
-func (api *KSCloudAPI) SetSecretKey(secretKey string) { api.secretKey = secretKey }
-func (api *KSCloudAPI) SetCloudReport(cloudReport string) {
-	if cloudReport != "" {
-		api.cloudReport = cloudReport
-	}
-}
-func (api *KSCloudAPI) SetCloudAPI(cloudAPI string) {
-	if cloudAPI != "" {
-		api.cloudAPI = cloudAPI
-	}
-}
-func (api *KSCloudAPI) SetCloudUI(cloudUI string) {
-	if cloudUI != "" {
-		api.cloudUI = cloudUI
-	}
-}
-func (api *KSCloudAPI) SetCloudAuth(cloudAuth string) {
-	if cloudAuth != "" {
-		api.cloudAuth = cloudAuth
-	}
-}
+func (api *KSCloudAPI) SetAccountID(accountID string)           { api.accountID = accountID }
+func (api *KSCloudAPI) SetClientID(clientID string)             { api.clientID = clientID }
+func (api *KSCloudAPI) SetSecretKey(secretKey string)           { api.secretKey = secretKey }
+func (api *KSCloudAPI) SetCloudReportURL(cloudReportURL string) { api.cloudReportURL = cloudReportURL }
+func (api *KSCloudAPI) SetCloudAPIURL(cloudAPIURL string)       { api.cloudAPIURL = cloudAPIURL }
+func (api *KSCloudAPI) SetCloudUIURL(cloudUIURL string)         { api.cloudUIURL = cloudUIURL }
+func (api *KSCloudAPI) SetCloudAuthURL(cloudAuthURL string)     { api.cloudAuthURL = cloudAuthURL }
 
 func (api *KSCloudAPI) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
 	respStr, err := api.Get(api.getAttackTracksURL(), nil)

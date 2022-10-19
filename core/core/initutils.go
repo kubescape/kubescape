@@ -128,7 +128,7 @@ func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
-		If CloudReport not set - Do not send report
+		If CloudReportURL not set - Do not send report
 
 		If "First run (local config not found)" -
 			Default/keep-local - Do not send report
@@ -140,7 +140,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 	*/
 
-	if getter.GetKSCloudAPIConnector().GetCloudAPI() == "" {
+	if getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" {
 		scanInfo.Submit = false
 		return
 	}
@@ -177,7 +177,7 @@ func getPolicyGetter(loadPoliciesFromFile []string, tenantEmail string, framewor
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
-	if tenantEmail != "" && getter.GetKSCloudAPIConnector().GetCloudAPI() != "" && frameworkScope {
+	if tenantEmail != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
 	}

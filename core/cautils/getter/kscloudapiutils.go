@@ -13,7 +13,7 @@ var NativeFrameworks = []string{"nsa", "mitre", "armobest", "devopsbest"}
 
 func (api *KSCloudAPI) getFrameworkURL(frameworkName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
 	q.Add("customerGUID", api.getCustomerGUIDFallBack())
@@ -30,7 +30,7 @@ func (api *KSCloudAPI) getFrameworkURL(frameworkName string) string {
 
 func (api *KSCloudAPI) getAttackTracksURL() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/attackTracks"
 	q := u.Query()
 	q.Add("customerGUID", api.getCustomerGUIDFallBack())
@@ -41,7 +41,7 @@ func (api *KSCloudAPI) getAttackTracksURL() string {
 
 func (api *KSCloudAPI) getListFrameworkURL() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/armoFrameworks"
 	q := u.Query()
 	q.Add("customerGUID", api.getCustomerGUIDFallBack())
@@ -51,7 +51,7 @@ func (api *KSCloudAPI) getListFrameworkURL() string {
 }
 func (api *KSCloudAPI) getExceptionsURL(clusterName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/armoPostureExceptions"
 
 	q := u.Query()
@@ -66,7 +66,7 @@ func (api *KSCloudAPI) getExceptionsURL(clusterName string) string {
 
 func (api *KSCloudAPI) exceptionsURL(exceptionsPolicyName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/postureExceptionPolicy"
 
 	q := u.Query()
@@ -88,7 +88,7 @@ func (api *KSCloudAPI) getAccountConfigDefault(clusterName string) string {
 
 func (api *KSCloudAPI) getAccountConfig(clusterName string) string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/armoCustomerConfiguration"
 
 	q := u.Query()
@@ -103,21 +103,21 @@ func (api *KSCloudAPI) getAccountConfig(clusterName string) string {
 
 func (api *KSCloudAPI) getAccountURL() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/createTenant"
 	return u.String()
 }
 
 func (api *KSCloudAPI) getApiToken() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAuth())
+	u.Scheme, u.Host = parseHost(api.GetCloudAuthURL())
 	u.Path = "identity/resources/auth/v1/api-token"
 	return u.String()
 }
 
 func (api *KSCloudAPI) getOpenidCustomers() string {
 	u := url.URL{}
-	u.Scheme, u.Host = parseHost(api.GetCloudAPI())
+	u.Scheme, u.Host = parseHost(api.GetCloudAPIURL())
 	u.Path = "api/v1/openid_customers"
 	return u.String()
 }
