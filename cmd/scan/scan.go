@@ -1,8 +1,8 @@
 package scan
 
 import (
+	"flag"
 	"fmt"
-	"math"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -75,11 +75,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().Float32VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 100, "Failure threshold is the percent above which the command fails and returns exit code 1")
 
-	scanCmd.PersistentFlags().IntVar(&scanInfo.FailThresholdCritical, "threshold-critical", math.MaxInt, "Critical threshold is the amount of resources that have critical failed controls above which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().IntVar(&scanInfo.FailThresholdHigh, "threshold-high", math.MaxInt, "The amount of resources that have failed controls with High severity above which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().IntVar(&scanInfo.FailThresholdMedium, "threshold-medium", math.MaxInt, "The amount of resources that have failed controls with Medium severity above which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().IntVar(&scanInfo.FailThresholdLow, "threshold-low", math.MaxInt, "The amount of resources that have failed controls with Low severity above which the command fails and returns exit code 1")
-
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html"`)
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to ARMO backend. Use this flag if you ran with the '--submit' flag in the past and you do not want to submit your current scan results")
@@ -101,6 +97,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
 	// scanCmd.PersistentFlags().MarkHidden("format-version") // meant for testing different output approaches and not for common use
+
+	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
+	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
 
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://github.com/kubescape/kubescape/blob/master/core/pkg/hostsensorutils/hostsensor.yaml")
 	hostF.NoOptDefVal = "true"

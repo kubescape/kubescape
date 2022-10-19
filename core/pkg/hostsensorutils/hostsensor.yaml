@@ -28,12 +28,15 @@ spec:
       tolerations:
       # this toleration is to have the DaemonDet runnable on master nodes
       # remove it if your masters can't run pods
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
       - key: node-role.kubernetes.io/master
         operator: Exists
         effect: NoSchedule
       containers:
       - name: host-sensor
-        image: quay.io/kubescape/host-scanner:latest
+        image: quay.io/kubescape/host-scanner:v1.0.28
         securityContext:
           privileged: true
           readOnlyRootFilesystem: true
