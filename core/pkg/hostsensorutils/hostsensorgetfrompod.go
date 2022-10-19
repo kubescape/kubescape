@@ -129,6 +129,12 @@ func (hsh *HostSensorHandler) GetKubeProxyInfo() ([]hostsensor.HostSensorDataEnv
 	return hsh.sendAllPodsHTTPGETRequest("/kubeProxyInfo", "KubeProxyInfo")
 }
 
+// return list of KubeProxyInfo
+func (hsh *HostSensorHandler) GetControlPlaneInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/controlPlaneInfo", ControlPlaneInfo)
+}
+
 // return list of KubeletCommandLine
 func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
@@ -261,6 +267,16 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 
 	// GetKubeProxyInfo
 	kcData, err = hsh.GetKubeProxyInfo()
+	if err != nil {
+		addInfoToMap(KubeProxyInfo, infoMap, err)
+		logger.L().Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
+
+	// GetControlPlaneInfo
+	kcData, err = hsh.GetControlPlaneInfo()
 	if err != nil {
 		addInfoToMap(KubeProxyInfo, infoMap, err)
 		logger.L().Warning(err.Error())

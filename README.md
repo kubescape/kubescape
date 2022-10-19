@@ -51,6 +51,13 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
+## Architecture in short
+### CLI
+<img src="docs/ks-cli-arch.png" width="300">
+
+### Operator
+<img src="docs/ks-operator-arch.png" width="300">
+
 ### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
 </br>
@@ -185,6 +192,11 @@ kubescape scan framework mitre --submit
 #### Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armosec.io/docs/controls?utm_source=github&utm_medium=repository) 
 ```
 kubescape scan control "Privileged container"
+```
+
+#### Scan using an anternative kubeconfig file
+```
+kubescape scan --kubeconfig cluster.conf
 ```
 
 #### Scan specific namespaces
