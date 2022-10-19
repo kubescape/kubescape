@@ -28,10 +28,18 @@ type IBackend interface {
 	GetAccountID() string
 	GetClientID() string
 	GetSecretKey() string
+	GetCloudReport() string
+	GetCloudAPI() string
+	GetCloudUI() string
+	GetCloudAuth() string
 
 	SetAccountID(accountID string)
 	SetClientID(clientID string)
 	SetSecretKey(secretKey string)
+	SetCloudReport(cloudReport string)
+	SetCloudAPI(cloudAPI string)
+	SetCloudUI(cloudUI string)
+	SetCloudAuth(cloudAuth string)
 
 	GetTenant() (*TenantResponse, error)
 }

@@ -17,6 +17,12 @@ type RootInfo struct {
 	KSCloudBEURLsDep string // Kubescape Cloud URL
 
 }
+type CloudURLs struct {
+	CloudReport string
+	CloudAPI    string
+	CloudUI     string
+	CloudAuth   string
+}
 
 type Credentials struct {
 	Account   string

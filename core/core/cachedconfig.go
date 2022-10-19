@@ -19,6 +19,18 @@ func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 	if setConfig.ClientID != "" {
 		tenant.GetConfigObj().ClientID = setConfig.ClientID
 	}
+	if setConfig.CloudAPI != "" {
+		tenant.GetConfigObj().CloudAPI = setConfig.CloudAPI
+	}
+	if setConfig.CloudAuth != "" {
+		tenant.GetConfigObj().CloudAuth = setConfig.CloudAuth
+	}
+	if setConfig.CloudReport != "" {
+		tenant.GetConfigObj().CloudReport = setConfig.CloudReport
+	}
+	if setConfig.CloudUI != "" {
+		tenant.GetConfigObj().CloudUI = setConfig.CloudUI
+	}
 
 	return tenant.UpdateCachedConfig()
 }

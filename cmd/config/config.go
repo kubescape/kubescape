@@ -25,6 +25,9 @@ var (
 
   # Set access key
   kubescape config set secretKey <access key>
+
+  # Set cloudAPI
+  kubescape config set cloudAPI <cloud API>
 `
 )
 
