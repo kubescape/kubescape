@@ -97,6 +97,8 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType ca
 		return printerv2.NewPdfPrinter()
 	case printer.HtmlFormat:
 		return printerv2.NewHtmlPrinter()
+	case printer.SARIFFormat:
+		return printerv2.NewSARIFPrinter()
 	default:
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
 	}
