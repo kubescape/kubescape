@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	corev1 "k8s.io/api/core/v1"
@@ -32,6 +33,10 @@ type ConfigObj struct {
 	Token              string `json:"invitationParam,omitempty"`
 	CustomerAdminEMail string `json:"adminMail,omitempty"`
 	ClusterName        string `json:"clusterName,omitempty"`
+	CloudReportURL     string `json:"cloudReportURL,omitempty"`
+	CloudAPIURL        string `json:"cloudAPIURL,omitempty"`
+	CloudUIURL         string `json:"cloudUIURL,omitempty"`
+	CloudAuthURL       string `json:"cloudAuthURL,omitempty"`
 }
 
 // Config - convert ConfigObj to config file
@@ -75,6 +80,10 @@ type ITenantConfig interface {
 	GetClientID() string
 	GetSecretKey() string
 	GetConfigObj() *ConfigObj
+	GetCloudReportURL() string
+	GetCloudAPIURL() string
+	GetCloudUIURL() string
+	GetCloudAuthURL() string
 	// GetBackendAPI() getter.IBackend
 	// GenerateURL()
 
@@ -103,6 +112,7 @@ func NewLocalConfig(
 	}
 
 	updateCredentials(lc.configObj, credentials)
+	updateCloudURLs(lc.configObj)
 
 	// If a custom cluster name is provided then set that name, else use the cluster's original name
 	if customClusterName != "" {
@@ -114,18 +124,35 @@ func NewLocalConfig(
 	lc.backendAPI.SetAccountID(lc.configObj.AccountID)
 	lc.backendAPI.SetClientID(lc.configObj.ClientID)
 	lc.backendAPI.SetSecretKey(lc.configObj.SecretKey)
+	if lc.configObj.CloudAPIURL != "" {
+		lc.backendAPI.SetCloudAPIURL(lc.configObj.CloudAPIURL)
+	}
+	if lc.configObj.CloudAuthURL != "" {
+		lc.backendAPI.SetCloudAuthURL(lc.configObj.CloudAuthURL)
+	}
+	if lc.configObj.CloudReportURL != "" {
+		lc.backendAPI.SetCloudReportURL(lc.configObj.CloudReportURL)
+	}
+	if lc.configObj.CloudUIURL != "" {
+		lc.backendAPI.SetCloudUIURL(lc.configObj.CloudUIURL)
+	}
+	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", lc.backendAPI.GetCloudAPIURL()), helpers.String("auth", lc.backendAPI.GetCloudAuthURL()), helpers.String("report", lc.backendAPI.GetCloudReportURL()), helpers.String("UI", lc.backendAPI.GetCloudUIURL()))
 
 	return lc
 }
 
-func (lc *LocalConfig) GetConfigObj() *ConfigObj { return lc.configObj }
-func (lc *LocalConfig) GetTenantEmail() string   { return lc.configObj.CustomerAdminEMail }
-func (lc *LocalConfig) GetAccountID() string     { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetClientID() string      { return lc.configObj.ClientID }
-func (lc *LocalConfig) GetSecretKey() string     { return lc.configObj.SecretKey }
-func (lc *LocalConfig) GetContextName() string   { return lc.configObj.ClusterName }
-func (lc *LocalConfig) GetToken() string         { return lc.configObj.Token }
-func (lc *LocalConfig) IsConfigFound() bool      { return existsConfigFile() }
+func (lc *LocalConfig) GetConfigObj() *ConfigObj  { return lc.configObj }
+func (lc *LocalConfig) GetTenantEmail() string    { return lc.configObj.CustomerAdminEMail }
+func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountID }
+func (lc *LocalConfig) GetClientID() string       { return lc.configObj.ClientID }
+func (lc *LocalConfig) GetSecretKey() string      { return lc.configObj.SecretKey }
+func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterName }
+func (lc *LocalConfig) GetToken() string          { return lc.configObj.Token }
+func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
+func (lc *LocalConfig) GetCloudAPIURL() string    { return lc.configObj.CloudAPIURL }
+func (lc *LocalConfig) GetCloudUIURL() string     { return lc.configObj.CloudUIURL }
+func (lc *LocalConfig) GetCloudAuthURL() string   { return lc.configObj.CloudAuthURL }
+func (lc *LocalConfig) IsConfigFound() bool       { return existsConfigFile() }
 func (lc *LocalConfig) SetTenant() error {
 
 	// Kubescape Cloud tenant GUID
@@ -213,6 +240,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		loadConfigFromFile(c.configObj)
 	}
 	updateCredentials(c.configObj, credentials)
+	updateCloudURLs(c.configObj)
 
 	// If a custom cluster name is provided then set that name, else use the cluster's original name
 	if customClusterName != "" {
@@ -230,18 +258,36 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	c.backendAPI.SetAccountID(c.configObj.AccountID)
 	c.backendAPI.SetClientID(c.configObj.ClientID)
 	c.backendAPI.SetSecretKey(c.configObj.SecretKey)
+	if c.configObj.CloudAPIURL != "" {
+		c.backendAPI.SetCloudAPIURL(c.configObj.CloudAPIURL)
+	}
+	if c.configObj.CloudAuthURL != "" {
+		c.backendAPI.SetCloudAuthURL(c.configObj.CloudAuthURL)
+	}
+	if c.configObj.CloudReportURL != "" {
+		c.backendAPI.SetCloudReportURL(c.configObj.CloudReportURL)
+	}
+	if c.configObj.CloudUIURL != "" {
+		c.backendAPI.SetCloudUIURL(c.configObj.CloudUIURL)
+	}
+	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", c.backendAPI.GetCloudAPIURL()), helpers.String("auth", c.backendAPI.GetCloudAuthURL()), helpers.String("report", c.backendAPI.GetCloudReportURL()), helpers.String("UI", c.backendAPI.GetCloudUIURL()))
 
 	return c
 }
 
-func (c *ClusterConfig) GetConfigObj() *ConfigObj { return c.configObj }
-func (c *ClusterConfig) GetDefaultNS() string     { return c.configMapNamespace }
-func (c *ClusterConfig) GetAccountID() string     { return c.configObj.AccountID }
-func (c *ClusterConfig) GetClientID() string      { return c.configObj.ClientID }
-func (c *ClusterConfig) GetSecretKey() string     { return c.configObj.SecretKey }
-func (c *ClusterConfig) GetTenantEmail() string   { return c.configObj.CustomerAdminEMail }
-func (c *ClusterConfig) GetToken() string         { return c.configObj.Token }
-func (c *ClusterConfig) IsConfigFound() bool      { return existsConfigFile() || c.existsConfigMap() }
+func (c *ClusterConfig) GetConfigObj() *ConfigObj  { return c.configObj }
+func (c *ClusterConfig) GetDefaultNS() string      { return c.configMapNamespace }
+func (c *ClusterConfig) GetAccountID() string      { return c.configObj.AccountID }
+func (c *ClusterConfig) GetClientID() string       { return c.configObj.ClientID }
+func (c *ClusterConfig) GetSecretKey() string      { return c.configObj.SecretKey }
+func (c *ClusterConfig) GetTenantEmail() string    { return c.configObj.CustomerAdminEMail }
+func (c *ClusterConfig) GetToken() string          { return c.configObj.Token }
+func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudReportURL }
+func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPIURL }
+func (c *ClusterConfig) GetCloudUIURL() string     { return c.configObj.CloudUIURL }
+func (c *ClusterConfig) GetCloudAuthURL() string   { return c.configObj.CloudAuthURL }
+
+func (c *ClusterConfig) IsConfigFound() bool { return existsConfigFile() || c.existsConfigMap() }
 
 func (c *ClusterConfig) SetTenant() error {
 
@@ -524,6 +570,42 @@ func updateCredentials(configObj *ConfigObj, credentials *Credentials) {
 	}
 	if credentials.SecretKey != "" {
 		configObj.SecretKey = credentials.SecretKey // override config SecretKey
+	}
+
+}
+
+func getCloudURLsFromEnv(cloudURLs *CloudURLs) {
+	// load from env
+	if cloudAPIURL := os.Getenv("KS_CLOUD_API_URL"); cloudAPIURL != "" {
+		cloudURLs.CloudAPIURL = cloudAPIURL
+	}
+	if cloudAuthURL := os.Getenv("KS_CLOUD_AUTH_URL"); cloudAuthURL != "" {
+		cloudURLs.CloudAuthURL = cloudAuthURL
+	}
+	if cloudReportURL := os.Getenv("KS_CLOUD_REPORT_URL"); cloudReportURL != "" {
+		cloudURLs.CloudReportURL = cloudReportURL
+	}
+	if cloudUIURL := os.Getenv("KS_CLOUD_UI_URL"); cloudUIURL != "" {
+		cloudURLs.CloudUIURL = cloudUIURL
+	}
+}
+
+func updateCloudURLs(configObj *ConfigObj) {
+	cloudURLs := &CloudURLs{}
+
+	getCloudURLsFromEnv(cloudURLs)
+
+	if cloudURLs.CloudAPIURL != "" {
+		configObj.CloudAPIURL = cloudURLs.CloudAPIURL // override config CloudAPIURL
+	}
+	if cloudURLs.CloudAuthURL != "" {
+		configObj.CloudAuthURL = cloudURLs.CloudAuthURL // override config CloudAuthURL
+	}
+	if cloudURLs.CloudReportURL != "" {
+		configObj.CloudReportURL = cloudURLs.CloudReportURL // override config CloudReportURL
+	}
+	if cloudURLs.CloudUIURL != "" {
+		configObj.CloudUIURL = cloudURLs.CloudUIURL // override config CloudUIURL
 	}
 
 }

@@ -51,7 +51,7 @@ func (ksCivAdaptor *KSCivAdaptor) GetImageVulnerability(imageID *registryvulnera
 	pageNumber := 1
 	request := V2ListRequest{PageSize: &pageSize, PageNum: &pageNumber, InnerFilters: filter, OrderBy: "timestamp:desc"}
 	requestBody, _ := json.Marshal(request)
-	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsDetails?customerGUID=%s", ksCivAdaptor.ksCloudAPI.GetApiURL(), ksCivAdaptor.ksCloudAPI.GetAccountID())
+	requestUrl := fmt.Sprintf("https://%s/api/v1/vulnerability/scanResultsDetails?customerGUID=%s", ksCivAdaptor.ksCloudAPI.GetCloudAPIURL(), ksCivAdaptor.ksCloudAPI.GetAccountID())
 
 	resp, err := ksCivAdaptor.ksCloudAPI.Post(requestUrl, map[string]string{"Content-Type": "application/json"}, requestBody)
 	if err != nil {
