@@ -85,6 +85,7 @@ We hold community meetings in [Zoom](https://us02web.zoom.us/j/84020231442) on t
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
 * [How To Secure Kubernetes Clusters With Kubescape And Armo](https://youtu.be/ZATGiDIDBQk)
 * [Scan Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Scan container image registry](https://youtu.be/iQ_k8EnK-3s)
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
