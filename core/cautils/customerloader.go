@@ -126,15 +126,23 @@ func NewLocalConfig(
 	lc.backendAPI.SetSecretKey(lc.configObj.SecretKey)
 	if lc.configObj.CloudAPIURL != "" {
 		lc.backendAPI.SetCloudAPIURL(lc.configObj.CloudAPIURL)
+	} else {
+		lc.configObj.CloudAPIURL = lc.backendAPI.GetCloudAPIURL()
 	}
 	if lc.configObj.CloudAuthURL != "" {
 		lc.backendAPI.SetCloudAuthURL(lc.configObj.CloudAuthURL)
+	} else {
+		lc.configObj.CloudAuthURL = lc.backendAPI.GetCloudAuthURL()
 	}
 	if lc.configObj.CloudReportURL != "" {
 		lc.backendAPI.SetCloudReportURL(lc.configObj.CloudReportURL)
+	} else {
+		lc.configObj.CloudReportURL = lc.backendAPI.GetCloudReportURL()
 	}
 	if lc.configObj.CloudUIURL != "" {
 		lc.backendAPI.SetCloudUIURL(lc.configObj.CloudUIURL)
+	} else {
+		lc.configObj.CloudUIURL = lc.backendAPI.GetCloudUIURL()
 	}
 	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", lc.backendAPI.GetCloudAPIURL()), helpers.String("auth", lc.backendAPI.GetCloudAuthURL()), helpers.String("report", lc.backendAPI.GetCloudReportURL()), helpers.String("UI", lc.backendAPI.GetCloudUIURL()))
 
@@ -260,15 +268,23 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	c.backendAPI.SetSecretKey(c.configObj.SecretKey)
 	if c.configObj.CloudAPIURL != "" {
 		c.backendAPI.SetCloudAPIURL(c.configObj.CloudAPIURL)
+	} else {
+		c.configObj.CloudAPIURL = c.backendAPI.GetCloudAPIURL()
 	}
 	if c.configObj.CloudAuthURL != "" {
 		c.backendAPI.SetCloudAuthURL(c.configObj.CloudAuthURL)
+	} else {
+		c.configObj.CloudAuthURL = c.backendAPI.GetCloudAuthURL()
 	}
 	if c.configObj.CloudReportURL != "" {
 		c.backendAPI.SetCloudReportURL(c.configObj.CloudReportURL)
+	} else {
+		c.configObj.CloudReportURL = c.backendAPI.GetCloudReportURL()
 	}
 	if c.configObj.CloudUIURL != "" {
 		c.backendAPI.SetCloudUIURL(c.configObj.CloudUIURL)
+	} else {
+		c.configObj.CloudUIURL = c.backendAPI.GetCloudUIURL()
 	}
 	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", c.backendAPI.GetCloudAPIURL()), helpers.String("auth", c.backendAPI.GetCloudAuthURL()), helpers.String("report", c.backendAPI.GetCloudReportURL()), helpers.String("UI", c.backendAPI.GetCloudUIURL()))
 
