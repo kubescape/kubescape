@@ -9,7 +9,6 @@ ENV CLIENT=$client
 ENV GO111MODULE=
 
 ENV CGO_ENABLED=1
-ENV PATH=$PATH:/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin
 
 # Install required python/pip
 ENV PYTHONUNBUFFERED=1
