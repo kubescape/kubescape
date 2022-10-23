@@ -160,15 +160,12 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	// 	if tenantConfig.GetAccountID() == "" {
-	// 		scanInfo.Submit = false
-	// 	} else {
+	// If There is no account, or if the account is not legal, do not submit
 	if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
 		scanInfo.Submit = false
 	} else {
 		scanInfo.Submit = true
 	}
-	// 	}
 
 }
 
