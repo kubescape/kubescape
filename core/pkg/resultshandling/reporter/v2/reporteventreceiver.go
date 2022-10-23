@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/armosec/armoapi-go/apis"
+	"github.com/google/uuid"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -182,6 +183,56 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
+const ImageApiVersion string = "container.kubscape.cloud"
+
+type Image struct {
+	ImageTag   string `json:"imageTag"`
+	ImageHash  string //just in kind=pod imageHash:
+	ApiVersion string //ApiVersion
+	Kind       string //"image"
+	Metadata   ImageMetadata
+}
+
+// ImageMetadata single image object metadata
+type ImageMetadata struct {
+	Name            string `json:"name"`
+	Namespace       string `json:"namespace"`
+	ParentKind      string `json:"parentKind"`
+	ParentName      string `json:"parentName"`
+	ParentResorceId string `json:"parentResorceId"`
+}
+
+func rawResourceImageHandler(object map[string]interface{}, parentResource reporthandling.Resource) (images []reporthandling.Resource) {
+	wl := workloadinterface.NewWorkloadObj(object)
+	//resourceID := wl.GetResourceID()
+	if wl == nil {
+		return []reporthandling.Resource{}
+	}
+	containers, err := wl.GetContainers()
+	if err != nil || len(containers) == 0 {
+		return []reporthandling.Resource{}
+	}
+	for idx := range containers {
+		obj := reporthandling.Resource{
+			ResourceID:  uuid.NewString(),
+			Object: Image{
+				Kind:       "Container",
+				ApiVersion: ImageApiVersion,
+				ImageTag:   containers[idx].Image,
+				Metadata: ImageMetadata{
+					Name:            containers[idx].Image,
+					Namespace:       wl.GetNamespace(),
+					ParentResorceId: parentResource.ResourceID,
+					ParentName:      parentResource.GetName(),
+					ParentKind:      parentResource.GetKind(),
+				},
+			}}
+		obj.ResourceID = obj.Source.LastCommit.Hash
+		images = append(images, obj)
+	}
+	return images
+}
+
 func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
 	for resourceID, v := range allResources {
 		/*
@@ -202,7 +253,9 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", resourceID, err)
 		}
 
-		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
+		images := rawResourceImageHandler(resource.GetObject(), *resource)
+
+		if *counter+len(r)+len(images) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
 
 			// send report
 			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
@@ -218,8 +271,9 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 			*counter = 0
 		}
 
-		*counter += len(r)
+		*counter += len(r) + len(images)
 		reportObj.Resources = append(reportObj.Resources, *resource)
+		reportObj.Resources = append(reportObj.Resources, images...)
 	}
 	return nil
 }
