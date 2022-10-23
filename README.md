@@ -194,7 +194,7 @@ kubescape scan framework mitre --submit
 kubescape scan control "Privileged container"
 ```
 
-#### Scan using an anternative kubeconfig file
+#### Scan using an alternative kubeconfig file
 ```
 kubescape scan --kubeconfig cluster.conf
 ```
