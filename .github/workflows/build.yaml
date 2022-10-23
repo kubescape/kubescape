@@ -76,14 +76,14 @@ jobs:
           asset_name: kubescape-${{ matrix.os }}-sha256
           asset_content_type: application/octet-stream
   
-  publish-image:
-    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
-    uses: ./.github/workflows/build-image.yaml
-    needs: create-release
-    with:
-      client: "image-release"
-      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
-      image_tag: "v2.0.${{ github.run_number }}"
-      support_platforms: true
-      cosign: true
-    secrets: inherit
+  # publish-image:
+  #   if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
+  #   uses: ./.github/workflows/build-image.yaml
+  #   needs: create-release
+  #   with:
+  #     client: "image-release"
+  #     image_name: "quay.io/${{ github.repository_owner }}/kubescape"
+  #     image_tag: "v2.0.${{ github.run_number }}"
+  #     support_platforms: true
+  #     cosign: true
+  #   secrets: inherit
