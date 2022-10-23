@@ -183,28 +183,28 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
-const ImageApiVersion string = "container.kubscape.cloud"
+const ContainerApiVersion string = "container.kubscape.cloud"
+const ContainerKind string = "Container"
 
-type Image struct {
+type Container struct {
 	ImageTag   string `json:"imageTag"`
 	ImageHash  string //just in kind=pod imageHash:
 	ApiVersion string //ApiVersion
-	Kind       string //"image"
-	Metadata   ImageMetadata
+	Kind       string //"Container"
+	Metadata   ContainerMetadata
 }
 
-// ImageMetadata single image object metadata
-type ImageMetadata struct {
+// ContainerMetadata single image object metadata
+type ContainerMetadata struct {
 	Name            string `json:"name"`
 	Namespace       string `json:"namespace"`
 	ParentKind      string `json:"parentKind"`
 	ParentName      string `json:"parentName"`
-	ParentResorceId string `json:"parentResorceId"`
+	ParentResourceID string `json:"parentResourceID"`
 }
 
-func rawResourceImageHandler(object map[string]interface{}, parentResource reporthandling.Resource) (images []reporthandling.Resource) {
-	wl := workloadinterface.NewWorkloadObj(object)
-	//resourceID := wl.GetResourceID()
+func rawResourceContainerHandler(parentResource reporthandling.Resource) (images []reporthandling.Resource) {
+	wl := workloadinterface.NewWorkloadObj(parentResource.GetObject())
 	if wl == nil {
 		return []reporthandling.Resource{}
 	}
@@ -215,19 +215,18 @@ func rawResourceImageHandler(object map[string]interface{}, parentResource repor
 	for idx := range containers {
 		obj := reporthandling.Resource{
 			ResourceID:  uuid.NewString(),
-			Object: Image{
-				Kind:       "Container",
-				ApiVersion: ImageApiVersion,
+			Object: Container{
+				Kind:       ContainerKind,
+				ApiVersion: ContainerApiVersion,
 				ImageTag:   containers[idx].Image,
-				Metadata: ImageMetadata{
+				Metadata: ContainerMetadata{
 					Name:            containers[idx].Image,
 					Namespace:       wl.GetNamespace(),
-					ParentResorceId: parentResource.ResourceID,
+					ParentResourceID: parentResource.ResourceID,
 					ParentName:      parentResource.GetName(),
 					ParentKind:      parentResource.GetKind(),
 				},
 			}}
-		obj.ResourceID = obj.Source.LastCommit.Hash
 		images = append(images, obj)
 	}
 	return images
@@ -253,9 +252,9 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", resourceID, err)
 		}
 
-		images := rawResourceImageHandler(resource.GetObject(), *resource)
+		containers := rawResourceContainerHandler(*resource)
 
-		if *counter+len(r)+len(images) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
+		if *counter+len(r)+len(containers) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
 
 			// send report
 			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
@@ -271,9 +270,9 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 			*counter = 0
 		}
 
-		*counter += len(r) + len(images)
+		*counter += len(r) + len(containers)
 		reportObj.Resources = append(reportObj.Resources, *resource)
-		reportObj.Resources = append(reportObj.Resources, images...)
+		reportObj.Resources = append(reportObj.Resources, containers...)
 	}
 	return nil
 }
