@@ -25,6 +25,8 @@ jobs:
     name: Build and publish artifacts
     needs: create-release
     runs-on: ${{ matrix.os }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
