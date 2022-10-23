@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"github.com/armosec/armoapi-go/apis"
-	"github.com/google/uuid"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -183,26 +182,6 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
-const ContainerApiVersion string = "container.kubscape.cloud"
-const ContainerKind string = "Container"
-
-type Container struct {
-	ImageTag   string `json:"imageTag"`
-	ImageHash  string //just in kind=pod imageHash:
-	ApiVersion string //ApiVersion
-	Kind       string //"Container"
-	Metadata   ContainerMetadata
-}
-
-// ContainerMetadata single image object metadata
-type ContainerMetadata struct {
-	Name            string `json:"name"`
-	Namespace       string `json:"namespace"`
-	ParentKind      string `json:"parentKind"`
-	ParentName      string `json:"parentName"`
-	ParentResourceID string `json:"parentResourceID"`
-}
-
 func rawResourceContainerHandler(parentResource reporthandling.Resource) (images []reporthandling.Resource) {
 	wl := workloadinterface.NewWorkloadObj(parentResource.GetObject())
 	if wl == nil {
@@ -213,21 +192,7 @@ func rawResourceContainerHandler(parentResource reporthandling.Resource) (images
 		return []reporthandling.Resource{}
 	}
 	for idx := range containers {
-		obj := reporthandling.Resource{
-			ResourceID:  uuid.NewString(),
-			Object: Container{
-				Kind:       ContainerKind,
-				ApiVersion: ContainerApiVersion,
-				ImageTag:   containers[idx].Image,
-				Metadata: ContainerMetadata{
-					Name:            containers[idx].Image,
-					Namespace:       wl.GetNamespace(),
-					ParentResourceID: parentResource.ResourceID,
-					ParentName:      parentResource.GetName(),
-					ParentKind:      parentResource.GetKind(),
-				},
-			}}
-		images = append(images, obj)
+		images = append(images, containerResorceBuilder(parentResource, containers[idx].Image))
 	}
 	return images
 }
