@@ -40,7 +40,7 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 
 ## Run:
 ```sh
-kubescape scan --submit --enable-host-scan --verbose
+kubescape scan --enable-host-scan --verbose
 ```
 
 <img src="docs/summary.png">
@@ -170,22 +170,22 @@ Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 ### Examples
 
 
-#### Scan a running Kubernetes cluster and submit results to the [Kubescape SaaS version](https://cloud.armosec.io?utm_source=github&utm_medium=repository)
+#### Scan a running Kubernetes cluster
 ```
-kubescape scan --submit --enable-host-scan  --verbose
+kubescape scan --enable-host-scan  --verbose
 ```
 
 > Read [here](https://hub.armosec.io/docs/host-sensor?utm_source=github&utm_medium=repository) more about the `enable-host-scan` flag
 
-#### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework and submit results to the [Kubescape SaaS version](https://cloud.armosec.io?utm_source=github&utm_medium=repository)
+#### Scan a running Kubernetes cluster with [`nsa`](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/) framework
 ```
-kubescape scan framework nsa --submit
+kubescape scan framework nsa
 ```
 
 
-#### Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework and submit results to the [Kubescape SaaS version](https://cloud.armosec.io?utm_source=github&utm_medium=repository)
+#### Scan a running Kubernetes cluster with [`MITRE ATT&CK®`](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) framework
 ```
-kubescape scan framework mitre --submit
+kubescape scan framework mitre
 ```
 
 
@@ -209,14 +209,13 @@ kubescape scan --include-namespaces development,staging,production
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
 
-#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI). Submit the results in case the directory is a git repo. [docs](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
+#### Scan local `yaml`/`json` files before deploying. [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI).
 ```
-kubescape scan *.yaml --submit
+kubescape scan *.yaml
 ```
 
-#### Scan Kubernetes manifest files from a git repository [and submit the results](https://hub.armosec.io/docs/repository-scanning?utm_source=github&utm_medium=repository)
-```
-kubescape scan https://github.com/kubescape/kubescape --submit
+#### Scan Kubernetes manifest files from a git repository 
+kubescape scan https://github.com/kubescape/kubescape
 ```
 
 #### Display all scanned resources (including the resources which passed) 
@@ -263,13 +262,13 @@ kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 
 #### Scan Helm charts 
 ```
-kubescape scan </path/to/directory> --submit
+kubescape scan </path/to/directory>
 ```
 > Kubescape will load the default value file
 
 #### Scan Kustomize Directory 
 ```
-kubescape scan </path/to/directory> --submit
+kubescape scan </path/to/directory>
 ```
 > Kubescape will generate Kubernetes Yaml Objects using 'Kustomize' file and scans them for security.
 
