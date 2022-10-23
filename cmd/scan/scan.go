@@ -78,7 +78,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html"`)
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
-	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to ARMO backend. Use this flag if you ran with the '--submit' flag in the past and you do not want to submit your current scan results")
+	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.ResourceViewType), fmt.Sprintf("View results based on the %s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.ResourceViewType))
@@ -92,14 +92,13 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
 
-	// Deprecated flags - remove 1.May.2022
+	// Deprecated flags - remove 1.Jan.2023
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to ARMO management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
-	scanCmd.PersistentFlags().MarkDeprecated("submit", "use only '--account' flag. If you have an account linked to kubescape we submit. Flag will be removed at 1.Jan.2023")
+	scanCmd.PersistentFlags().MarkDeprecated("submit", "Kubescape will automatically submit the scan results whenever an account ID is configured. An account ID can be configured either with (1) '--account' flag (2) Kubescape configuration (3) 'KS_ACCOUNT_ID' environment variable. '--submit' flag will be removed at 1.Jan.2023")
 
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
-	scanCmd.PersistentFlags().MarkHidden("submit")         // this flag should be deprecated since the submit is related if there is an account linked to kubescape.
 	// scanCmd.PersistentFlags().MarkHidden("format-version") // meant for testing different output approaches and not for common use
 
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
