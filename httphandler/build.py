@@ -14,18 +14,18 @@ def check_status(status, msg):
 
 def get_build_dir():
     current_platform = platform.system()
-    build_dir = "build/"
+    build_dir = ""
 
-    if current_platform == "Windows": build_dir += "windows-latest"
-    elif current_platform == "Linux": build_dir += "ubuntu-latest"
-    elif current_platform == "Darwin": build_dir += "macos-latest"
+    if current_platform == "Windows": build_dir = "windows-latest"
+    elif current_platform == "Linux": build_dir = "ubuntu-latest"
+    elif current_platform == "Darwin": build_dir = "macos-latest"
     else: raise OSError("Platform %s is not supported!" % (current_platform))
 
-    return build_dir
+    return os.path.join("build", build_dir)
 
 def get_package_name():
     package_name = "kubescape"
-
+    # TODO: if platform.system() == "Windows": packageName += ".exe" - we should find all places were we access the windows executable before changing the extension 
     return package_name
 
 
