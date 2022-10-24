@@ -2,8 +2,9 @@ package v2
 
 import (
 	"fmt"
-	"github.com/kubescape/opa-utils/reporthandling"
 	"hash/fnv"
+
+	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 const (
@@ -13,18 +14,23 @@ const (
 
 type Container struct {
 	ImageTag   string            `json:"imageTag"`
-	ImageHash  string            `json:"imageHash"` //just in kind=pod imageHash:
+	ImageHash  string            `json:"imageHash,omitempty"` //just in kind=pod imageHash:
 	ApiVersion string            `json:"apiVersion"`
 	Kind       string            `json:"kind"`
 	Metadata   ContainerMetadata `json:"metadata"`
 }
 
 type ContainerMetadata struct {
-	Name             string `json:"name"`
-	Namespace        string `json:"namespace"`
-	ParentKind       string `json:"parentKind"`
-	ParentName       string `json:"parentName"`
-	ParentResourceID string `json:"parentResourceID"`
+	*Metadata
+	Parent Metadata `json:"parent"`
+}
+
+type Metadata struct {
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	Namespace  string `json:"namespace,omitempty"`
+	ResourceID string `json:"resourceID,omitempty"`
+	ApiVersion string `json:"apiVersion"`
 }
 
 func generateContainerResorceId(imageTag, parentResourceID string) string {
@@ -40,11 +46,14 @@ func containerResorceBuilder(parentResource reporthandling.Resource, imageTag st
 			ApiVersion: ContainerApiVersion,
 			ImageTag:   imageTag,
 			Metadata: ContainerMetadata{
-				Name:             imageTag,
-				Namespace:        parentResource.GetNamespace(),
-				ParentResourceID: parentResource.ResourceID,
-				ParentName:       parentResource.GetName(),
-				ParentKind:       parentResource.GetKind(),
+				Metadata: &Metadata{Name: imageTag},
+				Parent: Metadata{
+					Name:       parentResource.GetName(),
+					Namespace:  parentResource.GetNamespace(),
+					Kind:       parentResource.GetKind(),
+					ResourceID: parentResource.ResourceID,
+					ApiVersion: parentResource.GetApiVersion(),
+				},
 			},
 		}}
 }
