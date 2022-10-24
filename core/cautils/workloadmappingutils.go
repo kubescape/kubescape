@@ -17,6 +17,7 @@ var (
 		"LinuxKernelVariables",
 		"KubeletInfo",
 		"KubeProxyInfo",
+		"ControlPlaneInfo",
 	}
 	CloudResources = []string{"ClusterDescribe"}
 )
