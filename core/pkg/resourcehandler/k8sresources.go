@@ -79,9 +79,14 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
 	}
 
+	cautils.StopSpinner()
+	logger.L().Success("Accessed to Kubernetes objects")
+
 	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
 	// check that controls use image vulnerability resources
-	if len(imgVulnResources) > 0 {
+	if false { //len(imgVulnResources) > 0 {
+		logger.L().Info("Requesting images vulnerabilities results")
+		cautils.StartSpinner()
 		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
 			logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
 			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
@@ -90,11 +95,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", imgVulnResources, sessionObj.InfoMap)
 			}
 		}
+		cautils.StopSpinner()
+		logger.L().Success("Requested images vulnerabilities results")
 	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
+		logger.L().Info("Requesting Host scanner data")
+		cautils.StartSpinner()
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
 			infoMap, err := k8sHandler.collectHostResources(allResources, ksResourceMap)
 			if err != nil {
@@ -108,6 +117,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 					sessionObj.InfoMap = infoMap
 				}
 			}
+			cautils.StopSpinner()
+			logger.L().Success("Requested Host scanner data")
 		} else {
 			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor", hostResources, sessionObj.InfoMap)
 		}
@@ -123,6 +134,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
+		logger.L().Info("Requesting cloud provider data")
+		cautils.StartSpinner()
 		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
@@ -133,10 +146,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 				sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
 			}
 		}
+		cautils.StopSpinner()
+		logger.L().Info("Requested cloud provider data")
 	}
-
-	cautils.StopSpinner()
-	logger.L().Success("Accessed to Kubernetes objects")
 
 	return k8sResourcesMap, allResources, ksResourceMap, nil
 }
