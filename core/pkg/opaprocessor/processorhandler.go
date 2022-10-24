@@ -152,12 +152,7 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 
 func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 
-	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
-
-	// Merge configurable control input and fixed control input
-	for k, v := range fixedControlInputs {
-		postureControlInputs[k] = v
-	}
+	postureControlInputs, configuredControlInputs := opap.getControlInput(rule, fixedControlInputs)
 
 	inputResources, err := reporthandling.RegoResourcesAggregator(rule, getAllSupportedObjects(opap.K8SResources, opap.ArmoResource, opap.AllResources, rule))
 	if err != nil {
@@ -179,7 +174,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 	for i := range inputResources {
 		resources[inputResources[i].GetID()] = &resourcesresults.ResourceAssociatedRule{
 			Name:                  rule.Name,
-			ControlConfigurations: postureControlInputs,
+			ControlConfigurations: configuredControlInputs,
 			Status:                apis.StatusPassed,
 		}
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
@@ -215,6 +210,22 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 	}
 
 	return resources, err
+}
+
+// getControlInput combine the configured control input with the fixed ones, for a rule
+func (opap *OPAProcessor) getControlInput(rule *reporthandling.PolicyRule, fixedInput map[string][]string) (map[string][]string, map[string][]string) {
+	configuredControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs)
+
+	postureControlInputs := make(map[string][]string, len(configuredControlInputs)+len(fixedInput))
+	for k, v := range configuredControlInputs {
+		postureControlInputs[k] = v
+	}
+
+	// Merge configurable control input and fixed control input
+	for k, v := range fixedInput {
+		postureControlInputs[k] = v
+	}
+	return postureControlInputs, configuredControlInputs
 }
 
 func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, postureControlInputs map[string][]string) ([]reporthandling.RuleResponse, error) {
