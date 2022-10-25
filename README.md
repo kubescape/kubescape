@@ -51,6 +51,13 @@ kubescape scan --submit --enable-host-scan --verbose
 
 </br>
 
+## Architecture in short
+### CLI
+<img src="docs/ks-cli-arch.png" width="300">
+
+### Operator
+<img src="docs/ks-operator-arch.png" width="300">
+
 ### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
 </br>
@@ -185,6 +192,11 @@ kubescape scan framework mitre --submit
 #### Scan a running Kubernetes cluster with a specific control using the control name or control ID. [List of controls](https://hub.armosec.io/docs/controls?utm_source=github&utm_medium=repository) 
 ```
 kubescape scan control "Privileged container"
+```
+
+#### Scan using an alternative kubeconfig file
+```
+kubescape scan --kubeconfig cluster.conf
 ```
 
 #### Scan specific namespaces
@@ -389,7 +401,7 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 
 * Apply changes you wish to make to the kubescape directory using text editors like `Vim`.
 * [Build on Linux](https://github.com/kubescape/kubescape#build-on-linuxmacos)
-* Now, you can use Kubescape just like a normal user. Instead of using `kubescape`, use `./kubescape`. (Make sure you are inside kubescape directory because the command will execute the binary named `kubescape` in `kubescape directory`.
+* Now, you can use Kubescape just like a normal user. Instead of using `kubescape`, use `./kubescape`. (Make sure you are inside kubescape directory because the command will execute the binary named `kubescape` in `kubescape directory`)
 
 </details>
 

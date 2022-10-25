@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"flag"
 	"fmt"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -96,6 +97,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
 	// scanCmd.PersistentFlags().MarkHidden("format-version") // meant for testing different output approaches and not for common use
+
+	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
+	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
 
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://github.com/kubescape/kubescape/blob/master/core/pkg/hostsensorutils/hostsensor.yaml")
 	hostF.NoOptDefVal = "true"
