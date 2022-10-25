@@ -52,11 +52,15 @@ kubescape scan --submit --enable-host-scan --verbose
 </br>
 
 ## Architecture in short
-### CLI
-<img src="docs/ks-cli-arch.png" width="300">
+### [CLI](#kubescape-cli)
+<div align="center">
+    <img src="docs/ks-cli-arch.png" width="300" alt="cli-diagram">
+</div>
 
-### Operator
-<img src="docs/ks-operator-arch.png" width="300">
+### [Operator](https://github.com/kubescape/helm-charts#readme)
+<div align="center">
+    <img src="docs/ks-operator-arch.png" width="300" alt="operator-diagram">
+</div>
 
 ### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
