@@ -84,7 +84,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
 	// check that controls use image vulnerability resources
-	if false { //len(imgVulnResources) > 0 {
+	if len(imgVulnResources) > 0 {
 		logger.L().Info("Requesting images vulnerabilities results")
 		cautils.StartSpinner()
 		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
