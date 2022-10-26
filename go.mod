@@ -22,6 +22,7 @@ require (
 	github.com/mattn/go-isatty v0.0.14
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/open-policy-agent/opa v0.45.0
+	github.com/owenrumney/go-sarif/v2 v2.1.2
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.0
 	github.com/whilp/git-urls v1.0.0
