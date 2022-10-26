@@ -52,11 +52,15 @@ kubescape scan --submit --enable-host-scan --verbose
 </br>
 
 ## Architecture in short
-### CLI
-<img src="docs/ks-cli-arch.png" width="300">
+### [CLI](#kubescape-cli)
+<div align="center">
+    <img src="docs/ks-cli-arch.png" width="300" alt="cli-diagram">
+</div>
 
-### Operator
-<img src="docs/ks-operator-arch.png" width="300">
+### [Operator](https://github.com/kubescape/helm-charts#readme)
+<div align="center">
+    <img src="docs/ks-operator-arch.png" width="300" alt="operator-diagram">
+</div>
 
 ### Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape 😀
 
@@ -92,6 +96,7 @@ We hold community meetings in [Zoom](https://us02web.zoom.us/j/84020231442) on t
 * [Overview](https://youtu.be/wdBkt_0Qhbg)
 * [How To Secure Kubernetes Clusters With Kubescape And Armo](https://youtu.be/ZATGiDIDBQk)
 * [Scan Kubernetes YAML files](https://youtu.be/Ox6DaR7_4ZI)
+* [Scan container image registry](https://youtu.be/iQ_k8EnK-3s)
 * [Scan Kubescape on an air-gapped environment (offline support)](https://youtu.be/IGXL9s37smM)
 * [Managing exceptions in the Kubescape SaaS version](https://youtu.be/OzpvxGmCR80)
 * [Configure and run customized frameworks](https://youtu.be/12Sanq_rEhs)
