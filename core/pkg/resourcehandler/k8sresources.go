@@ -230,10 +230,14 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 
 		// set dynamic object
 		var clientResource dynamic.ResourceInterface
-		if namespace != "" && k8sinterface.IsNamespaceScope(resource) {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
-		} else {
+		if namespace != "" {
 			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
+		} else if k8sinterface.IsNamespaceScope(resource) {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
+		} else if k8sHandler.fieldSelector.GetClusterScope(*&resource) {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
+		} else {
+			continue
 		}
 
 		// list resources
