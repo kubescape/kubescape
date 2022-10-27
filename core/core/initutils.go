@@ -37,7 +37,7 @@ func getExceptionsGetter(useExceptions string, accountID string, downloadRelease
 		// load exceptions from file
 		return getter.NewLoadPolicy([]string{useExceptions})
 	}
-	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" {
+	if accountID != "" {
 		// download exceptions from Kubescape Cloud backend
 		return getter.GetKSCloudAPIConnector()
 	}
