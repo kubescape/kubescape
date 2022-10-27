@@ -32,13 +32,24 @@ func getTenantConfig(credentials *cautils.Credentials, clusterName string, custo
 	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
 }
 
-func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
+func getExceptionsGetter(useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
 	if useExceptions != "" {
 		// load exceptions from file
 		return getter.NewLoadPolicy([]string{useExceptions})
-	} else {
+	}
+	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" {
+		// download exceptions from Kubescape Cloud backend
 		return getter.GetKSCloudAPIConnector()
 	}
+	// download exceptions from GitHub
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil {
+		logger.L().Warning("failed to get exceptions from github release, this may affect the scanning results", helpers.Error(err))
+	}
+	return downloadReleasedPolicy
+
 }
 
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
