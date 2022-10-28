@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
 
@@ -130,13 +131,18 @@ func (lp *LoadPolicy) GetControlsInputs(clusterName string) (map[string][]string
 	filePath := lp.filePath()
 	accountConfig := &armotypes.CustomerConfig{}
 	f, err := os.ReadFile(filePath)
+	fileName := filepath.Base(filePath)
 	if err != nil {
+		logger.L().Error(fmt.Sprintf("Error opening %s file, \"controls-config\" will be downloaded from ARMO management portal", fileName))
 		return nil, err
 	}
 
 	if err = json.Unmarshal(f, &accountConfig.Settings.PostureControlInputs); err == nil {
 		return accountConfig.Settings.PostureControlInputs, nil
 	}
+
+	logger.L().Error(fmt.Sprintf("Error reading %s file, %s, \"controls-config\" will be downloaded from ARMO management portal", fileName, err.Error()))
+
 	return nil, err
 }
 
