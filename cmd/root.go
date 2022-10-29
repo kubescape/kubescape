@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v2/cmd/list"
 	"github.com/kubescape/kubescape/v2/cmd/scan"
 	"github.com/kubescape/kubescape/v2/cmd/submit"
+	"github.com/kubescape/kubescape/v2/cmd/update"
 	"github.com/kubescape/kubescape/v2/cmd/version"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -76,6 +77,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(completion.GetCompletionCmd())
 	rootCmd.AddCommand(version.GetVersionCmd())
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
+	rootCmd.AddCommand(update.GetUpdateCmd())
 
 	return rootCmd
 }

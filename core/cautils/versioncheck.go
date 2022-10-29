@@ -19,6 +19,7 @@ const SKIP_VERSION_CHECK = "KS_SKIP_UPDATE_CHECK"
 
 var BuildNumber string
 var Client string
+var LatestReleaseVersion string
 
 const UnknownBuildNumber = "unknown"
 
@@ -108,9 +109,11 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 		return fmt.Errorf("failed to get latest version")
 	}
 
+	LatestReleaseVersion := latestVersion.ClientUpdate
+
 	if latestVersion.ClientUpdate != "" {
-		if BuildNumber != "" && semver.Compare(BuildNumber, latestVersion.ClientUpdate) == -1 {
-			logger.L().Warning(warningMessage(latestVersion.ClientUpdate))
+		if BuildNumber != "" && semver.Compare(BuildNumber, LatestReleaseVersion) == -1 {
+			logger.L().Warning(warningMessage(LatestReleaseVersion))
 		}
 	}
 

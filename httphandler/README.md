@@ -55,7 +55,7 @@ When scanning is in progress
 }
 ```
 ### Check scanning progress status
-Check the scanning status - is the scanning in progress or done? This is meant for a waiting mechanize since the API does not return the entire results object when the scanning is done
+Check the scanning status - is the scanning in progress or done. This is meant for a waiting mechanize since the API does not return the entire results object when the scanning is done
 
 * GET `/v1/status` -  Request kubescape scan status
 * * query `id=<string>` -> Check status of a specific scan. If empty, it will check if any scan is still in progress

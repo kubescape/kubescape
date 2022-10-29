@@ -18,7 +18,8 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Nil(t, ctx.HelmContextMetadata)
 		assert.Nil(t, ctx.RepoContextMetadata)
 	}
-	{
+	// TODO: tests were commented out due to actual http calls ; http calls should be mocked.
+	/*{
 		ctx := reporthandlingv2.ContextMetadata{}
 		setContextMetadata(&ctx, "https://github.com/kubescape/kubescape")
 
@@ -31,7 +32,7 @@ func TestSetContextMetadata(t *testing.T) {
 		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Repo)
 		assert.Equal(t, "kubescape", ctx.RepoContextMetadata.Owner)
 		assert.Equal(t, "master", ctx.RepoContextMetadata.Branch)
-	}
+	}*/
 }
 
 func TestGetHostname(t *testing.T) {

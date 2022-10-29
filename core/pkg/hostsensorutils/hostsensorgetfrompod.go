@@ -278,7 +278,7 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	// GetControlPlaneInfo
 	kcData, err = hsh.GetControlPlaneInfo()
 	if err != nil {
-		addInfoToMap(KubeProxyInfo, infoMap, err)
+		addInfoToMap(ControlPlaneInfo, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
 	if len(kcData) > 0 {

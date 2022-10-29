@@ -3,6 +3,7 @@ package cautils
 import (
 	"strings"
 
+	"github.com/kubescape/k8s-interface/cloudsupport"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
@@ -19,7 +20,10 @@ var (
 		"KubeProxyInfo",
 		"ControlPlaneInfo",
 	}
-	CloudResources = []string{"ClusterDescribe"}
+	CloudResources = []string{
+		"ClusterDescribe",
+		string(cloudsupport.TypeApiServerInfo),
+	}
 )
 
 func MapKSResource(ksResourceMap *KSResources, resources []string) []string {
