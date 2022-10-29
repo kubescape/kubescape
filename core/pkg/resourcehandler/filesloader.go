@@ -30,7 +30,7 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 
 	//
 	// build resources map

@@ -49,7 +49,7 @@ func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.
 func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
 
-	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
+	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators, scanInfo)
 	if err != nil {
 		return err
 	}

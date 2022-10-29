@@ -45,7 +45,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -84,7 +84,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
 	// check that controls use image vulnerability resources
-	if false { //len(imgVulnResources) > 0 {
+	if scanInfo.ImageScan { //len(imgVulnResources) > 0 {
 		logger.L().Info("Requesting images vulnerabilities results")
 		cautils.StartSpinner()
 		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
