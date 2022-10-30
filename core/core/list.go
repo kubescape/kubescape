@@ -63,10 +63,10 @@ func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
 
 func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
 	// load tenant metav1
-	getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi())
+	tenant := getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi())
 
 	var exceptionsNames []string
-	ksCloudAPI := getExceptionsGetter("")
+	ksCloudAPI := getExceptionsGetter("", tenant.GetAccountID(), nil)
 	exceptions, err := ksCloudAPI.GetExceptions("")
 	if err != nil {
 		return exceptionsNames, err
