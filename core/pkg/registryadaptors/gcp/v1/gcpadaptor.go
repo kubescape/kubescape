@@ -20,9 +20,9 @@ func NewGCPAdaptor(GCPCloudAPI *getter.GCPCloudAPI) *GCPAdaptor {
 }
 
 func (GCPAdaptor *GCPAdaptor) Login() error {
-	client, err := containeranalysis.NewClient(GCPAdaptor.GCPCloudAPI.GetContext(), option.WithCredentialsFile(GCPAdaptor.GCPCloudAPI.GetCrediantialsPath()))
+	client, err := containeranalysis.NewClient(GCPAdaptor.GCPCloudAPI.GetContext(), option.WithCredentialsFile(GCPAdaptor.GCPCloudAPI.GetCredentialsPath()))
 	if err != nil {
-		return err 
+		return err
 	}
 	GCPAdaptor.GCPCloudAPI.SetClient(client)
 	return nil

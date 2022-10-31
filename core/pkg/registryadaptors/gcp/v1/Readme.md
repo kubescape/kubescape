@@ -24,3 +24,10 @@ Step 3:
 ### How we convert the response to Vulnerabilities
 
 Response from the iterator has two type of kinds i.e. Discovery and Vulnerabilties and both has differnent struct
+
+### How can this adaptor be used by the user 
+
+To know about GCR service accounts follow https://cloud.google.com/container-registry/docs/gcr-service-account
+export variables 
+    `export KS_GCP_CREDENTIALS_PATH=<path to service account credentials file>`
+    `export KS_GCP_PROJECT_ID=<your project ID>`
