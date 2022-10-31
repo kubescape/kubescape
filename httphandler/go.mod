@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.194
+	github.com/kubescape/opa-utils v0.0.196
 	github.com/stretchr/testify v1.8.0
 	k8s.io/utils v0.0.0-20220706174534-f6158b442e7c
 )
@@ -111,7 +111,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/kevinburke/ssh_config v0.0.0-20201106050909-4977a11b4351 // indirect
-	github.com/kubescape/k8s-interface v0.0.83 // indirect
+	github.com/kubescape/k8s-interface v0.0.84 // indirect
 	github.com/kubescape/rbac-utils v0.0.17 // indirect
 	github.com/libgit2/git2go/v33 v33.0.9 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
@@ -131,6 +131,7 @@ require (
 	github.com/open-policy-agent/opa v0.45.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.0.3-0.20211202183452-c5a74bcca799 // indirect
+	github.com/owenrumney/go-sarif/v2 v2.1.2 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/pquerna/cachecontrol v0.1.0 // indirect

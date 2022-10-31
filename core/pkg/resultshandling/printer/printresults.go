@@ -18,6 +18,7 @@ const (
 	PrometheusFormat  string = "prometheus"
 	PdfFormat         string = "pdf"
 	HtmlFormat        string = "html"
+	SARIFFormat       string = "sarif"
 )
 
 type IPrinter interface {

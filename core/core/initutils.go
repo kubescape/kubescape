@@ -32,13 +32,24 @@ func getTenantConfig(credentials *cautils.Credentials, clusterName string, custo
 	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
 }
 
-func getExceptionsGetter(useExceptions string) getter.IExceptionsGetter {
+func getExceptionsGetter(useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
 	if useExceptions != "" {
 		// load exceptions from file
 		return getter.NewLoadPolicy([]string{useExceptions})
-	} else {
+	}
+	if accountID != "" {
+		// download exceptions from Kubescape Cloud backend
 		return getter.GetKSCloudAPIConnector()
 	}
+	// download exceptions from GitHub
+	if downloadReleasedPolicy == nil {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
+	}
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil {
+		logger.L().Warning("failed to get exceptions from github release, this may affect the scanning results", helpers.Error(err))
+	}
+	return downloadReleasedPolicy
+
 }
 
 func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, submit bool) *cautils.RBACObjects {
@@ -128,6 +139,8 @@ func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
+		If CloudReportURL not set - Do not send report
+
 		If "First run (local config not found)" -
 			Default/keep-local - Do not send report
 			Submit - Create tenant & Submit report
@@ -137,6 +150,11 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 			Default/Submit - Submit report
 
 	*/
+
+	if getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" {
+		scanInfo.Submit = false
+		return
+	}
 
 	// do not submit control scanning
 	if !scanInfo.FrameworkScan {
@@ -166,11 +184,11 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(loadPoliciesFromFile []string, tennatEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getPolicyGetter(loadPoliciesFromFile []string, tenantEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
-	if tennatEmail != "" && frameworkScope {
+	if tenantEmail != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
 	}

@@ -16,13 +16,14 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.37.0
 	github.com/kubescape/go-logger v0.0.6
-	github.com/kubescape/k8s-interface v0.0.83
-	github.com/kubescape/opa-utils v0.0.194
+	github.com/kubescape/k8s-interface v0.0.84
+	github.com/kubescape/opa-utils v0.0.196
 	github.com/kubescape/rbac-utils v0.0.17
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.14
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/open-policy-agent/opa v0.45.0
+	github.com/owenrumney/go-sarif/v2 v2.1.2
 	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.8.0
 	github.com/whilp/git-urls v1.0.0
@@ -168,7 +169,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/square/go-jose.v2 v2.6.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
+	gopkg.in/yaml.v2 v2.4.0 // indirect
 	k8s.io/apiextensions-apiserver v0.24.2 // indirect
 	k8s.io/klog/v2 v2.60.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20220328201542-3ee0da9b0b42 // indirect
