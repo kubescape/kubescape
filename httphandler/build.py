@@ -18,7 +18,7 @@ def get_build_dir():
 
     if current_platform == "Windows": build_dir = "windows-latest"
     elif current_platform == "Linux": build_dir = "ubuntu-latest"
-    elif current_platform == "Darwin": build_dir = "macos-latest"
+    elif current_platform == "Darwin": build_dir = "macos-12"
     else: raise OSError("Platform %s is not supported!" % (current_platform))
 
     return os.path.join("build", build_dir)
