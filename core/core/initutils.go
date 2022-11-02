@@ -141,13 +141,11 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	/*
 		If CloudReportURL not set - Do not send report
 
-		If "First run (local config not found)" -
-			Default/keep-local - Do not send report
-			Submit - Create tenant & Submit report
+		If There is no account - Do not send report
 
-		If "Submitted" -
+		If There is account -
 			keep-local - Do not send report
-			Default/Submit - Submit report
+			Default - Submit report
 
 	*/
 
@@ -168,17 +166,16 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	if tenantConfig.IsConfigFound() { // config found in cache (submitted)
-		if !scanInfo.Local {
-			if tenantConfig.GetAccountID() != "" {
-				if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
-					scanInfo.Submit = false
-					return
-				}
-			}
-			// Submit report
-			scanInfo.Submit = true
-		}
+	if scanInfo.Local {
+		scanInfo.Submit = false
+		return
+	}
+
+	// If There is no account, or if the account is not legal, do not submit
+	if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
+		scanInfo.Submit = false
+	} else {
+		scanInfo.Submit = true
 	}
 
 }
