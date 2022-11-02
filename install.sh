@@ -21,17 +21,17 @@ KUBESCAPE_ZIP=kubescape.zip
 
 osName=$(uname -s)
 if [[ $osName == *"MINGW"* ]]; then
-    osName=windows
+    osName=windows-latest
 elif [[ $osName == *"Darwin"* ]]; then
-    osName=macos
+    osName=macos-12
 else
-    osName=ubuntu
+    osName=ubuntu-latest
 fi
 
 mkdir -p $BASE_DIR 
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
-DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/${RELEASE}/kubescape-${osName}-latest"
+DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/${RELEASE}/kubescape-${osName}"
 
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
