@@ -17,20 +17,22 @@ require (
 	github.com/johnfercher/maroto v0.37.0
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/k8s-interface v0.0.84
-	github.com/kubescape/opa-utils v0.0.198
+	github.com/kubescape/opa-utils v0.0.199-0.20221103115452-7f21b4b201ea
 	github.com/kubescape/rbac-utils v0.0.17
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.14
+	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/open-policy-agent/opa v0.45.0
 	github.com/owenrumney/go-sarif/v2 v2.1.2
-	github.com/spf13/cobra v1.5.0
+	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.8.0
 	github.com/whilp/git-urls v1.0.0
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3
 	google.golang.org/api v0.85.0
 	google.golang.org/genproto v0.0.0-20220708155623-50e5f4832e73
 	google.golang.org/protobuf v1.28.1
+	gopkg.in/op/go-logging.v1 v1.0.0-20160211212156-b2cb9fa56473
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v3 v3.9.0
 	k8s.io/api v0.24.3
@@ -68,8 +70,10 @@ require (
 	github.com/ProtonMail/go-crypto v0.0.0-20210428141323-04723f9f07d7 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
+	github.com/a8m/envsubst v1.3.0 // indirect
 	github.com/acomagu/bufpipe v1.0.3 // indirect
 	github.com/agnivade/levenshtein v1.1.1 // indirect
+	github.com/alecthomas/participle/v2 v2.0.0-beta.5 // indirect
 	github.com/aws/aws-sdk-go v1.44.51 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.16.7 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.15.13 // indirect
@@ -91,6 +95,7 @@ require (
 	github.com/docker/docker v20.10.17+incompatible // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.4.0 // indirect
+	github.com/elliotchance/orderedmap v1.5.0 // indirect
 	github.com/emicklei/go-restful v2.9.5+incompatible // indirect
 	github.com/emirpasic/gods v1.12.0 // indirect
 	github.com/evanphx/json-patch v4.12.0+incompatible // indirect
@@ -104,6 +109,8 @@ require (
 	github.com/go-openapi/jsonreference v0.19.5 // indirect
 	github.com/go-openapi/swag v0.19.14 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
+	github.com/goccy/go-json v0.9.11 // indirect
+	github.com/goccy/go-yaml v1.9.6 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.2.0 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
@@ -115,13 +122,15 @@ require (
 	github.com/googleapis/gax-go/v2 v2.4.0 // indirect
 	github.com/huandu/xstrings v1.3.2 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect
-	github.com/inconshreveable/mousetrap v1.0.0 // indirect
+	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
+	github.com/jinzhu/copier v0.3.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/kevinburke/ssh_config v0.0.0-20201106050909-4977a11b4351 // indirect
+	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/mailru/easyjson v0.7.6 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
 	github.com/mattn/go-runewidth v0.0.9 // indirect
@@ -163,6 +172,7 @@ require (
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
+	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect
 	gonum.org/v1/gonum v0.9.1 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/grpc v1.49.0 // indirect

@@ -2,12 +2,20 @@ package v2
 
 import (
 	"os"
+	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/owenrumney/go-sarif/v2/sarif"
 )
 
@@ -80,7 +88,7 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 }
 
 // addResult adds a result of checking a rule to the scan run based on the given control summary
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string) {
+func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location) {
 	scanRun.CreateResultForRule(ctl.GetID()).
 		WithMessage(sarif.NewTextMessage(ctl.GetDescription())).
 		AddLocation(
@@ -89,7 +97,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 					WithArtifactLocation(
 						sarif.NewSimpleArtifactLocation(filepath),
 					).WithRegion(
-					sarif.NewSimpleRegion(1, 1),
+					sarif.NewRegion().WithStartLine(location.Line).WithStartColumn(location.Column),
 				),
 			),
 		)
@@ -102,6 +110,7 @@ func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	}
 
 	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	basePath := getBasePathFromMetadata(*opaSessionObj)
 
 	for resourceID, result := range opaSessionObj.ResourcesResult {
 		if result.GetStatus(nil).IsFailed() {
@@ -109,15 +118,23 @@ func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 			filepath := resourceSource.RelativePath
 
 			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-			if filepath == "" {
+			if filepath == "" || basePath == "" {
 				continue
+			}
+
+			rsrcAbsPath := path.Join(basePath, filepath)
+			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
+			if err != nil {
+				logger.L().Debug("failed to create location resolver", helpers.Error(err))
 			}
 
 			for _, ac := range result.AssociatedControls {
 				if ac.GetStatus(nil).IsFailed() {
 					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+
 					sp.addRule(run, ctl)
-					sp.addResult(run, ctl, filepath)
+					sp.addResult(run, ctl, filepath, location)
 				}
 			}
 		}
@@ -126,4 +143,56 @@ func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	report.AddRun(run)
 
 	report.PrettyWrite(sp.writer)
+}
+
+func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
+	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
+	if locationResolver == nil {
+		return defaultLocation
+	}
+
+	fixPaths := failedPathsToString(ac)
+	if len(fixPaths) == 0 {
+		fixPaths = fixPathsToString(ac)
+	}
+	var fixPath string
+	if len(fixPaths) > 0 {
+		fixPath = fixPaths[0]
+	}
+
+	var location locationresolver.Location
+	if fixPath == "" {
+		return defaultLocation
+	}
+
+	resource := opaSessionObj.AllResources[resourceID]
+	localworkload, ok := resource.(*localworkload.LocalWorkload)
+	if !ok {
+		return defaultLocation
+	}
+
+	splittedPath := strings.Split(localworkload.GetPath(), ":")
+	if len(splittedPath) <= 1 {
+		return defaultLocation
+	}
+
+	docIndex, _ := strconv.Atoi(splittedPath[1])
+	location, _ = locationResolver.ResolveLocation(fixPath, docIndex)
+	if location.Line == 0 {
+		return defaultLocation
+	}
+
+	return location
+}
+
+func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == v2.GitLocal {
+		return opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
+	}
+
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == v2.Directory {
+		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
+	}
+
+	return ""
 }
