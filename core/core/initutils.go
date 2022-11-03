@@ -69,7 +69,7 @@ func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fw
 	}
 	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework
-		return reporterv2.NewReportMock(reporterv2.NO_SUBMIT_QUERY, "run kubescape with the '--submit' flag")
+		return reporterv2.NewReportMock("https://hub.armosec.io/docs/installing-kubescape", "run kubescape with the '--account' flag")
 	}
 	var message string
 	if !fwScan {
@@ -141,13 +141,11 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	/*
 		If CloudReportURL not set - Do not send report
 
-		If "First run (local config not found)" -
-			Default/keep-local - Do not send report
-			Submit - Create tenant & Submit report
+		If There is no account - Do not send report
 
-		If "Submitted" -
+		If There is account -
 			keep-local - Do not send report
-			Default/Submit - Submit report
+			Default - Submit report
 
 	*/
 
@@ -168,17 +166,16 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	if tenantConfig.IsConfigFound() { // config found in cache (submitted)
-		if !scanInfo.Local {
-			if tenantConfig.GetAccountID() != "" {
-				if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
-					scanInfo.Submit = false
-					return
-				}
-			}
-			// Submit report
-			scanInfo.Submit = true
-		}
+	if scanInfo.Local {
+		scanInfo.Submit = false
+		return
+	}
+
+	// If There is no account, or if the account is not legal, do not submit
+	if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
+		scanInfo.Submit = false
+	} else {
+		scanInfo.Submit = true
 	}
 
 }

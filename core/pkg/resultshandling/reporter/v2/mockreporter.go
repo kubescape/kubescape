@@ -44,8 +44,9 @@ func (reportMock *ReportMock) DisplayReportURL() {
 	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	message := sep + "\n"
 	message += "Scan results have not been submitted: " + reportMock.message + "\n"
-	message += "Sign up for free: "
-	message += reportMock.GetURL() + "\n"
+	if reportMock.query != "" {
+		message += "For more details: " + reportMock.query + "\n"
+	}
 	message += sep + "\n"
 	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", message))
 }

@@ -130,14 +130,19 @@ func (lp *LoadPolicy) GetControlsInputs(clusterName string) (map[string][]string
 	filePath := lp.filePath()
 	accountConfig := &armotypes.CustomerConfig{}
 	f, err := os.ReadFile(filePath)
+	fileName := filepath.Base(filePath)
 	if err != nil {
-		return nil, err
+		formattedError := fmt.Errorf("Error opening %s file, \"controls-config\" will be downloaded from ARMO management portal", fileName)
+		return nil, formattedError
 	}
 
 	if err = json.Unmarshal(f, &accountConfig.Settings.PostureControlInputs); err == nil {
 		return accountConfig.Settings.PostureControlInputs, nil
 	}
-	return nil, err
+
+	formattedError := fmt.Errorf("Error reading %s file, %s, \"controls-config\" will be downloaded from ARMO management portal", fileName, err.Error())
+
+	return nil, formattedError
 }
 
 // temporary support for a list of files

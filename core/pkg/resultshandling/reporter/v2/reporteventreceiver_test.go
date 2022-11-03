@@ -105,14 +105,4 @@ func TestGetURL(t *testing.T) {
 		)
 		assert.Equal(t, "https://cloud.armosec.io/account/sign-up?customerGUID=1234&invitationToken=token&utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
 	}
-	// Test None submit url
-	{
-		reporter := NewReportMock(NO_SUBMIT_QUERY, "")
-		assert.Equal(t, "https://cloud.armosec.io/account/sign-up?utm_source=GitHub&utm_medium=CLI&utm_campaign=no_submit", reporter.GetURL())
-	}
-	// Test None report url
-	{
-		reporter := NewReportMock("", "")
-		assert.Equal(t, "https://cloud.armosec.io/account/sign-up", reporter.GetURL())
-	}
 }

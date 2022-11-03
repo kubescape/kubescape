@@ -147,8 +147,8 @@ github.com/armon/go-metrics v0.0.0-20180917152333-f0300d1749da/go.mod h1:Q73ZrmV
 github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
-github.com/armosec/armoapi-go v0.0.115 h1:KpxcACULFwX0BScYSS2u7DLO3D5Rlea3WNUKQpdCfJw=
-github.com/armosec/armoapi-go v0.0.115/go.mod h1:2zoNzb3Fy9ZByeczJZ47ftDRLRzTykVdTISS3GTc/JU=
+github.com/armosec/armoapi-go v0.0.119 h1:7XbvBbOKp26Bpp72LQ8Spw4FBpbXu3+qZFQyPEwTPFk=
+github.com/armosec/armoapi-go v0.0.119/go.mod h1:2zoNzb3Fy9ZByeczJZ47ftDRLRzTykVdTISS3GTc/JU=
 github.com/armosec/go-git-url v0.0.15 h1:sDtu0WNvAhrDJ2begTyWP8T4tE1j1K6D0ZJ6t3Cx8k4=
 github.com/armosec/go-git-url v0.0.15/go.mod h1:GzfssG3IW9KiURSpK7c/bySBRTlghpObQ7NQ1O4hcMI=
 github.com/armosec/utils-go v0.0.12 h1:NXkG/BhbSVAmTVXr0qqsK02CmxEiXuJyPmdTRcZ4jAo=
@@ -565,8 +565,8 @@ github.com/kubescape/go-logger v0.0.6 h1:ynhAmwrz0O7Jtqq1CdmCZUrKveji25hVP+B/FAb
 github.com/kubescape/go-logger v0.0.6/go.mod h1:DnVWEvC90LFY1nNMaNo6nBVOcqkLMK3S0qzXP1fzRvI=
 github.com/kubescape/k8s-interface v0.0.84 h1:k7YzpQ3SaN+bJCtpXzMj60WWIK9RkQQrU8dFQutr3LA=
 github.com/kubescape/k8s-interface v0.0.84/go.mod h1:ihX96yqar+xogHl45mFE8zT9DLI06iy7XQPAP+j5KJE=
-github.com/kubescape/opa-utils v0.0.196 h1:7pCW+wiMl8RsDNg2rIkSQPhvvnBnFvk90Jm8h/vdOxs=
-github.com/kubescape/opa-utils v0.0.196/go.mod h1:frMpD9wuK6rE3tMRIy6EM1X9zi+sSbXoDWjcSaq11og=
+github.com/kubescape/opa-utils v0.0.198 h1:dmakg7HIUQijC8FEJHPop3wZN9Eo1eG8rodG0xnzL5s=
+github.com/kubescape/opa-utils v0.0.198/go.mod h1:rDC3PANuk8gU5lSDO/WPFTluypBQ+/6qiuZLye+slYg=
 github.com/kubescape/rbac-utils v0.0.17 h1:B78kjlTKqjYK/PXwmi4GPysHsFxIwVz1KFb4+IGT29w=
 github.com/kubescape/rbac-utils v0.0.17/go.mod h1:pBwjpcrVeuH/no+DiCZWvlhYtCDzd3U0o/hEZKi+eM8=
 github.com/lunixbochs/vtclean v1.0.0/go.mod h1:pHhQNgMf3btfWnGBVipUOjRYhoOsdGqdm/+2c2E2WMI=
