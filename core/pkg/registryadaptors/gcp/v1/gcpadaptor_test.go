@@ -19,12 +19,12 @@ func TestSum(t *testing.T) {
 	imageVulnerabilityReports, err := adaptor.GetImagesVulnerabilities([]registryvulnerabilities.ContainerImageIdentifier{{Tag: "gcr.io/myproject/nginx@sha256:1XXXXX"}, {Tag: "gcr.io/myproject/nginx@sha256:2XXXXX"}})
 	assert.NoError(t, err)
 
-	for i,_ := range imageVulnerabilityReports {
-		var length int 
-		if i==0 {
-			length= 5
-		}else if i==1 {
-			length=3
+	for i := range imageVulnerabilityReports {
+		var length int
+		if i == 0 {
+			length = 5
+		} else if i == 1 {
+			length = 3
 		}
 		assert.Equal(t, length, len(imageVulnerabilityReports[i].Vulnerabilities))
 	}
