@@ -41,6 +41,8 @@ func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.Polic
 	controlsInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(cautils.ClusterName)
 	if err == nil {
 		policiesAndResources.RegoInputData.PostureControlInputs = controlsInputs
+	} else {
+		logger.L().Error(err.Error())
 	}
 	cautils.StopSpinner()
 
