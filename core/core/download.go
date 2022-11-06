@@ -106,7 +106,7 @@ func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 	var err error
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	exceptionsGetter := getExceptionsGetter("")
+	exceptionsGetter := getExceptionsGetter("", tenant.GetAccountID(), nil)
 	exceptions := []armotypes.PostureExceptionPolicy{}
 	if tenant.GetAccountID() != "" {
 		exceptions, err = exceptionsGetter.GetExceptions(tenant.GetContextName())

@@ -10,7 +10,7 @@
     ```bash
     curl --header "Content-Type: application/json" \
     --request POST \
-    --data '{"account":"XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX","hostScanner":true, "submit":true}' \
+    --data '{"account":"XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX","hostScanner":true}' \
     http://127.0.0.1:8080/v1/scan
     ```
 

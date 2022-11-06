@@ -134,8 +134,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
-		logger.L().Info("Requesting cloud provider data")
-		cautils.StartSpinner()
 		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
@@ -152,9 +150,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		if err != nil {
 			logger.L().Warning("failed to collect api server info resource", helpers.Error(err))
 		}
-
-		cautils.StopSpinner()
-		logger.L().Info("Requested cloud provider data")
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, nil
@@ -249,10 +244,14 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 
 		// set dynamic object
 		var clientResource dynamic.ResourceInterface
-		if namespace != "" && k8sinterface.IsNamespaceScope(resource) {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
-		} else {
+		if namespace != "" {
 			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
+		} else if k8sinterface.IsNamespaceScope(resource) {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
+		} else if k8sHandler.fieldSelector.GetClusterScope(*&resource) {
+			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
+		} else {
+			continue
 		}
 
 		// list resources
