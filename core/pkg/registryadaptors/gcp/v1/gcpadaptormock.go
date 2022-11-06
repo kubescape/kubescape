@@ -1,7 +1,6 @@
 package v1
 
 import (
-
 	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 	grafeaspb "google.golang.org/genproto/googleapis/grafeas/v1"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -38,11 +37,11 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImagesVulnerabilities(imageIDs []regist
 
 func (GCPAdaptorMock *GCPAdaptorMock) GetImageVulnerability(imageID *registryvulnerabilities.ContainerImageIdentifier) (*registryvulnerabilities.ContainerImageVulnerabilityReport, error) {
 	vulnerability := []*grafeaspb.Occurrence_Vulnerability{}
-	occurence := []*grafeaspb.Occurrence{}
+	occurrence := []*grafeaspb.Occurrence{}
 	arr := GetMockData()
 
 	for i, _ := range arr {
-		if imageID.Tag == "gcr.io/myproject/nginx@sha256:2XXXXX" && i==4 {
+		if imageID.Tag == "gcr.io/myproject/nginx@sha256:2XXXXX" && i == 4 {
 			break
 		}
 		vulnerability = append(vulnerability, &grafeaspb.Occurrence_Vulnerability{
@@ -66,7 +65,7 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImageVulnerability(imageID *registryvul
 			},
 		})
 
-		occurence = append(occurence, &grafeaspb.Occurrence{
+		occurrence = append(occurrence, &grafeaspb.Occurrence{
 			Name:     arr[i].Name,
 			Kind:     grafeaspb.NoteKind_ATTESTATION,
 			NoteName: arr[i].Notename,
@@ -80,8 +79,7 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImageVulnerability(imageID *registryvul
 		})
 	}
 
-
-	vulnerabilities := responseObjectToVulnerabilities(occurence, 5)
+	vulnerabilities := responseObjectToVulnerabilities(occurrence, 5)
 
 	resultImageVulnerabilityReport := registryvulnerabilities.ContainerImageVulnerabilityReport{
 		ImageID:         *imageID,
@@ -112,74 +110,74 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImagesScanStatus(imageIDs []registryvul
 func GetMockData() []Mock {
 	arr := []Mock{
 		{
-			Name: "projects/stable-furnace-356005/occurrences/41fd9fec-6fab-4531-a4ee-e7b97d518554",
-			Notename: "projects/goog-vulnz/notes/CVE-2009-4487",
-			CvssScore: 6.8,
-			CreatedTime: 1661061853,
-			UpdatedTime: 1661061853,
-			Type: "OS",
+			Name:             "projects/stable-furnace-356005/occurrences/41fd9fec-6fab-4531-a4ee-e7b97d518554",
+			Notename:         "projects/goog-vulnz/notes/CVE-2009-4487",
+			CvssScore:        6.8,
+			CreatedTime:      1661061853,
+			UpdatedTime:      1661061853,
+			Type:             "OS",
 			ShortDescription: "CVE-2009-4487",
-			AffectedCPEURI: "cpe:/o:debian:debian_linux:11",
-			AffectedPackage: "nginx",
-			FixAvailable: true,
-			AffectedVersion: "1.23.1-1~bullseye",
-			FixedVersion: "",
+			AffectedCPEURI:   "cpe:/o:debian:debian_linux:11",
+			AffectedPackage:  "nginx",
+			FixAvailable:     true,
+			AffectedVersion:  "1.23.1-1~bullseye",
+			FixedVersion:     "",
 		},
 		{
-			Name: "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
-			Notename: "projects/goog-vulnz/notes/CVE-2017-17740",
-			CvssScore: 2.3,
-			CreatedTime: 3237628,
-			UpdatedTime: 5989893,
-			Type: "OS",
+			Name:             "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
+			Notename:         "projects/goog-vulnz/notes/CVE-2017-17740",
+			CvssScore:        2.3,
+			CreatedTime:      3237628,
+			UpdatedTime:      5989893,
+			Type:             "OS",
 			ShortDescription: "CVE-2017-17740",
-			AffectedCPEURI: "cpe:/o:debian:debian_linux:11",
-			AffectedPackage: "openldap",
-			FixAvailable: false,
-			AffectedVersion: "1.3.5",
-			FixedVersion: "1.3.5",
+			AffectedCPEURI:   "cpe:/o:debian:debian_linux:11",
+			AffectedPackage:  "openldap",
+			FixAvailable:     false,
+			AffectedVersion:  "1.3.5",
+			FixedVersion:     "1.3.5",
 		},
 		{
-			Name: "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
-			Notename: "projects/goog-vulnz/notes/CVE-2017-17740",
-			CvssScore: 2.3,
-			CreatedTime: 3237628,
-			UpdatedTime: 5989893,
-			Type: "OS",
+			Name:             "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
+			Notename:         "projects/goog-vulnz/notes/CVE-2017-17740",
+			CvssScore:        2.3,
+			CreatedTime:      3237628,
+			UpdatedTime:      5989893,
+			Type:             "OS",
 			ShortDescription: "CVE-2017-17740",
-			AffectedCPEURI: "cpe:/o:debian:debian_linux:11",
-			AffectedPackage: "openldap",
-			FixAvailable: false,
-			AffectedVersion: "1.3.5",
-			FixedVersion: "1.3.5",
+			AffectedCPEURI:   "cpe:/o:debian:debian_linux:11",
+			AffectedPackage:  "openldap",
+			FixAvailable:     false,
+			AffectedVersion:  "1.3.5",
+			FixedVersion:     "1.3.5",
 		},
 		{
-			Name: "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
-			Notename: "projects/goog-vulnz/notes/CVE-2017-17740",
-			CvssScore: 2.3,
-			CreatedTime: 3237628,
-			UpdatedTime: 5989893,
-			Type: "OS",
+			Name:             "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
+			Notename:         "projects/goog-vulnz/notes/CVE-2017-17740",
+			CvssScore:        2.3,
+			CreatedTime:      3237628,
+			UpdatedTime:      5989893,
+			Type:             "OS",
 			ShortDescription: "CVE-2017-17740",
-			AffectedCPEURI: "cpe:/o:debian:debian_linux:11",
-			AffectedPackage: "openldap",
-			FixAvailable: false,
-			AffectedVersion: "1.3.5",
-			FixedVersion: "1.3.5",
+			AffectedCPEURI:   "cpe:/o:debian:debian_linux:11",
+			AffectedPackage:  "openldap",
+			FixAvailable:     false,
+			AffectedVersion:  "1.3.5",
+			FixedVersion:     "1.3.5",
 		},
 		{
-			Name: "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
-			Notename: "projects/goog-vulnz/notes/CVE-2017-17740",
-			CvssScore: 2.3,
-			CreatedTime: 3237628,
-			UpdatedTime: 5989893,
-			Type: "OS",
+			Name:             "projects/stable-furnace-356005/occurrences/b28fa29f-5c2b-45c7-9727-2f1f02ed1957",
+			Notename:         "projects/goog-vulnz/notes/CVE-2017-17740",
+			CvssScore:        2.3,
+			CreatedTime:      3237628,
+			UpdatedTime:      5989893,
+			Type:             "OS",
 			ShortDescription: "CVE-2017-17740",
-			AffectedCPEURI: "cpe:/o:debian:debian_linux:11",
-			AffectedPackage: "openldap",
-			FixAvailable: false,
-			AffectedVersion: "1.3.5",
-			FixedVersion: "1.3.5",
+			AffectedCPEURI:   "cpe:/o:debian:debian_linux:11",
+			AffectedPackage:  "openldap",
+			FixAvailable:     false,
+			AffectedVersion:  "1.3.5",
+			FixedVersion:     "1.3.5",
 		},
 	}
 

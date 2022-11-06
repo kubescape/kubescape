@@ -1,7 +1,7 @@
 package v1
 
 import (
-	 "github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 type GCPAdaptor struct {

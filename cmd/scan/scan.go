@@ -14,7 +14,7 @@ var scanCmdExamples = `
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
   # Scan current cluster with all frameworks
-  kubescape scan --submit --enable-host-scan --verbose
+  kubescape scan --enable-host-scan --verbose
 
   # Scan kubernetes YAML manifest files
   kubescape scan *.yaml
@@ -87,24 +87,17 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host scanner DaemonSet. Use this flag cautiously")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v1", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomClusterName, "cluster-name", "", "Set the custom name of the cluster. Not same as the kube-context flag")
+	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Submit the scan results to Kubescape SaaS where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
 
-	// Deprecated flags - remove 1.May.2022
-	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Silent, "silent", "s", false, "Silent progress messages")
 	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
-
-	// Deprecated flags - remove 1.Jan.2023
-	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Send the scan results to ARMO management portal where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
-	scanCmd.PersistentFlags().MarkDeprecated("submit", "Kubescape will automatically submit the scan results whenever an account ID is configured. An account ID can be configured either with (1) '--account' flag (2) Kubescape configuration (3) 'KS_ACCOUNT_ID' environment variable. '--submit' flag will be removed at 1.Jan.2023")
 
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
-	scanCmd.PersistentFlags().MarkHidden("silent")         // this flag should be deprecated since we added the --logger support
-	// scanCmd.PersistentFlags().MarkHidden("format-version") // meant for testing different output approaches and not for common use
 
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
 
-	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy ARMO K8s host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://github.com/kubescape/kubescape/blob/master/core/pkg/hostsensorutils/hostsensor.yaml")
+	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy Kubescape host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://github.com/kubescape/kubescape/blob/master/core/pkg/hostsensorutils/hostsensor.yaml")
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 
