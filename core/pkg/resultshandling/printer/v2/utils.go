@@ -16,6 +16,7 @@ import (
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
+		Metadata:             *data.Metadata,
 		ClusterAPIServerInfo: data.Report.ClusterAPIServerInfo,
 		ReportGenerationTime: data.Report.ReportGenerationTime,
 		Attributes:           data.Report.Attributes,
