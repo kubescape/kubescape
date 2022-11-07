@@ -22,7 +22,7 @@ import (
 	"gopkg.in/op/go-logging.v1"
 )
 
-const UserValue = "YOUR_"
+const UserValuePrefix = "YOUR_"
 
 func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 	jsonFile, err := os.Open(fixInfo.ReportFile)
@@ -62,7 +62,7 @@ func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 		return nil
 	}
 
-	return fmt.Errorf("unsupported scanning target")
+	return fmt.Errorf("unsupported scanning target. Only local git and directory scanning targets are supported")
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
@@ -186,7 +186,7 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
 	for _, resourceToFix := range resourcesToFix {
-		singleExpression := h.reduceYamlExpressions(&resourceToFix)
+		singleExpression := reduceYamlExpressions(&resourceToFix)
 		if err := h.applyFixToFile(resourceToFix.FilePath, singleExpression); err != nil {
 			errors = append(errors,
 				fmt.Errorf("failed to fix resource [Name: '%s', Kind: '%s'] in '%s': %w ",
@@ -245,7 +245,7 @@ func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError e
 	return err
 }
 
-func (h *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(documentIndex int, ac *resourcesresults.ResourceAssociatedControl, skipUserValues bool) {
+func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(documentIndex int, ac *resourcesresults.ResourceAssociatedControl, skipUserValues bool) {
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
 			continue
@@ -255,18 +255,18 @@ func (h *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docume
 			if rulePaths.FixPath.Path == "" {
 				continue
 			}
-			if strings.HasPrefix(rulePaths.FixPath.Value, UserValue) && skipUserValues {
+			if strings.HasPrefix(rulePaths.FixPath.Value, UserValuePrefix) && skipUserValues {
 				continue
 			}
 
-			yamlExpression := h.FixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
-			h.YamlExpressions[yamlExpression] = &rulePaths.FixPath
+			yamlExpression := fixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
+			rfi.YamlExpressions[yamlExpression] = &rulePaths.FixPath
 		}
 	}
 }
 
-// ReduceYamlExpressions reduces the number of yaml expressions to a single one
-func (handler *FixHandler) reduceYamlExpressions(resource *ResourceFixInfo) string {
+// reduceYamlExpressions reduces the number of yaml expressions to a single one
+func reduceYamlExpressions(resource *ResourceFixInfo) string {
 	expressions := make([]string, 0, len(resource.YamlExpressions))
 	for expr := range resource.YamlExpressions {
 		expressions = append(expressions, expr)
@@ -275,7 +275,7 @@ func (handler *FixHandler) reduceYamlExpressions(resource *ResourceFixInfo) stri
 	return strings.Join(expressions, " | ")
 }
 
-func (h *ResourceFixInfo) FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
+func fixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
 	isStringValue := true
 	if _, err := strconv.ParseBool(value); err == nil {
 		isStringValue = false
