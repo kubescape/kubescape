@@ -66,6 +66,6 @@ echo -e "\033[0m"
 $KUBESCAPE_EXEC version
 echo
 
-echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan --submit --enable-host-scan --verbose"
+echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan --enable-host-scan --verbose"
 
 echo -e "\033[0m"

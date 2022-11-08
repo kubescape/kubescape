@@ -139,9 +139,9 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			for j := range w {
 				lw := localworkload.NewLocalWorkload(w[j].GetObject())
 				if relPath, err := filepath.Rel(rootPath, path); err == nil {
-					lw.SetPath(relPath)
+					lw.SetPath(fmt.Sprintf("%s:%d", relPath, j))
 				} else {
-					lw.SetPath(path)
+					lw.SetPath(fmt.Sprintf("%s:%d", path, j))
 				}
 				wSlice = append(wSlice, lw)
 			}

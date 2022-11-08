@@ -101,7 +101,6 @@ When scanning is not in progress
   "excludedNamespaces": [<str>], // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
   "includeNamespaces": [<str>],  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
   "useCachedArtifacts"`: <bool>, // use the cached artifacts instead of downloading (offline support)
-  "submit": <bool>,              // submit results to Kubescape cloud (same as 'kubescape scan --submit')
   "hostScanner": <bool>,         // deploy Kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
   "keepLocal": <bool>,           // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
   "account": <str>,              // account ID (same as 'kubescape scan --account')
@@ -132,7 +131,7 @@ When scanning is not in progress
 
 1. Trigger kubescape scan
   ```bash
-  curl --header "Content-Type: application/json" --request POST --data '{"hostScanner":true, "submit": true}' http://127.0.0.1:8080/v1/scan
+  curl --header "Content-Type: application/json" --request POST --data '{"hostScanner":true}' http://127.0.0.1:8080/v1/scan
   ```
 
 2. Get kubescape scan results
@@ -143,13 +142,13 @@ When scanning is not in progress
 #### Trigger scan and wait for the scan to end  
 
 ```bash
-curl --header "Content-Type: application/json" --request POST --data '{"hostScanner":true, "submit": true}' http://127.0.0.1:8080/v1/scan?wait -o scan_results.json
+curl --header "Content-Type: application/json" --request POST --data '{"hostScanner":true}' http://127.0.0.1:8080/v1/scan?wait -o scan_results.json
 ```
 #### Scan single namespace with a specific framework
 ```bash
 curl --header "Content-Type: application/json" \
   --request POST \
-  --data '{"hostScanner":true, "submit":true, "includeNamespaces": ["kubescape"], "targetType": "framework", "targetNames": ["nsa"] }' \
+  --data '{"hostScanner":true, "includeNamespaces": ["kubescape"], "targetType": "framework", "targetNames": ["nsa"] }' \
   http://127.0.0.1:8080/v1/scan
 ```
 
@@ -171,7 +170,6 @@ go tool pprof http://localhost:6060/debug/pprof/heap
 ## Supported environment variables
 
 * `KS_ACCOUNT`: Account ID
-* `KS_SUBMIT`: Submit the results to the Kubescape SaaS version
 * `KS_EXCLUDE_NAMESPACES`: List of namespaces to exclude, e.g. `KS_EXCLUDE_NAMESPACES=kube-system,kube-public`
 * `KS_INCLUDE_NAMESPACES`: List of namespaces to include, rest of the namespaces will be ignored. e.g. `KS_INCLUDE_NAMESPACES=dev,prod`
 * `KS_HOST_SCAN_YAML`: Full path to the host scanner YAML

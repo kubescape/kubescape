@@ -3,6 +3,7 @@ package getter
 import (
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/gitregostore"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -98,4 +99,12 @@ func contains(s []string, str string) bool {
 		}
 	}
 	return false
+}
+
+func (drp *DownloadReleasedPolicy) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	exceptions, err := drp.gs.GetSystemPostureExceptionPolicies()
+	if err != nil {
+		return nil, err
+	}
+	return exceptions, nil
 }

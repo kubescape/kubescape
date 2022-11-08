@@ -65,16 +65,16 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 }
 
 func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framework, error) {
-	framework := &reporthandling.Framework{}
+	var framework reporthandling.Framework
 	var err error
 	for _, filePath := range lp.filePaths {
+		framework = reporthandling.Framework{}
 		f, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
-
-		if err = json.Unmarshal(f, framework); err != nil {
-			return framework, err
+		if err = json.Unmarshal(f, &framework); err != nil {
+			return nil, err
 		}
 		if strings.EqualFold(frameworkName, framework.Name) {
 			break
@@ -84,7 +84,7 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 
 		return nil, fmt.Errorf("framework from file not matching")
 	}
-	return framework, err
+	return &framework, err
 }
 
 func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
@@ -130,14 +130,19 @@ func (lp *LoadPolicy) GetControlsInputs(clusterName string) (map[string][]string
 	filePath := lp.filePath()
 	accountConfig := &armotypes.CustomerConfig{}
 	f, err := os.ReadFile(filePath)
+	fileName := filepath.Base(filePath)
 	if err != nil {
-		return nil, err
+		formattedError := fmt.Errorf("Error opening %s file, \"controls-config\" will be downloaded from ARMO management portal", fileName)
+		return nil, formattedError
 	}
 
 	if err = json.Unmarshal(f, &accountConfig.Settings.PostureControlInputs); err == nil {
 		return accountConfig.Settings.PostureControlInputs, nil
 	}
-	return nil, err
+
+	formattedError := fmt.Errorf("Error reading %s file, %s, \"controls-config\" will be downloaded from ARMO management portal", fileName, err.Error())
+
+	return nil, formattedError
 }
 
 // temporary support for a list of files
