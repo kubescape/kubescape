@@ -26,7 +26,7 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool) {
 	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	var postureReportStr []byte
@@ -43,3 +43,7 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 	}
 	jsonPrinter.writer.Write(postureReportStr)
 }
+
+// func (jsonPrinter *JsonPrinter) ActionPrintImage(opaSessionObj *cautils.OPASessionObj){
+// 	fmt.Println("TODO")
+// }

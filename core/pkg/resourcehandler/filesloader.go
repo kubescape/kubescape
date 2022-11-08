@@ -10,6 +10,8 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 
+	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
+
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -30,7 +32,7 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, map[string][]registryvulnerabilities.Vulnerability, error) {
 
 	//
 	// build resources map
@@ -38,9 +40,10 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
 	ksResources := &cautils.KSResources{}
+	imageVulnerabilities := map[string][]registryvulnerabilities.Vulnerability{}
 
 	if len(fileHandler.inputPatterns) == 0 {
-		return nil, nil, nil, fmt.Errorf("missing input")
+		return nil, nil, nil, nil, fmt.Errorf("missing input")
 	}
 
 	logger.L().Info("Accessing local objects")
@@ -49,7 +52,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	for path := range fileHandler.inputPatterns {
 		workloadIDToSource, workloads, err := getResourcesFromPath(fileHandler.inputPatterns[path])
 		if err != nil {
-			return nil, allResources, nil, err
+			return nil, allResources, nil, nil, err
 		}
 		if len(workloads) == 0 {
 			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", fileHandler.inputPatterns[path]))
@@ -76,14 +79,16 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	}
 
-	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
+	if imgResults, err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
 		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
+	} else{
+		imageVulnerabilities = imgResults
 	}
 
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")
 
-	return k8sResources, allResources, ksResources, nil
+	return k8sResources, allResources, ksResources, imageVulnerabilities, nil
 }
 
 func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {

@@ -48,7 +48,7 @@ func (htmlPrinter *HtmlPrinter) SetWriter(outputFile string) {
 	htmlPrinter.writer = printer.GetWriter(outputFile)
 }
 
-func (htmlPrinter *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (htmlPrinter *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool) {
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0
@@ -109,6 +109,7 @@ func (htmlPrinter *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 		logger.L().Error("failed to render template", helpers.Error(err))
 	}
 }
+
 
 func (htmlPrinter *HtmlPrinter) Score(score float32) {
 	return

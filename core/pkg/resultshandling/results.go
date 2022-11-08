@@ -62,9 +62,9 @@ func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureRepo
 }
 
 // HandleResults handle the scan results according to the pre defined interfaces
-func (resultsHandler *ResultsHandler) HandleResults() error {
+func (resultsHandler *ResultsHandler) HandleResults(scanInfo *cautils.ScanInfo) error {
 
-	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
+	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData, scanInfo.ImageScan)
 
 	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
 		return err

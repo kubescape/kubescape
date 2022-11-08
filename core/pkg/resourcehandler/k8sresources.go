@@ -16,6 +16,8 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
+	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
+
 	"github.com/armosec/armoapi-go/armotypes"
 
 	v1 "k8s.io/api/core/v1"
@@ -45,8 +47,9 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, map[string][]registryvulnerabilities.Vulnerability, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
+	imageVulnerabilities := map[string][]registryvulnerabilities.Vulnerability{}
 
 	// get k8s resources
 	logger.L().Info("Accessing Kubernetes objects")
@@ -68,7 +71,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, ksResourceMap, err
+		return k8sResourcesMap, allResources, ksResourceMap, imageVulnerabilities, err
 	}
 
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
@@ -84,16 +87,17 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
 	// check that controls use image vulnerability resources
-	if scanInfo.ImageScan { //len(imgVulnResources) > 0 {
+	if len(imgVulnResources) > 0 {
 		logger.L().Info("Requesting images vulnerabilities results")
 		cautils.StartSpinner()
-		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
+		if imgResults, err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
 			logger.L().Warning("failed to collect image vulnerabilities", helpers.Error(err))
 			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
 		} else {
 			if isEmptyImgVulns(*ksResourceMap) {
 				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", imgVulnResources, sessionObj.InfoMap)
 			}
+			imageVulnerabilities = imgResults
 		}
 		cautils.StopSpinner()
 		logger.L().Success("Requested images vulnerabilities results")
@@ -157,7 +161,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		logger.L().Info("Requested cloud provider data")
 	}
 
-	return k8sResourcesMap, allResources, ksResourceMap, nil
+	return k8sResourcesMap, allResources, ksResourceMap, imageVulnerabilities, nil
 }
 
 func (k8sHandler *K8sResourceHandler) collectAPIServerInfoResource(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {

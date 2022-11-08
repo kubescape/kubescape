@@ -22,7 +22,7 @@ const (
 )
 
 type IPrinter interface {
-	ActionPrint(opaSessionObj *cautils.OPASessionObj)
+	ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool)
 	SetWriter(outputFile string)
 	Score(score float32)
 }

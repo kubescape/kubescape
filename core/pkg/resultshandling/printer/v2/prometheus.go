@@ -44,7 +44,7 @@ func (printer *PrometheusPrinter) generatePrometheusFormat(
 	return m
 }
 
-func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool) {
 
 	metrics := printer.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
 

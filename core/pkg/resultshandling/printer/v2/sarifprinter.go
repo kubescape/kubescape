@@ -95,7 +95,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		)
 }
 
-func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool) {
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
 		panic(err)

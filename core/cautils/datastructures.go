@@ -8,6 +8,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
@@ -30,6 +31,7 @@ type OPASessionObj struct {
 	InfoMap               map[string]apis.StatusInfo // Map errors of resources to StatusInfo
 	ResourceToControlsMap map[string][]string        // map[<apigroup/apiversion/resource>] = [<control_IDs>]
 	SessionID             string                     // SessionID
+	ImageResults 		  map[string][]registryvulnerabilities.Vulnerability // Image vulnerabilities
 }
 
 func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {

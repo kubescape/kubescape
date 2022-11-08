@@ -32,7 +32,7 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, viewType cautils.V
 	}
 }
 
-func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool) {
 	fmt.Fprintf(prettyPrinter.writer, "\n"+getSeparator("^")+"\n")
 
 	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())

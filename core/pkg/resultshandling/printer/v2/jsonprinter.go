@@ -27,8 +27,9 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	r, err := json.Marshal(FinalizeResults(opaSessionObj))
+func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool) {
+
+	r, err := PrintStyle(opaSessionObj, imageScan)
 	if err != nil {
 		logger.L().Fatal("failed to Marshal posture report object")
 	}
@@ -37,4 +38,18 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 	if _, err := jsonPrinter.writer.Write(r); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
 	}
+
+}
+
+// Get the result based on the scan type i.e. an overall cluster scan results or just image scan results
+func PrintStyle(opaSessionObj *cautils.OPASessionObj, imageScan bool) ([]byte, error) {
+	
+	if imageScan == true{
+		result, err := json.Marshal(opaSessionObj.ImageResults)
+		return result, err
+	} else{
+		result, err := json.Marshal(FinalizeResults(opaSessionObj))
+		return result, err
+	}
+
 }

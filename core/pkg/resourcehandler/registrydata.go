@@ -35,16 +35,16 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	return registryAdaptors, nil
 }
 
-func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
+func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (map[string][]registryvulnerabilities.Vulnerability, error) {
 	logger.L().Debug("Collecting images vulnerabilities")
 
 	if len(registryAdaptors.adaptors) == 0 {
-		return fmt.Errorf("credentials are not configured for any registry adaptor")
+		return nil, fmt.Errorf("credentials are not configured for any registry adaptor")
 	}
 
 	for i := range registryAdaptors.adaptors { // login and and get vulnerabilities
 		if err := registryAdaptors.adaptors[i].Login(); err != nil {
-			return fmt.Errorf("failed to login, adaptor: '%s', reason: '%s'", registryAdaptors.adaptors[i].DescribeAdaptor(), err.Error())
+			return nil, fmt.Errorf("failed to login, adaptor: '%s', reason: '%s'", registryAdaptors.adaptors[i].DescribeAdaptor(), err.Error())
 		}
 	}
 
@@ -56,8 +56,9 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	for i := range registryAdaptors.adaptors { // login and and get vulnerabilities
 
 		vulnerabilities, err := registryAdaptors.adaptors[i].GetImagesVulnerabilities(imagesIdentifiers)
+
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for j := range vulnerabilities {
 			imagesVulnerability[vulnerabilities[j].ImageID.Tag] = vulnerabilities[j].Vulnerabilities
@@ -68,7 +69,7 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	metaObjs := vulnerabilitiesToIMetadata(imagesVulnerability)
 
 	if len(metaObjs) == 0 {
-		return fmt.Errorf("no vulnerabilities found for any of the images")
+		return nil, fmt.Errorf("no vulnerabilities found for any of the images")
 	}
 
 	// save in resources map
@@ -77,7 +78,7 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	}
 	(*ksResourceMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
 
-	return nil
+	return imagesVulnerability, nil
 }
 
 func vulnerabilitiesToIMetadata(vulnerabilities map[string][]registryvulnerabilities.Vulnerability) []workloadinterface.IMetadata {

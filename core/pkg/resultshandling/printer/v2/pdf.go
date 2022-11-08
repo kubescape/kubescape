@@ -75,7 +75,7 @@ func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsumm
 
 }
 
-func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj, imageScan bool) {
 	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
