@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 )
 
@@ -54,11 +53,7 @@ func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi()) // change k8sinterface
 
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
-	l := getter.ListName
-	if listPolicies.ListIDs {
-		l = getter.ListID
-	}
-	return g.ListControls(l)
+	return g.ListControls()
 }
 
 func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
