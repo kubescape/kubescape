@@ -109,7 +109,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	return fwNames, nil
 }
 
-func (lp *LoadPolicy) ListControls(listType ListType) ([]string, error) {
+func (lp *LoadPolicy) ListControls() ([]string, error) {
 	// TODO - Support
 	return []string{}, fmt.Errorf("loading controls list from file is not supported")
 }
