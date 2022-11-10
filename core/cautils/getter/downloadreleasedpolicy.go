@@ -68,7 +68,7 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 	controlsNamesWithIDsList := make([]string, len(controlsIDsList))
 	// by design both slices have the same length
 	for i := range controlsIDsList {
-		controlsNamesWithIDsList = append(controlsNamesWithIDsList, fmt.Sprintf("%v (%v)", controlsNamesList[i], controlsIDsList[i]))
+		controlsNamesWithIDsList[i] = fmt.Sprintf("%v (%v)", controlsNamesList[i], controlsIDsList[i])
 	}
 	return controlsNamesWithIDsList, nil
 }

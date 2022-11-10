@@ -28,14 +28,18 @@ func ListSupportActions() []string {
 	return commands
 }
 func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
-	if f, ok := listFunc[listPolicies.Target]; ok {
-		policies, err := f(listPolicies)
+	if policyListerFunc, ok := listFunc[listPolicies.Target]; ok {
+		policies, err := policyListerFunc(listPolicies)
 		if err != nil {
 			return err
 		}
 		sort.Strings(policies)
 
-		listFormatFunc[listPolicies.Format](listPolicies, policies)
+		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
+			listFormatFunction(listPolicies, policies)
+		} else {
+			return fmt.Errorf("Invalid format \"%s\", Supported formats: 'pretty-print'/'json' ", listPolicies.Format)
+		}
 
 		return nil
 	}
@@ -44,16 +48,16 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 
 func listFrameworks(listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi()) // change k8sinterface
-	g := getPolicyGetter(nil, tenant.GetTenantEmail(), true, nil)
+	policyGetter := getPolicyGetter(nil, tenant.GetTenantEmail(), true, nil)
 
-	return listFrameworksNames(g), nil
+	return listFrameworksNames(policyGetter), nil
 }
 
 func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi()) // change k8sinterface
 
-	g := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
-	return g.ListControls()
+	policyGetter := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
+	return policyGetter.ListControls()
 }
 
 func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
