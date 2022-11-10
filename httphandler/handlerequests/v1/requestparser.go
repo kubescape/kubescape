@@ -3,7 +3,7 @@ package v1
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"sync"
 
@@ -124,7 +124,7 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 		return scanRequestParams, fmt.Errorf("failed to parse query params, reason: %s", err.Error())
 	}
 
-	readBuffer, err := ioutil.ReadAll(r.Body)
+	readBuffer, err := io.ReadAll(r.Body)
 	if err != nil {
 		// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()), scanID)
 		return scanRequestParams, fmt.Errorf("failed to read request body, reason: %s", err.Error())
