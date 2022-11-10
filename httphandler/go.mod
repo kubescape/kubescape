@@ -120,7 +120,7 @@ require (
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/kevinburke/ssh_config v0.0.0-20201106050909-4977a11b4351 // indirect
 	github.com/kubescape/k8s-interface v0.0.89 // indirect
-	github.com/kubescape/rbac-utils v0.0.18 // indirect
+	github.com/kubescape/rbac-utils v0.0.19 // indirect
 	github.com/libgit2/git2go/v33 v33.0.9 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect

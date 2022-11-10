@@ -591,8 +591,8 @@ github.com/kubescape/k8s-interface v0.0.89 h1:OtlvZosHpjlbHfsilfQk2wRbuBnxwF0e+W
 github.com/kubescape/k8s-interface v0.0.89/go.mod h1:pgFRs20mHiavf6+fFWY7h/f8HuKlwuZwirvjxiKJlu0=
 github.com/kubescape/opa-utils v0.0.200 h1:7EhE9FTabzkUxicvxdchXuaTWW0J2mFj04vK4jTrxN0=
 github.com/kubescape/opa-utils v0.0.200/go.mod h1:rDC3PANuk8gU5lSDO/WPFTluypBQ+/6qiuZLye+slYg=
-github.com/kubescape/rbac-utils v0.0.18 h1:KZA0Ob9+UdJxt+yHgpwPeDFrLhEbBYwXI1k0JJtWBLg=
-github.com/kubescape/rbac-utils v0.0.18/go.mod h1:JrmuYT8/jQleb84j/ntYNi+bbnoo4tRvE0aVfN4i0HI=
+github.com/kubescape/rbac-utils v0.0.19 h1:7iydgVxlMLW15MgHORfMBMqNj9jHtFGACd744fdtrFs=
+github.com/kubescape/rbac-utils v0.0.19/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/leodido/go-urn v1.2.0/go.mod h1:+8+nEpDfqqsY+g338gtMEUOtuK+4dEMhiQEgxpxOKII=
 github.com/lunixbochs/vtclean v1.0.0/go.mod h1:pHhQNgMf3btfWnGBVipUOjRYhoOsdGqdm/+2c2E2WMI=
 github.com/magiconair/properties v1.8.1/go.mod h1:PppfXfuXeibc/6YijjN8zIbojt8czPbwD3XqdrwzmxQ=
