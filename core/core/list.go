@@ -6,7 +6,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	v2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
+	"github.com/olekukonko/tablewriter"
 )
 
 var listFunc = map[string]func(*metav1.ListPolicies) ([]string, error){
@@ -15,7 +19,7 @@ var listFunc = map[string]func(*metav1.ListPolicies) ([]string, error){
 	"exceptions": listExceptions,
 }
 
-var listFormatFunc = map[string]func(*metav1.ListPolicies, []string){
+var listFormatFunc = map[string]func(string, []string){
 	"pretty-print": prettyPrintListFormat,
 	"json":         jsonListFormat,
 }
@@ -36,7 +40,7 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 		sort.Strings(policies)
 
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
-			listFormatFunction(listPolicies, policies)
+			listFormatFunction(listPolicies.Target, policies)
 		} else {
 			return fmt.Errorf("Invalid format \"%s\", Supported formats: 'pretty-print'/'json' ", listPolicies.Format)
 		}
@@ -76,12 +80,73 @@ func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
 	return exceptionsNames, nil
 }
 
-func prettyPrintListFormat(listPolicies *metav1.ListPolicies, policies []string) {
-	sep := "\n  * "
-	fmt.Printf("Supported %s:%s%s\n", listPolicies.Target, sep, strings.Join(policies, sep))
+func prettyPrintListFormat(targetPolicy string, policies []string) {
+	if targetPolicy == "controls" {
+		prettyPrintControls(policies)
+		return
+	}
+
+	header := fmt.Sprintf("Supported %s", targetPolicy)
+
+	policyTable := tablewriter.NewWriter(printer.GetWriter(""))
+	policyTable.SetAutoWrapText(true)
+	policyTable.SetHeader([]string{header})
+	policyTable.SetHeaderLine(true)
+	policyTable.SetRowLine(true)
+	data := v2.Matrix{}
+
+	controlRows := generatePolicyRows(policies)
+	data = append(data, controlRows...)
+
+	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
+	policyTable.AppendBulk(data)
+	policyTable.Render()
 }
 
-func jsonListFormat(listPolicies *metav1.ListPolicies, policies []string) {
+func jsonListFormat(targetPolicy string, policies []string) {
 	j, _ := json.MarshalIndent(policies, "", "  ")
+
 	fmt.Printf("%s\n", j)
+}
+
+func prettyPrintControls(policies []string) {
+	controlsTable := tablewriter.NewWriter(printer.GetWriter(""))
+	controlsTable.SetAutoWrapText(true)
+	controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs"})
+	controlsTable.SetHeaderLine(true)
+	controlsTable.SetRowLine(true)
+	data := v2.Matrix{}
+
+	controlRows := generateControlRows(policies)
+	data = append(data, controlRows...)
+
+	controlsTable.AppendBulk(data)
+	controlsTable.Render()
+}
+
+func generateControlRows(policies []string) [][]string {
+	rows := [][]string{}
+
+	for _, control := range policies {
+		idAndControl := strings.Split(control, "|")
+		id, control := idAndControl[0], idAndControl[1]
+
+		docs := cautils.GetControlLink(id)
+
+		currentRow := []string{id, control, docs}
+
+		rows = append(rows, currentRow)
+	}
+
+	return rows
+}
+
+func generatePolicyRows(policies []string) [][]string {
+	rows := [][]string{}
+
+	for _, policy := range policies {
+		currentRow := []string{policy}
+		rows = append(rows, currentRow)
+	}
+	return rows
 }
