@@ -84,7 +84,7 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 
 }
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
-	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), getControlLink(controlSummary.GetID()))
+	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), GetControlLink(controlSummary.GetID()))
 	switch controlSummary.GetStatus().Status() {
 	case apis.StatusSkipped:
 		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
@@ -255,8 +255,10 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 	return ""
 }
 
-func getControlLink(controlID string) string {
-	return fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(controlID))
+func GetControlLink(controlID string) string {
+	// For CIS Controls, cis-1.1.3 will be transformed to cis-1-1-3 in documentation link.
+	docLinkID := strings.ReplaceAll(controlID, ".", "-")
+	return fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(docLinkID))
 }
 
 // renderSeverityCountersSummary renders the string that reports severity counters summary
