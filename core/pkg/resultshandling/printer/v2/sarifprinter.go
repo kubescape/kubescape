@@ -1,6 +1,7 @@
 package v2
 
 import (
+	"fmt"
 	"os"
 	"path"
 	"path/filepath"
@@ -84,7 +85,7 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 		WithDefaultConfiguration(configuration).
 		WithShortDescription(sarif.NewMultiformatMessageString(control.GetName())).
 		WithFullDescription(sarif.NewMultiformatMessageString(control.GetDescription())).
-		WithHelp(sarif.NewMultiformatMessageString(control.GetRemediation()))
+		WithHelp(sarif.NewMultiformatMessageString(sp.generateRemediationMessage(control)))
 }
 
 // addResult adds a result of checking a rule to the scan run based on the given control summary
@@ -195,4 +196,9 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 	}
 
 	return ""
+}
+
+// generateRemediationMessage generates a remediation message for the given control summary
+func (sp *SARIFPrinter) generateRemediationMessage(control reportsummary.IControlSummary) string {
+	return fmt.Sprintf("Remediation: %s", control.GetRemediation())
 }
