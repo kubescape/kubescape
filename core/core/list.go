@@ -115,7 +115,11 @@ func generateControlRows(policies []string) [][]string {
 	for _, control := range policies {
 		idAndControl := strings.Split(control, "|")
 		id, control := idAndControl[0], idAndControl[1]
-		docs := fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(id))
+
+		// For CIS Controls, cis-1.1.3 will be transformed to cis-1-1-3 in documentation link.
+		docLinkID := strings.ReplaceAll(id, ".", "-")
+
+		docs := fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(docLinkID))
 
 		currentRow := []string{id, control, docs}
 
