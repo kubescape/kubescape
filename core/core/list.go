@@ -85,8 +85,22 @@ func prettyPrintListFormat(targetPolicy string, policies []string) {
 		prettyPrintControls(policies)
 		return
 	}
-	sep := "\n  * "
-	fmt.Printf("Supported %s:%s%s\n", targetPolicy, sep, strings.Join(policies, sep))
+
+	header := fmt.Sprintf("Supported %s", targetPolicy)
+
+	policyTable := tablewriter.NewWriter(printer.GetWriter(""))
+	policyTable.SetAutoWrapText(true)
+	policyTable.SetHeader([]string{header})
+	policyTable.SetHeaderLine(true)
+	policyTable.SetRowLine(true)
+	data := v2.Matrix{}
+
+	controlRows := generatePolicyRows(policies)
+	data = append(data, controlRows...)
+
+	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
+	policyTable.AppendBulk(data)
+	policyTable.Render()
 }
 
 func jsonListFormat(targetPolicy string, policies []string) {
@@ -124,5 +138,15 @@ func generateControlRows(policies []string) [][]string {
 		rows = append(rows, currentRow)
 	}
 
+	return rows
+}
+
+func generatePolicyRows(policies []string) [][]string {
+	rows := [][]string{}
+
+	for _, policy := range policies {
+		currentRow := []string{policy}
+		rows = append(rows, currentRow)
+	}
 	return rows
 }
