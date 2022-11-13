@@ -73,7 +73,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 			continue
 		}
 
-		row[resourceColumnURL] = GetControlLink(controls[i].GetID())
+		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
 		row[resourceColumnPath] = strings.Join(append(failedPathsToString(&controls[i]), fixPathsToString(&controls[i])...), "\n")
 		row[resourceColumnName] = controls[i].GetName()
 

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	v2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
@@ -116,7 +117,7 @@ func generateControlRows(policies []string) [][]string {
 		idAndControl := strings.Split(control, "|")
 		id, control := idAndControl[0], idAndControl[1]
 
-		docs := v2.GetControlLink(id)
+		docs := cautils.GetControlLink(id)
 
 		currentRow := []string{id, control, docs}
 
