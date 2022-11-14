@@ -24,8 +24,8 @@ var (
   # Download the NSA framework. Run 'kubescape list frameworks' for all frameworks names
   kubescape download framework nsa
 
-  # Download the "Allowed hostPath" control. Run 'kubescape list controls' for all controls names
-  kubescape download control "Allowed hostPath"
+  # Download the "HostPath mount" control. Run 'kubescape list controls' for all controls names
+  kubescape download control "HostPath mount"
 
   # Download the "C-0001" control. Run 'kubescape list controls --id' for all controls ids
   kubescape download control C-0001
