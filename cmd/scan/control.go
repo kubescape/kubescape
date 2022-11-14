@@ -23,7 +23,7 @@ var (
   kubescape scan control "privileged container"
 	
   # Scan list of controls separated with a comma
-  kubescape scan control "privileged container","allowed hostpath"
+  kubescape scan control "privileged container","HostPath mount"
   
   # Scan list of controls using the control ID separated with a comma
   kubescape scan control C-0058,C-0057
@@ -61,7 +61,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
 			}
-			
+
 			// flagValidationControl(scanInfo)
 			scanInfo.PolicyIdentifier = []cautils.PolicyIdentifier{}
 
