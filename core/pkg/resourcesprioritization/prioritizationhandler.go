@@ -58,6 +58,7 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 		resource, exist := sessionObj.AllResources[resourceId]
 		if !exist {
 			logger.L().Error("resource not found in resources map", helpers.String("resource ID", resourceId))
+			continue
 		}
 
 		workload := workloadinterface.NewWorkloadObj(resource.GetObject())
