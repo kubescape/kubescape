@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strings"
 
 	"github.com/enescakir/emoji"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -84,7 +83,7 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 
 }
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
-	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), getControlLink(controlSummary.GetID()))
+	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
 	switch controlSummary.GetStatus().Status() {
 	case apis.StatusSkipped:
 		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
@@ -253,10 +252,6 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 		return p
 	}
 	return ""
-}
-
-func getControlLink(controlID string) string {
-	return fmt.Sprintf("https://hub.armosec.io/docs/%s", strings.ToLower(controlID))
 }
 
 // renderSeverityCountersSummary renders the string that reports severity counters summary

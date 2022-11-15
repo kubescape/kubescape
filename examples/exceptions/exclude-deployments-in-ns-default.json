@@ -16,7 +16,7 @@
         ],
         "posturePolicies": [
             {
-                "controlName": "Allowed hostPath" 
+                "controlName": "HostPath mount" 
             }
         ]
     }

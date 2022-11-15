@@ -21,6 +21,6 @@ jobs:
       client: "image-dev"
       image_name: "quay.io/${{ github.repository_owner }}/kubescape"
       image_tag: "dev-v2.0.${{ github.run_number }}"
-      support_platforms: false
+      support_platforms: true
       cosign: true
     secrets: inherit

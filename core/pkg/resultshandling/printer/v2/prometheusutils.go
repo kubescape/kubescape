@@ -289,7 +289,7 @@ func (m *Metrics) setRiskScores(summaryDetails *reportsummary.SummaryDetails) {
 			controlName: control.GetName(),
 			controlID:   control.GetID(),
 			riskScore:   cautils.Float32ToInt(control.GetScore()),
-			link:        getControlLink(control.GetID()),
+			link:        cautils.GetControlLink(control.GetID()),
 			severity:    apis.ControlSeverityToString(control.GetScoreFactor()),
 			remediation: control.GetRemediation(),
 		}

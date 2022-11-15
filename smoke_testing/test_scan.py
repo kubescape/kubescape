@@ -13,15 +13,15 @@ def scan_all(kubescape_exec: str):
 
 
 def scan_control_name(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'Allowed hostPath', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'HostPath mount', all_files, "--enable-host-scan=false"])
 
 
 def scan_control_id(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0006', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048', all_files, "--enable-host-scan=false"])
 
 
 def scan_controls(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'Allowed hostPath,Allow privilege escalation', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'HostPath mount,Allow privilege escalation', all_files, "--enable-host-scan=false"])
 
 
 def scan_framework(kubescape_exec: str):

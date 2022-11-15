@@ -220,6 +220,8 @@ kubescape scan *.yaml
 ```
 
 #### Scan Kubernetes manifest files from a git repository 
+
+```
 kubescape scan https://github.com/kubescape/kubescape
 ```
 

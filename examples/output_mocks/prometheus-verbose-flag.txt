@@ -98,56 +98,56 @@ kubescape_object_failed_count{framework="NSA",control="Privileged container",nam
 kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "NSA" control "Privileged container"
 kubescape_object_failed_count{framework="NSA",control="Privileged container",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
-# Number of resources found as part of NSA control Allowed hostPath
-kubescape_resources_found_count{framework="NSA",control="Allowed hostPath"} 22
-# Number of resources excluded as part of NSA control Allowed hostPath
-kubescape_resources_excluded_count{framework="NSA",control="Allowed hostPath"} 0
-# Number of resources failed as part of NSA control Allowed hostPath
-kubescape_resources_failed_count{framework="NSA",control="Allowed hostPath"} 7
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="etcd-david-virtualbox",groupVersionKind="v1/Pod"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="kube-controller-manager-david-virtualbox",groupVersionKind="v1/Pod"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-posture",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-rbac",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-notification-server",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
-# Failed object from "NSA" control "Allowed hostPath"
-kubescape_object_failed_count{framework="NSA",control="Allowed hostPath",namespace="kube-system",name="kube-scheduler-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Number of resources found as part of NSA control HostPath mount
+kubescape_resources_found_count{framework="NSA",control="HostPath mount"} 22
+# Number of resources excluded as part of NSA control HostPath mount
+kubescape_resources_excluded_count{framework="NSA",control="HostPath mount"} 0
+# Number of resources failed as part of NSA control HostPath mount
+kubescape_resources_failed_count{framework="NSA",control="HostPath mount"} 7
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kube-system",name="etcd-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kube-system",name="kube-controller-manager-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-posture",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-rbac",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-notification-server",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Failed object from "NSA" control "HostPath mount"
+kubescape_object_failed_count{framework="NSA",control="HostPath mount",namespace="kube-system",name="kube-scheduler-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Number of resources found as part of NSA control Automatic mapping of service account
 kubescape_resources_found_count{framework="NSA",control="Automatic mapping of service account"} 47
 # Number of resources excluded as part of NSA control Automatic mapping of service account
@@ -2668,56 +2668,56 @@ kubescape_object_failed_count{framework="ArmoBest",control="Privileged container
 kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
 # Failed object from "ArmoBest" control "Privileged container"
 kubescape_object_failed_count{framework="ArmoBest",control="Privileged container",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
-# Number of resources found as part of ArmoBest control Allowed hostPath
-kubescape_resources_found_count{framework="ArmoBest",control="Allowed hostPath"} 22
-# Number of resources excluded as part of ArmoBest control Allowed hostPath
-kubescape_resources_excluded_count{framework="ArmoBest",control="Allowed hostPath"} 0
-# Number of resources failed as part of ArmoBest control Allowed hostPath
-kubescape_resources_failed_count{framework="ArmoBest",control="Allowed hostPath"} 7
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="kube-controller-manager-david-virtualbox",groupVersionKind="v1/Pod"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="etcd-david-virtualbox",groupVersionKind="v1/Pod"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-posture",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-rbac",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-notification-server",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
-# Failed object from "ArmoBest" control "Allowed hostPath"
-kubescape_object_failed_count{framework="ArmoBest",control="Allowed hostPath",namespace="kube-system",name="kube-scheduler-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Number of resources found as part of ArmoBest control HostPath mount
+kubescape_resources_found_count{framework="ArmoBest",control="HostPath mount"} 22
+# Number of resources excluded as part of ArmoBest control HostPath mount
+kubescape_resources_excluded_count{framework="ArmoBest",control="HostPath mount"} 0
+# Number of resources failed as part of ArmoBest control HostPath mount
+kubescape_resources_failed_count{framework="ArmoBest",control="HostPath mount"} 7
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kube-system",name="kube-proxy",groupVersionKind="apps/v1/DaemonSet"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kube-system",name="kube-controller-manager-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kube-system",name="storage-provisioner",groupVersionKind="v1/Pod"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kube-system",name="etcd-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kubescape",name="armo-web-socket",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-webhook",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-websocket",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kube-system",name="coredns",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="nginx-ingress",name="nginx-ingress",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kubescape",name="armo-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-oracle",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-posture",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-rbac",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-vuln-scan",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-audit",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-dashboard-aggregator",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-notification-server",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="cyberarmor-system",name="ca-ocimage",groupVersionKind="apps/v1/Deployment"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kubescape",name="armo-kubescape",groupVersionKind="batch/v1/CronJob"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kubescape",name="armo-scan-scheduler",groupVersionKind="batch/v1/CronJob"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kube-system",name="kube-apiserver-david-virtualbox",groupVersionKind="v1/Pod"} 1
+# Failed object from "ArmoBest" control "HostPath mount"
+kubescape_object_failed_count{framework="ArmoBest",control="HostPath mount",namespace="kube-system",name="kube-scheduler-david-virtualbox",groupVersionKind="v1/Pod"} 1
 # Number of resources found as part of ArmoBest control Automatic mapping of service account
 kubescape_resources_found_count{framework="ArmoBest",control="Automatic mapping of service account"} 47
 # Number of resources excluded as part of ArmoBest control Automatic mapping of service account

@@ -177,7 +177,7 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			testCaseFailure := JUnitFailure{}
 			testCaseFailure.Type = "Control"
 			// testCaseFailure.Contents =
-			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), getControlLink(control.GetID()), strings.Join(resourcesStr, "\n"))
+			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), cautils.GetControlLink(control.GetID()), strings.Join(resourcesStr, "\n"))
 
 			testCase.Failure = &testCaseFailure
 		} else if control.GetStatus().IsSkipped() {

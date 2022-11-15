@@ -3,6 +3,8 @@ package resourcesprioritization
 import (
 	"fmt"
 
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -55,7 +57,8 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 		resourcePriorityVector := []prioritization.ControlsVector{}
 		resource, exist := sessionObj.AllResources[resourceId]
 		if !exist {
-			return fmt.Errorf("expected to find resource id '%s' in scanned resources map", resourceId)
+			logger.L().Error("resource not found in resources map", helpers.String("resource ID", resourceId))
+			continue
 		}
 
 		workload := workloadinterface.NewWorkloadObj(resource.GetObject())
