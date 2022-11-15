@@ -143,7 +143,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		}
 
 		workloadSource := reporthandling.Source{
-			RelativePath: source,
+			RelativePath: relSource,
 			FileType:     filetype,
 			LastCommit:   lastCommit,
 		}
