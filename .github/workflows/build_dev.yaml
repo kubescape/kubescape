@@ -1,22 +1,21 @@
 name: build-dev
 
 on:
-  push:
+  pull_request:
     branches: [ dev ]
     paths-ignore:
       # Do not run the pipeline if only Markdown files changed
       - '**.md'
 jobs:
-  test:
-    uses: ./.github/workflows/test.yaml
-    with:
-      release: "v2.0.${{ github.run_number }}"
-      client: test
+  # test:
+  #   uses: ./.github/workflows/test.yaml
+  #   with:
+  #     release: "v2.0.${{ github.run_number }}"
+  #     client: test
  
   publish-dev-image:
-    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
+    # if: ${{ github.repository == 'amirmalka/kubescape' }} # TODO
     uses: ./.github/workflows/build-image.yaml
-    needs: test
     with:
       client: "image-dev"
       image_name: "quay.io/${{ github.repository_owner }}/kubescape"
