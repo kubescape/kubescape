@@ -38,6 +38,8 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 
 [Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix-community)
 
+[Run via Docker](#run-via-docker)
+
 ## Run:
 ```sh
 kubescape scan --enable-host-scan --verbose
@@ -168,6 +170,14 @@ home-manager:
 
 Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 
+</details>
+
+## Run via Docker
+<details><summary>Docker</summary>
+
+1. ```sh
+    docker run --rm -it armosec/kubescape:latest
+    ```
 </details>
 
 ## Usage & Examples
