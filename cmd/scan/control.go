@@ -120,6 +120,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
 
+	if scanInfo.Submit && scanInfo.OmitRawResources {
+		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+	}
+
 	if err := validateSeverity(severity); severity != "" && err != nil {
 		return err
 	}

@@ -201,7 +201,9 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
 		return fmt.Errorf("bad argument: out of range threshold")
 	}
-
+	if scanInfo.Submit && scanInfo.OmitRawResources {
+		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+	}
 	severity := scanInfo.FailThresholdSeverity
 	if err := validateSeverity(severity); severity != "" && err != nil {
 		return err

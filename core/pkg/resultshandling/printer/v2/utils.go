@@ -27,7 +27,9 @@ func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureRepor
 	report.Results = make([]resourcesresults.Result, len(data.ResourcesResult))
 	finalizeResults(report.Results, data.ResourcesResult, data.ResourcesPrioritized)
 
-	report.Resources = finalizeResources(report.Results, data.AllResources, data.ResourceSource)
+	if !data.OmitRawResources {
+		report.Resources = finalizeResources(report.Results, data.AllResources, data.ResourceSource)
+	}
 
 	return &report
 }

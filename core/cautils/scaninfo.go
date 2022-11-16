@@ -127,6 +127,7 @@ type ScanInfo struct {
 	KubeContext           string             // context name
 	FrameworkScan         bool               // false if scanning control
 	ScanAll               bool               // true if scan all frameworks
+	OmitRawResources      bool               // true if omit raw resources from the output
 }
 
 type Getters struct {
