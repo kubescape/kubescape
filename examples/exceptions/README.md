@@ -64,24 +64,24 @@ But if you wish to exclude all namespaces **OR** any resource with the label `"e
 
 Same works with the `posturePolicies` list ->
 
-e.g. If you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **AND** failed the `Allowed hostPath` control, the `posturePolicies` list should look as follows:
+e.g. If you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **AND** failed the `HostPath mount` control, the `posturePolicies` list should look as follows:
 ```
 "posturePolicies": [
     {
         "frameworkName": "NSA",
-        "controlName": "Allowed hostPath" 
+        "controlName": "HostPath mount" 
     }
 ]
 ```
 
-But if you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **OR** failed the `Allowed hostPath` control, the `posturePolicies` list should look as follows:
+But if you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **OR** failed the `HostPath mount` control, the `posturePolicies` list should look as follows:
 ```
 "posturePolicies": [
     {
         "frameworkName": "NSA" 
     },
     {
-        "controlName": "Allowed hostPath" 
+        "controlName": "HostPath mount" 
     }
 ]
 ```
@@ -122,7 +122,7 @@ The resources
 ]
 ```
 
-### Exclude deployments in the default namespace that failed the "Allowed hostPath" control 
+### Exclude deployments in the default namespace that failed the "HostPath mount" control 
 ```
 [
     {
@@ -142,7 +142,7 @@ The resources
         ],
         "posturePolicies": [
             {
-                "controlName": "Allowed hostPath" 
+                "controlName": "HostPath mount" 
             }
         ]
     }

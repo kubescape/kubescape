@@ -3,7 +3,6 @@ package cautils
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -159,7 +158,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 		scanInfo.UseArtifactsFrom = dir
 	}
 	// set frameworks files
-	files, err := ioutil.ReadDir(scanInfo.UseArtifactsFrom)
+	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
 	if err != nil {
 		logger.L().Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
 	}

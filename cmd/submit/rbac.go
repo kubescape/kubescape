@@ -31,10 +31,11 @@ var (
 // getRBACCmd represents the RBAC command
 func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 	return &cobra.Command{
-		Use:     "rbac",
-		Example: rbacExamples,
-		Short:   "Submit cluster's Role-Based Access Control(RBAC)",
-		Long:    ``,
+		Use:        "rbac",
+		Deprecated: "This command is deprecated and will not be supported after 1/Jan/2023. Please use the 'scan' command instead.",
+		Example:    rbacExamples,
+		Short:      "Submit cluster's Role-Based Access Control(RBAC)",
+		Long:       ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			if err := flagValidationSubmit(submitInfo); err != nil {

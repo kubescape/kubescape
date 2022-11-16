@@ -3,7 +3,6 @@ package cautils
 import (
 	_ "embed"
 	"encoding/json"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +38,7 @@ func (s *HelmChartTestSuite) SetupSuite() {
 	}
 
 	var obj interface{}
-	file, _ := ioutil.ReadFile(filepath.Join("testdata", "helm_expected_default_values.json"))
+	file, _ := os.ReadFile(filepath.Join("testdata", "helm_expected_default_values.json"))
 	_ = json.Unmarshal([]byte(file), &obj)
 	s.expectedDefaultValues = obj.(map[string]interface{})
 }

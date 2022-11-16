@@ -65,16 +65,16 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 }
 
 func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framework, error) {
-	framework := &reporthandling.Framework{}
+	var framework reporthandling.Framework
 	var err error
 	for _, filePath := range lp.filePaths {
+		framework = reporthandling.Framework{}
 		f, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
-
-		if err = json.Unmarshal(f, framework); err != nil {
-			return framework, err
+		if err = json.Unmarshal(f, &framework); err != nil {
+			return nil, err
 		}
 		if strings.EqualFold(frameworkName, framework.Name) {
 			break
@@ -84,7 +84,7 @@ func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framew
 
 		return nil, fmt.Errorf("framework from file not matching")
 	}
-	return framework, err
+	return &framework, err
 }
 
 func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
@@ -109,7 +109,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	return fwNames, nil
 }
 
-func (lp *LoadPolicy) ListControls(listType ListType) ([]string, error) {
+func (lp *LoadPolicy) ListControls() ([]string, error) {
 	// TODO - Support
 	return []string{}, fmt.Errorf("loading controls list from file is not supported")
 }

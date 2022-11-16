@@ -173,7 +173,7 @@ func failedControlsToFailureMessage(results *cautils.OPASessionObj, controls []r
 			msg += fmt.Sprintf("Test: %s\n", control.GetName())
 			msg += fmt.Sprintf("Severity: %s\n", apis.ControlSeverityToString(control.GetScoreFactor()))
 			msg += fmt.Sprintf("Remediation: %s\n", control.GetRemediation())
-			msg += fmt.Sprintf("Link: %s\n", getControlLink(control.GetID()))
+			msg += fmt.Sprintf("Link: %s\n", cautils.GetControlLink(control.GetID()))
 			if failedPaths := failedPathsToString(&c); len(failedPaths) > 0 {
 				msg += fmt.Sprintf("Failed paths: \n - %s\n", strings.Join(failedPaths, "\n - "))
 			}

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -306,7 +306,7 @@ func (api *KSCloudAPI) ListFrameworks() ([]string, error) {
 	return frameworkList, nil
 }
 
-func (api *KSCloudAPI) ListControls(l ListType) ([]string, error) {
+func (api *KSCloudAPI) ListControls() ([]string, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
 
@@ -358,7 +358,7 @@ func (api *KSCloudAPI) Login() error {
 		return fmt.Errorf("error authenticating: %d", resp.StatusCode)
 	}
 
-	responseBody, err := ioutil.ReadAll(resp.Body)
+	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
 	}

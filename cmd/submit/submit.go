@@ -7,16 +7,21 @@ import (
 )
 
 var submitCmdExamples = `
+# Submit Kubescape scan results file
+kubescape submit results
 
+# Submit exceptions file to Kubescape SaaS
+kubescape submit exceptions
 `
 
 func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
 	var submitInfo metav1.Submit
 
 	submitCmd := &cobra.Command{
-		Use:   "submit <command>",
-		Short: "Submit an object to the Kubescape SaaS version",
-		Long:  ``,
+		Use:     "submit <command>",
+		Short:   "Submit an object to the Kubescape SaaS version",
+		Long:    ``,
+		Example: submitCmdExamples,
 		Run: func(cmd *cobra.Command, args []string) {
 		},
 	}

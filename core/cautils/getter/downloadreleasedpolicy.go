@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -55,13 +56,21 @@ func (drp *DownloadReleasedPolicy) ListFrameworks() ([]string, error) {
 	return drp.gs.GetOPAFrameworksNamesList()
 }
 
-func (drp *DownloadReleasedPolicy) ListControls(listType ListType) ([]string, error) {
-	switch listType {
-	case ListID:
-		return drp.gs.GetOPAControlsIDsList()
-	default:
-		return drp.gs.GetOPAControlsNamesList()
+func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
+	controlsIDsList, err := drp.gs.GetOPAControlsIDsList()
+	if err != nil {
+		return []string{}, err
 	}
+	controlsNamesList, err := drp.gs.GetOPAControlsNamesList()
+	if err != nil {
+		return []string{}, err
+	}
+	controlsNamesWithIDsList := make([]string, len(controlsIDsList))
+	// by design both slices have the same length
+	for i := range controlsIDsList {
+		controlsNamesWithIDsList[i] = fmt.Sprintf("%v|%v", controlsIDsList[i], controlsNamesList[i])
+	}
+	return controlsNamesWithIDsList, nil
 }
 
 func (drp *DownloadReleasedPolicy) GetControlsInputs(clusterName string) (map[string][]string, error) {
