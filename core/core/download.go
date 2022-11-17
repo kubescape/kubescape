@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
-	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
 
 var downloadFunc = map[string]func(*metav1.DownloadInfo) error{
@@ -20,6 +19,7 @@ var downloadFunc = map[string]func(*metav1.DownloadInfo) error{
 	"control":         downloadControl,
 	"framework":       downloadFramework,
 	"artifacts":       downloadArtifacts,
+	"attack-tracks":   downloadAttackTracks,
 }
 
 func DownloadSupportCommands() []string {
@@ -71,6 +71,7 @@ func downloadArtifacts(downloadInfo *metav1.DownloadInfo) error {
 		"controls-inputs": downloadConfigInputs,
 		"exceptions":      downloadExceptions,
 		"framework":       downloadFramework,
+		"attack-tracks":   downloadAttackTracks,
 	}
 	for artifact := range artifacts {
 		if err := downloadArtifact(&metav1.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
@@ -132,13 +133,22 @@ func downloadAttackTracks(downloadInfo *metav1.DownloadInfo) error {
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
 	attackTracksGetter := getAttackTracksGetter(tenant.GetAccountID(), nil)
-	attackTracks := []v1alpha1.AttackTrack{}
-	if tenant.GetAccountID() != "" {
-		attackTracks, err = attackTracksGetter.GetAttackTracks()
-		if err != nil {
-			return err
-		}
+
+	attackTracks, err := attackTracksGetter.GetAttackTracks()
+	if err != nil {
+		return err
 	}
+
+	if downloadInfo.FileName == "" {
+		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
+	}
+	// save in file
+	err = getter.SaveInFile(attackTracks, filepath.Join(downloadInfo.Path, downloadInfo.FileName))
+	if err != nil {
+		return err
+	}
+	logger.L().Success("Downloaded", helpers.String("attack tracks", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+	return nil
 
 }
 

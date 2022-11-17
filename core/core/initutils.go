@@ -249,7 +249,7 @@ func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.Down
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
 		logger.L().Warning("failed to get attack tracks from github release, loading attack tracks from cache", helpers.Error(err))
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath("attackTracks.json")})
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
 	}
 	return downloadReleasedPolicy
 }

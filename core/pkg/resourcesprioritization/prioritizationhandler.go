@@ -40,7 +40,7 @@ func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGe
 	}
 
 	// Store attack tracks in cache
-	cache := getter.GetDefaultPath("attackTracks.json")
+	cache := getter.GetDefaultPath(cautils.LocalAttackTracksFilename)
 	if err := getter.SaveInFile(tracks, cache); err != nil {
 		logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 	}
