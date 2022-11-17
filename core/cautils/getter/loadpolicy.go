@@ -9,6 +9,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
 
 // =======================================================================================================================
@@ -151,4 +152,19 @@ func (lp *LoadPolicy) filePath() string {
 		return lp.filePaths[0]
 	}
 	return ""
+}
+
+func (lp *LoadPolicy) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
+	attackTracks := []v1alpha1.AttackTrack{}
+
+	f, err := os.ReadFile(lp.filePath())
+
+	if err != nil {
+		return nil, err
+	}
+
+	if err := json.Unmarshal(f, &attackTracks); err != nil {
+		return nil, err
+	}
+	return attackTracks, nil
 }

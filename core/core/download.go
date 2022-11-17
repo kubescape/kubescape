@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
 
 var downloadFunc = map[string]func(*metav1.DownloadInfo) error{
@@ -124,6 +125,21 @@ func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 	}
 	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
 	return nil
+}
+
+func downloadAttackTracks(downloadInfo *metav1.DownloadInfo) error {
+	var err error
+	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
+
+	attackTracksGetter := getAttackTracksGetter(tenant.GetAccountID(), nil)
+	attackTracks := []v1alpha1.AttackTrack{}
+	if tenant.GetAccountID() != "" {
+		attackTracks, err = attackTracksGetter.GetAttackTracks()
+		if err != nil {
+			return err
+		}
+	}
+
 }
 
 func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
