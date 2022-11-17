@@ -175,9 +175,14 @@ Or to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
 ## Run via Docker
 <details><summary>Docker</summary>
 
-1. ```sh
-    docker run --rm -it armosec/kubescape:latest
-    ```
+```sh
+docker run --rm -it --entrypoint kubescape quay.io/kubescape/kubescape:latest
+```
+or
+```sh
+alias kubescape="docker run --rm -it --entrypoint kubescape quay.io/kubescape/kubescape:latest"
+```
+
 </details>
 
 ## Usage & Examples
