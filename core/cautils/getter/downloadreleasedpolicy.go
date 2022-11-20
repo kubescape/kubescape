@@ -65,12 +65,20 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 	if err != nil {
 		return []string{}, err
 	}
-	controlsNamesWithIDsList := make([]string, len(controlsIDsList))
-	// by design both slices have the same length
-	for i := range controlsIDsList {
-		controlsNamesWithIDsList[i] = fmt.Sprintf("%v|%v", controlsIDsList[i], controlsNamesList[i])
+	controls, err := drp.gs.GetOPAControls()
+	if err != nil {
+		return []string{}, err
 	}
-	return controlsNamesWithIDsList, nil
+	var controlsFrameworksList [][]string
+	for _, control := range controls {
+		controlsFrameworksList = append(controlsFrameworksList, control.FrameworkNames)
+	}
+	controlsNamesWithIDsandFrameworksList := make([]string, len(controlsIDsList))
+	// by design all slices have the same lengt
+	for i := range controlsIDsList {
+		controlsNamesWithIDsandFrameworksList[i] = fmt.Sprintf("%v|%v|%v", controlsIDsList[i], controlsNamesList[i], strings.Join(controlsFrameworksList[i], ","))
+	}
+	return controlsNamesWithIDsandFrameworksList, nil
 }
 
 func (drp *DownloadReleasedPolicy) GetControlsInputs(clusterName string) (map[string][]string, error) {

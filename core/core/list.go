@@ -112,7 +112,7 @@ func jsonListFormat(targetPolicy string, policies []string) {
 func prettyPrintControls(policies []string) {
 	controlsTable := tablewriter.NewWriter(printer.GetWriter(""))
 	controlsTable.SetAutoWrapText(true)
-	controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs"})
+	controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
 	controlsTable.SetHeaderLine(true)
 	controlsTable.SetRowLine(true)
 	data := v2.Matrix{}
@@ -128,12 +128,12 @@ func generateControlRows(policies []string) [][]string {
 	rows := [][]string{}
 
 	for _, control := range policies {
-		idAndControl := strings.Split(control, "|")
-		id, control := idAndControl[0], idAndControl[1]
+		idAndControlAndFrameworks := strings.Split(control, "|")
+		id, control, framework := idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
 
 		docs := cautils.GetControlLink(id)
 
-		currentRow := []string{id, control, docs}
+		currentRow := []string{id, control, docs, framework}
 
 		rows = append(rows, currentRow)
 	}
