@@ -36,6 +36,8 @@ var (
   # Download the configured controls-inputs 
   kubescape download controls-inputs 
 
+  # Download the attack tracks
+  kubescape download attack-tracks
 `
 )
 

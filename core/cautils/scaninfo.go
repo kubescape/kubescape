@@ -40,6 +40,7 @@ const (
 	// ScanLocalFiles             string = "yaml"
 	localControlInputsFilename string = "controls-inputs.json"
 	localExceptionsFilename    string = "exceptions.json"
+	LocalAttackTracksFilename  string = "attack-tracks.json"
 )
 
 type BoolPtrFlag struct {
