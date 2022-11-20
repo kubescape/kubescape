@@ -39,7 +39,7 @@ const (
 	// ScanCluster                string = "cluster"
 	// ScanLocalFiles             string = "yaml"
 	localControlInputsFilename string = "controls-inputs.json"
-	localExceptionsFilename    string = "exceptions.json"
+	LocalExceptionsFilename    string = "exceptions.json"
 	LocalAttackTracksFilename  string = "attack-tracks.json"
 )
 
@@ -176,7 +176,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	// set config-inputs file
 	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, localControlInputsFilename)
 	// set exceptions
-	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, localExceptionsFilename)
+	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
 }
 
 func (scanInfo *ScanInfo) setUseFrom() {

@@ -110,12 +110,12 @@ func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 
 	exceptionsGetter := getExceptionsGetter("", tenant.GetAccountID(), nil)
 	exceptions := []armotypes.PostureExceptionPolicy{}
-	if tenant.GetAccountID() != "" {
-		exceptions, err = exceptionsGetter.GetExceptions(tenant.GetContextName())
-		if err != nil {
-			return err
-		}
+
+	exceptions, err = exceptionsGetter.GetExceptions(tenant.GetContextName())
+	if err != nil {
+		return err
 	}
+
 	if downloadInfo.FileName == "" {
 		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Target)
 	}
