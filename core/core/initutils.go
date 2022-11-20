@@ -45,8 +45,9 @@ func getExceptionsGetter(useExceptions string, accountID string, downloadRelease
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil {
-		logger.L().Warning("failed to get exceptions from github release, this may affect the scanning results", helpers.Error(err))
+	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
+		logger.L().Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
+		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 	}
 	return downloadReleasedPolicy
 
