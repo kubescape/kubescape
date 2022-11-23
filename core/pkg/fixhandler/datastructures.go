@@ -20,3 +20,9 @@ type ResourceFixInfo struct {
 	Resource        *reporthandling.Resource
 	FilePath        string
 }
+
+// LineAndContentToAdd is a struct that holds the information about where to insert the new changes in the existing yaml file
+type LineAndContentToAdd struct {
+	Line    int
+	Content string
+}

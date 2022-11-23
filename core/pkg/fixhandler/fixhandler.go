@@ -216,32 +216,9 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 }
 
 func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError error) {
-	var completedSuccessfully bool
-	writeInPlaceHandler := yqlib.NewWriteInPlaceHandler(filePath)
-	out, err := writeInPlaceHandler.CreateTempFile()
-	if err != nil {
-		return fmt.Errorf("unable to create a tmp file for in-place YAML update: %s", err)
-	}
-
-	defer func() {
-		if cmdError == nil {
-			cmdError = writeInPlaceHandler.FinishWriteInPlace(completedSuccessfully)
-		}
-	}()
-
-	encoder := yqlib.NewYamlEncoder(2, false, yqlib.ConfiguredYamlPreferences)
-
-	printer := yqlib.NewPrinter(encoder, yqlib.NewSinglePrinterWriter(out))
-	allAtOnceEvaluator := yqlib.NewAllAtOnceEvaluator()
-
-	preferences := yqlib.ConfiguredYamlPreferences
-	preferences.EvaluateTogether = true
-	decoder := yqlib.NewYamlDecoder(preferences)
-
-	err = allAtOnceEvaluator.EvaluateFiles(yamlExpression, []string{filePath}, printer, decoder)
-
-	completedSuccessfully = err == nil
-
+	fixedYamlNode := getFixedYamlNode(filePath, yamlExpression)
+	lineAndContentsToAdd := getLineAndContentToAdd(&fixedYamlNode)
+	err := addFixesToFile(filePath, *lineAndContentsToAdd)
 	return err
 }
 
