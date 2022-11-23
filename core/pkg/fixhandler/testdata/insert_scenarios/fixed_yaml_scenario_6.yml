@@ -1,0 +1,14 @@
+# Fix to Apply:
+# select(di==0).spec.containers[0].securityContext.capabilities.drop += ["SYS_ADM"]
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_list
+spec:
+  containers:
+  - name: nginx1
+    image: nginx
+    securityContext:
+      capabilities:
+        drop: [NET_RAW, SYS_ADM]
