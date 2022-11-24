@@ -14,8 +14,9 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-const SKIP_VERSION_CHECK_DEPRECATED = "KUBESCAPE_SKIP_UPDATE_CHECK"
-const SKIP_VERSION_CHECK = "KS_SKIP_UPDATE_CHECK"
+const SKIP_VERSION_CHECK_DEPRECATED_ENV = "KUBESCAPE_SKIP_UPDATE_CHECK"
+const SKIP_VERSION_CHECK_ENV = "KS_SKIP_UPDATE_CHECK"
+const CLIENT_ENV = "KS_CLIENT"
 
 var BuildNumber string
 var Client string
@@ -31,9 +32,14 @@ func NewIVersionCheckHandler() IVersionCheckHandler {
 	if BuildNumber == "" {
 		logger.L().Warning("unknown build number, this might affect your scan results. Please make sure you are updated to latest version")
 	}
-	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK); ok && boolutils.StringToBool(v) {
+
+	if v, ok := os.LookupEnv(CLIENT_ENV); ok && v != "" {
+		Client = v
+	}
+
+	if v, ok := os.LookupEnv(SKIP_VERSION_CHECK_ENV); ok && boolutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
-	} else if v, ok := os.LookupEnv(SKIP_VERSION_CHECK_DEPRECATED); ok && boolutils.StringToBool(v) {
+	} else if v, ok := os.LookupEnv(SKIP_VERSION_CHECK_DEPRECATED_ENV); ok && boolutils.StringToBool(v) {
 		return NewVersionCheckHandlerMock()
 	}
 	return NewVersionCheckHandler()
