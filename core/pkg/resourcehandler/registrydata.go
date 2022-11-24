@@ -8,8 +8,8 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	gcpadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/gcp/v1"
 	armosecadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
+	gcpadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/gcp/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 
 	"github.com/kubescape/opa-utils/shared"

@@ -17,7 +17,7 @@ var scanCmdExamples = `
   kubescape scan --enable-host-scan --verbose
 
   # Scan kubernetes YAML manifest files
-  kubescape scan *.yaml
+  kubescape scan .yaml
 
   # Scan and save the results in the JSON format
   kubescape scan --format json --output results.json

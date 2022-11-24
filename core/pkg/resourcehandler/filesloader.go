@@ -76,9 +76,10 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	}
 
-	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
-		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
-	}
+	// Should Kubescape scan image related controls when scanning local files?
+	// if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
+	// 	logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
+	// }
 
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")
