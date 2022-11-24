@@ -8,7 +8,6 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/cloudsupport"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/score"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -18,6 +17,8 @@ import (
 
 	"github.com/open-policy-agent/opa/storage"
 
+	"github.com/kubescape/k8s-interface/cloudsupport"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -155,10 +156,10 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 
 	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
 
-	clusterName := cautils.ClusterName
+	clusterName := k8sinterface.GetContextName()
 	provider := cloudsupport.GetCloudProvider(clusterName)
 
-	postureControlInputs["CloudProvider"] = []string{provider}
+	postureControlInputs["cloudProvider"] = []string{provider}
 
 	// Merge configurable control input and fixed control input
 	for k, v := range fixedControlInputs {
