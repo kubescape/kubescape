@@ -4,6 +4,8 @@ import (
 	"fmt"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/cloudsupport"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
 )
@@ -48,6 +50,17 @@ func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.
 
 func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
+
+	// attempting to get cloud provider from API server git version
+	if opaSessionObj.Report.ClusterAPIServerInfo != nil {
+		opaSessionObj.Report.ClusterCloudProvider = cloudsupport.GetCloudProvider(opaSessionObj.Report.ClusterAPIServerInfo.GitVersion)
+	}
+
+	// if didn't succeed getting cloud provider from API server git version, try from context.
+	if opaSessionObj.Report.ClusterCloudProvider == "" {
+		clusterName := k8sinterface.GetContextName()
+		opaSessionObj.Report.ClusterCloudProvider = cloudsupport.GetCloudProvider(clusterName)
+	}
 
 	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
 	if err != nil {
