@@ -19,6 +19,7 @@ var (
 		"KubeletInfo",
 		"KubeProxyInfo",
 		"ControlPlaneInfo",
+		"CloudProviderInfo",
 	}
 	CloudResources = []string{
 		"ClusterDescribe",
