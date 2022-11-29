@@ -10,7 +10,7 @@ import (
 	"log"
 	"os"
 	"strings"
-	"yqlib"
+	"github.com/mikefarah/yq/v4/pkg/yqlib"
 
 	"gopkg.in/yaml.v3"
 )
