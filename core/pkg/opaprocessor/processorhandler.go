@@ -156,8 +156,6 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
 	dataControlInputs := map[string]string{"cloudProvider": opap.OPASessionObj.Report.ClusterCloudProvider}
 
-	postureControlInputs["cloudProvider"] = []string{opap.OPASessionObj.Report.ClusterCloudProvider}
-
 	// Merge configurable control input and fixed control input
 	for k, v := range fixedControlInputs {
 		postureControlInputs[k] = v
