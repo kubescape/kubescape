@@ -96,6 +96,7 @@ type Exception struct {
 
 type RegoInputData struct {
 	PostureControlInputs map[string][]string `json:"postureControlInputs"`
+	DataControlInputs    map[string]string   `json:"dataControlInputs"`
 	// ClusterName          string              `json:"clusterName"`
 	// K8sConfig            RegoK8sConfig       `json:"k8sconfig"`
 }

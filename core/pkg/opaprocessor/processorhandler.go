@@ -35,6 +35,7 @@ type OPAProcessor struct {
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
+		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
 	}
 	return &OPAProcessor{
 		OPASessionObj:        sessionObj,
@@ -153,6 +154,7 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 
 	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
+	dataControlInputs := map[string]string{"cloudProvider": opap.OPASessionObj.Report.ClusterCloudProvider}
 
 	postureControlInputs["cloudProvider"] = []string{opap.OPASessionObj.Report.ClusterCloudProvider}
 
@@ -160,6 +162,9 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 	for k, v := range fixedControlInputs {
 		postureControlInputs[k] = v
 	}
+
+	RuleRegoDependenciesData := resources.RegoDependenciesData{DataControlInputs: dataControlInputs,
+		PostureControlInputs: postureControlInputs}
 
 	inputResources, err := reporthandling.RegoResourcesAggregator(rule, getAllSupportedObjects(opap.K8SResources, opap.ArmoResource, opap.AllResources, rule))
 	if err != nil {
@@ -187,7 +192,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
-	ruleResponses, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData, postureControlInputs)
+	ruleResponses, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData, RuleRegoDependenciesData)
 	if err != nil {
 		// TODO - Handle error
 		logger.L().Error(err.Error())
@@ -219,16 +224,16 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 	return resources, err
 }
 
-func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, postureControlInputs map[string][]string) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
-		return opap.runRegoOnK8s(rule, k8sObjects, getRuleData, postureControlInputs)
+		return opap.runRegoOnK8s(rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
 	default:
 		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
 
-func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, postureControlInputs map[string][]string) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
 
 	// compile modules
 	modules, err := getRuleDependencies()
@@ -241,7 +246,7 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjec
 		return nil, fmt.Errorf("in 'runRegoOnSingleRule', failed to compile rule, name: %s, reason: %s", rule.Name, err.Error())
 	}
 
-	store, err := resources.TOStorage(postureControlInputs)
+	store, err := ruleRegoDependenciesData.TOStorage()
 	if err != nil {
 		return nil, err
 	}
@@ -284,8 +289,12 @@ func (opap *OPAProcessor) enumerateData(rule *reporthandling.PolicyRule, k8sObje
 		return k8sObjects, nil
 	}
 	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs)
+	dataControlInputs := map[string]string{"cloudProvider": opap.OPASessionObj.Report.ClusterCloudProvider}
 
-	ruleResponse, err := opap.runOPAOnSingleRule(rule, k8sObjects, ruleEnumeratorData, postureControlInputs)
+	RuleRegoDependenciesData := resources.RegoDependenciesData{DataControlInputs: dataControlInputs,
+		PostureControlInputs: postureControlInputs}
+
+	ruleResponse, err := opap.runOPAOnSingleRule(rule, k8sObjects, ruleEnumeratorData, RuleRegoDependenciesData)
 	if err != nil {
 		return nil, err
 	}
