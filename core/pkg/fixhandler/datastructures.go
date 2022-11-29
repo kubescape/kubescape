@@ -21,7 +21,7 @@ type ResourceFixInfo struct {
 	FilePath        string
 }
 
-// LineAndContentToAdd is a struct that holds the information about where to insert the new changes in the existing yaml file
+// LineAndContentToAdd holds the information about where to insert the new changes in the existing yaml file
 type LineAndContentToAdd struct {
 	Line    int
 	Content string
