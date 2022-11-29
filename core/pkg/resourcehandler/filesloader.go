@@ -119,6 +119,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 
 		var relSource string
 		if repoRoot == source {
+			// This is to preserve the relSource of individual files.
 			relSource = repoRoot
 		} else {
 			relSource, err = filepath.Rel(repoRoot, source)
