@@ -88,6 +88,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 }
 
 func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	workloads := []workloadinterface.IMetadata{}
 
@@ -116,7 +117,13 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 
-		relSource, err := filepath.Rel(repoRoot, source)
+		var relSource string
+		if repoRoot == source {
+			relSource = repoRoot
+		} else {
+			relSource, err = filepath.Rel(repoRoot, source)
+		}
+
 		if err == nil {
 			source = relSource
 		}
