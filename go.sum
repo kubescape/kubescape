@@ -157,8 +157,6 @@ github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPd
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
 github.com/armosec/armoapi-go v0.0.119 h1:7XbvBbOKp26Bpp72LQ8Spw4FBpbXu3+qZFQyPEwTPFk=
 github.com/armosec/armoapi-go v0.0.119/go.mod h1:2zoNzb3Fy9ZByeczJZ47ftDRLRzTykVdTISS3GTc/JU=
-github.com/armosec/go-git-url v0.0.15 h1:sDtu0WNvAhrDJ2begTyWP8T4tE1j1K6D0ZJ6t3Cx8k4=
-github.com/armosec/go-git-url v0.0.15/go.mod h1:GzfssG3IW9KiURSpK7c/bySBRTlghpObQ7NQ1O4hcMI=
 github.com/armosec/utils-go v0.0.12 h1:NXkG/BhbSVAmTVXr0qqsK02CmxEiXuJyPmdTRcZ4jAo=
 github.com/armosec/utils-go v0.0.12/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
 github.com/armosec/utils-k8s-go v0.0.12 h1:u7kHSUp4PpvPP3hEaRXMbM0Vw23IyLhAzzE+2TW6Jkk=

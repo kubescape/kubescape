@@ -6,11 +6,11 @@ import (
 	nethttp "net/http"
 	"os"
 
-	giturl "github.com/armosec/go-git-url"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
+	giturl "github.com/kubescape/go-git-url"
 )
 
 // To Check if the given repository is Public(No Authentication needed), send a HTTP GET request to the URL

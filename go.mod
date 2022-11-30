@@ -2,10 +2,12 @@ module github.com/kubescape/kubescape/v2
 
 go 1.18
 
+// TODO: replace this local copy by new tagged version, onece kubescape/go-git-url#2 is merged
+replace github.com/kubescape/go-git-url => /home/fred/src/github.com/kubescape/go-git-url
+
 require (
 	cloud.google.com/go/containeranalysis v0.4.0
 	github.com/armosec/armoapi-go v0.0.119
-	github.com/armosec/go-git-url v0.0.15
 	github.com/armosec/utils-go v0.0.12
 	github.com/armosec/utils-k8s-go v0.0.12
 	github.com/briandowns/spinner v1.18.1
@@ -15,6 +17,7 @@ require (
 	github.com/go-git/go-git/v5 v5.4.2
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.37.0
+	github.com/kubescape/go-git-url v0.0.16
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/k8s-interface v0.0.89
 	github.com/kubescape/opa-utils v0.0.200
@@ -29,6 +32,7 @@ require (
 	github.com/stretchr/testify v1.8.0
 	github.com/whilp/git-urls v1.0.0
 	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3
+	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
 	google.golang.org/api v0.85.0
 	google.golang.org/genproto v0.0.0-20220708155623-50e5f4832e73
 	google.golang.org/protobuf v1.28.1
@@ -169,7 +173,6 @@ require (
 	golang.org/x/net v0.0.0-20220909164309-bea034e7d591 // indirect
 	golang.org/x/oauth2 v0.0.0-20220630143837-2104d58473e0 // indirect
 	golang.org/x/sys v0.0.0-20220829200755-d48e67d00261 // indirect
-	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	golang.org/x/xerrors v0.0.0-20220609144429-65e65417b02f // indirect
