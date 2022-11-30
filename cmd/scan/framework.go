@@ -119,7 +119,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
 
-			enforceSeverityThresholds(&results.GetData().Report.SummaryDetails.SeverityCounters, scanInfo, terminateOnExceedingSeverity)
+			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 			return nil
 		},
 	}
@@ -136,10 +136,10 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 		SeverityName       string
 		GetFailedResources func() int
 	}{
-		{reporthandlingapis.SeverityLowString, severityCounters.NumberOfResourcesWithLowSeverity},
-		{reporthandlingapis.SeverityMediumString, severityCounters.NumberOfResourcesWithMediumSeverity},
-		{reporthandlingapis.SeverityHighString, severityCounters.NumberOfResourcesWithHighSeverity},
-		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfResourcesWithCriticalSeverity},
+		{reporthandlingapis.SeverityLowString, severityCounters.NumberOfLowSeverity},
+		{reporthandlingapis.SeverityMediumString, severityCounters.NumberOfMediumSeverity},
+		{reporthandlingapis.SeverityHighString, severityCounters.NumberOfHighSeverity},
+		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfCriticalSeverity},
 	}
 
 	targetSeverityIdx := 0

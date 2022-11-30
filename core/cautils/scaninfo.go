@@ -420,7 +420,7 @@ func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, erro
 		Date:          commit.Committer.Date,
 		CommitterName: commit.Committer.Name,
 	}
-	context.LocalRootPath = getAbsPath(input)
+	context.LocalRootPath, _ = gitParser.GetRootDir()
 
 	return context, nil
 }

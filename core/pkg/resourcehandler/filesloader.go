@@ -103,6 +103,8 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	gitRepo, err := cautils.NewLocalGitRepository(path)
 	if err == nil && gitRepo != nil {
 		repoRoot, _ = gitRepo.GetRootDir()
+	} else {
+		repoRoot, _ = filepath.Abs(path)
 	}
 
 	// load resource from local file system
@@ -141,7 +143,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		}
 
 		workloadSource := reporthandling.Source{
-			RelativePath: source,
+			RelativePath: relSource,
 			FileType:     filetype,
 			LastCommit:   lastCommit,
 		}
