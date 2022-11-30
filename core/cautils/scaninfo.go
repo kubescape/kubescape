@@ -10,7 +10,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
-	giturl "github.com/armosec/go-git-url"
+	giturl "github.com/kubescape/go-git-url"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/armosec/go-git-url/apis"
 	gitv5 "github.com/go-git/go-git/v5"
 	configv5 "github.com/go-git/go-git/v5/config"
 	plumbingv5 "github.com/go-git/go-git/v5/plumbing"
+	"github.com/kubescape/go-git-url/apis"
 	git2go "github.com/libgit2/git2go/v33"
 )
 
