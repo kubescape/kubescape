@@ -3,6 +3,7 @@ package hostsensorutils
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	logger "github.com/kubescape/go-logger"
@@ -99,6 +100,28 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 	return res, nil
 }
 
+// return host-scanner version
+func (hsh *HostSensorHandler) GetVersion() ([]byte, error) {
+	// loop over pods and port-forward it to each of them
+	podList, err := hsh.getPodList()
+	if err != nil {
+		return nil, fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
+	}
+
+	// initialization of the channels
+	hsh.workerPool.init(len(podList))
+	hsh.workerPool.hostSensorApplyJobs(podList, "/version", "version")
+	for job := range hsh.workerPool.jobs {
+		resBytes, err := hsh.HTTPGetToPod(job.podName, job.path)
+		if err != nil {
+			return nil, err
+		} else {
+			return resBytes, nil
+		}
+	}
+	return nil, nil
+}
+
 // return list of LinuxKernelVariables
 func (hsh *HostSensorHandler) GetKernelVariables() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
@@ -192,6 +215,18 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	var kcData []hostsensor.HostSensorDataEnvelope
 	var err error
 	logger.L().Debug("Accessing host scanner")
+	version, err := hsh.GetVersion()
+	if err != nil {
+		logger.L().Warning(err.Error())
+	}
+	if len(version) > 0 {
+		versionToPrint := strings.ReplaceAll(string(version), "\"", "")
+		versionToPrint = strings.ReplaceAll(versionToPrint, "\n", "")
+		logger.L().Info("Host scanner version : " + versionToPrint)
+	} else {
+		logger.L().Info("Assuming Host scanner version < v1.0.39")
+	}
+	//
 	kcData, err = hsh.GetKubeletConfigurations()
 	if err != nil {
 		addInfoToMap(KubeletConfiguration, infoMap, err)
