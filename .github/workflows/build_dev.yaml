@@ -14,7 +14,6 @@ jobs:
       client: test
  
   publish-dev-image:
-    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
     uses: ./.github/workflows/build-image.yaml
     needs: test
     with:
