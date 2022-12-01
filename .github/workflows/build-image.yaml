@@ -11,6 +11,11 @@ on:
         description: 'image tag'
         required: true
         type: string
+      tag_latest:
+        description: 'should this image have the latest tag'
+        required: false
+        default: false
+        type: boolean
       image_name:
         description: 'image registry and name'
         required: true
@@ -60,11 +65,18 @@ jobs:
 
       - name: Build and push image
         if: ${{ inputs.support_platforms }}
-        run: docker buildx build . --file build/Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --push --platform linux/amd64,linux/arm64
-     
+        run: docker buildx build . --file build/Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --platform linux/amd64,linux/arm64
+
       - name: Build and push image without amd64/arm64 support
         if: ${{ !inputs.support_platforms }}
-        run: docker buildx build . --file build/Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --push
+        run: docker buildx build . --file build/Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }}
+
+      - name: Tag image as latest
+        if: ${{ inputs.tag_latest }}
+        run: docker tag ${{ inputs.image_name }}:${{ inputs.image_tag }}} ${{ inputs.image_name }}:latest
+
+      - name: Push image to registry
+        run: docker push ${{ inputs.image_name }}
 
       - name: Install cosign
         uses: sigstore/cosign-installer@main
@@ -75,6 +87,5 @@ jobs:
         env:
           COSIGN_EXPERIMENTAL: "true"
         run: |
-            cosign sign --force ${{ inputs.image_name }}:latest
-            cosign sign --force ${{ inputs.image_name }}:${{ inputs.image_tag }}
+            cosign sign --force ${{ inputs.image_name }}
 
