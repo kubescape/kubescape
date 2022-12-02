@@ -22,7 +22,7 @@ import (
 
 var (
 	frameworkExample = `
-  # Scan all frameworks and submit the results
+  # Scan all frameworks
   kubescape scan framework all
   
   # Scan the NSA framework
