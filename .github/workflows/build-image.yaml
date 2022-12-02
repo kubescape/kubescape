@@ -83,7 +83,7 @@ jobs:
 
       - name: Tag image as latest
         if: ${{ inputs.tag_latest }}
-        run: docker tag ${{ inputs.image_name }}:${{ inputs.image_tag }}} ${{ inputs.image_name }}:latest
+        run: docker tag ${{ inputs.image_name }}:${{ inputs.image_tag }} ${{ inputs.image_name }}:latest
 
       - name: Push image to registry
         run: docker push ${{ inputs.image_name }}
