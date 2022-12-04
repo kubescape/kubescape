@@ -101,11 +101,11 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 }
 
 // return host-scanner version
-func (hsh *HostSensorHandler) GetVersion() ([]byte, error) {
+func (hsh *HostSensorHandler) GetVersion() (string, error) {
 	// loop over pods and port-forward it to each of them
 	podList, err := hsh.getPodList()
 	if err != nil {
-		return nil, fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
+		return "", fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
 	}
 
 	// initialization of the channels
@@ -114,12 +114,14 @@ func (hsh *HostSensorHandler) GetVersion() ([]byte, error) {
 	for job := range hsh.workerPool.jobs {
 		resBytes, err := hsh.HTTPGetToPod(job.podName, job.path)
 		if err != nil {
-			return nil, err
+			return "", err
 		} else {
-			return resBytes, nil
+			version := strings.ReplaceAll(string(resBytes), "\"", "")
+			version = strings.ReplaceAll(version, "\n", "")
+			return version, nil
 		}
 	}
-	return nil, nil
+	return "", nil
 }
 
 // return list of LinuxKernelVariables
@@ -220,11 +222,9 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 		logger.L().Warning(err.Error())
 	}
 	if len(version) > 0 {
-		versionToPrint := strings.ReplaceAll(string(version), "\"", "")
-		versionToPrint = strings.ReplaceAll(versionToPrint, "\n", "")
-		logger.L().Info("Host scanner version : " + versionToPrint)
+		logger.L().Info("Host scanner version : " + version)
 	} else {
-		logger.L().Info("Assuming Host scanner version < v1.0.39")
+		logger.L().Info("Unknown host scanner version")
 	}
 	//
 	kcData, err = hsh.GetKubeletConfigurations()
