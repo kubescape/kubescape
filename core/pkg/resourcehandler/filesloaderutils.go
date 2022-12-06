@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 
-	giturl "github.com/armosec/go-git-url"
+	giturl "github.com/kubescape/go-git-url"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
