@@ -84,7 +84,6 @@ jobs:
       client: "image-release"
       image_name: "quay.io/${{ github.repository_owner }}/kubescape"
       image_tag: "v2.0.${{ github.run_number }}"
-      tag_latest: true
       support_platforms: true
       cosign: true
     secrets: inherit
