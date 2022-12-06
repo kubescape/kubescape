@@ -22,8 +22,8 @@ import (
 
 var (
 	frameworkExample = `
-  # Scan all frameworks and submit the results
-  kubescape scan framework all --submit
+  # Scan all frameworks
+  kubescape scan framework all
   
   # Scan the NSA framework
   kubescape scan framework nsa
@@ -35,7 +35,7 @@ var (
   kubescape scan framework all
 
   # Scan kubernetes YAML manifest files (single file or glob)
-  kubescape scan framework nsa *.yaml
+  kubescape scan framework nsa .
 
   Run 'kubescape list frameworks' for the list of supported frameworks
 `

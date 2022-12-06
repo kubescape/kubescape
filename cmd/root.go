@@ -27,7 +27,7 @@ var rootInfo cautils.RootInfo
 
 var ksExamples = `
   # Scan command
-  kubescape scan --submit
+  kubescape scan
 
   # List supported frameworks
   kubescape list frameworks

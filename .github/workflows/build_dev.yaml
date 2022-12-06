@@ -13,14 +13,13 @@ jobs:
       release: "v2.0.${{ github.run_number }}"
       client: test
  
-  publish-dev-image:
-    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
-    uses: ./.github/workflows/build-image.yaml
-    needs: test
-    with:
-      client: "image-dev"
-      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
-      image_tag: "dev-v2.0.${{ github.run_number }}"
-      support_platforms: true
-      cosign: true
-    secrets: inherit
+  # publish-dev-image:
+  #   uses: ./.github/workflows/build-image.yaml
+  #   needs: test
+  #   with:
+  #     client: "image-dev"
+  #     image_name: "quay.io/${{ github.repository_owner }}/kubescape"
+  #     image_tag: "dev-v2.0.${{ github.run_number }}"
+  #     support_platforms: true
+  #     cosign: true
+  #   secrets: inherit
