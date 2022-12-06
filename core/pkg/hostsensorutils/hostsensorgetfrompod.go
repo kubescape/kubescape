@@ -160,6 +160,12 @@ func (hsh *HostSensorHandler) GetControlPlaneInfo() ([]hostsensor.HostSensorData
 	return hsh.sendAllPodsHTTPGETRequest("/controlPlaneInfo", ControlPlaneInfo)
 }
 
+// return list of KubeProxyInfo
+func (hsh *HostSensorHandler) GetCloudProviderInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/cloudProviderInfo", CloudProviderInfo)
+}
+
 // return list of KubeletCommandLine
 func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
@@ -314,6 +320,16 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	kcData, err = hsh.GetControlPlaneInfo()
 	if err != nil {
 		addInfoToMap(ControlPlaneInfo, infoMap, err)
+		logger.L().Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
+
+	// GetCloudProviderInfo
+	kcData, err = hsh.GetCloudProviderInfo()
+	if err != nil {
+		addInfoToMap(CloudProviderInfo, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
 	if len(kcData) > 0 {
