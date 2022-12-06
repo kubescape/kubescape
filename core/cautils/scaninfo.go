@@ -10,7 +10,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
-	giturl "github.com/armosec/go-git-url"
+	giturl "github.com/kubescape/go-git-url"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -39,7 +39,8 @@ const (
 	// ScanCluster                string = "cluster"
 	// ScanLocalFiles             string = "yaml"
 	localControlInputsFilename string = "controls-inputs.json"
-	localExceptionsFilename    string = "exceptions.json"
+	LocalExceptionsFilename    string = "exceptions.json"
+	LocalAttackTracksFilename  string = "attack-tracks.json"
 )
 
 type BoolPtrFlag struct {
@@ -127,6 +128,7 @@ type ScanInfo struct {
 	KubeContext           string             // context name
 	FrameworkScan         bool               // false if scanning control
 	ScanAll               bool               // true if scan all frameworks
+	OmitRawResources      bool               // true if omit raw resources from the output
 }
 
 type Getters struct {
@@ -175,7 +177,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	// set config-inputs file
 	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, localControlInputsFilename)
 	// set exceptions
-	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, localExceptionsFilename)
+	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
 }
 
 func (scanInfo *ScanInfo) setUseFrom() {
@@ -418,7 +420,7 @@ func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, erro
 		Date:          commit.Committer.Date,
 		CommitterName: commit.Committer.Name,
 	}
-	context.LocalRootPath = getAbsPath(input)
+	context.LocalRootPath, _ = gitParser.GetRootDir()
 
 	return context, nil
 }

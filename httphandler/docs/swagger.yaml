@@ -75,7 +75,6 @@ definitions:
         description: |-
           Submit results to Kubescape Cloud.
 
-          Same as `kubescape scan --submit`.
         type: boolean
         x-go-name: Submit
       targetNames:

@@ -2,6 +2,7 @@ package resultshandling
 
 import (
 	"encoding/json"
+	"fmt"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -100,6 +101,9 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType ca
 	case printer.SARIFFormat:
 		return printerv2.NewSARIFPrinter()
 	default:
+		if printFormat != printer.PrettyFormat {
+			logger.L().Error(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
+		}
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
 	}
 }

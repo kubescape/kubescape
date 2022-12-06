@@ -16,8 +16,8 @@ import (
 	"github.com/google/uuid"
 )
 
-var OutputDir = "./results"
-var FailedOutputDir = "./failed"
+var OutputDir = "./results/"
+var FailedOutputDir = "./failed/"
 
 // A Scan Response object
 //

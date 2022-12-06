@@ -76,9 +76,10 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	}
 
-	if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
-		logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
-	}
+	// Should Kubescape scan image related controls when scanning local files?
+	// if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
+	// 	logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
+	// }
 
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")
@@ -103,6 +104,8 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	gitRepo, err := cautils.NewLocalGitRepository(path)
 	if err == nil && gitRepo != nil {
 		repoRoot, _ = gitRepo.GetRootDir()
+	} else {
+		repoRoot, _ = filepath.Abs(path)
 	}
 
 	// load resource from local file system
@@ -141,7 +144,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		}
 
 		workloadSource := reporthandling.Source{
-			RelativePath: source,
+			RelativePath: relSource,
 			FileType:     filetype,
 			LastCommit:   lastCommit,
 		}

@@ -192,7 +192,7 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 		return
 	}
 	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
-	cautils.InfoTextDisplay(prettyPrinter.writer, renderSeverityCountersSummary(&summaryDetails.SeverityCounters)+"\n\n")
+	cautils.InfoTextDisplay(prettyPrinter.writer, renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters())+"\n\n")
 
 	// cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+"Severities: SOME OTHER"+"\n\n")
 
@@ -256,10 +256,10 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 
 // renderSeverityCountersSummary renders the string that reports severity counters summary
 func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) string {
-	critical := counters.NumberOfResourcesWithCriticalSeverity()
-	high := counters.NumberOfResourcesWithHighSeverity()
-	medium := counters.NumberOfResourcesWithMediumSeverity()
-	low := counters.NumberOfResourcesWithLowSeverity()
+	critical := counters.NumberOfCriticalSeverity()
+	high := counters.NumberOfHighSeverity()
+	medium := counters.NumberOfMediumSeverity()
+	low := counters.NumberOfLowSeverity()
 
 	return fmt.Sprintf(
 		"Failed Resources by Severity: Critical — %d, High — %d, Medium — %d, Low — %d",

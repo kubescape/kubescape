@@ -130,10 +130,11 @@ func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableV
 func buildResourceControlResult(resourceControl resourcesresults.ResourceAssociatedControl, control reportsummary.IControlSummary) ResourceControlResult {
 	ctlSeverity := apis.ControlSeverityToString(control.GetScoreFactor())
 	ctlName := resourceControl.GetName()
-	ctlURL := resourceControl.GetID()
+	ctlID := resourceControl.GetID()
+	ctlURL := cautils.GetControlLink(resourceControl.GetID())
 	failedPaths := append(failedPathsToString(&resourceControl), fixPathsToString(&resourceControl)...)
 
-	return ResourceControlResult{ctlSeverity, ctlName, ctlURL, failedPaths}
+	return ResourceControlResult{ctlSeverity, ctlName, ctlID, ctlURL, failedPaths}
 }
 
 func buildResourceControlResultTable(resourceControls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails) []ResourceControlResult {

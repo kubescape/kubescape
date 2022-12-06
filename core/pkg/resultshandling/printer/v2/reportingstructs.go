@@ -14,6 +14,7 @@ type ResourceResult struct {
 type ResourceControlResult struct {
 	Severity    string
 	Name        string
+	ID          string
 	URL         string
 	FailedPaths []string
 }
