@@ -54,6 +54,10 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		if err := tenantConfig.SetTenant(); err != nil {
 			logger.L().Error(err.Error())
 		}
+
+		if scanInfo.OmitRawResources {
+			logger.L().Warning("omit-raw-resources flag will be ignored in submit mode")
+		}
 	}
 
 	// ================== version testing ======================================

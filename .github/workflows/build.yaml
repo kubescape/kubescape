@@ -4,7 +4,6 @@ on:
   push:
     branches: [ master ]
     paths-ignore:
-      # Do not run the pipeline if only Markdown files changed
       - '**.md'
 jobs:
   test:
@@ -79,7 +78,6 @@ jobs:
           asset_content_type: application/octet-stream
   
   publish-image:
-    if: ${{ github.repository == 'kubescape/kubescape' }} # TODO
     uses: ./.github/workflows/build-image.yaml
     needs: create-release
     with:

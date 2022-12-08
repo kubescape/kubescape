@@ -22,8 +22,8 @@ import (
 
 var (
 	frameworkExample = `
-  # Scan all frameworks and submit the results
-  kubescape scan framework all --submit
+  # Scan all frameworks
+  kubescape scan framework all
   
   # Scan the NSA framework
   kubescape scan framework nsa
@@ -35,7 +35,7 @@ var (
   kubescape scan framework all
 
   # Scan kubernetes YAML manifest files (single file or glob)
-  kubescape scan framework nsa *.yaml
+  kubescape scan framework nsa .
 
   Run 'kubescape list frameworks' for the list of supported frameworks
 `
@@ -119,7 +119,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
 
-			enforceSeverityThresholds(&results.GetData().Report.SummaryDetails.SeverityCounters, scanInfo, terminateOnExceedingSeverity)
+			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 			return nil
 		},
 	}
@@ -136,10 +136,10 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 		SeverityName       string
 		GetFailedResources func() int
 	}{
-		{reporthandlingapis.SeverityLowString, severityCounters.NumberOfResourcesWithLowSeverity},
-		{reporthandlingapis.SeverityMediumString, severityCounters.NumberOfResourcesWithMediumSeverity},
-		{reporthandlingapis.SeverityHighString, severityCounters.NumberOfResourcesWithHighSeverity},
-		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfResourcesWithCriticalSeverity},
+		{reporthandlingapis.SeverityLowString, severityCounters.NumberOfLowSeverity},
+		{reporthandlingapis.SeverityMediumString, severityCounters.NumberOfMediumSeverity},
+		{reporthandlingapis.SeverityHighString, severityCounters.NumberOfHighSeverity},
+		{reporthandlingapis.SeverityCriticalString, severityCounters.NumberOfCriticalSeverity},
 	}
 
 	targetSeverityIdx := 0
@@ -201,7 +201,9 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
 		return fmt.Errorf("bad argument: out of range threshold")
 	}
-
+	if scanInfo.Submit && scanInfo.OmitRawResources {
+		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+	}
 	severity := scanInfo.FailThresholdSeverity
 	if err := validateSeverity(severity); severity != "" && err != nil {
 		return err

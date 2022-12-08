@@ -142,7 +142,7 @@
         <tr>
           <td class="resourceSeverityCell">{{ .Severity }}</td>
           <td class="resourceNameCell">{{ .Name }}</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/{{ lower .URL }}">{{ .URL }}</a></td>
+          <td class="resourceURLCell"><a href="{{ lower .URL }}">{{ .ID }}</a></td>
           <td class="resourceRemediationCell">{{ range .FailedPaths }} <p>{{ . }}</p> {{ end }}</td>
         </tr>
         {{ end }}

@@ -109,7 +109,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
-			enforceSeverityThresholds(&results.GetResults().SummaryDetails.SeverityCounters, scanInfo, terminateOnExceedingSeverity)
+			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 
 			return nil
 		},
@@ -119,6 +119,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 // validateControlScanInfo validates the ScanInfo struct for the `control` command
 func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
+
+	if scanInfo.Submit && scanInfo.OmitRawResources {
+		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+	}
 
 	if err := validateSeverity(severity); severity != "" && err != nil {
 		return err

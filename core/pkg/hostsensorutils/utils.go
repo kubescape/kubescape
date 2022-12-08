@@ -16,6 +16,7 @@ var (
 	KubeletInfo                  = "KubeletInfo"
 	KubeProxyInfo                = "KubeProxyInfo"
 	ControlPlaneInfo             = "ControlPlaneInfo"
+	CloudProviderInfo            = "CloudProviderInfo"
 
 	MapHostSensorResourceToApiGroup = map[string]string{
 		KubeletConfiguration:         "hostdata.kubescape.cloud/v1beta0",
@@ -28,6 +29,7 @@ var (
 		KubeletInfo:                  "hostdata.kubescape.cloud/v1beta0",
 		KubeProxyInfo:                "hostdata.kubescape.cloud/v1beta0",
 		ControlPlaneInfo:             "hostdata.kubescape.cloud/v1beta0",
+		CloudProviderInfo:            "hostdata.kubescape.cloud/v1beta0",
 	}
 )
 

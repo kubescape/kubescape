@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
@@ -11,9 +12,8 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	"github.com/kubescape/opa-utils/shared"
 )
 
 /*
@@ -36,7 +36,6 @@ type JUnitTestSuites struct {
 	XMLName  xml.Name         `xml:"testsuites"`
 	Suites   []JUnitTestSuite `xml:"testsuite"`     // list of controls
 	Errors   int              `xml:"errors,attr"`   // total number of tests with error result from all testsuites
-	Disabled int              `xml:"disabled,attr"` // total number of disabled tests from all testsuites
 	Failures int              `xml:"failures,attr"` // total number of failed tests from all testsuites
 	Tests    int              `xml:"tests,attr"`    // total number of tests from all testsuites. Some software may expect to only see the number of successful tests from all testsuites though
 	Time     string           `xml:"time,attr"`     // time in seconds to execute all test suites
@@ -46,8 +45,8 @@ type JUnitTestSuites struct {
 // JUnitTestSuite represents a single control
 type JUnitTestSuite struct {
 	XMLName    xml.Name        `xml:"testsuite"`
+	Tests      int             `xml:"tests,attr"`     // total number of tests from this testsuite. Some software may expect to only see the number of successful tests though
 	Name       string          `xml:"name,attr"`      // Full (class) name of the test for non-aggregated testsuite documents. Class name without the package for aggregated testsuites documents. Required
-	Disabled   int             `xml:"disabled,attr"`  // The total number of disabled tests in the suite. optional. not supported by maven surefire.
 	Errors     int             `xml:"errors,attr"`    // The total number of tests in the suite that errors
 	Failures   int             `xml:"failures,attr"`  // The total number of tests in the suite that failed
 	Hostname   string          `xml:"hostname,attr"`  // Host on which the tests were executed ? cluster name ?
@@ -55,7 +54,6 @@ type JUnitTestSuite struct {
 	Skipped    string          `xml:"skipped,attr"`   // The total number of skipped tests
 	Time       string          `xml:"time,attr"`      // Time taken (in seconds) to execute the tests in the suite
 	Timestamp  string          `xml:"timestamp,attr"` // when the test was executed in ISO 8601 format (2014-01-21T16:17:18)
-	File       string          `xml:"file,attr"`      // The file be tested
 	Properties []JUnitProperty `xml:"properties>property,omitempty"`
 	TestCases  []JUnitTestCase `xml:"testcase"`
 }
@@ -64,7 +62,6 @@ type JUnitTestSuite struct {
 type JUnitTestCase struct {
 	XMLName     xml.Name          `xml:"testcase"`
 	Classname   string            `xml:"classname,attr"` // Full class name for the class the test method is in. required
-	Status      string            `xml:"status,attr"`    // Status
 	Name        string            `xml:"name,attr"`      // Name of the test method, required
 	Time        string            `xml:"time,attr"`      // Time taken (in seconds) to execute the test. optional
 	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
@@ -88,11 +85,6 @@ type JUnitFailure struct {
 	Type     string `xml:"type,attr"`
 	Contents string `xml:",chardata"`
 }
-
-const (
-	lineSeparator         = "\n===================================================================================================================\n\n"
-	testCaseTypeResources = "Resources"
-)
 
 func NewJunitPrinter(verbose bool) *JunitPrinter {
 	return &JunitPrinter{
@@ -124,118 +116,104 @@ func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionO
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
 	return &JUnitTestSuites{
 		Suites:   listTestsSuite(results),
-		Tests:    results.Report.SummaryDetails.NumberOfResources().All(),
+		Tests:    results.Report.SummaryDetails.NumberOfControls().All(),
 		Name:     "Kubescape Scanning",
-		Failures: results.Report.SummaryDetails.NumberOfResources().Failed(),
+		Failures: results.Report.SummaryDetails.NumberOfControls().Failed(),
 	}
 }
-
-// aggregate resources source to a list of resources results
-func sourceToResourcesResults(results *cautils.OPASessionObj) map[string][]resourcesresults.Result {
-	resourceResults := make(map[string][]resourcesresults.Result)
-	for i := range results.ResourceSource {
-		if r, ok := results.ResourcesResult[i]; ok {
-			if _, ok := resourceResults[results.ResourceSource[i].RelativePath]; !ok {
-				resourceResults[results.ResourceSource[i].RelativePath] = []resourcesresults.Result{}
-			}
-			resourceResults[results.ResourceSource[i].RelativePath] = append(resourceResults[results.ResourceSource[i].RelativePath], r)
-		}
-	}
-	return resourceResults
-}
-
-// listTestsSuite returns a list of testsuites
 func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 	var testSuites []JUnitTestSuite
-	resourceResults := sourceToResourcesResults(results)
-	counter := 0
+
 	// control scan
-	for path, resourcesResult := range resourceResults {
+	if len(results.Report.SummaryDetails.ListFrameworks()) == 0 {
 		testSuite := JUnitTestSuite{}
+		testSuite.Tests = results.Report.SummaryDetails.NumberOfControls().All()
+		testSuite.Failures = results.Report.SummaryDetails.NumberOfControls().Failed()
 		testSuite.Timestamp = results.Report.ReportGenerationTime.String()
-		testSuite.ID = counter
-		counter++
-		testSuite.File = path
-		testSuite.TestCases = testsCases(results, resourcesResult)
-		if len(testSuite.TestCases) > 0 {
-			testSuites = append(testSuites, testSuite)
-		}
+		testSuite.ID = 0
+		testSuite.Name = "kubescape"
+		testSuite.Properties = properties(results.Report.SummaryDetails.Score)
+		testSuite.TestCases = testsCases(results, &results.Report.SummaryDetails.Controls, "Kubescape")
+		testSuites = append(testSuites, testSuite)
+		return testSuites
+	}
+
+	for i, f := range results.Report.SummaryDetails.Frameworks {
+		testSuite := JUnitTestSuite{}
+		testSuite.Tests = f.NumberOfControls().All()
+		testSuite.Failures = f.NumberOfControls().Failed()
+		testSuite.Timestamp = results.Report.ReportGenerationTime.String()
+		testSuite.ID = i
+		testSuite.Name = f.Name
+		testSuite.Properties = properties(f.Score)
+		testSuite.TestCases = testsCases(results, f.GetControls(), f.GetName())
+		testSuites = append(testSuites, testSuite)
 	}
 
 	return testSuites
 }
-
-func failedControlsToFailureMessage(results *cautils.OPASessionObj, controls []resourcesresults.ResourceAssociatedControl, severityCounter []int) string {
-	msg := ""
-	for _, c := range controls {
-		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c.GetID())
-		if c.GetStatus(nil).IsFailed() {
-			msg += fmt.Sprintf("Test: %s\n", control.GetName())
-			msg += fmt.Sprintf("Severity: %s\n", apis.ControlSeverityToString(control.GetScoreFactor()))
-			msg += fmt.Sprintf("Remediation: %s\n", control.GetRemediation())
-			msg += fmt.Sprintf("Link: %s\n", cautils.GetControlLink(control.GetID()))
-			if failedPaths := failedPathsToString(&c); len(failedPaths) > 0 {
-				msg += fmt.Sprintf("Failed paths: \n - %s\n", strings.Join(failedPaths, "\n - "))
-			}
-			if fixPaths := fixPathsToString(&c); len(fixPaths) > 0 {
-				msg += fmt.Sprintf("Available fix: \n - %s\n", strings.Join(fixPaths, "\n - "))
-			}
-			msg += "\n"
-
-			severityCounter[apis.ControlSeverityToInt(control.GetScoreFactor())] += 1
-		}
-	}
-	return msg
-}
-
-// Every testCase includes a file (even if the file contains several resources)
-func testsCases(results *cautils.OPASessionObj, resourcesResult []resourcesresults.Result) []JUnitTestCase {
+func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
 	var testCases []JUnitTestCase
-	testCase := JUnitTestCase{}
-	testCaseFailure := JUnitFailure{}
-	testCaseFailure.Type = testCaseTypeResources
-	message := ""
 
-	// severityCounter represents the severities, 0: Unknown, 1: Low, 2: Medium, 3: High, 4: Critical
-	severityCounter := make([]int, apis.NumberOfSeverities, apis.NumberOfSeverities)
+	iter := controls.ListControlsIDs().All()
+	for iter.HasNext() {
+		cID := iter.Next()
+		testCase := JUnitTestCase{}
+		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, cID)
 
-	for i := range resourcesResult {
-		if failedControls := failedControlsToFailureMessage(results, resourcesResult[i].ListControls(), severityCounter); failedControls != "" {
-			message += fmt.Sprintf("%sResource: %s\n\n%s", lineSeparator, resourceNameToString(results.AllResources[resourcesResult[i].GetResourceID()]), failedControls)
+		testCase.Name = control.GetName()
+		testCase.Classname = classname
+
+		if control.GetStatus().IsFailed() {
+			resources := map[string]interface{}{}
+			resourceIDs := control.ListResourcesIDs().Failed()
+			for j := range resourceIDs {
+				resource := results.AllResources[resourceIDs[j]]
+				sourcePath := ""
+				if ResourceSourcePath, ok := results.ResourceSource[resourceIDs[j]]; ok {
+					sourcePath = ResourceSourcePath.RelativePath
+				}
+				resources[resourceToString(resource, sourcePath)] = nil
+			}
+			resourcesStr := shared.MapStringToSlice(resources)
+			sort.Strings(resourcesStr)
+			testCaseFailure := JUnitFailure{}
+			testCaseFailure.Type = "Control"
+			// testCaseFailure.Contents =
+			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), cautils.GetControlLink(control.GetID()), strings.Join(resourcesStr, "\n"))
+
+			testCase.Failure = &testCaseFailure
+		} else if control.GetStatus().IsSkipped() {
+			testCase.SkipMessage = &JUnitSkipMessage{
+				Message: "", // TODO - fill after statusInfo is supported
+			}
+
 		}
-	}
-	testCaseFailure.Message += fmt.Sprintf("%s\n%s", getSummaryMessage(severityCounter), message)
-
-	testCase.Failure = &testCaseFailure
-	if testCase.Failure.Message != "" {
 		testCases = append(testCases, testCase)
 	}
-
 	return testCases
 }
 
-func getSummaryMessage(severityCounter []int) string {
-	total := 0
-	severities := ""
-	for i, count := range severityCounter {
-		if apis.SeverityNumberToString(i) == apis.SeverityNumberToString(apis.SeverityUnknown) {
-			continue
-		}
-		severities += fmt.Sprintf("%s: %d, ", apis.SeverityNumberToString(i), count)
-		total += count
+func resourceToString(resource workloadinterface.IMetadata, sourcePath string) string {
+	sep := "; "
+	s := ""
+	s += fmt.Sprintf("apiVersion: %s", resource.GetApiVersion()) + sep
+	s += fmt.Sprintf("kind: %s", resource.GetKind()) + sep
+	if resource.GetNamespace() != "" {
+		s += fmt.Sprintf("namespace: %s", resource.GetNamespace()) + sep
 	}
-	if len(severities) == 0 {
-		return ""
+	s += fmt.Sprintf("name: %s", resource.GetName())
+	if sourcePath != "" {
+		s += sep + fmt.Sprintf("sourcePath: %s", sourcePath)
 	}
-	return fmt.Sprintf("Total: %d (%s)", total, severities[:len(severities)-2])
+	return s
 }
 
-func resourceNameToString(resource workloadinterface.IMetadata) string {
-	s := ""
-	s += fmt.Sprintf("kind=%s/", resource.GetKind())
-	if resource.GetNamespace() != "" {
-		s += fmt.Sprintf("namespace=%s/", resource.GetNamespace())
+func properties(riskScore float32) []JUnitProperty {
+	return []JUnitProperty{
+		{
+			Name:  "riskScore",
+			Value: fmt.Sprintf("%.2f", riskScore),
+		},
 	}
-	s += fmt.Sprintf("name=%s", resource.GetName())
-	return s
 }

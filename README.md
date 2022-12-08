@@ -52,6 +52,9 @@ kubescape scan --enable-host-scan --verbose
 </br>
 
 ## Architecture in short
+
+[Component architecture](docs/architecture.drawio.svg)
+
 ### [CLI](#kubescape-cli)
 <div align="center">
     <img src="docs/ks-cli-arch.png" width="300" alt="cli-diagram">

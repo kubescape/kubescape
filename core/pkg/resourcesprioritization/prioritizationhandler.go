@@ -21,7 +21,8 @@ func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGe
 		attackTracks: make([]v1alpha1.IAttackTrack, 0),
 	}
 
-	if tracks, err := attackTracksGetter.GetAttackTracks(); err != nil {
+	tracks, err := attackTracksGetter.GetAttackTracks()
+	if err != nil {
 		return nil, err
 	} else {
 		for _, attackTrack := range tracks {
@@ -36,6 +37,12 @@ func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGe
 
 	if len(handler.attackTracks) == 0 {
 		return nil, fmt.Errorf("expected to find at least one attack track")
+	}
+
+	// Store attack tracks in cache
+	cache := getter.GetDefaultPath(cautils.LocalAttackTracksFilename)
+	if err := getter.SaveInFile(tracks, cache); err != nil {
+		logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 	}
 
 	return handler, nil
