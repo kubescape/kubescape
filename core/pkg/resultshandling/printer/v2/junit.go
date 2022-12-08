@@ -36,7 +36,6 @@ type JUnitTestSuites struct {
 	XMLName  xml.Name         `xml:"testsuites"`
 	Suites   []JUnitTestSuite `xml:"testsuite"`     // list of controls
 	Errors   int              `xml:"errors,attr"`   // total number of tests with error result from all testsuites
-	Disabled int              `xml:"disabled,attr"` // total number of disabled tests from all testsuites
 	Failures int              `xml:"failures,attr"` // total number of failed tests from all testsuites
 	Tests    int              `xml:"tests,attr"`    // total number of tests from all testsuites. Some software may expect to only see the number of successful tests from all testsuites though
 	Time     string           `xml:"time,attr"`     // time in seconds to execute all test suites
@@ -46,8 +45,8 @@ type JUnitTestSuites struct {
 // JUnitTestSuite represents a single control
 type JUnitTestSuite struct {
 	XMLName    xml.Name        `xml:"testsuite"`
+	Tests      int             `xml:"tests,attr"`     // total number of tests from this testsuite. Some software may expect to only see the number of successful tests though
 	Name       string          `xml:"name,attr"`      // Full (class) name of the test for non-aggregated testsuite documents. Class name without the package for aggregated testsuites documents. Required
-	Disabled   int             `xml:"disabled,attr"`  // The total number of disabled tests in the suite. optional. not supported by maven surefire.
 	Errors     int             `xml:"errors,attr"`    // The total number of tests in the suite that errors
 	Failures   int             `xml:"failures,attr"`  // The total number of tests in the suite that failed
 	Hostname   string          `xml:"hostname,attr"`  // Host on which the tests were executed ? cluster name ?
@@ -63,7 +62,6 @@ type JUnitTestSuite struct {
 type JUnitTestCase struct {
 	XMLName     xml.Name          `xml:"testcase"`
 	Classname   string            `xml:"classname,attr"` // Full class name for the class the test method is in. required
-	Status      string            `xml:"status,attr"`    // Status
 	Name        string            `xml:"name,attr"`      // Name of the test method, required
 	Time        string            `xml:"time,attr"`      // Time taken (in seconds) to execute the test. optional
 	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
@@ -129,6 +127,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 	// control scan
 	if len(results.Report.SummaryDetails.ListFrameworks()) == 0 {
 		testSuite := JUnitTestSuite{}
+		testSuite.Tests = results.Report.SummaryDetails.NumberOfControls().All()
 		testSuite.Failures = results.Report.SummaryDetails.NumberOfControls().Failed()
 		testSuite.Timestamp = results.Report.ReportGenerationTime.String()
 		testSuite.ID = 0
@@ -141,6 +140,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 
 	for i, f := range results.Report.SummaryDetails.Frameworks {
 		testSuite := JUnitTestSuite{}
+		testSuite.Tests = f.NumberOfControls().All()
 		testSuite.Failures = f.NumberOfControls().Failed()
 		testSuite.Timestamp = results.Report.ReportGenerationTime.String()
 		testSuite.ID = i
@@ -163,14 +163,17 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 
 		testCase.Name = control.GetName()
 		testCase.Classname = classname
-		testCase.Status = string(control.GetStatus().Status())
 
 		if control.GetStatus().IsFailed() {
 			resources := map[string]interface{}{}
 			resourceIDs := control.ListResourcesIDs().Failed()
 			for j := range resourceIDs {
 				resource := results.AllResources[resourceIDs[j]]
-				resources[resourceToString(resource)] = nil
+				sourcePath := ""
+				if ResourceSourcePath, ok := results.ResourceSource[resourceIDs[j]]; ok {
+					sourcePath = ResourceSourcePath.RelativePath
+				}
+				resources[resourceToString(resource, sourcePath)] = nil
 			}
 			resourcesStr := shared.MapStringToSlice(resources)
 			sort.Strings(resourcesStr)
@@ -191,7 +194,7 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 	return testCases
 }
 
-func resourceToString(resource workloadinterface.IMetadata) string {
+func resourceToString(resource workloadinterface.IMetadata, sourcePath string) string {
 	sep := "; "
 	s := ""
 	s += fmt.Sprintf("apiVersion: %s", resource.GetApiVersion()) + sep
@@ -200,6 +203,9 @@ func resourceToString(resource workloadinterface.IMetadata) string {
 		s += fmt.Sprintf("namespace: %s", resource.GetNamespace()) + sep
 	}
 	s += fmt.Sprintf("name: %s", resource.GetName())
+	if sourcePath != "" {
+		s += sep + fmt.Sprintf("sourcePath: %s", sourcePath)
+	}
 	return s
 }
 
