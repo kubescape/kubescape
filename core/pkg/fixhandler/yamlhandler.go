@@ -4,205 +4,187 @@ import (
 	"bufio"
 	"bytes"
 	"container/list"
-	"errors"
 	"fmt"
-	"io"
-	"log"
+	"io/ioutil"
 	"os"
-	"strings"
+
+	logger "github.com/kubescape/go-logger"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 
 	"gopkg.in/yaml.v3"
 )
 
-func getFixedYamlNode(filePath, yamlExpression string) yaml.Node {
+func getDecodedYaml(filepath string) *yaml.Node {
+	file, err := ioutil.ReadFile(filepath)
+	if err != nil {
+		logger.L().Fatal("Cannot read file")
+	}
+	fileReader := bytes.NewReader(file)
+	dec := yaml.NewDecoder(fileReader)
+
+	var node yaml.Node
+	err = dec.Decode(&node)
+
+	if err != nil {
+		logger.L().Fatal("Cannot Decode Yaml")
+	}
+
+	return &node
+}
+
+func getFixedYamlNode(filePath, yamlExpression string) *yaml.Node {
 	preferences := yqlib.ConfiguredYamlPreferences
 	preferences.EvaluateTogether = true
 	decoder := yqlib.NewYamlDecoder(preferences)
 
 	var allDocuments = list.New()
-	reader, err := readStream(filePath)
+	reader, err := getNewReader(filePath)
 	if err != nil {
-		return yaml.Node{}
+		return &yaml.Node{}
 	}
 
 	fileDocuments, err := readDocuments(reader, filePath, 0, decoder)
 	if err != nil {
-		return yaml.Node{}
+		return &yaml.Node{}
 	}
 	allDocuments.PushBackList(fileDocuments)
 
-	if allDocuments.Len() == 0 {
-		candidateNode := &yqlib.CandidateNode{
-			Document:       0,
-			Filename:       "",
-			Node:           &yaml.Node{Kind: yaml.DocumentNode, Content: []*yaml.Node{{Tag: "!!null", Kind: yaml.ScalarNode}}},
-			FileIndex:      0,
-			LeadingContent: "",
-		}
-		allDocuments.PushBack(candidateNode)
-	}
-
 	allAtOnceEvaluator := yqlib.NewAllAtOnceEvaluator()
 
-	matches, _ := allAtOnceEvaluator.EvaluateCandidateNodes(yamlExpression, allDocuments)
+	matches, err := allAtOnceEvaluator.EvaluateCandidateNodes(yamlExpression, allDocuments)
 
-	return *matches.Front().Value.(*yqlib.CandidateNode).Node
-}
-
-func readStream(filename string) (io.Reader, error) {
-	var reader *bufio.Reader
-	if filename == "-" {
-		reader = bufio.NewReader(os.Stdin)
-	} else {
-		// ignore CWE-22 gosec issue - that's more targeted for http based apps that run in a public directory,
-		// and ensuring that it's not possible to give a path to a file outside thar directory.
-		file, err := os.Open(filename) // #nosec
-		if err != nil {
-			return nil, err
-		}
-		reader = bufio.NewReader(file)
-	}
-	return reader, nil
-
-}
-
-func readDocuments(reader io.Reader, filename string, fileIndex int, decoder yqlib.Decoder) (*list.List, error) {
-	err := decoder.Init(reader)
 	if err != nil {
-		return nil, err
+		logger.L().Fatal(fmt.Sprintf("Error fixing YAML, %v", err.Error()))
 	}
-	inputList := list.New()
-	var currentIndex uint
 
-	for {
-		candidateNode, errorReading := decoder.Decode()
+	return matches.Front().Value.(*yqlib.CandidateNode).Node
+}
 
-		if errors.Is(errorReading, io.EOF) {
-			switch reader := reader.(type) {
-			case *os.File:
-				safelyCloseFile(reader)
-			}
-			return inputList, nil
-		} else if errorReading != nil {
-			return nil, fmt.Errorf("bad file '%v': %w", filename, errorReading)
-		}
-		candidateNode.Document = currentIndex
-		candidateNode.Filename = filename
-		candidateNode.FileIndex = fileIndex
-		candidateNode.EvaluateTogether = true
+func getDFSOrder(node *yaml.Node) *[]NodeInfo {
+	dfsOrder := make([]NodeInfo, 0)
+	getDFSOrderHelper(node, nil, &dfsOrder, 0)
+	return &dfsOrder
+}
 
-		inputList.PushBack(candidateNode)
+func matchNodes(nodeOne, nodeTwo *yaml.Node) int {
 
-		currentIndex = currentIndex + 1
+	isNewNode := nodeTwo.Line == 0 && nodeTwo.Column == 0
+	sameLines := nodeOne.Line == nodeTwo.Line
+	sameColumns := nodeOne.Column == nodeTwo.Column
+	sameKinds := nodeOne.Kind == nodeTwo.Kind
+	sameValues := nodeOne.Value == nodeTwo.Value
+
+	isSameNode := sameKinds && sameValues && sameLines && sameColumns
+
+	switch {
+	case isSameNode:
+		return int(sameNodes)
+	case isNewNode:
+		return int(insertedNode)
+	case sameLines && sameColumns:
+		return int(replacedNode)
+	default:
+		return int(removedNode)
 	}
 }
 
-func safelyCloseFile(file *os.File) {
-	err := file.Close()
-	if err != nil {
-		fmt.Println("Error Closing File")
+func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]ContentToRemove) {
+	contentToAdd := make([]ContentToAdd, 0)
+	linesToRemove := make([]ContentToRemove, 0)
+
+	originalListTracker, fixedListTracker := 0, 0
+
+	fixInfoMetadata := &FixInfoMetadata{
+		originalList:        originalList,
+		fixedList:           fixedList,
+		originalListTracker: originalListTracker,
+		fixedListTracker:    fixedListTracker,
+		contentToAdd:        &contentToAdd,
+		contentToRemove:     &linesToRemove,
 	}
+
+	for originalListTracker < len(*originalList) && fixedListTracker < len(*fixedList) {
+		matchNodeResult := matchNodes((*originalList)[originalListTracker].node, (*fixedList)[fixedListTracker].node)
+
+		fixInfoMetadata.originalListTracker = originalListTracker
+		fixInfoMetadata.fixedListTracker = fixedListTracker
+
+		switch matchNodeResult {
+		case int(sameNodes):
+			originalListTracker += 1
+			fixedListTracker += 1
+
+		case int(removedNode):
+			originalListTracker = addLinesToRemove(fixInfoMetadata)
+
+		case int(insertedNode):
+			fixedListTracker = addLinesToInsert(fixInfoMetadata)
+
+		case int(replacedNode):
+			originalListTracker, fixedListTracker = updateLinesToReplace(fixInfoMetadata)
+		}
+	}
+
+	for originalListTracker < len(*originalList) {
+		fixInfoMetadata.originalListTracker = originalListTracker
+		fixInfoMetadata.fixedListTracker = len(*fixedList) - 1
+		originalListTracker = addLinesToRemove(fixInfoMetadata)
+	}
+
+	for fixedListTracker < len(*fixedList) {
+		fixInfoMetadata.originalListTracker = len(*originalList) - 1
+		fixInfoMetadata.fixedListTracker = fixedListTracker
+		fixedListTracker = addLinesToInsert(fixInfoMetadata)
+	}
+
+	return &contentToAdd, &linesToRemove
+
 }
 
-func getLineAndContentToAdd(node *yaml.Node) *[]LineAndContentToAdd {
-	contentToAdd := make([]LineAndContentToAdd, 0)
-	getLineAndContentToAddHelper(0, node, &contentToAdd)
-	return &contentToAdd
+// Adds the lines to remove and returns the updated originalListTracker
+func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) int {
+	currentDFSNode := (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker]
+	newTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
+	*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
+		startLine: currentDFSNode.node.Line,
+		endLine:   getNodeLine(fixInfoMetadata.originalList, newTracker) - 1,
+	})
+
+	return newTracker
 }
 
-func getLineAndContentToAddHelper(nodeIdx int, parentNode *yaml.Node, contentToAdd *[]LineAndContentToAdd) {
-	node := parentNode.Content[nodeIdx]
-	var content string
-	var err error
-	if node.Line == 0 && node.Column == 0 {
-		if parentNode.Kind == yaml.MappingNode {
-			if nodeIdx%2 != 0 {
-				return
-			}
-		}
-		content, err = enocodeIntoYaml(parentNode, nodeIdx)
+// Adds the lines to insert and returns the updated fixedListTracker
+func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) int {
+	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
+	lineToInsert := (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker].node.Line - 1
+	contentToInsert := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
-		if err != nil {
-			fmt.Println("Cannot Encode into YAML")
-		}
+	newTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
-		indentationSpacesBeforeContent := parentNode.Column - 1
+	*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
+		Line:    lineToInsert,
+		Content: contentToInsert,
+	})
 
-		content = addIndentationToContent(content, indentationSpacesBeforeContent)
-
-		// Getting the line to add content after. Add directly after the left Sibling.
-		var lineToAddAfter int
-		for idx := nodeIdx - 1; idx >= 0; idx-- {
-			if parentNode.Content[idx].Line != 0 {
-				lineToAddAfter = getEndingLine(idx, parentNode)
-			}
-		}
-		lineAndContentToAdd := LineAndContentToAdd{
-			Line:    lineToAddAfter,
-			Content: content,
-		}
-		*contentToAdd = append(*contentToAdd, lineAndContentToAdd)
-	}
-
-	for index, _ := range node.Content {
-		getLineAndContentToAddHelper(index, node, contentToAdd)
-	}
+	return newTracker
 }
 
-func enocodeIntoYaml(parentNode *yaml.Node, nodeIdx int) (string, error) {
-	if parentNode.Kind == yaml.MappingNode {
-		content := make([]*yaml.Node, 0)
-		content = append(content, parentNode.Content[nodeIdx], parentNode.Content[nodeIdx+1])
-		parentForContent := yaml.Node{
-			Kind:    yaml.MappingNode,
-			Content: content,
-		}
-		buf := new(bytes.Buffer)
-		encoder := yaml.NewEncoder(buf)
-		errorEncoding := encoder.Encode(parentForContent)
-		if errorEncoding != nil {
-			return "", fmt.Errorf("Error debugging node, %v", errorEncoding.Error())
-		}
-		errorClosingEncoder := encoder.Close()
-		if errorClosingEncoder != nil {
-			return "", fmt.Errorf("Error closing encoder: ", errorClosingEncoder.Error())
-		}
-		return fmt.Sprintf(`%v`, buf.String()), nil
+// Adds the lines to remove and insert and updates the fixedListTracker and originalListTracker
+func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
+	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
+
+	if isValueNodeinMapping(&currentDFSNode) {
+		fixInfoMetadata.originalListTracker -= 1
+		fixInfoMetadata.fixedListTracker -= 1
 	}
 
-	return "", nil
+	updatedOriginalTracker := addLinesToRemove(fixInfoMetadata)
+	updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
+
+	return updatedOriginalTracker, updatedFixedTracker
 }
 
-func addIndentationToContent(content string, indentationSpacesBeforeContent int) string {
-	indentedContent := ""
-	indentSpaces := strings.Repeat(" ", indentationSpacesBeforeContent)
-
-	scanner := bufio.NewScanner(strings.NewReader(content))
-	for scanner.Scan() {
-		line := scanner.Text()
-		indentedContent += (indentSpaces + line + "\n")
-	}
-	return indentedContent
-}
-
-func getEndingLine(nodeIdx int, parentNode *yaml.Node) int {
-	node := parentNode.Content[nodeIdx]
-	if node.Kind == yaml.ScalarNode {
-		return node.Line
-	}
-	contentLen := len(node.Content)
-
-	for idx := contentLen - 1; idx >= 0; idx-- {
-		if node.Content[idx].Line != 0 {
-			return getEndingLine(idx, node)
-		}
-	}
-
-	return 0
-}
-
-func addFixesToFile(filePath string, lineAndContentsToAdd []LineAndContentToAdd) (cmdError error) {
+func applyFixesToFile(filePath string, lineAndContentsToAdd *[]ContentToAdd, linesToRemove *[]ContentToRemove) (cmdError error) {
 	linesSlice, err := getLinesSlice(filePath)
 
 	if err != nil {
@@ -225,11 +207,16 @@ func addFixesToFile(filePath string, lineAndContentsToAdd []LineAndContentToAdd)
 		return nil
 	}()
 
+	removeLines(linesToRemove, &linesSlice)
+
 	writer := bufio.NewWriter(file)
 	lineIdx, lineToAddIdx := 0, 0
 
-	for lineToAddIdx < len(lineAndContentsToAdd) {
-		for lineIdx <= lineAndContentsToAdd[lineToAddIdx].Line {
+	for lineToAddIdx < len(*lineAndContentsToAdd) {
+		for lineIdx <= (*lineAndContentsToAdd)[lineToAddIdx].Line {
+			if linesSlice[lineIdx] == "*" {
+				continue
+			}
 			_, err := writer.WriteString(linesSlice[lineIdx] + "\n")
 			if err != nil {
 				return err
@@ -237,11 +224,14 @@ func addFixesToFile(filePath string, lineAndContentsToAdd []LineAndContentToAdd)
 			lineIdx += 1
 		}
 
-		writeContentToAdd(writer, lineAndContentsToAdd[lineToAddIdx].Content)
+		writeContentToAdd(writer, (*lineAndContentsToAdd)[lineToAddIdx].Content)
 		lineToAddIdx += 1
 	}
 
 	for lineIdx < len(linesSlice) {
+		if linesSlice[lineIdx] == "*" {
+			continue
+		}
 		_, err := writer.WriteString(linesSlice[lineIdx] + "\n")
 		if err != nil {
 			return err
@@ -251,36 +241,4 @@ func addFixesToFile(filePath string, lineAndContentsToAdd []LineAndContentToAdd)
 
 	writer.Flush()
 	return nil
-}
-
-// Get the lines of existing yaml in a slice
-func getLinesSlice(filePath string) ([]string, error) {
-	lineSlice := make([]string, 0)
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		log.Fatal(err)
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		lineSlice = append(lineSlice, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
-		return nil, err
-	}
-
-	return lineSlice, err
-}
-
-func writeContentToAdd(writer *bufio.Writer, contentToAdd string) {
-	scanner := bufio.NewScanner(strings.NewReader(contentToAdd))
-	for scanner.Scan() {
-		line := scanner.Text()
-		writer.WriteString(line + "\n")
-	}
 }

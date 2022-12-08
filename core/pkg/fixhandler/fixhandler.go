@@ -216,9 +216,13 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 }
 
 func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError error) {
+	originalYamlNode := getDecodedYaml(filePath)
 	fixedYamlNode := getFixedYamlNode(filePath, yamlExpression)
-	lineAndContentsToAdd := getLineAndContentToAdd(&fixedYamlNode)
-	err := addFixesToFile(filePath, *lineAndContentsToAdd)
+
+	originalList := getDFSOrder(originalYamlNode)
+	fixedList := getDFSOrder(fixedYamlNode)
+	contentToAdd, linesToRemove := getFixInfo(originalList, fixedList)
+	err := applyFixesToFile(filePath, contentToAdd, linesToRemove)
 	return err
 }
 
