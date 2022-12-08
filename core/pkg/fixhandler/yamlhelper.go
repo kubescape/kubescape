@@ -84,11 +84,6 @@ func getDFSOrderHelper(node *yaml.Node, parent *yaml.Node, dfsOrder *[]NodeInfo,
 		parent: parent,
 		index:  index,
 	}
-
-	fmt.Println(dfsNode.node)
-	fmt.Println(dfsNode.parent)
-	fmt.Println(dfsNode.index)
-
 	*dfsOrder = append(*dfsOrder, dfsNode)
 
 	for idx, child := range node.Content {
