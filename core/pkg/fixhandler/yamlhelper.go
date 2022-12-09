@@ -177,6 +177,7 @@ func enocodeIntoYaml(parentNode *yaml.Node, dfsOrder *[]NodeInfo, tracker int) (
 	}
 	buf := new(bytes.Buffer)
 	encoder := yaml.NewEncoder(buf)
+	encoder.SetIndent(2)
 	errorEncoding := encoder.Encode(parentForContent)
 	if errorEncoding != nil {
 		return "", fmt.Errorf("Error debugging node, %v", errorEncoding.Error())
@@ -238,13 +239,65 @@ func isEmptyLineOrComment(lineContent string) bool {
 	return false
 }
 
+// Truncates the comments and empty lines at the top of the file and
+// returns the truncated content
+func truncateContentAtHead(filePath string) (string, error) {
+	var contentAtHead string
+
+	linesSlice, err := getLinesSlice(filePath)
+
+	if err != nil {
+		return "", err
+	}
+
+	if err := os.Truncate(filePath, 0); err != nil {
+		return "", err
+	}
+
+	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
+	if err != nil {
+		return "", err
+	}
+
+	defer func() error {
+		if err := file.Close(); err != nil {
+			return err
+		}
+		return nil
+	}()
+
+	lineIdx := 0
+
+	for lineIdx < len(linesSlice) {
+		if isEmptyLineOrComment(linesSlice[lineIdx]) {
+			contentAtHead += (linesSlice[lineIdx] + "\n")
+			lineIdx += 1
+		} else {
+			break
+		}
+	}
+
+	writer := bufio.NewWriter(file)
+
+	for lineIdx < len(linesSlice) {
+		_, err = writer.WriteString(linesSlice[lineIdx] + "\n")
+		if err != nil {
+			return "", err
+		}
+		lineIdx += 1
+	}
+
+	writer.Flush()
+	return contentAtHead, nil
+}
+
 // Get the lines of existing yaml in a slice
 func getLinesSlice(filePath string) ([]string, error) {
 	lineSlice := make([]string, 0)
 
 	file, err := os.Open(filePath)
 	if err != nil {
-		log.Fatal(err)
+		logger.L().Fatal(fmt.Sprintf("Cannot open file %s", filePath))
 		return nil, err
 	}
 	defer file.Close()

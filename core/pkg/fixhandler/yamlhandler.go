@@ -184,7 +184,7 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	return updatedOriginalTracker, updatedFixedTracker
 }
 
-func applyFixesToFile(filePath string, lineAndContentsToAdd *[]ContentToAdd, linesToRemove *[]ContentToRemove) (cmdError error) {
+func applyFixesToFile(filePath string, lineAndContentsToAdd *[]ContentToAdd, linesToRemove *[]ContentToRemove, contentAtHead string) error {
 	linesSlice, err := getLinesSlice(filePath)
 
 	if err != nil {
@@ -211,6 +211,9 @@ func applyFixesToFile(filePath string, lineAndContentsToAdd *[]ContentToAdd, lin
 
 	writer := bufio.NewWriter(file)
 	lineIdx, lineToAddIdx := 0, 0
+
+	// Insert the comments and lines at the head removed initially.
+	writer.WriteString(contentAtHead)
 
 	for lineToAddIdx < len(*lineAndContentsToAdd) {
 		for lineIdx <= (*lineAndContentsToAdd)[lineToAddIdx].Line {
