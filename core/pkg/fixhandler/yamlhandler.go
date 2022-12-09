@@ -184,7 +184,21 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	return updatedOriginalTracker, updatedFixedTracker
 }
 
-func applyFixesToFile(filePath string, lineAndContentsToAdd *[]ContentToAdd, linesToRemove *[]ContentToRemove, contentAtHead string) error {
+// Line numbers are readjusted such that there are no empty lines or comment lines before them
+func adjustContentLines(contentToAdd *[]ContentToAdd, linesSlice *[]string) {
+	for contentIdx, content := range *contentToAdd {
+		line := content.Line
+		for idx := line - 1; idx >= 0; idx-- {
+			if isEmptyLineOrComment((*linesSlice)[idx]) {
+				(*contentToAdd)[contentIdx].Line -= 1
+			} else {
+				break
+			}
+		}
+	}
+}
+
+func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemove *[]ContentToRemove, contentAtHead string) error {
 	linesSlice, err := getLinesSlice(filePath)
 
 	if err != nil {
@@ -210,32 +224,36 @@ func applyFixesToFile(filePath string, lineAndContentsToAdd *[]ContentToAdd, lin
 	removeLines(linesToRemove, &linesSlice)
 
 	writer := bufio.NewWriter(file)
-	lineIdx, lineToAddIdx := 0, 0
+	lineIdx, lineToAddIdx := 1, 0
 
 	// Insert the comments and lines at the head removed initially.
 	writer.WriteString(contentAtHead)
 
-	for lineToAddIdx < len(*lineAndContentsToAdd) {
-		for lineIdx <= (*lineAndContentsToAdd)[lineToAddIdx].Line {
-			if linesSlice[lineIdx] == "*" {
+	// Ideally, new node is inserted at line before the next node in DFS order. But, when the previous line contains a
+	// comment or empty line, we need to insert new nodes before them.
+	adjustContentLines(contentToAdd, &linesSlice)
+
+	for lineToAddIdx < len(*contentToAdd) {
+		for lineIdx <= (*contentToAdd)[lineToAddIdx].Line {
+			if linesSlice[lineIdx-1] == "*" {
 				continue
 			}
-			_, err := writer.WriteString(linesSlice[lineIdx] + "\n")
+			_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
 			if err != nil {
 				return err
 			}
 			lineIdx += 1
 		}
 
-		writeContentToAdd(writer, (*lineAndContentsToAdd)[lineToAddIdx].Content)
+		writeContentToAdd(writer, (*contentToAdd)[lineToAddIdx].Content)
 		lineToAddIdx += 1
 	}
 
-	for lineIdx < len(linesSlice) {
-		if linesSlice[lineIdx] == "*" {
+	for lineIdx <= len(linesSlice) {
+		if linesSlice[lineIdx-1] == "*" {
 			continue
 		}
-		_, err := writer.WriteString(linesSlice[lineIdx] + "\n")
+		_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
 		if err != nil {
 			return err
 		}

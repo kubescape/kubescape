@@ -65,7 +65,7 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[]string, direct
 
 		// make changes to temp file
 		h, _ := NewFixHandlerMock()
-		err = h.applyFixToFile(tempFile.Name(), (*yamlExpressions)[scenario])
+		err = h.applyFixToFile(tempFile.Name(), (*yamlExpressions)[scenario-1])
 		assert.NoError(t, err)
 
 		// Check temp file contents
@@ -79,7 +79,7 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[]string, direct
 
 		errorMessage := fmt.Sprintf("Content of fixed %s doesn't match content of %s in %s", originalFile, fixedFile, directoryPath)
 
-		assert.Equal(t, tempFileContent, fixedFileContent, errorMessage)
+		assert.Equal(t, string(tempFileContent), string(fixedFileContent), errorMessage)
 
 	}
 }

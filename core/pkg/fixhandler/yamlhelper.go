@@ -231,6 +231,7 @@ func removeLines(linesToRemove *[]ContentToRemove, linesSlice *[]string) {
 
 // Checks if the line is empty or a comment
 func isEmptyLineOrComment(lineContent string) bool {
+	lineContent = strings.TrimSpace(lineContent)
 	if lineContent == "" {
 		return true
 	} else if lineContent[0:1] == "#" {
