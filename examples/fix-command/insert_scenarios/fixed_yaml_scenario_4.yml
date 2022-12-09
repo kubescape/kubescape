@@ -1,9 +1,9 @@
 # Fixes to Apply:
-# 1) spec.template.spec.securityContext.allowPrivilegeEscalation = false
-# 2) spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"]
-# 3) spec.template.spec.containers[0].securityContext.seccompProfile.type = RuntimeDefault
-# 4) spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation = false
-# 5) spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem = true
+# 1) select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation = false
+# 2) select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"]
+# 3) select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type = RuntimeDefault
+# 4) select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false
+# 5) select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true
 
 apiVersion: apps/v1
 kind: Deployment

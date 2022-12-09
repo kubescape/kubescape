@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -27,45 +28,124 @@ func NewFixHandlerMock() (*FixHandler, error) {
 	}, nil
 }
 
-func onlineBoutiquePath() string {
+func fixCommandPath() string {
 	o, _ := os.Getwd()
-	return filepath.Join(filepath.Dir(o), "..", "..", "examples", "online-boutique")
+	return filepath.Join(filepath.Dir(o), "..", "..", "examples", "fix-command")
+}
+
+func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[]string, directoryPath string) {
+
+	scenarioCount := len(*yamlExpressions)
+
+	for scenario := 1; scenario <= scenarioCount; scenario++ {
+		originalFile := fmt.Sprintf("original_yaml_scenario_%d.yml", scenario)
+		fixedFile := fmt.Sprintf("fixed_yaml_scenario_%d.yml", scenario)
+
+		originalFilePath := filepath.Join(directoryPath, originalFile)
+		fixedFilePath := filepath.Join(directoryPath, fixedFile)
+
+		// create temp file
+		tempFile, err := ioutil.TempFile("", originalFile)
+		if err != nil {
+			panic(err)
+		}
+		defer os.Remove(tempFile.Name())
+
+		// read original file
+		originalFileContent, err := ioutil.ReadFile(originalFilePath)
+		if err != nil {
+			panic(err)
+		}
+
+		// write original file contents to temp file
+		err = ioutil.WriteFile(tempFile.Name(), originalFileContent, 0644)
+		if err != nil {
+			panic(err)
+		}
+
+		// make changes to temp file
+		h, _ := NewFixHandlerMock()
+		err = h.applyFixToFile(tempFile.Name(), (*yamlExpressions)[scenario])
+		assert.NoError(t, err)
+
+		// Check temp file contents
+		tempFileContent, err := ioutil.ReadFile(tempFile.Name())
+		if err != nil {
+			panic(err)
+		}
+
+		// Get fixed Yaml file contents
+		fixedFileContent, err := ioutil.ReadFile(fixedFilePath)
+
+		assert.Equal(t, tempFileContent, fixedFileContent)
+
+	}
+}
+
+func testDirectoryApplyFix(t *testing.T, directory string) {
+	directoryPath := filepath.Join(fixCommandPath(), directory)
+	var yamlExpressions []string
+
+	switch directory {
+	case "insert_scenarios":
+		yamlExpressions = []string{
+			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+
+			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+
+			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
+
+			`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false | 
+			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"] | 
+			 select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type |= RuntimeDefault | 
+			 select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false | 
+			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`,
+
+			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+
+			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
+		}
+
+	case "remove_scenarios":
+		yamlExpressions = []string{
+			"del(select(di==0).spec.containers[0].securityContext)",
+
+			"del(select(di==0).spec.containers[1])",
+
+			"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])",
+		}
+
+	case "replace_scenarios":
+		yamlExpressions = []string{
+			"select(di==0).spec.containers[0].securityContext.runAsRoot |= false",
+
+			`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" | 
+			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`,
+		}
+
+	case "hybrid_scenarios":
+		yamlExpressions = []string{
+			`del(select(di==0).spec.containers[0].securityContext) | 
+			 select(di==0).spec.securityContext.runAsRoot |= false`,
+		}
+	}
+
+	testDirectoryApplyFixHelper(t, &yamlExpressions, directoryPath)
 }
 
 func TestFixHandler_applyFixToFile(t *testing.T) {
-	originalFilePath := filepath.Join(onlineBoutiquePath(), "adservice.yaml")
-	// create temp file
-	tempFile, err := ioutil.TempFile("", "adservice.yaml")
-	if err != nil {
-		panic(err)
-	}
-	defer os.Remove(tempFile.Name())
+	// Tests for Insert scenarios
+	testDirectoryApplyFix(t, "insert_scenarios")
 
-	// read original file
-	b, err := ioutil.ReadFile(originalFilePath)
-	if err != nil {
-		panic(err)
-	}
-	assert.NotContains(t, string(b), "readOnlyRootFilesystem: true")
+	// Tests for Removal scenarios
+	testDirectoryApplyFix(t, "remove_scenarios")
 
-	// write original file contents to temp file
-	err = ioutil.WriteFile(tempFile.Name(), b, 0644)
-	if err != nil {
-		panic(err)
-	}
+	// Tests for Replace scenarios
+	testDirectoryApplyFix(t, "replace_scenarios")
 
-	// make changes to temp file
-	h, _ := NewFixHandlerMock()
-	yamlExpression := "select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true"
-	err = h.applyFixToFile(tempFile.Name(), yamlExpression)
-	assert.NoError(t, err)
+	// Tests for Hybrid Scenarios
+	testDirectoryApplyFix(t, "hybrid_scenarios")
 
-	// Check temp file contents
-	b, err = ioutil.ReadFile(tempFile.Name())
-	if err != nil {
-		panic(err)
-	}
-	assert.Contains(t, string(b), "readOnlyRootFilesystem: true")
 }
 
 func Test_fixPathToValidYamlExpression(t *testing.T) {
