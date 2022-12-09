@@ -292,6 +292,27 @@ func truncateContentAtHead(filePath string) (string, error) {
 	return contentAtHead, nil
 }
 
+func adjustContentLines(contentToAdd *[]ContentToAdd, linesSlice *[]string) {
+	for contentIdx, content := range *contentToAdd {
+		line := content.Line
+
+		// Update Line number to last line if their value is math.Inf
+		if line == int(math.Inf(1)) {
+			(*contentToAdd)[contentIdx].Line = len(*linesSlice)
+			continue
+		}
+
+		// Adjust line numbers such that there are no "empty lines or comment lines of next nodes" before them
+		for idx := line - 1; idx >= 0; idx-- {
+			if isEmptyLineOrComment((*linesSlice)[idx]) {
+				(*contentToAdd)[contentIdx].Line -= 1
+			} else {
+				break
+			}
+		}
+	}
+}
+
 // Get the lines of existing yaml in a slice
 func getLinesSlice(filePath string) ([]string, error) {
 	lineSlice := make([]string, 0)

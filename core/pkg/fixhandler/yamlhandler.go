@@ -6,6 +6,7 @@ import (
 	"container/list"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 
 	logger "github.com/kubescape/go-logger"
@@ -132,7 +133,7 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 	}
 
 	for fixedListTracker < len(*fixedList) {
-		fixInfoMetadata.originalListTracker = len(*originalList) - 1
+		fixInfoMetadata.originalListTracker = -1
 		fixInfoMetadata.fixedListTracker = fixedListTracker
 		fixedListTracker = addLinesToInsert(fixInfoMetadata)
 	}
@@ -156,7 +157,14 @@ func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) int {
 // Adds the lines to insert and returns the updated fixedListTracker
 func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) int {
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
-	lineToInsert := (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker].node.Line - 1
+
+	var lineToInsert int
+	if fixInfoMetadata.originalListTracker == -1 {
+		lineToInsert = int(math.Inf(1))
+	} else {
+		lineToInsert = (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker].node.Line - 1
+	}
+
 	contentToInsert := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
 	newTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
@@ -182,20 +190,6 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
 
 	return updatedOriginalTracker, updatedFixedTracker
-}
-
-// Line numbers are readjusted such that there are no empty lines or comment lines before them
-func adjustContentLines(contentToAdd *[]ContentToAdd, linesSlice *[]string) {
-	for contentIdx, content := range *contentToAdd {
-		line := content.Line
-		for idx := line - 1; idx >= 0; idx-- {
-			if isEmptyLineOrComment((*linesSlice)[idx]) {
-				(*contentToAdd)[contentIdx].Line -= 1
-			} else {
-				break
-			}
-		}
-	}
 }
 
 func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemove *[]ContentToRemove, contentAtHead string) error {
