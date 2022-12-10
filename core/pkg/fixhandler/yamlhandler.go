@@ -114,7 +114,7 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 			fixedListTracker += 1
 
 		case int(removedNode):
-			originalListTracker = addLinesToRemove(fixInfoMetadata)
+			originalListTracker, fixedListTracker = addLinesToRemove(fixInfoMetadata)
 
 		case int(insertedNode):
 			originalListTracker, fixedListTracker = addLinesToInsert(fixInfoMetadata)
@@ -127,7 +127,7 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 	for originalListTracker < len(*originalList) {
 		fixInfoMetadata.originalListTracker = originalListTracker
 		fixInfoMetadata.fixedListTracker = len(*fixedList) - 1
-		originalListTracker = addLinesToRemove(fixInfoMetadata)
+		originalListTracker, _ = addLinesToRemove(fixInfoMetadata)
 	}
 
 	for fixedListTracker < len(*fixedList) {
@@ -141,15 +141,43 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 }
 
 // Adds the lines to remove and returns the updated originalListTracker
-func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) int {
+func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	currentDFSNode := (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker]
+
+	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
+
+	if isOneLine {
+		originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
+		fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
+
+		currentDFSNode = (*fixInfoMetadata.fixedList)[fixedListTracker]
+		content := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+
+		// Remove the Single line
+		*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
+			startLine: line,
+			endLine:   line,
+		})
+
+		// Encode entire Sequence Node and Insert
+		*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
+			Line:    line,
+			Content: content,
+		})
+
+		originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
+		fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
+
+		return originalListTracker, fixedListTracker
+	}
+
 	newTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 	*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
 		startLine: currentDFSNode.node.Line,
 		endLine:   getNodeLine(fixInfoMetadata.originalList, newTracker) - 1,
 	})
 
-	return newTracker
+	return newTracker, fixInfoMetadata.fixedListTracker
 }
 
 // Adds the lines to insert and returns the updated fixedListTracker
@@ -181,7 +209,6 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 		fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
 
 		return originalListTracker, fixedListTracker
-
 	}
 
 	var lineToInsert int
@@ -212,8 +239,8 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 		fixInfoMetadata.fixedListTracker -= 1
 	}
 
-	updatedOriginalTracker := addLinesToRemove(fixInfoMetadata)
-	updatedOriginalTracker, updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
+	updatedOriginalTracker, updatedFixedTracker := addLinesToRemove(fixInfoMetadata)
+	updatedOriginalTracker, updatedFixedTracker = addLinesToInsert(fixInfoMetadata)
 
 	return updatedOriginalTracker, updatedFixedTracker
 }

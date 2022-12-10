@@ -140,7 +140,7 @@ func TestFixHandler_applyFixToFile(t *testing.T) {
 	testDirectoryApplyFix(t, "insert_scenarios")
 
 	// Tests for Removal scenarios
-	// testDirectoryApplyFix(t, "remove_scenarios")
+	testDirectoryApplyFix(t, "remove_scenarios")
 
 	// Tests for Replace scenarios
 	// testDirectoryApplyFix(t, "replace_scenarios")
