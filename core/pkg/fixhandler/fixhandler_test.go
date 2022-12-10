@@ -143,10 +143,10 @@ func TestFixHandler_applyFixToFile(t *testing.T) {
 	testDirectoryApplyFix(t, "remove_scenarios")
 
 	// Tests for Replace scenarios
-	// testDirectoryApplyFix(t, "replace_scenarios")
+	testDirectoryApplyFix(t, "replace_scenarios")
 
 	// Tests for Hybrid Scenarios
-	// testDirectoryApplyFix(t, "hybrid_scenarios")
+	testDirectoryApplyFix(t, "hybrid_scenarios")
 
 }
 

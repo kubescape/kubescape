@@ -234,6 +234,33 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
 
+	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
+
+	if isOneLine {
+		originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
+		fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
+
+		currentDFSNode = (*fixInfoMetadata.fixedList)[fixedListTracker]
+		content := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+
+		// Remove the Single line
+		*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
+			startLine: line,
+			endLine:   line,
+		})
+
+		// Encode entire Sequence Node and Insert
+		*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
+			Line:    line,
+			Content: content,
+		})
+
+		originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
+		fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
+
+		return originalListTracker, fixedListTracker
+	}
+
 	if isValueNodeinMapping(&currentDFSNode) {
 		fixInfoMetadata.originalListTracker -= 1
 		fixInfoMetadata.fixedListTracker -= 1
