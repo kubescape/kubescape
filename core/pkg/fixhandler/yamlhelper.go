@@ -148,17 +148,26 @@ func getNodeLine(dfsOrder *[]NodeInfo, tracker int) int {
 	}
 }
 
-func isOneLineSequenceNode(node *yaml.Node) bool {
-	if node.Kind != yaml.SequenceNode {
-		return false
+func isOneLineSequenceNode(list *[]NodeInfo, currentTracker int) (bool, int) {
+	parentNode := (*list)[currentTracker].parent
+	if parentNode.Kind != yaml.SequenceNode {
+		return false, -1
 	}
-	nodeLine := node.Line
-	for _, child := range node.Content {
-		if child.Line != nodeLine {
-			return false
+
+	var currentNode, prevNode NodeInfo
+	currentTracker -= 1
+
+	for (*list)[currentTracker].node != parentNode {
+		currentNode = (*list)[currentTracker]
+		prevNode = (*list)[currentTracker-1]
+
+		if currentNode.node.Line != prevNode.node.Line {
+			return false, -1
 		}
+		currentTracker -= 1
 	}
-	return true
+
+	return true, currentTracker
 }
 
 func enocodeIntoYaml(parentNode *yaml.Node, dfsOrder *[]NodeInfo, tracker int) (string, error) {
@@ -214,19 +223,37 @@ func indentContent(content string, indentationSpaces int) string {
 	return indentedContent
 }
 
+func getTracker(list *[]NodeInfo, node *NodeInfo) int {
+	tracker := 0
+
+	for !isSameNode((*list)[tracker].node, node.node) {
+		tracker += 1
+	}
+
+	return tracker
+}
+
 func removeLines(linesToRemove *[]ContentToRemove, linesSlice *[]string) {
 	for _, lineToRemove := range *linesToRemove {
-		startLine := lineToRemove.startLine
-		endLine := int(math.Min(float64(lineToRemove.endLine), float64(len(*linesSlice)-1)))
-
+		startLine := lineToRemove.startLine - 1
+		endLine := int(math.Min(float64(lineToRemove.endLine), float64(len(*linesSlice)))) - 1
 		for line := startLine; line <= endLine; line++ {
-			lineContent := strings.ReplaceAll((*linesSlice)[line], " ", "")
+			lineContent := (*linesSlice)[line]
 			if isEmptyLineOrComment(lineContent) {
 				break
 			}
 			(*linesSlice)[line] = "*"
 		}
 	}
+}
+
+func isSameNode(nodeOne, nodeTwo *yaml.Node) bool {
+	sameLines := nodeOne.Line == nodeTwo.Line
+	sameColumns := nodeOne.Column == nodeTwo.Column
+	sameKinds := nodeOne.Kind == nodeTwo.Kind
+	sameValues := nodeOne.Value == nodeTwo.Value
+
+	return sameKinds && sameValues && sameLines && sameColumns
 }
 
 // Checks if the line is empty or a comment

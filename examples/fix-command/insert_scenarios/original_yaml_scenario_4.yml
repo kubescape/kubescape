@@ -45,16 +45,3 @@ spec:
           periodSeconds: 15
           exec:
             command: ["/bin/grpc_health_probe", "-addr=:3000"]
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: example_4
-spec:
-  type: ClusterIP
-  selector:
-    app: example_4
-  ports:
-  - name: test_port
-    port: 3000
-    targetPort: 3000

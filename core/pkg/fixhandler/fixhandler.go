@@ -229,6 +229,7 @@ func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError e
 
 	originalList := getDFSOrder(originalYamlNode)
 	fixedList := getDFSOrder(fixedYamlNode)
+
 	contentToAdd, linesToRemove := getFixInfo(originalList, fixedList)
 
 	err = applyFixesToFile(filePath, contentToAdd, linesToRemove, contentAtHead)

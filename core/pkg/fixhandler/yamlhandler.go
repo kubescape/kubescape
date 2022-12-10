@@ -72,10 +72,8 @@ func matchNodes(nodeOne, nodeTwo *yaml.Node) int {
 	isNewNode := nodeTwo.Line == 0 && nodeTwo.Column == 0
 	sameLines := nodeOne.Line == nodeTwo.Line
 	sameColumns := nodeOne.Column == nodeTwo.Column
-	sameKinds := nodeOne.Kind == nodeTwo.Kind
-	sameValues := nodeOne.Value == nodeTwo.Value
 
-	isSameNode := sameKinds && sameValues && sameLines && sameColumns
+	isSameNode := isSameNode(nodeOne, nodeTwo)
 
 	switch {
 	case isSameNode:
@@ -119,7 +117,7 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 			originalListTracker = addLinesToRemove(fixInfoMetadata)
 
 		case int(insertedNode):
-			fixedListTracker = addLinesToInsert(fixInfoMetadata)
+			originalListTracker, fixedListTracker = addLinesToInsert(fixInfoMetadata)
 
 		case int(replacedNode):
 			originalListTracker, fixedListTracker = updateLinesToReplace(fixInfoMetadata)
@@ -133,9 +131,9 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 	}
 
 	for fixedListTracker < len(*fixedList) {
-		fixInfoMetadata.originalListTracker = -1
+		fixInfoMetadata.originalListTracker = int(math.Inf(1))
 		fixInfoMetadata.fixedListTracker = fixedListTracker
-		fixedListTracker = addLinesToInsert(fixInfoMetadata)
+		_, fixedListTracker = addLinesToInsert(fixInfoMetadata)
 	}
 
 	return &contentToAdd, &linesToRemove
@@ -155,11 +153,46 @@ func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) int {
 }
 
 // Adds the lines to insert and returns the updated fixedListTracker
-func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) int {
+func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
 
+	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
+
+	if isOneLine {
+		parentNode := (*fixInfoMetadata.fixedList)[parentTracker]
+		originalTracker := getTracker(fixInfoMetadata.originalList, &parentNode)
+		line := parentNode.node.Line
+		content := getContent(parentNode.parent, fixInfoMetadata.fixedList, parentTracker)
+
+		// Remove the Single line
+		*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
+			startLine: line,
+			endLine:   line,
+		})
+
+		// Encode entire Sequence Node and Insert
+		*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
+			Line:    line,
+			Content: content,
+		})
+
+		var newOriginalTracker int
+
+		if fixInfoMetadata.originalListTracker != int(math.Inf(1)) {
+			newOriginalTracker = updateTracker(fixInfoMetadata.originalList, originalTracker)
+
+		} else {
+			newOriginalTracker = int(math.Inf(1))
+		}
+
+		newFixedTracker := updateTracker(fixInfoMetadata.fixedList, parentTracker)
+
+		return newOriginalTracker, newFixedTracker
+
+	}
+
 	var lineToInsert int
-	if fixInfoMetadata.originalListTracker == -1 {
+	if fixInfoMetadata.originalListTracker == int(math.Inf(1)) {
 		lineToInsert = int(math.Inf(1))
 	} else {
 		lineToInsert = (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker].node.Line - 1
@@ -167,14 +200,14 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) int {
 
 	contentToInsert := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
-	newTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
+	newFixedTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
 	*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
 		Line:    lineToInsert,
 		Content: contentToInsert,
 	})
 
-	return newTracker
+	return fixInfoMetadata.originalListTracker, newFixedTracker
 }
 
 // Adds the lines to remove and insert and updates the fixedListTracker and originalListTracker
@@ -187,7 +220,7 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	}
 
 	updatedOriginalTracker := addLinesToRemove(fixInfoMetadata)
-	updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
+	_, updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
 
 	return updatedOriginalTracker, updatedFixedTracker
 }
@@ -229,12 +262,11 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 
 	for lineToAddIdx < len(*contentToAdd) {
 		for lineIdx <= (*contentToAdd)[lineToAddIdx].Line {
-			if linesSlice[lineIdx-1] == "*" {
-				continue
-			}
-			_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
-			if err != nil {
-				return err
+			if linesSlice[lineIdx-1] != "*" {
+				_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
+				if err != nil {
+					return err
+				}
 			}
 			lineIdx += 1
 		}
@@ -244,12 +276,11 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 	}
 
 	for lineIdx <= len(linesSlice) {
-		if linesSlice[lineIdx-1] == "*" {
-			continue
-		}
-		_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
-		if err != nil {
-			return err
+		if linesSlice[lineIdx-1] != "*" {
+			_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
+			if err != nil {
+				return err
+			}
 		}
 		lineIdx += 1
 	}
