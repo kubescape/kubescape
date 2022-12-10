@@ -148,6 +148,7 @@ func getNodeLine(dfsOrder *[]NodeInfo, tracker int) int {
 	}
 }
 
+// Checks if the node is part of single line sequence node and returns the line
 func isOneLineSequenceNode(list *[]NodeInfo, currentTracker int) (bool, int) {
 	parentNode := (*list)[currentTracker].parent
 	if parentNode.Kind != yaml.SequenceNode {
@@ -167,7 +168,22 @@ func isOneLineSequenceNode(list *[]NodeInfo, currentTracker int) (bool, int) {
 		currentTracker -= 1
 	}
 
-	return true, currentTracker
+	parentNodeInfo := (*list)[currentTracker]
+
+	if parentNodeInfo.parent.Kind == yaml.MappingNode {
+		keyNodeInfo := (*list)[currentTracker-1]
+		if keyNodeInfo.node.Line == parentNode.Line {
+			return true, parentNode.Line
+		} else {
+			return false, -1
+		}
+	} else {
+		if parentNodeInfo.parent.Line == parentNode.Line {
+			return true, parentNode.Line
+		} else {
+			return false, -1
+		}
+	}
 }
 
 func enocodeIntoYaml(parentNode *yaml.Node, dfsOrder *[]NodeInfo, tracker int) (string, error) {
@@ -228,6 +244,19 @@ func getTracker(list *[]NodeInfo, node *NodeInfo) int {
 
 	for !isSameNode((*list)[tracker].node, node.node) {
 		tracker += 1
+	}
+
+	return tracker
+}
+
+// Returns the first node in the given line that is not mapping node
+func getFirstNodeInLine(list *[]NodeInfo, line int) int {
+	tracker := 0
+
+	currentNode := (*list)[tracker].node
+	for currentNode.Line != line || currentNode.Kind == yaml.MappingNode {
+		tracker += 1
+		currentNode = (*list)[tracker].node
 	}
 
 	return tracker

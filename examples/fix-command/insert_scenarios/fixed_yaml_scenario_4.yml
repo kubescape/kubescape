@@ -48,11 +48,10 @@ spec:
         securityContext:
           capabilities:
             drop:
-              - "NET_RAW"
+              - NET_RAW
           seccompProfile:
             type: RuntimeDefault
           allowPrivilegeEscalation: false
           readOnlyRootFilesystem: true
       securityContext:
         allowPrivilegeEscalation: false
-

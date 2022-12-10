@@ -11,6 +11,4 @@ spec:
     image: nginx
     securityContext:
       capabilities:
-        drop:
-          - "NET_RAW"
-          - "SYS_ADM"
+        drop: [NET_RAW, SYS_ADM]

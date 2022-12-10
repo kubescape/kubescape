@@ -159,10 +159,11 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
 	if isOneLine {
-		parentNode := (*fixInfoMetadata.fixedList)[parentTracker]
-		originalTracker := getTracker(fixInfoMetadata.originalList, &parentNode)
-		line := parentNode.node.Line
-		content := getContent(parentNode.parent, fixInfoMetadata.fixedList, parentTracker)
+		originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
+		fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
+
+		currentDFSNode = (*fixInfoMetadata.fixedList)[fixedListTracker]
+		content := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
 
 		// Remove the Single line
 		*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
@@ -176,18 +177,10 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 			Content: content,
 		})
 
-		var newOriginalTracker int
+		originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
+		fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
 
-		if fixInfoMetadata.originalListTracker != int(math.Inf(1)) {
-			newOriginalTracker = updateTracker(fixInfoMetadata.originalList, originalTracker)
-
-		} else {
-			newOriginalTracker = int(math.Inf(1))
-		}
-
-		newFixedTracker := updateTracker(fixInfoMetadata.fixedList, parentTracker)
-
-		return newOriginalTracker, newFixedTracker
+		return originalListTracker, fixedListTracker
 
 	}
 
@@ -220,7 +213,7 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	}
 
 	updatedOriginalTracker := addLinesToRemove(fixInfoMetadata)
-	_, updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
+	updatedOriginalTracker, updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
 
 	return updatedOriginalTracker, updatedFixedTracker
 }
