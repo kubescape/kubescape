@@ -224,11 +224,11 @@ func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError e
 	if err != nil {
 		logger.L().Fatal("Error truncating comments and empty lines at head")
 	}
-	originalYamlNode := getDecodedYaml(filePath)
-	fixedYamlNode := getFixedYamlNode(filePath, yamlExpression)
+	originalYamlNode := constructDecodedYaml(filePath)
+	fixedYamlNode := constructFixedYamlNode(filePath, yamlExpression)
 
-	originalList := getDFSOrder(originalYamlNode)
-	fixedList := getDFSOrder(fixedYamlNode)
+	originalList := constructDFSOrder(originalYamlNode)
+	fixedList := constructDFSOrder(fixedYamlNode)
 
 	contentToAdd, linesToRemove := getFixInfo(originalList, fixedList)
 

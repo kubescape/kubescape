@@ -15,7 +15,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func getDecodedYaml(filepath string) *yaml.Node {
+func constructDecodedYaml(filepath string) *yaml.Node {
 	file, err := ioutil.ReadFile(filepath)
 	if err != nil {
 		logger.L().Fatal("Cannot read file")
@@ -33,13 +33,13 @@ func getDecodedYaml(filepath string) *yaml.Node {
 	return &node
 }
 
-func getFixedYamlNode(filePath, yamlExpression string) *yaml.Node {
+func constructFixedYamlNode(filePath, yamlExpression string) *yaml.Node {
 	preferences := yqlib.ConfiguredYamlPreferences
 	preferences.EvaluateTogether = true
 	decoder := yqlib.NewYamlDecoder(preferences)
 
 	var allDocuments = list.New()
-	reader, err := getNewReader(filePath)
+	reader, err := constructNewReader(filePath)
 	if err != nil {
 		return &yaml.Node{}
 	}
@@ -61,9 +61,9 @@ func getFixedYamlNode(filePath, yamlExpression string) *yaml.Node {
 	return matches.Front().Value.(*yqlib.CandidateNode).Node
 }
 
-func getDFSOrder(node *yaml.Node) *[]NodeInfo {
+func constructDFSOrder(node *yaml.Node) *[]NodeInfo {
 	dfsOrder := make([]NodeInfo, 0)
-	getDFSOrderHelper(node, nil, &dfsOrder, 0)
+	constructDFSOrderHelper(node, nil, &dfsOrder, 0)
 	return &dfsOrder
 }
 
@@ -87,9 +87,9 @@ func matchNodes(nodeOne, nodeTwo *yaml.Node) int {
 	}
 }
 
-func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]ContentToRemove) {
+func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]LinesToRemove) {
 	contentToAdd := make([]ContentToAdd, 0)
-	linesToRemove := make([]ContentToRemove, 0)
+	linesToRemove := make([]LinesToRemove, 0)
 
 	originalListTracker, fixedListTracker := 0, 0
 
@@ -99,7 +99,7 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 		originalListTracker: originalListTracker,
 		fixedListTracker:    fixedListTracker,
 		contentToAdd:        &contentToAdd,
-		contentToRemove:     &linesToRemove,
+		linesToRemove:       &linesToRemove,
 	}
 
 	for originalListTracker < len(*originalList) && fixedListTracker < len(*fixedList) {
@@ -124,12 +124,13 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 		}
 	}
 
+	// Some nodes are still not visited if they are removed at the end of the list
 	for originalListTracker < len(*originalList) {
 		fixInfoMetadata.originalListTracker = originalListTracker
-		fixInfoMetadata.fixedListTracker = len(*fixedList) - 1
 		originalListTracker, _ = addLinesToRemove(fixInfoMetadata)
 	}
 
+	// Some nodes are still not visited if they are inserted at the end of the list
 	for fixedListTracker < len(*fixedList) {
 		fixInfoMetadata.originalListTracker = int(math.Inf(1))
 		fixInfoMetadata.fixedListTracker = fixedListTracker
@@ -142,8 +143,6 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]Conten
 
 // Adds the lines to remove and returns the updated originalListTracker
 func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) (int, int) {
-	currentDFSNode := (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker]
-
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 
 	if isOneLine {
@@ -152,18 +151,19 @@ func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) (int, int) {
 		return replaceSingleLineSequence(fixInfoMetadata, line)
 	}
 
-	newTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
-	*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
+	currentDFSNode := (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker]
+
+	newOriginalListTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
+	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, LinesToRemove{
 		startLine: currentDFSNode.node.Line,
-		endLine:   getNodeLine(fixInfoMetadata.originalList, newTracker) - 1,
+		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker) - 1,
 	})
 
-	return newTracker, fixInfoMetadata.fixedListTracker
+	return newOriginalListTracker, fixInfoMetadata.fixedListTracker
 }
 
 // Adds the lines to insert and returns the updated fixedListTracker
 func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
-	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
 
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -171,14 +171,10 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 		return replaceSingleLineSequence(fixInfoMetadata, line)
 	}
 
-	var lineToInsert int
-	if fixInfoMetadata.originalListTracker == int(math.Inf(1)) {
-		lineToInsert = int(math.Inf(1))
-	} else {
-		lineToInsert = (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker].node.Line - 1
-	}
+	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
 
-	contentToInsert := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
+	lineToInsert := getLineToInsert(fixInfoMetadata)
+	contentToInsert := constructContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
 	newFixedTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -192,7 +188,6 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 
 // Adds the lines to remove and insert and updates the fixedListTracker and originalListTracker
 func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
-	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
 
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -200,18 +195,21 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 		return replaceSingleLineSequence(fixInfoMetadata, line)
 	}
 
+	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
+
+	// If only the value node is changed, entire "key-value" pair is replaced
 	if isValueNodeinMapping(&currentDFSNode) {
 		fixInfoMetadata.originalListTracker -= 1
 		fixInfoMetadata.fixedListTracker -= 1
 	}
 
-	updatedOriginalTracker, updatedFixedTracker := addLinesToRemove(fixInfoMetadata)
-	updatedOriginalTracker, updatedFixedTracker = addLinesToInsert(fixInfoMetadata)
+	addLinesToRemove(fixInfoMetadata)
+	updatedOriginalTracker, updatedFixedTracker := addLinesToInsert(fixInfoMetadata)
 
 	return updatedOriginalTracker, updatedFixedTracker
 }
 
-func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemove *[]ContentToRemove, contentAtHead string) error {
+func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemove *[]LinesToRemove, contentAtHead string) error {
 	linesSlice, err := getLinesSlice(filePath)
 
 	if err != nil {
@@ -248,6 +246,7 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 
 	for lineToAddIdx < len(*contentToAdd) {
 		for lineIdx <= (*contentToAdd)[lineToAddIdx].Line {
+			// Check if the current line is not removed
 			if linesSlice[lineIdx-1] != "*" {
 				_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
 				if err != nil {
@@ -257,7 +256,9 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 			lineIdx += 1
 		}
 
-		writeContentToAdd(writer, (*contentToAdd)[lineToAddIdx].Content)
+		content := (*contentToAdd)[lineToAddIdx].Content
+		writer.WriteString(content)
+
 		lineToAddIdx += 1
 	}
 

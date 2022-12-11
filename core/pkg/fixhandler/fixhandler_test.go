@@ -74,7 +74,7 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[]string, direct
 			panic(err)
 		}
 
-		// Get fixed Yaml file contents
+		// Get fixed Yaml file content and check if it is equal to tempFileContent
 		fixedFileContent, err := ioutil.ReadFile(fixedFilePath)
 
 		errorMessage := fmt.Sprintf("Content of fixed %s doesn't match content of %s in %s", originalFile, fixedFile, directoryPath)

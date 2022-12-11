@@ -39,7 +39,7 @@ type FixInfoMetadata struct {
 	originalListTracker int
 	fixedListTracker    int
 	contentToAdd        *[]ContentToAdd
-	contentToRemove     *[]ContentToRemove
+	linesToRemove       *[]LinesToRemove
 }
 
 // ContentToAdd holds the information about where to insert the new changes in the existing yaml file
@@ -50,8 +50,8 @@ type ContentToAdd struct {
 	Content string
 }
 
-// ContentToRemove holds the line numbers to remove from the existing yaml file
-type ContentToRemove struct {
+// LinesToRemove holds the line numbers to remove from the existing yaml file
+type LinesToRemove struct {
 	startLine int
 	endLine   int
 }
