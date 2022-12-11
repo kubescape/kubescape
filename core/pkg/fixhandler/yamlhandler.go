@@ -147,28 +147,9 @@ func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 
 	if isOneLine {
-		originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
-		fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
-
-		currentDFSNode = (*fixInfoMetadata.fixedList)[fixedListTracker]
-		content := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
-
-		// Remove the Single line
-		*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
-			startLine: line,
-			endLine:   line,
-		})
-
-		// Encode entire Sequence Node and Insert
-		*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
-			Line:    line,
-			Content: content,
-		})
-
-		originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
-		fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
-
-		return originalListTracker, fixedListTracker
+		// Remove the entire line and replace it with the sequence node in fixed info. This way,
+		// the original formatting is lost.
+		return replaceSingleLineSequence(fixInfoMetadata, line)
 	}
 
 	newTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
@@ -187,28 +168,7 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
 	if isOneLine {
-		originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
-		fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
-
-		currentDFSNode = (*fixInfoMetadata.fixedList)[fixedListTracker]
-		content := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
-
-		// Remove the Single line
-		*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
-			startLine: line,
-			endLine:   line,
-		})
-
-		// Encode entire Sequence Node and Insert
-		*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
-			Line:    line,
-			Content: content,
-		})
-
-		originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
-		fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
-
-		return originalListTracker, fixedListTracker
+		return replaceSingleLineSequence(fixInfoMetadata, line)
 	}
 
 	var lineToInsert int
@@ -237,28 +197,7 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
 	if isOneLine {
-		originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
-		fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
-
-		currentDFSNode = (*fixInfoMetadata.fixedList)[fixedListTracker]
-		content := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
-
-		// Remove the Single line
-		*fixInfoMetadata.contentToRemove = append(*fixInfoMetadata.contentToRemove, ContentToRemove{
-			startLine: line,
-			endLine:   line,
-		})
-
-		// Encode entire Sequence Node and Insert
-		*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
-			Line:    line,
-			Content: content,
-		})
-
-		originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
-		fixedListTracker = updateTracker(fixInfoMetadata.fixedList, fixedListTracker)
-
-		return originalListTracker, fixedListTracker
+		return replaceSingleLineSequence(fixInfoMetadata, line)
 	}
 
 	if isValueNodeinMapping(&currentDFSNode) {
