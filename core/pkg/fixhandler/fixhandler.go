@@ -217,13 +217,6 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 
 func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError error) {
 
-	// While obtaining fixedYamlNode, comments and empty lines at the top are ignored. In order to deal with that,
-	// comments and empty lines are removed and they are inserted again when applying fixes to file.
-	contentAtHead, err := truncateContentAtHead(filePath)
-
-	if err != nil {
-		logger.L().Fatal("Error truncating comments and empty lines at head")
-	}
 	originalYamlNode := constructDecodedYaml(filePath)
 	fixedYamlNode := constructFixedYamlNode(filePath, yamlExpression)
 
@@ -232,7 +225,7 @@ func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError e
 
 	contentToAdd, linesToRemove := getFixInfo(originalList, fixedList)
 
-	err = applyFixesToFile(filePath, contentToAdd, linesToRemove, contentAtHead)
+	err := applyFixesToFile(filePath, contentToAdd, linesToRemove)
 	return err
 }
 

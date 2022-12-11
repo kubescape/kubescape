@@ -88,6 +88,12 @@ func matchNodes(nodeOne, nodeTwo *yaml.Node) int {
 }
 
 func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]LinesToRemove) {
+
+	// While obtaining fixedYamlNode, comments and empty lines at the top are ignored.
+	// This causes a difference in Line numbers across the tree structure. In order to
+	// counter this, line numbers are adjusted in fixed list.
+	adjustFixedListLines(originalList, fixedList)
+
 	contentToAdd := make([]ContentToAdd, 0)
 	linesToRemove := make([]LinesToRemove, 0)
 
@@ -209,13 +215,14 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	return updatedOriginalTracker, updatedFixedTracker
 }
 
-func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemove *[]LinesToRemove, contentAtHead string) error {
+func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemove *[]LinesToRemove) error {
+	// Read contents of the file line by line and store in a list
 	linesSlice, err := getLinesSlice(filePath)
 
 	if err != nil {
 		return err
 	}
-
+	// Clear the current content of file
 	if err := os.Truncate(filePath, 0); err != nil {
 		return err
 	}
@@ -236,9 +243,6 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 
 	writer := bufio.NewWriter(file)
 	lineIdx, lineToAddIdx := 1, 0
-
-	// Insert the comments and lines at the head removed initially.
-	writer.WriteString(contentAtHead)
 
 	// Ideally, new node is inserted at line before the next node in DFS order. But, when the previous line contains a
 	// comment or empty line, we need to insert new nodes before them.

@@ -45,6 +45,24 @@ func adjustContentLines(contentToAdd *[]ContentToAdd, linesSlice *[]string) {
 	}
 }
 
+func adjustFixedListLines(originalList, fixedList *[]NodeInfo) {
+	differenceAtTop := (*originalList)[0].node.Line - (*fixedList)[0].node.Line
+
+	if differenceAtTop <= 0 {
+		return
+	}
+
+	for _, node := range *fixedList {
+		// Line numbers should not be changed for new nodes.
+		if node.node.Line != 0 {
+			node.node.Line += differenceAtTop
+		}
+	}
+
+	return
+
+}
+
 func constructDFSOrderHelper(node *yaml.Node, parent *yaml.Node, dfsOrder *[]NodeInfo, index int) {
 	dfsNode := NodeInfo{
 		node:   node,
