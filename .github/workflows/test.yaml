@@ -19,14 +19,14 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-20.04, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v3
         with:
           submodules: recursive
 
       - name: Cache Go modules (Linux)
-        if: matrix.os == 'ubuntu-latest' 
+        if: matrix.os == 'ubuntu-20.04'
         uses: actions/cache@v3
         with:
           path: |
@@ -85,9 +85,16 @@ jobs:
           CGO_ENABLED: 1
         run: python3 --version && python3 build.py
 
-      - name: Smoke Testing
+      - name: Smoke Testing (Windows / MacOS)
         env:
           RELEASE: ${{ inputs.release }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
-        
+        if: matrix.os != 'ubuntu-20.04'
+
+      - name: Smoke Testing (Linux)
+        env:
+          RELEASE: ${{ inputs.release }} 
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/ubuntu-latest/kubescape
+        if: matrix.os == 'ubuntu-20.04'        
