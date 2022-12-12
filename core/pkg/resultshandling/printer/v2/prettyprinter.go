@@ -34,18 +34,18 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, viewType cautils.V
 func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	fmt.Fprintf(prettyPrinter.writer, "\n"+getSeparator("^")+"\n")
 
-	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
 	switch prettyPrinter.viewType {
 	case cautils.ControlViewType:
-		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlNames)
+		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
 	case cautils.ResourceViewType:
 		if prettyPrinter.verboseMode {
 			prettyPrinter.resourceTable(opaSessionObj)
 		}
 	}
 
-	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlNames)
+	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 
 }
 
@@ -56,10 +56,10 @@ func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
 func (prettyPrinter *PrettyPrinter) Score(score float32) {
 }
 
-func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlNames [][]string) {
-	for i := len(sortedControlNames) - 1; i >= 0; i-- {
-		for _, c := range sortedControlNames[i] {
-			controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
+func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlIDs [][]string) {
+	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
+		for _, c := range sortedControlIDs[i] {
+			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 			prettyPrinter.printTitle(controlSummary)
 			prettyPrinter.printResources(controlSummary, allResources)
 			prettyPrinter.printSummary(c, controlSummary)
@@ -185,7 +185,7 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 
 	return row
 }
-func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
+func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
 	if summaryDetails.NumberOfControls().All() == 0 {
 		fmt.Fprintf(prettyPrinter.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
@@ -209,9 +209,9 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	}
 
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
-	for i := len(sortedControlNames) - 1; i >= 0; i-- {
-		for _, c := range sortedControlNames[i] {
-			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfo, printAll)
+	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
+		for _, c := range sortedControlIDs[i] {
+			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfo, printAll)
 			if len(row) > 0 {
 				summaryTable.Append(row)
 			}

@@ -77,7 +77,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		row[resourceColumnPath] = strings.Join(append(failedPathsToString(&controls[i]), fixPathsToString(&controls[i])...), "\n")
 		row[resourceColumnName] = controls[i].GetName()
 
-		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, controls[i].GetName()); c != nil {
+		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
 			row[resourceColumnSeverity] = getSeverityColumn(c)
 		}
 
