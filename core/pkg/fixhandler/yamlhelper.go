@@ -28,12 +28,6 @@ func adjustContentLines(contentToAdd *[]ContentToAdd, linesSlice *[]string) {
 	for contentIdx, content := range *contentToAdd {
 		line := content.Line
 
-		// Update Line number to last line if their value is math.Inf
-		if line == int(math.Inf(1)) {
-			(*contentToAdd)[contentIdx].Line = len(*linesSlice)
-			continue
-		}
-
 		// Adjust line numbers such that there are no "empty lines or comment lines of next nodes" before them
 		for idx := line - 1; idx >= 0; idx-- {
 			if isEmptyLineOrComment((*linesSlice)[idx]) {
@@ -176,19 +170,72 @@ func getLinesSlice(filePath string) ([]string, error) {
 
 func getLineToInsert(fixInfoMetadata *FixInfoMetadata) int {
 	var lineToInsert int
-	if fixInfoMetadata.originalListTracker == int(math.Inf(1)) {
-		lineToInsert = int(math.Inf(1))
+	// Check if lineToInsert is last line
+	if fixInfoMetadata.originalListTracker < 0 {
+		originalListTracker := int(math.Abs(float64(fixInfoMetadata.originalListTracker)))
+		// Storing the negative value of line of last node as a placeholder to determine the last line later.
+		lineToInsert = -(*fixInfoMetadata.originalList)[originalListTracker].node.Line
 	} else {
 		lineToInsert = (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker].node.Line - 1
 	}
 	return lineToInsert
 }
 
+func assignLastLine(contentsToAdd *[]ContentToAdd, linesToRemove *[]LinesToRemove, linesSlice *[]string) {
+	for idx, contentToAdd := range *contentsToAdd {
+		if contentToAdd.Line < 0 {
+			currentLine := int(math.Abs(float64(contentToAdd.Line)))
+			(*contentsToAdd)[idx].Line, _ = getLastLineOfResource(linesSlice, currentLine)
+		}
+	}
+
+	for idx, lineToRemove := range *linesToRemove {
+		if lineToRemove.EndLine < 0 {
+			endLine, _ := getLastLineOfResource(linesSlice, lineToRemove.StartLine)
+			(*linesToRemove)[idx].EndLine = endLine
+		}
+	}
+}
+
+func getLastLineOfResource(linesSlice *[]string, currentLine int) (int, error) {
+	// Get lastlines of all resources...
+	lastLinesOfResources := make([]int, 0)
+	for lineNumber, lineContent := range *linesSlice {
+		if lineContent == "---" {
+			for lastLine := lineNumber - 1; lastLine >= 0; lastLine-- {
+				if !isEmptyLineOrComment((*linesSlice)[lastLine]) {
+					lastLinesOfResources = append(lastLinesOfResources, lastLine+1)
+					break
+				}
+			}
+		}
+	}
+
+	lastLine := len(*linesSlice)
+	for lastLine >= 0 {
+		if !isEmptyLineOrComment((*linesSlice)[lastLine-1]) {
+			lastLinesOfResources = append(lastLinesOfResources, lastLine)
+			break
+		} else {
+			lastLine--
+		}
+	}
+
+	// Get last line of the resource we need
+	for _, endLine := range lastLinesOfResources {
+		if currentLine <= endLine {
+			return endLine, nil
+		}
+	}
+
+	return 0, fmt.Errorf("Provided line is greater than the length of YAML file")
+}
+
 func getNodeLine(nodeList *[]NodeInfo, tracker int) int {
 	if tracker < len(*nodeList) {
 		return (*nodeList)[tracker].node.Line
 	} else {
-		return int(math.Inf(1))
+		return -1
 	}
 }
 
@@ -308,8 +355,8 @@ func replaceSingleLineSequence(fixInfoMetadata *FixInfoMetadata, line int) (int,
 
 	// Remove the Single line
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, LinesToRemove{
-		startLine: line,
-		endLine:   line,
+		StartLine: line,
+		EndLine:   line,
 	})
 
 	// Encode entire Sequence Node and Insert
@@ -341,15 +388,8 @@ func getFirstNodeInLine(list *[]NodeInfo, line int) int {
 func removeLines(linesToRemove *[]LinesToRemove, linesSlice *[]string) {
 	var startLine, endLine int
 	for _, lineToRemove := range *linesToRemove {
-		startLine = lineToRemove.startLine - 1
-
-		if lineToRemove.endLine < len(*linesSlice) {
-			endLine = lineToRemove.endLine
-		} else {
-			// When removing until the end of file and unsure of length of file, endLine is set to Infinity.
-			// In that case, endLine is read as last line of linesSlice
-			endLine = len(*linesSlice) - 1
-		}
+		startLine = lineToRemove.StartLine - 1
+		endLine = lineToRemove.EndLine - 1
 
 		for line := startLine; line <= endLine; line++ {
 			lineContent := (*linesSlice)[line]

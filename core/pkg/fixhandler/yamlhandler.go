@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math"
 	"os"
 
 	logger "github.com/kubescape/go-logger"
@@ -155,7 +154,8 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]LinesT
 
 	// Some nodes are still not visited if they are inserted at the end of the list
 	for fixedListTracker < len(*fixedList) {
-		fixInfoMetadata.originalListTracker = int(math.Inf(1))
+		// Use negative index of last node in original list as a placeholder to determine the last line number later
+		fixInfoMetadata.originalListTracker = -(len(*originalList) - 1)
 		fixInfoMetadata.fixedListTracker = fixedListTracker
 		_, fixedListTracker = addLinesToInsert(fixInfoMetadata)
 	}
@@ -178,8 +178,8 @@ func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) (int, int) {
 
 	newOriginalListTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, LinesToRemove{
-		startLine: currentDFSNode.node.Line,
-		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker) - 1,
+		StartLine: currentDFSNode.node.Line,
+		EndLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker),
 	})
 
 	return newOriginalListTracker, fixInfoMetadata.fixedListTracker
@@ -239,6 +239,10 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 	if err != nil {
 		return err
 	}
+
+	// Determining last line required lineSlice. The placeholder for last line is replaced with the real last line
+	assignLastLine(contentToAdd, linesToRemove, &linesSlice)
+
 	// Clear the current content of file
 	if err := os.Truncate(filePath, 0); err != nil {
 		return err

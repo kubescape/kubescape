@@ -58,6 +58,6 @@ type ContentToAdd struct {
 
 // LinesToRemove holds the line numbers to remove from the existing yaml file
 type LinesToRemove struct {
-	startLine int
-	endLine   int
+	StartLine int
+	EndLine   int
 }
