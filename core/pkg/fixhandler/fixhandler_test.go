@@ -119,6 +119,11 @@ func testDirectoryApplyFix(t *testing.T, directory string) {
 			{"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"},
 
 			{"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]"},
+
+			{
+				"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+				"select(di==1).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+			},
 		}
 
 	case "remove_scenarios":
@@ -128,6 +133,11 @@ func testDirectoryApplyFix(t *testing.T, directory string) {
 			{"del(select(di==0).spec.containers[1])"},
 
 			{"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])"},
+
+			{
+				"del(select(di==0).spec.containers[0].securityContext)",
+				"del(select(di==1).spec.containers[1])",
+			},
 		}
 
 	case "replace_scenarios":
