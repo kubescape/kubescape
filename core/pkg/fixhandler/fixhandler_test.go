@@ -33,7 +33,7 @@ func fixCommandPath() string {
 	return filepath.Join(filepath.Dir(o), "..", "..", "examples", "fix-command")
 }
 
-func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[]string, directoryPath string) {
+func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[][]string, directoryPath string) {
 
 	scenarioCount := len(*yamlExpressions)
 
@@ -65,7 +65,20 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[]string, direct
 
 		// make changes to temp file
 		h, _ := NewFixHandlerMock()
-		err = h.applyFixToFile(tempFile.Name(), (*yamlExpressions)[scenario-1])
+
+		filePathFixInfo := make(map[string]*FileFixInfo)
+		filePath := tempFile.Name()
+		filePathFixInfo[filePath] = &FileFixInfo{
+			ContentToAdd:  make([]ContentToAdd, 0),
+			LinesToRemove: make([]LinesToRemove, 0),
+		}
+		fixInfo := filePathFixInfo[filePath]
+
+		for idx, yamlExpression := range (*yamlExpressions)[scenario-1] {
+			h.updateFileFixInfo(filePath, yamlExpression, idx, fixInfo)
+		}
+
+		err = h.applyFixToFiles(filePathFixInfo)
 		assert.NoError(t, err)
 
 		// Check temp file contents
@@ -86,49 +99,49 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[]string, direct
 
 func testDirectoryApplyFix(t *testing.T, directory string) {
 	directoryPath := filepath.Join(fixCommandPath(), directory)
-	var yamlExpressions []string
+	var yamlExpressions [][]string
 
 	switch directory {
 	case "insert_scenarios":
-		yamlExpressions = []string{
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+		yamlExpressions = [][]string{
+			{"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"},
 
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+			{"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]"},
 
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
+			{"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]"},
 
-			`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false | 
+			{`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false | 
 			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"] | 
 			 select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type |= "RuntimeDefault" | 
 			 select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false | 
-			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`,
+			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`},
 
-			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+			{"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"},
 
-			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
+			{"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]"},
 		}
 
 	case "remove_scenarios":
-		yamlExpressions = []string{
-			"del(select(di==0).spec.containers[0].securityContext)",
+		yamlExpressions = [][]string{
+			{"del(select(di==0).spec.containers[0].securityContext)"},
 
-			"del(select(di==0).spec.containers[1])",
+			{"del(select(di==0).spec.containers[1])"},
 
-			"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])",
+			{"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])"},
 		}
 
 	case "replace_scenarios":
-		yamlExpressions = []string{
-			"select(di==0).spec.containers[0].securityContext.runAsRoot |= false",
+		yamlExpressions = [][]string{
+			{"select(di==0).spec.containers[0].securityContext.runAsRoot |= false"},
 
-			`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" | 
-			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`,
+			{`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" | 
+			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`},
 		}
 
 	case "hybrid_scenarios":
-		yamlExpressions = []string{
-			`del(select(di==0).spec.containers[0].securityContext) | 
-			 select(di==0).spec.securityContext.runAsRoot |= false`,
+		yamlExpressions = [][]string{
+			{`del(select(di==0).spec.containers[0].securityContext) | 
+			 select(di==0).spec.securityContext.runAsRoot |= false`},
 		}
 	}
 

@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"container/list"
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math"
 	"os"
@@ -15,7 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func constructDecodedYaml(filepath string) *yaml.Node {
+func constructDecodedYaml(filepath string) *[]yaml.Node {
 	file, err := ioutil.ReadFile(filepath)
 	if err != nil {
 		logger.L().Fatal("Cannot read file")
@@ -23,17 +25,25 @@ func constructDecodedYaml(filepath string) *yaml.Node {
 	fileReader := bytes.NewReader(file)
 	dec := yaml.NewDecoder(fileReader)
 
-	var node yaml.Node
-	err = dec.Decode(&node)
+	nodes := make([]yaml.Node, 0)
+	for {
+		var node yaml.Node
+		err = dec.Decode(&node)
+		nodes = append(nodes, node)
 
-	if err != nil {
-		logger.L().Fatal("Cannot Decode Yaml")
+		// break the loop in case of EOF
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			panic(err)
+		}
 	}
 
-	return &node
+	return &nodes
 }
 
-func constructFixedYamlNode(filePath, yamlExpression string) *yaml.Node {
+func constructFixedYamlNodes(filePath, yamlExpression string) (*[]yaml.Node, error) {
 	preferences := yqlib.ConfiguredYamlPreferences
 	preferences.EvaluateTogether = true
 	decoder := yqlib.NewYamlDecoder(preferences)
@@ -41,12 +51,12 @@ func constructFixedYamlNode(filePath, yamlExpression string) *yaml.Node {
 	var allDocuments = list.New()
 	reader, err := constructNewReader(filePath)
 	if err != nil {
-		return &yaml.Node{}
+		return nil, err
 	}
 
 	fileDocuments, err := readDocuments(reader, filePath, 0, decoder)
 	if err != nil {
-		return &yaml.Node{}
+		return nil, err
 	}
 	allDocuments.PushBackList(fileDocuments)
 
@@ -58,7 +68,14 @@ func constructFixedYamlNode(filePath, yamlExpression string) *yaml.Node {
 		logger.L().Fatal(fmt.Sprintf("Error fixing YAML, %v", err.Error()))
 	}
 
-	return matches.Front().Value.(*yqlib.CandidateNode).Node
+	fixedNodes := make([]yaml.Node, 0)
+	var fixedNode *yaml.Node
+	for match := matches.Front(); match != nil; match = match.Next() {
+		fixedNode = match.Value.(*yqlib.CandidateNode).Node
+		fixedNodes = append(fixedNodes, *fixedNode)
+	}
+
+	return &fixedNodes, nil
 }
 
 func constructDFSOrder(node *yaml.Node) *[]NodeInfo {

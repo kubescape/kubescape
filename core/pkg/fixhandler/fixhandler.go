@@ -145,6 +145,7 @@ func (h *FixHandler) PrepareResourcesToFix() []ResourceFixInfo {
 			FilePath:        absolutePath,
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]*armotypes.FixPath, 0),
+			DocumentIndex:   documentIndex,
 		}
 
 		for i := range result.AssociatedControls {
@@ -185,9 +186,22 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []error) {
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
+	// Map with key as filepath
+	filePathFixInfo := make(map[string]*FileFixInfo)
 	for _, resourceToFix := range resourcesToFix {
 		singleExpression := reduceYamlExpressions(&resourceToFix)
-		if err := h.applyFixToFile(resourceToFix.FilePath, singleExpression); err != nil {
+		resourceFilePath := resourceToFix.FilePath
+
+		if _, pathExistsInMap := filePathFixInfo[resourceFilePath]; !pathExistsInMap {
+			contentToAdd := make([]ContentToAdd, 0)
+			linesToRemove := make([]LinesToRemove, 0)
+			filePathFixInfo[resourceFilePath] = &FileFixInfo{
+				ContentToAdd:  contentToAdd,
+				LinesToRemove: linesToRemove,
+			}
+		}
+
+		if err := h.updateFileFixInfo(resourceFilePath, singleExpression, resourceToFix.DocumentIndex, filePathFixInfo[resourceFilePath]); err != nil {
 			errors = append(errors,
 				fmt.Errorf("failed to fix resource [Name: '%s', Kind: '%s'] in '%s': %w ",
 					resourceToFix.Resource.GetName(),
@@ -197,6 +211,12 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 		} else {
 			updatedFiles[resourceToFix.FilePath] = true
 		}
+	}
+	err := h.applyFixToFiles(filePathFixInfo)
+
+	if err != nil {
+		logger.L().Fatal(fmt.Sprintf("Cannot Apply fixes to files, %v", err.Error()))
+		errors = append(errors, err)
 	}
 	return len(updatedFiles), errors
 }
@@ -215,18 +235,35 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError error) {
+func (h *FixHandler) updateFileFixInfo(filePath string, yamlExpression string, documentIdx int, fileFixInfo *FileFixInfo) error {
+	originalYamlNode := (*constructDecodedYaml(filePath))[documentIdx]
+	fixedYamlNodes, err := constructFixedYamlNodes(filePath, yamlExpression)
+	if err != nil {
+		return err
+	}
 
-	originalYamlNode := constructDecodedYaml(filePath)
-	fixedYamlNode := constructFixedYamlNode(filePath, yamlExpression)
+	fixedYamlNode := (*fixedYamlNodes)[documentIdx]
 
-	originalList := constructDFSOrder(originalYamlNode)
-	fixedList := constructDFSOrder(fixedYamlNode)
+	originalList := constructDFSOrder(&originalYamlNode)
+	fixedList := constructDFSOrder(&fixedYamlNode)
 
 	contentToAdd, linesToRemove := getFixInfo(originalList, fixedList)
 
-	err := applyFixesToFile(filePath, contentToAdd, linesToRemove)
-	return err
+	fileFixInfo.ContentToAdd = append(fileFixInfo.ContentToAdd, *contentToAdd...)
+	fileFixInfo.LinesToRemove = append(fileFixInfo.LinesToRemove, *linesToRemove...)
+
+	return nil
+
+}
+
+func (h *FixHandler) applyFixToFiles(filePathFixInfo map[string]*FileFixInfo) error {
+	for filepath, fixInfo := range filePathFixInfo {
+		err := applyFixesToFile(filepath, &fixInfo.ContentToAdd, &fixInfo.LinesToRemove)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(documentIndex int, ac *resourcesresults.ResourceAssociatedControl, skipUserValues bool) {

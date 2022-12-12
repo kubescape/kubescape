@@ -20,6 +20,12 @@ type ResourceFixInfo struct {
 	YamlExpressions map[string]*armotypes.FixPath
 	Resource        *reporthandling.Resource
 	FilePath        string
+	DocumentIndex   int
+}
+
+type FileFixInfo struct {
+	ContentToAdd  []ContentToAdd
+	LinesToRemove []LinesToRemove
 }
 
 // NodeInfo holds extra information about the node
