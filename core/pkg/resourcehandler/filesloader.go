@@ -112,6 +112,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
 
 	// update workloads and workloadIDToSource
+	var warnIssued bool
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 
@@ -131,7 +132,12 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 
 		var lastCommit reporthandling.LastCommit
 		if gitRepo != nil {
-			commitInfo, _ := gitRepo.GetFileLastCommit(source)
+			commitInfo, err := gitRepo.GetFileLastCommit(source)
+			if err != nil && !warnIssued {
+				logger.L().Warning("git scan skipped", helpers.Error(err))
+				warnIssued = true // croak only once
+			}
+
 			if commitInfo != nil {
 				lastCommit = reporthandling.LastCommit{
 					Hash:           commitInfo.SHA,
