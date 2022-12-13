@@ -1,8 +1,6 @@
 package v2
 
 import (
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -82,11 +80,4 @@ func finalizeResources(results []resourcesresults.Result, allResources map[strin
 		}
 	}
 	return resources
-}
-
-func logOUtputFile(fileName string) {
-	if fileName != "/dev/stdout" && fileName != "/dev/stderr" {
-		logger.L().Success("Scan results saved", helpers.String("filename", fileName))
-	}
-
 }

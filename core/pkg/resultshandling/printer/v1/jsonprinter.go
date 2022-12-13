@@ -42,4 +42,6 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 		logger.L().Fatal("failed to convert posture report object")
 	}
 	jsonPrinter.writer.Write(postureReportStr)
+
+	printer.LogOutputFile(jsonPrinter.writer.Name())
 }

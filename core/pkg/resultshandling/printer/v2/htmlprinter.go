@@ -107,7 +107,10 @@ func (htmlPrinter *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 	err := tpl.Execute(htmlPrinter.writer, reportingCtx)
 	if err != nil {
 		logger.L().Error("failed to render template", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(htmlPrinter.writer.Name())
 	}
+
 }
 
 func (htmlPrinter *HtmlPrinter) Score(score float32) {
