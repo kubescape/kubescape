@@ -78,6 +78,19 @@ func getColor(controlSeverity int) color.Attribute {
 	}
 }
 
+func getSortedControlsIDs(controls reportsummary.ControlSummaries) [][]string {
+	controlIDs := make([][]string, 5)
+	for k := range controls {
+		c := controls[k]
+		i := apis.ControlSeverityToInt(c.GetScoreFactor())
+		controlIDs[i] = append(controlIDs[i], c.GetID())
+	}
+	for i := range controlIDs {
+		sort.Strings(controlIDs[i])
+	}
+	return controlIDs
+}
+
 func getSortedControlsNames(controls reportsummary.ControlSummaries) [][]string {
 	controlNames := make([][]string, 5)
 	for k := range controls {

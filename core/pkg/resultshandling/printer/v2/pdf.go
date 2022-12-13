@@ -76,13 +76,13 @@ func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsumm
 }
 
 func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls)
+	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
 	m := pdf.NewMaroto(consts.Portrait, consts.A4)
 	pdfPrinter.printHeader(m)
 	pdfPrinter.printFramework(m, opaSessionObj.Report.SummaryDetails.ListFrameworks())
-	pdfPrinter.printTable(m, &opaSessionObj.Report.SummaryDetails, sortedControlNames)
+	pdfPrinter.printTable(m, &opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 	pdfPrinter.printFinalResult(m, &opaSessionObj.Report.SummaryDetails)
 	pdfPrinter.printInfo(m, &opaSessionObj.Report.SummaryDetails, infoToPrintInfo)
 
@@ -149,16 +149,16 @@ func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsu
 }
 
 // Create pdf table
-func (pdfPrinter *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
+func (pdfPrinter *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 	headers := getControlTableHeaders()
 	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
-	controls := make([][]string, len(sortedControlNames))
+	controls := make([][]string, len(sortedControlIDs))
 	for i := range controls {
 		controls[i] = make([]string, len(headers))
 	}
-	for i := len(sortedControlNames) - 1; i >= 0; i-- {
-		for _, c := range sortedControlNames[i] {
-			controls[i] = generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfoMap, true)
+	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
+		for _, c := range sortedControlIDs[i] {
+			controls[i] = generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap, true)
 		}
 	}
 
