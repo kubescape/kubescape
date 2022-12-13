@@ -62,5 +62,4 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 	} else {
 		printer.LogOutputFile(jsonPrinter.writer.Name())
 	}
-
 }
