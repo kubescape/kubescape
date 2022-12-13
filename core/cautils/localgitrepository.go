@@ -19,7 +19,7 @@ type LocalGitRepository struct {
 	config    *configv5.Config
 }
 
-var ErrWarnNotSupportedByBuild = errors.New("WARNING: commit retrieval not supported by this build. Build with tag gitenabled to enable the full git feature")
+var ErrWarnNotSupportedByBuild = errors.New("git commits retrieval not supported by this build. Build with tag gitenabled to enable the full git scan feature")
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})

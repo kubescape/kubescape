@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/go-git-url/apis"
 )
 
-var ErrFatalNotSupportedByBuild = errors.New("not supported by this build. Build with tag gitenabled to enable the git feature")
+var ErrFatalNotSupportedByBuild = errors.New("not supported by this build. Build with tag gitenabled to enable the git scan feature")
 
 type gitRepository struct {
 }
