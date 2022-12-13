@@ -27,7 +27,7 @@ type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
 	report            reporter.IReport
-	printerHandler    printer.IPrinter
+	printerHandlers   []printer.IPrinter
 	hostSensorHandler hostsensorutils.IHostSensor
 }
 
@@ -93,9 +93,16 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, scanInfo.GetScanningContext())
 
-	// setup printer
-	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
-	printerHandler.SetWriter(scanInfo.Output)
+	// setup printers
+	formats := scanInfo.GetFormats()
+	outputs := scanInfo.GetOutputFiles()
+
+	printerHandlers := make([]printer.IPrinter, 0)
+	for formatIdx, format := range formats {
+		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
+		printerHandler.SetWriter(outputs[formatIdx])
+		printerHandlers = append(printerHandlers, printerHandler)
+	}
 
 	// ================== return interface ======================================
 
@@ -103,7 +110,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		tenantConfig:      tenantConfig,
 		resourceHandler:   resourceHandler,
 		report:            reportHandler,
-		printerHandler:    printerHandler,
+		printerHandlers:   printerHandlers,
 		hostSensorHandler: hostSensorHandler,
 	}
 }
@@ -141,7 +148,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		}
 	}()
 
-	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.printerHandler)
+	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.printerHandlers)
 
 	// ===================== policies & resources =====================
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)

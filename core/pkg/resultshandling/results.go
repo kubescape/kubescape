@@ -16,14 +16,14 @@ import (
 
 type ResultsHandler struct {
 	reporterObj reporter.IReport
-	printerObj  printer.IPrinter
+	printerObjs []printer.IPrinter
 	scanData    *cautils.OPASessionObj
 }
 
-func NewResultsHandler(reporterObj reporter.IReport, printerObj printer.IPrinter) *ResultsHandler {
+func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter) *ResultsHandler {
 	return &ResultsHandler{
 		reporterObj: reporterObj,
-		printerObj:  printerObj,
+		printerObjs: printerObjs,
 	}
 }
 
@@ -43,8 +43,8 @@ func (resultsHandler *ResultsHandler) SetData(data *cautils.OPASessionObj) {
 }
 
 // GetPrinter get printer object
-func (resultsHandler *ResultsHandler) GetPrinter() printer.IPrinter {
-	return resultsHandler.printerObj
+func (resultsHandler *ResultsHandler) GetPrinters() []printer.IPrinter {
+	return resultsHandler.printerObjs
 }
 
 // GetReporter get reporter object
@@ -65,13 +65,19 @@ func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureRepo
 // HandleResults handle the scan results according to the pre defined interfaces
 func (resultsHandler *ResultsHandler) HandleResults() error {
 
-	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
+	printerObjs := resultsHandler.printerObjs
+
+	for _, printerObj := range printerObjs {
+		printerObj.ActionPrint(resultsHandler.scanData)
+	}
 
 	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
 		return err
 	}
 
-	resultsHandler.printerObj.Score(resultsHandler.GetRiskScore())
+	for _, printerObj := range printerObjs {
+		printerObj.Score(resultsHandler.GetRiskScore())
+	}
 
 	resultsHandler.reporterObj.DisplayReportURL()
 

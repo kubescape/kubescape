@@ -140,7 +140,6 @@ type Getters struct {
 
 func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
-	scanInfo.setOutputFile()
 	scanInfo.setUseArtifactsFrom()
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
@@ -188,25 +187,39 @@ func (scanInfo *ScanInfo) setUseFrom() {
 	}
 }
 
-func (scanInfo *ScanInfo) setOutputFile() {
-	if scanInfo.Output == "" {
-		return
-	}
-	if scanInfo.Format == "json" {
-		if filepath.Ext(scanInfo.Output) != ".json" {
-			scanInfo.Output += ".json"
+func (scanInfo *ScanInfo) GetFormats() []string {
+	return strings.Split(scanInfo.Format, ",")
+}
+
+func (scanInfo *ScanInfo) GetOutputFiles() []string {
+	formats := scanInfo.GetFormats()
+	outputs := make([]string, 0)
+
+	for _, format := range formats {
+		if scanInfo.Output == "" {
+			outputs = append(outputs, "")
 		}
-	}
-	if scanInfo.Format == "junit" {
-		if filepath.Ext(scanInfo.Output) != ".xml" {
-			scanInfo.Output += ".xml"
+
+		output := scanInfo.Output
+
+		if format == "json" {
+			if filepath.Ext(output) != ".json" {
+				output += ".json"
+			}
 		}
-	}
-	if scanInfo.Format == "pdf" {
-		if filepath.Ext(scanInfo.Output) != ".pdf" {
-			scanInfo.Output += ".pdf"
+		if format == "junit" {
+			if filepath.Ext(output) != ".xml" {
+				output += ".xml"
+			}
 		}
+		if format == "pdf" {
+			if filepath.Ext(output) != ".pdf" {
+				output += ".pdf"
+			}
+		}
+		outputs = append(outputs, output)
 	}
+	return outputs
 }
 
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
