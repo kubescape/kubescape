@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
@@ -42,4 +43,10 @@ func GetWriter(outputFile string) *os.File {
 	}
 	return os.Stdout
 
+}
+
+func LogOutputFile(fileName string) {
+	if fileName != "/dev/stdout" && fileName != "/dev/stderr" {
+		logger.L().Success("Scan results saved", helpers.String("filename", fileName))
+	}
 }

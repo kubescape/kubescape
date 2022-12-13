@@ -93,9 +93,10 @@ func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 		return
 	}
 
-	logOUtputFile(pdfPrinter.writer.Name())
 	if _, err := pdfPrinter.writer.Write(outBuff.Bytes()); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(pdfPrinter.writer.Name())
 	}
 }
 

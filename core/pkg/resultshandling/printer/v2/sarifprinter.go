@@ -144,6 +144,8 @@ func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	report.AddRun(run)
 
 	report.PrettyWrite(sp.writer)
+
+	printer.LogOutputFile(sp.writer.Name())
 }
 
 func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
