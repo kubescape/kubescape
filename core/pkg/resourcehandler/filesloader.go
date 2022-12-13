@@ -109,6 +109,11 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		repoRoot, _ = filepath.Abs(path)
 	}
 
+	// Adjusting the repoRoot incase a file is passed to scan
+	if cautils.IsYaml(repoRoot) {
+		repoRoot = filepath.Dir(repoRoot)
+	}
+
 	// load resource from local file system
 	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
 
@@ -117,13 +122,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 
-		var relSource string
-		if repoRoot == source {
-			// This is to preserve the relSource of individual files.
-			relSource = repoRoot
-		} else {
-			relSource, err = filepath.Rel(repoRoot, source)
-		}
+		relSource, err := filepath.Rel(repoRoot, source)
 
 		if err == nil {
 			source = relSource

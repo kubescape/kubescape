@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -80,7 +81,7 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 	}
 
 	if report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.File {
-		return report.Metadata.ContextMetadata.FileContextMetadata.FilePath
+		return filepath.Dir(report.Metadata.ContextMetadata.FileContextMetadata.FilePath)
 	}
 
 	return ""
