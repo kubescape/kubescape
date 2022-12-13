@@ -107,9 +107,10 @@ func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionO
 		logger.L().Fatal("failed to Marshal xml result object", helpers.Error(err))
 	}
 
-	logOUtputFile(junitPrinter.writer.Name())
 	if _, err := junitPrinter.writer.Write(postureReportStr); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(junitPrinter.writer.Name())
 	}
 }
 

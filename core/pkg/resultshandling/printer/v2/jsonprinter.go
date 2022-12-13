@@ -33,8 +33,9 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 		logger.L().Fatal("failed to Marshal posture report object")
 	}
 
-	logOUtputFile(jsonPrinter.writer.Name())
 	if _, err := jsonPrinter.writer.Write(r); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(jsonPrinter.writer.Name())
 	}
 }
