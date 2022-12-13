@@ -1,4 +1,4 @@
-package v2
+package printer
 
 import (
 	logger "github.com/kubescape/go-logger"
