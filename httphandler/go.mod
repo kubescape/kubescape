@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.204
+	github.com/kubescape/opa-utils v0.0.209
 	github.com/stretchr/testify v1.8.0
 	k8s.io/utils v0.0.0-20221128185143-99ec85e7a448
 )
