@@ -61,7 +61,7 @@ func constructFixedYamlNodes(filePath, yamlExpression string) (*[]yaml.Node, err
 
 	allAtOnceEvaluator := yqlib.NewAllAtOnceEvaluator()
 
-	matches, err := allAtOnceEvaluator.EvaluateCandidateNodes(yamlExpression, allDocuments)
+	fixedCandidateNodes, err := allAtOnceEvaluator.EvaluateCandidateNodes(yamlExpression, allDocuments)
 
 	if err != nil {
 		logger.L().Fatal(fmt.Sprintf("Error fixing YAML, %v", err.Error()))
@@ -69,8 +69,8 @@ func constructFixedYamlNodes(filePath, yamlExpression string) (*[]yaml.Node, err
 
 	fixedNodes := make([]yaml.Node, 0)
 	var fixedNode *yaml.Node
-	for match := matches.Front(); match != nil; match = match.Next() {
-		fixedNode = match.Value.(*yqlib.CandidateNode).Node
+	for fixedCandidateNode := fixedCandidateNodes.Front(); fixedCandidateNode != nil; fixedCandidateNode = fixedCandidateNode.Next() {
+		fixedNode = fixedCandidateNode.Value.(*yqlib.CandidateNode).Node
 		fixedNodes = append(fixedNodes, *fixedNode)
 	}
 
