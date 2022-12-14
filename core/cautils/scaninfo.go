@@ -94,7 +94,8 @@ const (
 )
 
 type PolicyIdentifier struct {
-	Name        string                        // policy name e.g. nsa,mitre,c-0012
+	ID          string                        // policy ID e.g. c-0012 - relevant only to kind=control
+	Name        string                        // policy name e.g. nsa,mitre
 	Kind        apisv1.NotificationPolicyKind // policy kind e.g. Framework,Control,Rule
 	Designators armotypes.PortalDesignator
 }
@@ -214,7 +215,13 @@ func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.No
 		if !scanInfo.contains(policy) {
 			newPolicy := PolicyIdentifier{}
 			newPolicy.Kind = kind
-			newPolicy.Name = policy
+			// control can be identified only by it's id.
+			if kind == apisv1.KindControl {
+				newPolicy.ID = policy
+			} else {
+				newPolicy.Name = policy
+			}
+
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 		}
 	}

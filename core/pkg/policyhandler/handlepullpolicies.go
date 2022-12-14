@@ -73,15 +73,15 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 		f := reporthandling.Framework{}
 		var receivedControl *reporthandling.Control
 		var err error
-		for _, rule := range policyIdentifier {
-			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(rule.Name)
+		for _, policy := range policyIdentifier {
+			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(policy.ID)
 			if err != nil {
 				return frameworks, policyDownloadError(err)
 			}
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
 
-				cache := getter.GetDefaultPath(rule.Name + ".json")
+				cache := getter.GetDefaultPath(policy.ID + ".json")
 				if err := getter.SaveInFile(receivedControl, cache); err != nil {
 					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 				}
