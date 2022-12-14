@@ -21,7 +21,7 @@ def scan_control_id(kubescape_exec: str):
 
 
 def scan_controls(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'HostPath mount,Allow privilege escalation', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048,C-0016', all_files, "--enable-host-scan=false"])
 
 
 def scan_framework(kubescape_exec: str):
