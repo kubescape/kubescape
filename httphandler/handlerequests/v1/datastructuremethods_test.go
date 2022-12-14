@@ -49,7 +49,7 @@ func TestToScanInfo(t *testing.T) {
 		assert.Equal(t, "kube-system,kube-public", s.IncludeNamespaces)
 		assert.Equal(t, "", s.ExcludedNamespaces)
 		assert.Equal(t, 1, len(s.PolicyIdentifier))
-		assert.Equal(t, "c-0001", s.PolicyIdentifier[0].Name)
+		assert.Equal(t, "c-0001", s.PolicyIdentifier[0].ID)
 		assert.Equal(t, apisv1.KindControl, s.PolicyIdentifier[0].Kind)
 	}
 	{
