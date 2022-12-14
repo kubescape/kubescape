@@ -45,7 +45,7 @@ require (
 
 require github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 
-require github.com/kubescape/opa-utils v0.0.209
+require github.com/kubescape/opa-utils v0.0.204
 
 require (
 	cloud.google.com/go/compute v1.7.0 // indirect
