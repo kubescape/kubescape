@@ -13,13 +13,22 @@ import (
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 )
 
+const (
+	TargetControlsInputs = "controls-inputs"
+	TargetExceptions     = "exceptions"
+	TargetControl        = "control"
+	TargetFramework      = "framework"
+	TargetArtifacts      = "artifacts"
+	TargetAttackTracks   = "attack-tracks"
+)
+
 var downloadFunc = map[string]func(*metav1.DownloadInfo) error{
-	"controls-inputs": downloadConfigInputs,
-	"exceptions":      downloadExceptions,
-	"control":         downloadControl,
-	"framework":       downloadFramework,
-	"artifacts":       downloadArtifacts,
-	"attack-tracks":   downloadAttackTracks,
+	TargetControlsInputs: downloadConfigInputs,
+	TargetExceptions:     downloadExceptions,
+	TargetControl:        downloadControl,
+	TargetFramework:      downloadFramework,
+	TargetArtifacts:      downloadArtifacts,
+	TargetAttackTracks:   downloadAttackTracks,
 }
 
 func DownloadSupportCommands() []string {
@@ -200,25 +209,25 @@ func downloadControl(downloadInfo *metav1.DownloadInfo) error {
 
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
 
-	if downloadInfo.Name == "" {
+	if downloadInfo.ID == "" {
 		// TODO - support
-		return fmt.Errorf("missing control name")
+		return fmt.Errorf("missing control ID")
 	}
 	if downloadInfo.FileName == "" {
-		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Name)
+		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.ID)
 	}
-	controls, err := g.GetControl(downloadInfo.Name)
+	controls, err := g.GetControl(downloadInfo.ID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to download control id '%s',  %s", downloadInfo.ID, err.Error())
 	}
 	if controls == nil {
-		return fmt.Errorf("failed to download control - received an empty objects")
+		return fmt.Errorf("failed to download control id '%s' - received an empty objects", downloadInfo.ID)
 	}
 	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 	err = getter.SaveInFile(controls, downloadTo)
 	if err != nil {
 		return err
 	}
-	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("name", downloadInfo.Name), helpers.String("path", downloadTo))
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("ID", downloadInfo.ID), helpers.String("path", downloadTo))
 	return nil
 }

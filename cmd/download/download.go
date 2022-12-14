@@ -70,7 +70,14 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			}
 			downloadInfo.Target = args[0]
 			if len(args) >= 2 {
-				downloadInfo.Name = args[1]
+
+				// downloading a control is supported only by id.
+				if downloadInfo.Target == core.TargetControl {
+					downloadInfo.ID = args[1]
+				} else {
+					downloadInfo.Name = args[1]
+				}
+
 			}
 			if err := ks.Download(&downloadInfo); err != nil {
 				logger.L().Fatal(err.Error())
