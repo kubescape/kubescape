@@ -17,6 +17,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.17
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/k8s-interface v0.0.89
+	github.com/kubescape/opa-utils v0.0.204
 	github.com/kubescape/rbac-utils v0.0.19
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.14
@@ -44,8 +45,6 @@ require (
 )
 
 require github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
-
-require github.com/kubescape/opa-utils v0.0.204
 
 require (
 	cloud.google.com/go/compute v1.7.0 // indirect
