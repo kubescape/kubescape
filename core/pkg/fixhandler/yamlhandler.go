@@ -1,14 +1,11 @@
 package fixhandler
 
 import (
-	"bufio"
-	"bytes"
 	"container/list"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"os"
+	"strings"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
@@ -16,44 +13,37 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func constructDecodedYaml(filepath string) *[]yaml.Node {
-	file, err := ioutil.ReadFile(filepath)
-	if err != nil {
-		logger.L().Fatal("Cannot read file")
-	}
-	fileReader := bytes.NewReader(file)
+func constructDecodedYaml(yamlString string) *[]yaml.Node {
+	fileReader := strings.NewReader(yamlString)
 	dec := yaml.NewDecoder(fileReader)
 
 	nodes := make([]yaml.Node, 0)
 	for {
 		var node yaml.Node
-		err = dec.Decode(&node)
+		err := dec.Decode(&node)
+
 		nodes = append(nodes, node)
 
-		// break the loop in case of EOF
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
-			panic(err)
+			logger.L().Fatal("Cannot decode given document")
 		}
 	}
 
 	return &nodes
 }
 
-func constructFixedYamlNodes(filePath, yamlExpression string) (*[]yaml.Node, error) {
+func constructFixedYamlNodes(yamlString, yamlExpression string) (*[]yaml.Node, error) {
 	preferences := yqlib.ConfiguredYamlPreferences
 	preferences.EvaluateTogether = true
 	decoder := yqlib.NewYamlDecoder(preferences)
 
 	var allDocuments = list.New()
-	reader, err := constructNewReader(filePath)
-	if err != nil {
-		return nil, err
-	}
+	reader := strings.NewReader(yamlString)
 
-	fileDocuments, err := readDocuments(reader, filePath, 0, decoder)
+	fileDocuments, err := readDocuments(reader, decoder)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +93,22 @@ func matchNodes(nodeOne, nodeTwo *yaml.Node) int {
 	}
 }
 
-func getFixInfo(originalList, fixedList *[]nodeInfo) (*[]contentToAdd, *[]linesToRemove) {
+func getFixInfo(originalRootNodes, fixedRootNodes *[]yaml.Node) (*[]contentToAdd, *[]linesToRemove) {
+	contentToAdd := make([]contentToAdd, 0)
+	linesToRemove := make([]linesToRemove, 0)
+
+	for idx, _ := range *fixedRootNodes {
+		originalList := constructDFSOrder(&(*originalRootNodes)[idx])
+		fixedList := constructDFSOrder(&(*fixedRootNodes)[idx])
+		nodeContentToAdd, nodeLinesToRemove := getFixInfoHelper(originalList, fixedList)
+		contentToAdd = append(contentToAdd, *nodeContentToAdd...)
+		linesToRemove = append(linesToRemove, *nodeLinesToRemove...)
+	}
+
+	return &contentToAdd, &linesToRemove
+}
+
+func getFixInfoHelper(originalList, fixedList *[]nodeInfo) (*[]contentToAdd, *[]linesToRemove) {
 
 	// While obtaining fixedYamlNode, comments and empty lines at the top are ignored.
 	// This causes a difference in Line numbers across the tree structure. In order to
@@ -232,71 +237,53 @@ func updateLinesToReplace(fixInfoMetadata *fixInfoMetadata) (int, int) {
 	return updatedOriginalTracker, updatedFixedTracker
 }
 
-func applyFixesToFile(filePath string, contentToAdd *[]contentToAdd, linesToRemove *[]linesToRemove) error {
-	// Read contents of the file line by line and store in a list
-	linesSlice, err := getLinesSlice(filePath)
-
-	if err != nil {
-		return err
-	}
-
-	// Determining last line required lineSlice. The placeholder for last line is replaced with the real last line
-	assignLastLine(contentToAdd, linesToRemove, &linesSlice)
-
-	// Clear the current content of file
-	if err := os.Truncate(filePath, 0); err != nil {
-		return err
-	}
-
-	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
-	if err != nil {
-		return err
-	}
-
-	defer func() error {
-		if err := file.Close(); err != nil {
-			return err
+func removeNewLinesAtTheEnd(yamlLines []string) []string {
+	for idx := 1; idx < len(yamlLines); idx++ {
+		if yamlLines[len(yamlLines)-idx] != "\n" {
+			yamlLines = yamlLines[:len(yamlLines)-idx+1]
+			break
 		}
-		return nil
-	}()
+	}
+	return yamlLines
+}
 
-	removeLines(linesToRemove, &linesSlice)
+func getFixedYamlLines(yamlLines []string, contentToAdd *[]contentToAdd, linesToRemove *[]linesToRemove) (fixedYamlLines []string) {
 
-	writer := bufio.NewWriter(file)
+	// Determining last line requires original yaml lines slice. The placeholder for last line is replaced with the real last line
+	assignLastLine(contentToAdd, linesToRemove, &yamlLines)
+
+	removeLines(linesToRemove, &yamlLines)
+
+	fixedYamlLines = make([]string, 0)
 	lineIdx, lineToAddIdx := 1, 0
 
 	// Ideally, new node is inserted at line before the next node in DFS order. But, when the previous line contains a
 	// comment or empty line, we need to insert new nodes before them.
-	adjustContentLines(contentToAdd, &linesSlice)
+	adjustContentLines(contentToAdd, &yamlLines)
 
 	for lineToAddIdx < len(*contentToAdd) {
 		for lineIdx <= (*contentToAdd)[lineToAddIdx].line {
 			// Check if the current line is not removed
-			if linesSlice[lineIdx-1] != "*" {
-				_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
-				if err != nil {
-					return err
-				}
+			if yamlLines[lineIdx-1] != "*" {
+				fixedYamlLines = append(fixedYamlLines, yamlLines[lineIdx-1])
 			}
 			lineIdx += 1
 		}
 
 		content := (*contentToAdd)[lineToAddIdx].content
-		writer.WriteString(content)
+		fixedYamlLines = append(fixedYamlLines, content)
 
 		lineToAddIdx += 1
 	}
 
-	for lineIdx <= len(linesSlice) {
-		if linesSlice[lineIdx-1] != "*" {
-			_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
-			if err != nil {
-				return err
-			}
+	for lineIdx <= len(yamlLines) {
+		if yamlLines[lineIdx-1] != "*" {
+			fixedYamlLines = append(fixedYamlLines, yamlLines[lineIdx-1])
 		}
 		lineIdx += 1
 	}
 
-	writer.Flush()
-	return nil
+	fixedYamlLines = removeNewLinesAtTheEnd(fixedYamlLines)
+
+	return fixedYamlLines
 }

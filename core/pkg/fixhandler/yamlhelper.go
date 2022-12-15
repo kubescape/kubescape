@@ -129,7 +129,7 @@ func constructContent(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) 
 
 	content = indentContent(content, indentationSpaces)
 
-	return content
+	return strings.TrimSuffix(content, "\n")
 }
 
 func indentContent(content string, indentationSpaces int) string {
@@ -306,12 +306,13 @@ func isEmptyLineOrComment(lineContent string) bool {
 	return false
 }
 
-func readDocuments(reader io.Reader, filename string, fileIndex int, decoder yqlib.Decoder) (*list.List, error) {
+func readDocuments(reader io.Reader, decoder yqlib.Decoder) (*list.List, error) {
 	err := decoder.Init(reader)
 	if err != nil {
 		return nil, err
 	}
 	inputList := list.New()
+
 	var currentIndex uint
 
 	for {
@@ -324,11 +325,10 @@ func readDocuments(reader io.Reader, filename string, fileIndex int, decoder yql
 			}
 			return inputList, nil
 		} else if errorReading != nil {
-			return nil, fmt.Errorf("bad file '%v': %w", filename, errorReading)
+			return nil, fmt.Errorf("Error Decoding YAML file")
 		}
+
 		candidateNode.Document = currentIndex
-		candidateNode.Filename = filename
-		candidateNode.FileIndex = fileIndex
 		candidateNode.EvaluateTogether = true
 
 		inputList.PushBack(candidateNode)
@@ -483,4 +483,8 @@ func updateTracker(nodeList *[]nodeInfo, tracker int) int {
 	}
 
 	return updatedTracker
+}
+
+func getFixedYamlString(yamlLines []string) (fixedYamlString string) {
+	return strings.Join(yamlLines, "\n")
 }

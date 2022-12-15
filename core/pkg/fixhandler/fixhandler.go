@@ -186,39 +186,34 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []error) {
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
-	// Map with key as filepath
-	filePathFixInfo := make(map[string]*fileFixInfo)
-	for _, resourceToFix := range resourcesToFix {
-		singleExpression := reduceYamlExpressions(&resourceToFix)
-		resourceFilePath := resourceToFix.FilePath
 
-		if _, pathExistsInMap := filePathFixInfo[resourceFilePath]; !pathExistsInMap {
-			filePathFixInfo[resourceFilePath] = &fileFixInfo{
-				contentToAdd:  make([]contentToAdd, 0),
-				linesToRemove: make([]linesToRemove, 0),
-			}
-		}
+	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
 
-		contentsToAdd, linesToRemove, err := h.getResourceFileFix(resourceFilePath, singleExpression, resourceToFix.DocumentIndex)
+	for filepath, yamlExpression := range fileYamlExpressions {
+		fileAsString, err := getFileString(filepath)
 
 		if err != nil {
-			errors = append(errors,
-				fmt.Errorf("failed to fix resource [Name: '%s', Kind: '%s'] in '%s': %w ",
-					resourceToFix.Resource.GetName(),
-					resourceToFix.Resource.GetKind(),
-					resourceToFix.FilePath,
-					err))
+			logger.L().Error(err.Error())
+			continue
+		}
+
+		fixedYamlString, err := h.ApplyFix(fileAsString, yamlExpression)
+
+		if err != nil {
+			errors = append(errors, fmt.Errorf("failed to fix file %s: %w ", filepath, err))
+			continue
 		} else {
-			h.addResourceFileFix(contentsToAdd, linesToRemove, filePathFixInfo[resourceFilePath])
-			updatedFiles[resourceToFix.FilePath] = true
+			updatedFiles[filepath] = true
+		}
+
+		err = writeFixesToFile(filepath, fixedYamlString)
+
+		if err != nil {
+			logger.L().Error(fmt.Sprintf("Cannot Apply fixes to file %s, %v", filepath, err.Error()))
+			errors = append(errors, err)
 		}
 	}
-	err := h.applyFixToFiles(filePathFixInfo)
 
-	if err != nil {
-		logger.L().Fatal(fmt.Sprintf("Cannot Apply fixes to files, %v", err.Error()))
-		errors = append(errors, err)
-	}
 	return len(updatedFiles), errors
 }
 
@@ -236,42 +231,40 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) getResourceFileFix(filePath string, yamlExpression string, documentIdx int) (*[]contentToAdd, *[]linesToRemove, error) {
-	originalYamlNode := (*constructDecodedYaml(filePath))[documentIdx]
-	fixedYamlNodes, err := constructFixedYamlNodes(filePath, yamlExpression)
+func (h *FixHandler) ApplyFix(yamlString, yamlExpression string) (fixedYamlString string, err error) {
+	yamlLines := strings.Split(yamlString, "\n")
+
+	originalRootNodes := constructDecodedYaml(yamlString)
+	fixedRootNodes, err := constructFixedYamlNodes(yamlString, yamlExpression)
+
 	if err != nil {
-		return nil, nil, err
+		return "", err
 	}
 
-	fixedYamlNode := (*fixedYamlNodes)[documentIdx]
+	contentsToAdd, linesToRemove := getFixInfo(originalRootNodes, fixedRootNodes)
 
-	originalList := constructDFSOrder(&originalYamlNode)
-	fixedList := constructDFSOrder(&fixedYamlNode)
+	fixedYamlLines := getFixedYamlLines(yamlLines, contentsToAdd, linesToRemove)
 
-	contentsToAdd, linesToRemove := getFixInfo(originalList, fixedList)
+	fixedYamlString = getFixedYamlString(fixedYamlLines)
 
-	return contentsToAdd, linesToRemove, nil
-
+	return fixedYamlString, nil
 }
 
-func (h *FixHandler) addResourceFileFix(contentToAdd *[]contentToAdd, linesToRemove *[]linesToRemove, fileFixInfo *fileFixInfo) {
-	for _, content := range *contentToAdd {
-		fileFixInfo.addContent(content)
-	}
+func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
+	fileYamlExpressions := make(map[string]string, 0)
+	for _, resourceToFix := range resourcesToFix {
+		singleExpression := reduceYamlExpressions(&resourceToFix)
+		resourceFilePath := resourceToFix.FilePath
 
-	for _, lines := range *linesToRemove {
-		fileFixInfo.addLinesToRemove(lines)
-	}
-}
-
-func (h *FixHandler) applyFixToFiles(filePathFixInfo map[string]*fileFixInfo) error {
-	for filepath, fixInfo := range filePathFixInfo {
-		err := applyFixesToFile(filepath, &fixInfo.contentToAdd, &fixInfo.linesToRemove)
-		if err != nil {
-			return err
+		if _, pathExistsInMap := fileYamlExpressions[resourceFilePath]; !pathExistsInMap {
+			fileYamlExpressions[resourceFilePath] = singleExpression
+		} else {
+			fileYamlExpressions[resourceFilePath] = joinStrings(fileYamlExpressions[resourceFilePath], " | ", singleExpression)
 		}
+
 	}
-	return nil
+
+	return fileYamlExpressions
 }
 
 func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(documentIndex int, ac *resourcesresults.ResourceAssociatedControl, skipUserValues bool) {
@@ -302,6 +295,30 @@ func reduceYamlExpressions(resource *ResourceFixInfo) string {
 	}
 
 	return strings.Join(expressions, " | ")
+}
+
+func joinStrings(inputStrings ...string) string {
+	return strings.Join(inputStrings, "")
+}
+
+func getFileString(filepath string) (string, error) {
+	bytes, err := ioutil.ReadFile(filepath)
+
+	if err != nil {
+		return "", fmt.Errorf("Error reading file %s", filepath)
+	}
+
+	return string(bytes), nil
+}
+
+func writeFixesToFile(filepath, content string) error {
+	err := ioutil.WriteFile(filepath, []byte(content), 0644)
+
+	if err != nil {
+		return fmt.Errorf("Error writing fixes to file: %w", err)
+	}
+
+	return nil
 }
 
 func fixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {

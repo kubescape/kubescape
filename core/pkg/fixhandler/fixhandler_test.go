@@ -1,13 +1,9 @@
 package fixhandler
 
 import (
-	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 
 	logger "github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
@@ -15,6 +11,12 @@ import (
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/op/go-logging.v1"
 )
+
+type indentationTestCase struct {
+	inputFile      string
+	yamlExpression string
+	expectedFile   string
+}
 
 func NewFixHandlerMock() (*FixHandler, error) {
 	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
@@ -33,149 +35,126 @@ func getTestdataPath() string {
 	return filepath.Join(currentDir, "testdata")
 }
 
-func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[][]string, directoryPath string) {
+func getTestCases() []indentationTestCase {
+	indentationTestCases := []indentationTestCase{
+		// Insertion Scenarios
+		{
+			"insert_scenarios/original_yaml_scenario_1.yml",
+			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+			"insert_scenarios/fixed_yaml_scenario_1.yml",
+		},
+		{
+			"insert_scenarios/original_yaml_scenario_2.yml",
+			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+			"insert_scenarios/fixed_yaml_scenario_2.yml",
+		},
+		{
+			"insert_scenarios/original_yaml_scenario_3.yml",
+			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
+			"insert_scenarios/fixed_yaml_scenario_3.yml",
+		},
+		{
+			"insert_scenarios/original_yaml_scenario_4.yml",
 
-	scenarioCount := len(*yamlExpressions)
+			`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false |
+			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"] |
+			 select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type |= "RuntimeDefault" |
+			 select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
+			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`,
 
-	for scenario := 1; scenario <= scenarioCount; scenario++ {
-		originalFile := fmt.Sprintf("original_yaml_scenario_%d.yml", scenario)
-		fixedFile := fmt.Sprintf("fixed_yaml_scenario_%d.yml", scenario)
+			"insert_scenarios/fixed_yaml_scenario_4.yml",
+		},
+		{
+			"insert_scenarios/original_yaml_scenario_5.yml",
+			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+			"insert_scenarios/fixed_yaml_scenario_5.yml",
+		},
+		{
+			"insert_scenarios/original_yaml_scenario_6.yml",
+			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
+			"insert_scenarios/fixed_yaml_scenario_6.yml",
+		},
+		{
+			"insert_scenarios/original_yaml_scenario_7.yml",
 
-		originalFilePath := filepath.Join(directoryPath, originalFile)
-		fixedFilePath := filepath.Join(directoryPath, fixedFile)
+			`select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
+			 select(di==1).spec.containers[0].securityContext.allowPrivilegeEscalation |= false`,
 
-		// create temp file
-		tempFile, err := ioutil.TempFile("", originalFile)
-		if err != nil {
-			panic(err)
+			"insert_scenarios/fixed_yaml_scenario_7.yml",
+		},
+
+		// Removal Scenarios
+
+		{
+			"remove_scenarios/original_yaml_scenario_1.yml",
+			"del(select(di==0).spec.containers[0].securityContext)",
+			"remove_scenarios/fixed_yaml_scenario_1.yml",
+		},
+		{
+			"remove_scenarios/original_yaml_scenario_2.yml",
+			"del(select(di==0).spec.containers[1])",
+			"remove_scenarios/fixed_yaml_scenario_2.yml",
+		},
+		{
+			"remove_scenarios/original_yaml_scenario_3.yml",
+			"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])",
+			"remove_scenarios/fixed_yaml_scenario_3.yml",
+		},
+		{
+			"remove_scenarios/original_yaml_scenario_4.yml",
+			`del(select(di==0).spec.containers[0].securityContext) | 
+			 del(select(di==1).spec.containers[1])`,
+			"remove_scenarios/fixed_yaml_scenario_4.yml",
+		},
+
+		// Replace Scenarios
+		{
+			"replace_scenarios/original_yaml_scenario_1.yml",
+			"select(di==0).spec.containers[0].securityContext.runAsRoot |= false",
+			"replace_scenarios/fixed_yaml_scenario_1.yml",
+		},
+		{
+			"replace_scenarios/original_yaml_scenario_2.yml",
+			`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" |
+			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`,
+			"replace_scenarios/fixed_yaml_scenario_2.yml",
+		},
+
+		// Hybrid Scenarios
+		{
+			"hybrid_scenarios/original_yaml_scenario_1.yml",
+			`del(select(di==0).spec.containers[0].securityContext) |
+			 select(di==0).spec.securityContext.runAsRoot |= false`,
+			"hybrid_scenarios/fixed_yaml_scenario_1.yml",
+		},
+	}
+
+	return indentationTestCases
+}
+
+func TestApplyFixKeepsIndentation(t *testing.T) {
+	testCases := getTestCases()
+
+	for _, tc := range testCases {
+		getTestDataPath := func(filename string) string {
+			currentDir, _ := os.Getwd()
+			currentFile := "testdata/" + filename
+			return filepath.Join(currentDir, currentFile)
 		}
-		defer os.Remove(tempFile.Name())
 
-		// read original file
-		originalFileContent, err := ioutil.ReadFile(originalFilePath)
-		if err != nil {
-			panic(err)
-		}
+		input, _ := os.ReadFile(getTestDataPath(tc.inputFile))
+		want, _ := os.ReadFile(getTestDataPath(tc.expectedFile))
+		expression := tc.yamlExpression
 
-		// write original file contents to temp file
-		err = ioutil.WriteFile(tempFile.Name(), originalFileContent, 0644)
-		if err != nil {
-			panic(err)
-		}
-
-		// make changes to temp file
 		h, _ := NewFixHandlerMock()
 
-		filePathFixInfo := make(map[string]*fileFixInfo)
-		filePath := tempFile.Name()
-		filePathFixInfo[filePath] = &fileFixInfo{
-			contentToAdd:  make([]contentToAdd, 0),
-			linesToRemove: make([]linesToRemove, 0),
+		got, _ := h.ApplyFix(string(input), expression)
+
+		if got != string(want) {
+			t.Errorf("Fixed file does not match the expected.\nGot: <%s>\nWant:<%s>", got, want)
 		}
-		fixInfo := filePathFixInfo[filePath]
-
-		for idx, yamlExpression := range (*yamlExpressions)[scenario-1] {
-			contentToAdd, linesToRemove, err := h.getResourceFileFix(filePath, yamlExpression, idx)
-
-			if err == nil {
-				h.addResourceFileFix(contentToAdd, linesToRemove, fixInfo)
-			}
-
-		}
-
-		err = h.applyFixToFiles(filePathFixInfo)
-		assert.NoError(t, err)
-
-		// Check temp file contents
-		tempFileContent, err := ioutil.ReadFile(tempFile.Name())
-		if err != nil {
-			panic(err)
-		}
-
-		// Get fixed Yaml file content and check if it is equal to tempFileContent
-		fixedFileContent, err := ioutil.ReadFile(fixedFilePath)
-
-		errorMessage := fmt.Sprintf("Content of fixed %s doesn't match content of %s in %s", originalFile, fixedFile, directoryPath)
-
-		assert.Equal(t, string(fixedFileContent), string(tempFileContent), errorMessage)
 
 	}
-}
-
-func testDirectoryApplyFix(t *testing.T, directory string) {
-	directoryPath := filepath.Join(getTestdataPath(), directory)
-	var yamlExpressions [][]string
-
-	switch directory {
-	case "insert_scenarios":
-		yamlExpressions = [][]string{
-			{"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"},
-
-			{"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]"},
-
-			{"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]"},
-
-			{`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false | 
-			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"] | 
-			 select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type |= "RuntimeDefault" | 
-			 select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false | 
-			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`},
-
-			{"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"},
-
-			{"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]"},
-
-			{
-				"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-				"select(di==1).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			},
-		}
-
-	case "remove_scenarios":
-		yamlExpressions = [][]string{
-			{"del(select(di==0).spec.containers[0].securityContext)"},
-
-			{"del(select(di==0).spec.containers[1])"},
-
-			{"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])"},
-
-			{
-				"del(select(di==0).spec.containers[0].securityContext)",
-				"del(select(di==1).spec.containers[1])",
-			},
-		}
-
-	case "replace_scenarios":
-		yamlExpressions = [][]string{
-			{"select(di==0).spec.containers[0].securityContext.runAsRoot |= false"},
-
-			{`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" | 
-			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`},
-		}
-
-	case "hybrid_scenarios":
-		yamlExpressions = [][]string{
-			{`del(select(di==0).spec.containers[0].securityContext) | 
-			 select(di==0).spec.securityContext.runAsRoot |= false`},
-		}
-	}
-
-	testDirectoryApplyFixHelper(t, &yamlExpressions, directoryPath)
-}
-
-func TestFixHandler_applyFixToFile(t *testing.T) {
-	// Tests for Insert scenarios
-	testDirectoryApplyFix(t, "insert_scenarios")
-
-	// Tests for Removal scenarios
-	testDirectoryApplyFix(t, "remove_scenarios")
-
-	// Tests for Replace scenarios
-	testDirectoryApplyFix(t, "replace_scenarios")
-
-	// Tests for Hybrid Scenarios
-	testDirectoryApplyFix(t, "hybrid_scenarios")
-
 }
 
 func Test_fixPathToValidYamlExpression(t *testing.T) {
