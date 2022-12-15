@@ -28,9 +28,9 @@ func NewFixHandlerMock() (*FixHandler, error) {
 	}, nil
 }
 
-func fixCommandPath() string {
-	o, _ := os.Getwd()
-	return filepath.Join(filepath.Dir(o), "..", "..", "examples", "fix-command")
+func getTestdataPath() string {
+	currentDir, _ := os.Getwd()
+	return filepath.Join(currentDir, "testdata")
 }
 
 func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[][]string, directoryPath string) {
@@ -98,7 +98,7 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[][]string, dire
 }
 
 func testDirectoryApplyFix(t *testing.T, directory string) {
-	directoryPath := filepath.Join(fixCommandPath(), directory)
+	directoryPath := filepath.Join(getTestdataPath(), directory)
 	var yamlExpressions [][]string
 
 	switch directory {
