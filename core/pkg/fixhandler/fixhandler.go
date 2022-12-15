@@ -193,15 +193,15 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 		resourceFilePath := resourceToFix.FilePath
 
 		if _, pathExistsInMap := filePathFixInfo[resourceFilePath]; !pathExistsInMap {
-			contentToAdd := make([]contentToAdd, 0)
-			linesToRemove := make([]linesToRemove, 0)
 			filePathFixInfo[resourceFilePath] = &fileFixInfo{
-				contentToAdd:  contentToAdd,
-				linesToRemove: linesToRemove,
+				contentToAdd:  make([]contentToAdd, 0),
+				linesToRemove: make([]linesToRemove, 0),
 			}
 		}
 
-		if err := h.updateFileFixInfo(resourceFilePath, singleExpression, resourceToFix.DocumentIndex, filePathFixInfo[resourceFilePath]); err != nil {
+		contentsToAdd, linesToRemove, err := h.getResourceFileFix(resourceFilePath, singleExpression, resourceToFix.DocumentIndex)
+
+		if err != nil {
 			errors = append(errors,
 				fmt.Errorf("failed to fix resource [Name: '%s', Kind: '%s'] in '%s': %w ",
 					resourceToFix.Resource.GetName(),
@@ -209,6 +209,7 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 					resourceToFix.FilePath,
 					err))
 		} else {
+			h.addResourceFileFix(contentsToAdd, linesToRemove, filePathFixInfo[resourceFilePath])
 			updatedFiles[resourceToFix.FilePath] = true
 		}
 	}
@@ -235,11 +236,11 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) updateFileFixInfo(filePath string, yamlExpression string, documentIdx int, fileFixInfo *fileFixInfo) error {
+func (h *FixHandler) getResourceFileFix(filePath string, yamlExpression string, documentIdx int) (*[]contentToAdd, *[]linesToRemove, error) {
 	originalYamlNode := (*constructDecodedYaml(filePath))[documentIdx]
 	fixedYamlNodes, err := constructFixedYamlNodes(filePath, yamlExpression)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	fixedYamlNode := (*fixedYamlNodes)[documentIdx]
@@ -249,16 +250,18 @@ func (h *FixHandler) updateFileFixInfo(filePath string, yamlExpression string, d
 
 	contentsToAdd, linesToRemove := getFixInfo(originalList, fixedList)
 
-	for _, content := range *contentsToAdd {
+	return contentsToAdd, linesToRemove, nil
+
+}
+
+func (h *FixHandler) addResourceFileFix(contentToAdd *[]contentToAdd, linesToRemove *[]linesToRemove, fileFixInfo *fileFixInfo) {
+	for _, content := range *contentToAdd {
 		fileFixInfo.addContent(content)
 	}
 
 	for _, lines := range *linesToRemove {
 		fileFixInfo.addLinesToRemove(lines)
 	}
-
-	return nil
-
 }
 
 func (h *FixHandler) applyFixToFiles(filePathFixInfo map[string]*fileFixInfo) error {

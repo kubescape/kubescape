@@ -75,7 +75,12 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[][]string, dire
 		fixInfo := filePathFixInfo[filePath]
 
 		for idx, yamlExpression := range (*yamlExpressions)[scenario-1] {
-			h.updateFileFixInfo(filePath, yamlExpression, idx, fixInfo)
+			contentToAdd, linesToRemove, err := h.getResourceFileFix(filePath, yamlExpression, idx)
+
+			if err == nil {
+				h.addResourceFileFix(contentToAdd, linesToRemove, fixInfo)
+			}
+
 		}
 
 		err = h.applyFixToFiles(filePathFixInfo)
