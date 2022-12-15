@@ -66,11 +66,11 @@ func testDirectoryApplyFixHelper(t *testing.T, yamlExpressions *[][]string, dire
 		// make changes to temp file
 		h, _ := NewFixHandlerMock()
 
-		filePathFixInfo := make(map[string]*FileFixInfo)
+		filePathFixInfo := make(map[string]*fileFixInfo)
 		filePath := tempFile.Name()
-		filePathFixInfo[filePath] = &FileFixInfo{
-			ContentToAdd:  make([]ContentToAdd, 0),
-			LinesToRemove: make([]LinesToRemove, 0),
+		filePathFixInfo[filePath] = &fileFixInfo{
+			contentToAdd:  make([]contentToAdd, 0),
+			linesToRemove: make([]linesToRemove, 0),
 		}
 		fixInfo := filePathFixInfo[filePath]
 

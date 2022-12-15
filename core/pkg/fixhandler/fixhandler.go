@@ -187,17 +187,17 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
 	// Map with key as filepath
-	filePathFixInfo := make(map[string]*FileFixInfo)
+	filePathFixInfo := make(map[string]*fileFixInfo)
 	for _, resourceToFix := range resourcesToFix {
 		singleExpression := reduceYamlExpressions(&resourceToFix)
 		resourceFilePath := resourceToFix.FilePath
 
 		if _, pathExistsInMap := filePathFixInfo[resourceFilePath]; !pathExistsInMap {
-			contentToAdd := make([]ContentToAdd, 0)
-			linesToRemove := make([]LinesToRemove, 0)
-			filePathFixInfo[resourceFilePath] = &FileFixInfo{
-				ContentToAdd:  contentToAdd,
-				LinesToRemove: linesToRemove,
+			contentToAdd := make([]contentToAdd, 0)
+			linesToRemove := make([]linesToRemove, 0)
+			filePathFixInfo[resourceFilePath] = &fileFixInfo{
+				contentToAdd:  contentToAdd,
+				linesToRemove: linesToRemove,
 			}
 		}
 
@@ -235,7 +235,7 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) updateFileFixInfo(filePath string, yamlExpression string, documentIdx int, fileFixInfo *FileFixInfo) error {
+func (h *FixHandler) updateFileFixInfo(filePath string, yamlExpression string, documentIdx int, fileFixInfo *fileFixInfo) error {
 	originalYamlNode := (*constructDecodedYaml(filePath))[documentIdx]
 	fixedYamlNodes, err := constructFixedYamlNodes(filePath, yamlExpression)
 	if err != nil {
@@ -249,16 +249,16 @@ func (h *FixHandler) updateFileFixInfo(filePath string, yamlExpression string, d
 
 	contentToAdd, linesToRemove := getFixInfo(originalList, fixedList)
 
-	fileFixInfo.ContentToAdd = append(fileFixInfo.ContentToAdd, *contentToAdd...)
-	fileFixInfo.LinesToRemove = append(fileFixInfo.LinesToRemove, *linesToRemove...)
+	fileFixInfo.contentToAdd = append(fileFixInfo.contentToAdd, *contentToAdd...)
+	fileFixInfo.linesToRemove = append(fileFixInfo.linesToRemove, *linesToRemove...)
 
 	return nil
 
 }
 
-func (h *FixHandler) applyFixToFiles(filePathFixInfo map[string]*FileFixInfo) error {
+func (h *FixHandler) applyFixToFiles(filePathFixInfo map[string]*fileFixInfo) error {
 	for filepath, fixInfo := range filePathFixInfo {
-		err := applyFixesToFile(filepath, &fixInfo.ContentToAdd, &fixInfo.LinesToRemove)
+		err := applyFixesToFile(filepath, &fixInfo.contentToAdd, &fixInfo.linesToRemove)
 		if err != nil {
 			return err
 		}

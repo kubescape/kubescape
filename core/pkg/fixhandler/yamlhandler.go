@@ -77,8 +77,8 @@ func constructFixedYamlNodes(filePath, yamlExpression string) (*[]yaml.Node, err
 	return &fixedNodes, nil
 }
 
-func constructDFSOrder(node *yaml.Node) *[]NodeInfo {
-	dfsOrder := make([]NodeInfo, 0)
+func constructDFSOrder(node *yaml.Node) *[]nodeInfo {
+	dfsOrder := make([]nodeInfo, 0)
 	constructDFSOrderHelper(node, nil, &dfsOrder, 0)
 	return &dfsOrder
 }
@@ -103,19 +103,19 @@ func matchNodes(nodeOne, nodeTwo *yaml.Node) int {
 	}
 }
 
-func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]LinesToRemove) {
+func getFixInfo(originalList, fixedList *[]nodeInfo) (*[]contentToAdd, *[]linesToRemove) {
 
 	// While obtaining fixedYamlNode, comments and empty lines at the top are ignored.
 	// This causes a difference in Line numbers across the tree structure. In order to
 	// counter this, line numbers are adjusted in fixed list.
 	adjustFixedListLines(originalList, fixedList)
 
-	contentToAdd := make([]ContentToAdd, 0)
-	linesToRemove := make([]LinesToRemove, 0)
+	contentToAdd := make([]contentToAdd, 0)
+	linesToRemove := make([]linesToRemove, 0)
 
 	originalListTracker, fixedListTracker := 0, 0
 
-	fixInfoMetadata := &FixInfoMetadata{
+	fixInfoMetadata := &fixInfoMetadata{
 		originalList:        originalList,
 		fixedList:           fixedList,
 		originalListTracker: originalListTracker,
@@ -165,7 +165,7 @@ func getFixInfo(originalList, fixedList *[]NodeInfo) (*[]ContentToAdd, *[]LinesT
 }
 
 // Adds the lines to remove and returns the updated originalListTracker
-func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) (int, int) {
+func addLinesToRemove(fixInfoMetadata *fixInfoMetadata) (int, int) {
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 
 	if isOneLine {
@@ -177,16 +177,16 @@ func addLinesToRemove(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	currentDFSNode := (*fixInfoMetadata.originalList)[fixInfoMetadata.originalListTracker]
 
 	newOriginalListTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
-	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, LinesToRemove{
-		StartLine: currentDFSNode.node.Line,
-		EndLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker),
+	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{
+		startLine: currentDFSNode.node.Line,
+		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker),
 	})
 
 	return newOriginalListTracker, fixInfoMetadata.fixedListTracker
 }
 
 // Adds the lines to insert and returns the updated fixedListTracker
-func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
+func addLinesToInsert(fixInfoMetadata *fixInfoMetadata) (int, int) {
 
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -201,16 +201,16 @@ func addLinesToInsert(fixInfoMetadata *FixInfoMetadata) (int, int) {
 
 	newFixedTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
-	*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
-		Line:    lineToInsert,
-		Content: contentToInsert,
+	*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, contentToAdd{
+		line:    lineToInsert,
+		content: contentToInsert,
 	})
 
 	return fixInfoMetadata.originalListTracker, newFixedTracker
 }
 
 // Adds the lines to remove and insert and updates the fixedListTracker and originalListTracker
-func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
+func updateLinesToReplace(fixInfoMetadata *fixInfoMetadata) (int, int) {
 
 	isOneLine, line := isOneLineSequenceNode(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
@@ -232,7 +232,7 @@ func updateLinesToReplace(fixInfoMetadata *FixInfoMetadata) (int, int) {
 	return updatedOriginalTracker, updatedFixedTracker
 }
 
-func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemove *[]LinesToRemove) error {
+func applyFixesToFile(filePath string, contentToAdd *[]contentToAdd, linesToRemove *[]linesToRemove) error {
 	// Read contents of the file line by line and store in a list
 	linesSlice, err := getLinesSlice(filePath)
 
@@ -270,7 +270,7 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 	adjustContentLines(contentToAdd, &linesSlice)
 
 	for lineToAddIdx < len(*contentToAdd) {
-		for lineIdx <= (*contentToAdd)[lineToAddIdx].Line {
+		for lineIdx <= (*contentToAdd)[lineToAddIdx].line {
 			// Check if the current line is not removed
 			if linesSlice[lineIdx-1] != "*" {
 				_, err := writer.WriteString(linesSlice[lineIdx-1] + "\n")
@@ -281,7 +281,7 @@ func applyFixesToFile(filePath string, contentToAdd *[]ContentToAdd, linesToRemo
 			lineIdx += 1
 		}
 
-		content := (*contentToAdd)[lineToAddIdx].Content
+		content := (*contentToAdd)[lineToAddIdx].content
 		writer.WriteString(content)
 
 		lineToAddIdx += 1

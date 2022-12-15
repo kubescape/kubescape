@@ -24,14 +24,14 @@ const (
 	replacedNode
 )
 
-func adjustContentLines(contentToAdd *[]ContentToAdd, linesSlice *[]string) {
+func adjustContentLines(contentToAdd *[]contentToAdd, linesSlice *[]string) {
 	for contentIdx, content := range *contentToAdd {
-		line := content.Line
+		line := content.line
 
 		// Adjust line numbers such that there are no "empty lines or comment lines of next nodes" before them
 		for idx := line - 1; idx >= 0; idx-- {
 			if isEmptyLineOrComment((*linesSlice)[idx]) {
-				(*contentToAdd)[contentIdx].Line -= 1
+				(*contentToAdd)[contentIdx].line -= 1
 			} else {
 				break
 			}
@@ -39,7 +39,7 @@ func adjustContentLines(contentToAdd *[]ContentToAdd, linesSlice *[]string) {
 	}
 }
 
-func adjustFixedListLines(originalList, fixedList *[]NodeInfo) {
+func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
 	differenceAtTop := (*originalList)[0].node.Line - (*fixedList)[0].node.Line
 
 	if differenceAtTop <= 0 {
@@ -47,7 +47,7 @@ func adjustFixedListLines(originalList, fixedList *[]NodeInfo) {
 	}
 
 	for _, node := range *fixedList {
-		// Line numbers should not be changed for new nodes.
+		// line numbers should not be changed for new nodes.
 		if node.node.Line != 0 {
 			node.node.Line += differenceAtTop
 		}
@@ -57,8 +57,8 @@ func adjustFixedListLines(originalList, fixedList *[]NodeInfo) {
 
 }
 
-func constructDFSOrderHelper(node *yaml.Node, parent *yaml.Node, dfsOrder *[]NodeInfo, index int) {
-	dfsNode := NodeInfo{
+func constructDFSOrderHelper(node *yaml.Node, parent *yaml.Node, dfsOrder *[]nodeInfo, index int) {
+	dfsNode := nodeInfo{
 		node:   node,
 		parent: parent,
 		index:  index,
@@ -86,7 +86,7 @@ func constructNewReader(filename string) (io.Reader, error) {
 	return reader, nil
 }
 
-func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]NodeInfo, tracker int) (string, error) {
+func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {
 	content := make([]*yaml.Node, 0)
 	currentNode := (*nodeList)[tracker].node
 	content = append(content, currentNode)
@@ -119,7 +119,7 @@ func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]NodeInfo, tracker int) (
 	return fmt.Sprintf(`%v`, buf.String()), nil
 }
 
-func constructContent(parentNode *yaml.Node, nodeList *[]NodeInfo, tracker int) string {
+func constructContent(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) string {
 	content, err := enocodeIntoYaml(parentNode, nodeList, tracker)
 	if err != nil {
 		logger.L().Fatal("Cannot Encode into YAML")
@@ -168,7 +168,7 @@ func getLinesSlice(filePath string) ([]string, error) {
 	return lineSlice, err
 }
 
-func getLineToInsert(fixInfoMetadata *FixInfoMetadata) int {
+func getLineToInsert(fixInfoMetadata *fixInfoMetadata) int {
 	var lineToInsert int
 	// Check if lineToInsert is last line
 	if fixInfoMetadata.originalListTracker < 0 {
@@ -181,18 +181,18 @@ func getLineToInsert(fixInfoMetadata *FixInfoMetadata) int {
 	return lineToInsert
 }
 
-func assignLastLine(contentsToAdd *[]ContentToAdd, linesToRemove *[]LinesToRemove, linesSlice *[]string) {
+func assignLastLine(contentsToAdd *[]contentToAdd, linesToRemove *[]linesToRemove, linesSlice *[]string) {
 	for idx, contentToAdd := range *contentsToAdd {
-		if contentToAdd.Line < 0 {
-			currentLine := int(math.Abs(float64(contentToAdd.Line)))
-			(*contentsToAdd)[idx].Line, _ = getLastLineOfResource(linesSlice, currentLine)
+		if contentToAdd.line < 0 {
+			currentLine := int(math.Abs(float64(contentToAdd.line)))
+			(*contentsToAdd)[idx].line, _ = getLastLineOfResource(linesSlice, currentLine)
 		}
 	}
 
 	for idx, lineToRemove := range *linesToRemove {
-		if lineToRemove.EndLine < 0 {
-			endLine, _ := getLastLineOfResource(linesSlice, lineToRemove.StartLine)
-			(*linesToRemove)[idx].EndLine = endLine
+		if lineToRemove.endLine < 0 {
+			endLine, _ := getLastLineOfResource(linesSlice, lineToRemove.startLine)
+			(*linesToRemove)[idx].endLine = endLine
 		}
 	}
 }
@@ -231,7 +231,7 @@ func getLastLineOfResource(linesSlice *[]string, currentLine int) (int, error) {
 	return 0, fmt.Errorf("Provided line is greater than the length of YAML file")
 }
 
-func getNodeLine(nodeList *[]NodeInfo, tracker int) int {
+func getNodeLine(nodeList *[]nodeInfo, tracker int) int {
 	if tracker < len(*nodeList) {
 		return (*nodeList)[tracker].node.Line
 	} else {
@@ -240,7 +240,7 @@ func getNodeLine(nodeList *[]NodeInfo, tracker int) int {
 }
 
 // Checks if the node is value node in "key-value" pairs of mapping node
-func isValueNodeinMapping(node *NodeInfo) bool {
+func isValueNodeinMapping(node *nodeInfo) bool {
 	if node.parent.Kind == yaml.MappingNode && node.index%2 != 0 {
 		return true
 	}
@@ -248,13 +248,13 @@ func isValueNodeinMapping(node *NodeInfo) bool {
 }
 
 // Checks if the node is part of single line sequence node and returns the line
-func isOneLineSequenceNode(list *[]NodeInfo, currentTracker int) (bool, int) {
+func isOneLineSequenceNode(list *[]nodeInfo, currentTracker int) (bool, int) {
 	parentNode := (*list)[currentTracker].parent
 	if parentNode.Kind != yaml.SequenceNode {
 		return false, -1
 	}
 
-	var currentNode, prevNode NodeInfo
+	var currentNode, prevNode nodeInfo
 	currentTracker -= 1
 
 	for (*list)[currentTracker].node != parentNode {
@@ -346,7 +346,7 @@ func safelyCloseFile(file *os.File) {
 
 // Remove the entire line and replace it with the sequence node in fixed info. This way,
 // the original formatting is lost.
-func replaceSingleLineSequence(fixInfoMetadata *FixInfoMetadata, line int) (int, int) {
+func replaceSingleLineSequence(fixInfoMetadata *fixInfoMetadata, line int) (int, int) {
 	originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
 	fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
 
@@ -354,15 +354,15 @@ func replaceSingleLineSequence(fixInfoMetadata *FixInfoMetadata, line int) (int,
 	contentToInsert := constructContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
 
 	// Remove the Single line
-	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, LinesToRemove{
-		StartLine: line,
-		EndLine:   line,
+	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{
+		startLine: line,
+		endLine:   line,
 	})
 
 	// Encode entire Sequence Node and Insert
-	*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, ContentToAdd{
-		Line:    line,
-		Content: contentToInsert,
+	*fixInfoMetadata.contentToAdd = append(*fixInfoMetadata.contentToAdd, contentToAdd{
+		line:    line,
+		content: contentToInsert,
 	})
 
 	originalListTracker = updateTracker(fixInfoMetadata.originalList, originalListTracker)
@@ -372,7 +372,7 @@ func replaceSingleLineSequence(fixInfoMetadata *FixInfoMetadata, line int) (int,
 }
 
 // Returns the first node in the given line that is not mapping node
-func getFirstNodeInLine(list *[]NodeInfo, line int) int {
+func getFirstNodeInLine(list *[]nodeInfo, line int) int {
 	tracker := 0
 
 	currentNode := (*list)[tracker].node
@@ -385,11 +385,11 @@ func getFirstNodeInLine(list *[]NodeInfo, line int) int {
 }
 
 // To not mess with the line number while inserting, removed lines are not deleted but replaced with "*"
-func removeLines(linesToRemove *[]LinesToRemove, linesSlice *[]string) {
+func removeLines(linesToRemove *[]linesToRemove, linesSlice *[]string) {
 	var startLine, endLine int
 	for _, lineToRemove := range *linesToRemove {
-		startLine = lineToRemove.StartLine - 1
-		endLine = lineToRemove.EndLine - 1
+		startLine = lineToRemove.startLine - 1
+		endLine = lineToRemove.endLine - 1
 
 		for line := startLine; line <= endLine; line++ {
 			lineContent := (*linesSlice)[line]
@@ -471,7 +471,7 @@ func truncateContentAtHead(filePath string) (string, error) {
 
 // The current node along with it's children is skipped and the tracker is moved to next sibling
 // of current node. If parent is mapping node, "value" in "key-value" pairs is also skipped.
-func updateTracker(nodeList *[]NodeInfo, tracker int) int {
+func updateTracker(nodeList *[]nodeInfo, tracker int) int {
 	currentNode := (*nodeList)[tracker]
 	var updatedTracker int
 

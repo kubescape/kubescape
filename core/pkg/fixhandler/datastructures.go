@@ -23,13 +23,13 @@ type ResourceFixInfo struct {
 	DocumentIndex   int
 }
 
-type FileFixInfo struct {
-	ContentToAdd  []ContentToAdd
-	LinesToRemove []LinesToRemove
+type fileFixInfo struct {
+	contentToAdd  []contentToAdd
+	linesToRemove []linesToRemove
 }
 
 // NodeInfo holds extra information about the node
-type NodeInfo struct {
+type nodeInfo struct {
 	node   *yaml.Node
 	parent *yaml.Node
 
@@ -39,25 +39,25 @@ type NodeInfo struct {
 
 // FixInfoMetadata holds the arguments "getFixInfo" function needs to pass to the
 // functions it uses
-type FixInfoMetadata struct {
-	originalList        *[]NodeInfo
-	fixedList           *[]NodeInfo
+type fixInfoMetadata struct {
+	originalList        *[]nodeInfo
+	fixedList           *[]nodeInfo
 	originalListTracker int
 	fixedListTracker    int
-	contentToAdd        *[]ContentToAdd
-	linesToRemove       *[]LinesToRemove
+	contentToAdd        *[]contentToAdd
+	linesToRemove       *[]linesToRemove
 }
 
 // ContentToAdd holds the information about where to insert the new changes in the existing yaml file
-type ContentToAdd struct {
+type contentToAdd struct {
 	// Line where the fix should be applied to
-	Line int
+	line int
 	// Content is a string representation of the YAML node that describes a suggested fix
-	Content string
+	content string
 }
 
 // LinesToRemove holds the line numbers to remove from the existing yaml file
-type LinesToRemove struct {
-	StartLine int
-	EndLine   int
+type linesToRemove struct {
+	startLine int
+	endLine   int
 }
