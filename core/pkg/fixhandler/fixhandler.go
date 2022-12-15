@@ -247,10 +247,15 @@ func (h *FixHandler) updateFileFixInfo(filePath string, yamlExpression string, d
 	originalList := constructDFSOrder(&originalYamlNode)
 	fixedList := constructDFSOrder(&fixedYamlNode)
 
-	contentToAdd, linesToRemove := getFixInfo(originalList, fixedList)
+	contentsToAdd, linesToRemove := getFixInfo(originalList, fixedList)
 
-	fileFixInfo.contentToAdd = append(fileFixInfo.contentToAdd, *contentToAdd...)
-	fileFixInfo.linesToRemove = append(fileFixInfo.linesToRemove, *linesToRemove...)
+	for _, content := range *contentsToAdd {
+		fileFixInfo.addContent(content)
+	}
+
+	for _, lines := range *linesToRemove {
+		fileFixInfo.addLinesToRemove(lines)
+	}
 
 	return nil
 
