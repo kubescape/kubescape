@@ -60,9 +60,11 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 			if err != nil {
 				return frameworks, policyDownloadError(err)
 			}
+			if err := validateFramework(receivedFramework); err != nil {
+				return frameworks, err
+			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
-
 				cache := getter.GetDefaultPath(rule.Name + ".json")
 				if err := getter.SaveInFile(receivedFramework, cache); err != nil {
 					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
