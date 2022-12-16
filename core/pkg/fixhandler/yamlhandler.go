@@ -13,7 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func constructDecodedYaml(yamlString string) *[]yaml.Node {
+// decodeDocumentRoots decodes all YAML documents stored in a given `filepath` and returns a slice of their root nodes
+func decodeDocumentRoots(yamlString string) *[]yaml.Node {
 	fileReader := strings.NewReader(yamlString)
 	dec := yaml.NewDecoder(fileReader)
 
@@ -35,7 +36,7 @@ func constructDecodedYaml(yamlString string) *[]yaml.Node {
 	return &nodes
 }
 
-func constructFixedYamlNodes(yamlString, yamlExpression string) (*[]yaml.Node, error) {
+func getFixedNodes(yamlString, yamlExpression string) (*[]yaml.Node, error) {
 	preferences := yqlib.ConfiguredYamlPreferences
 	preferences.EvaluateTogether = true
 	decoder := yqlib.NewYamlDecoder(preferences)
@@ -67,29 +68,22 @@ func constructFixedYamlNodes(yamlString, yamlExpression string) (*[]yaml.Node, e
 	return &fixedNodes, nil
 }
 
-func constructDFSOrder(node *yaml.Node) *[]nodeInfo {
+func flattenWithDFS(node *yaml.Node) *[]nodeInfo {
 	dfsOrder := make([]nodeInfo, 0)
-	constructDFSOrderHelper(node, nil, &dfsOrder, 0)
+	flattenWithDFSHelper(node, nil, &dfsOrder, 0)
 	return &dfsOrder
 }
 
-func matchNodes(nodeOne, nodeTwo *yaml.Node) int {
+func flattenWithDFSHelper(node *yaml.Node, parent *yaml.Node, dfsOrder *[]nodeInfo, index int) {
+	dfsNode := nodeInfo{
+		node:   node,
+		parent: parent,
+		index:  index,
+	}
+	*dfsOrder = append(*dfsOrder, dfsNode)
 
-	isNewNode := nodeTwo.Line == 0 && nodeTwo.Column == 0
-	sameLines := nodeOne.Line == nodeTwo.Line
-	sameColumns := nodeOne.Column == nodeTwo.Column
-
-	isSameNode := isSameNode(nodeOne, nodeTwo)
-
-	switch {
-	case isSameNode:
-		return int(sameNodes)
-	case isNewNode:
-		return int(insertedNode)
-	case sameLines && sameColumns:
-		return int(replacedNode)
-	default:
-		return int(removedNode)
+	for idx, child := range node.Content {
+		flattenWithDFSHelper(child, node, dfsOrder, idx)
 	}
 }
 
@@ -97,9 +91,9 @@ func getFixInfo(originalRootNodes, fixedRootNodes *[]yaml.Node) (*[]contentToAdd
 	contentToAdd := make([]contentToAdd, 0)
 	linesToRemove := make([]linesToRemove, 0)
 
-	for idx, _ := range *fixedRootNodes {
-		originalList := constructDFSOrder(&(*originalRootNodes)[idx])
-		fixedList := constructDFSOrder(&(*fixedRootNodes)[idx])
+	for idx := 0; idx < len(*fixedRootNodes); idx++ {
+		originalList := flattenWithDFS(&(*originalRootNodes)[idx])
+		fixedList := flattenWithDFS(&(*fixedRootNodes)[idx])
 		nodeContentToAdd, nodeLinesToRemove := getFixInfoHelper(originalList, fixedList)
 		contentToAdd = append(contentToAdd, *nodeContentToAdd...)
 		linesToRemove = append(linesToRemove, *nodeLinesToRemove...)
@@ -136,17 +130,17 @@ func getFixInfoHelper(originalList, fixedList *[]nodeInfo) (*[]contentToAdd, *[]
 		fixInfoMetadata.fixedListTracker = fixedListTracker
 
 		switch matchNodeResult {
-		case int(sameNodes):
+		case sameNodes:
 			originalListTracker += 1
 			fixedListTracker += 1
 
-		case int(removedNode):
+		case removedNode:
 			originalListTracker, fixedListTracker = addLinesToRemove(fixInfoMetadata)
 
-		case int(insertedNode):
+		case insertedNode:
 			originalListTracker, fixedListTracker = addLinesToInsert(fixInfoMetadata)
 
-		case int(replacedNode):
+		case replacedNode:
 			originalListTracker, fixedListTracker = updateLinesToReplace(fixInfoMetadata)
 		}
 	}

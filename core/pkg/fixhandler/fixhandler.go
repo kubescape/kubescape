@@ -234,8 +234,8 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 func (h *FixHandler) ApplyFix(yamlString, yamlExpression string) (fixedYamlString string, err error) {
 	yamlLines := strings.Split(yamlString, "\n")
 
-	originalRootNodes := constructDecodedYaml(yamlString)
-	fixedRootNodes, err := constructFixedYamlNodes(yamlString, yamlExpression)
+	originalRootNodes := decodeDocumentRoots(yamlString)
+	fixedRootNodes, err := getFixedNodes(yamlString, yamlExpression)
 
 	if err != nil {
 		return "", err

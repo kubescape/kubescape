@@ -17,12 +17,34 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type NodeRelation int
+
 const (
-	sameNodes = iota
+	sameNodes NodeRelation = iota
 	insertedNode
 	removedNode
 	replacedNode
 )
+
+func matchNodes(nodeOne, nodeTwo *yaml.Node) NodeRelation {
+
+	isNewNode := nodeTwo.Line == 0 && nodeTwo.Column == 0
+	sameLines := nodeOne.Line == nodeTwo.Line
+	sameColumns := nodeOne.Column == nodeTwo.Column
+
+	isSameNode := isSameNode(nodeOne, nodeTwo)
+
+	switch {
+	case isSameNode:
+		return sameNodes
+	case isNewNode:
+		return insertedNode
+	case sameLines && sameColumns:
+		return replacedNode
+	default:
+		return removedNode
+	}
+}
 
 func adjustContentLines(contentToAdd *[]contentToAdd, linesSlice *[]string) {
 	for contentIdx, content := range *contentToAdd {
@@ -55,35 +77,6 @@ func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
 
 	return
 
-}
-
-func constructDFSOrderHelper(node *yaml.Node, parent *yaml.Node, dfsOrder *[]nodeInfo, index int) {
-	dfsNode := nodeInfo{
-		node:   node,
-		parent: parent,
-		index:  index,
-	}
-	*dfsOrder = append(*dfsOrder, dfsNode)
-
-	for idx, child := range node.Content {
-		constructDFSOrderHelper(child, node, dfsOrder, idx)
-	}
-}
-
-func constructNewReader(filename string) (io.Reader, error) {
-	var reader *bufio.Reader
-	if filename == "-" {
-		reader = bufio.NewReader(os.Stdin)
-	} else {
-		// ignore CWE-22 gosec issue - that's more targeted for http based apps that run in a public directory,
-		// and ensuring that it's not possible to give a path to a file outside thar directory.
-		file, err := os.Open(filename) // #nosec
-		if err != nil {
-			return nil, err
-		}
-		reader = bufio.NewReader(file)
-	}
-	return reader, nil
 }
 
 func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {
