@@ -245,7 +245,7 @@ func (h *FixHandler) ApplyFix(yamlString, yamlExpression string) (fixedYamlStrin
 
 	fixedYamlLines := getFixedYamlLines(yamlLines, contentsToAdd, linesToRemove)
 
-	fixedYamlString = getFixedYamlString(fixedYamlLines)
+	fixedYamlString = getStringFromSlice(fixedYamlLines)
 
 	return fixedYamlString, nil
 }
@@ -297,6 +297,25 @@ func reduceYamlExpressions(resource *ResourceFixInfo) string {
 	return strings.Join(expressions, " | ")
 }
 
+func fixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
+	isStringValue := true
+	if _, err := strconv.ParseBool(value); err == nil {
+		isStringValue = false
+	} else if _, err := strconv.ParseFloat(value, 64); err == nil {
+		isStringValue = false
+	} else if _, err := strconv.Atoi(value); err == nil {
+		isStringValue = false
+	}
+
+	// Strings should be quoted
+	if isStringValue {
+		value = fmt.Sprintf("\"%s\"", value)
+	}
+
+	// select document index and add a dot for the root node
+	return fmt.Sprintf("select(di==%d).%s |= %s", documentIndexInYaml, fixPath, value)
+}
+
 func joinStrings(inputStrings ...string) string {
 	return strings.Join(inputStrings, "")
 }
@@ -319,23 +338,4 @@ func writeFixesToFile(filepath, content string) error {
 	}
 
 	return nil
-}
-
-func fixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
-	isStringValue := true
-	if _, err := strconv.ParseBool(value); err == nil {
-		isStringValue = false
-	} else if _, err := strconv.ParseFloat(value, 64); err == nil {
-		isStringValue = false
-	} else if _, err := strconv.Atoi(value); err == nil {
-		isStringValue = false
-	}
-
-	// Strings should be quoted
-	if isStringValue {
-		value = fmt.Sprintf("\"%s\"", value)
-	}
-
-	// select document index and add a dot for the root node
-	return fmt.Sprintf("select(di==%d).%s |= %s", documentIndexInYaml, fixPath, value)
 }

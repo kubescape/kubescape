@@ -151,7 +151,7 @@ func TestApplyFixKeepsIndentation(t *testing.T) {
 		got, _ := h.ApplyFix(string(input), expression)
 
 		if got != string(want) {
-			t.Errorf("Fixed file does not match the expected.\nGot: <%s>\nWant:<%s>", got, want)
+			t.Errorf("Fixed file does not match the expected.\n FilePath: %s \nGot: <%s>\nWant:<%s>", tc.inputFile, got, want)
 		}
 
 	}

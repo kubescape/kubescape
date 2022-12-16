@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"math"
 	"os"
 	"strings"
@@ -112,7 +111,7 @@ func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (
 	return fmt.Sprintf(`%v`, buf.String()), nil
 }
 
-func constructContent(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) string {
+func getContent(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) string {
 	content, err := enocodeIntoYaml(parentNode, nodeList, tracker)
 	if err != nil {
 		logger.L().Fatal("Cannot Encode into YAML")
@@ -135,30 +134,6 @@ func indentContent(content string, indentationSpaces int) string {
 		indentedContent += (indentSpaces + line + "\n")
 	}
 	return indentedContent
-}
-
-// Get the lines of existing yaml in a slice
-func getLinesSlice(filePath string) ([]string, error) {
-	lineSlice := make([]string, 0)
-
-	file, err := os.Open(filePath)
-	if err != nil {
-		logger.L().Fatal(fmt.Sprintf("Cannot open file %s", filePath))
-		return nil, err
-	}
-	defer file.Close()
-
-	scanner := bufio.NewScanner(file)
-
-	for scanner.Scan() {
-		lineSlice = append(lineSlice, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		log.Fatal(err)
-		return nil, err
-	}
-
-	return lineSlice, err
 }
 
 func getLineToInsert(fixInfoMetadata *fixInfoMetadata) int {
@@ -344,7 +319,7 @@ func replaceSingleLineSequence(fixInfoMetadata *fixInfoMetadata, line int) (int,
 	fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
 
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixedListTracker]
-	contentToInsert := constructContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+	contentToInsert := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
 
 	// Remove the Single line
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{
@@ -410,58 +385,6 @@ func getChildrenCount(node *yaml.Node) int {
 	return totalChildren
 }
 
-// Truncates the comments and empty lines at the top of the file and
-// returns the truncated content
-func truncateContentAtHead(filePath string) (string, error) {
-	var contentAtHead string
-
-	linesSlice, err := getLinesSlice(filePath)
-
-	if err != nil {
-		return "", err
-	}
-
-	if err := os.Truncate(filePath, 0); err != nil {
-		return "", err
-	}
-
-	file, err := os.OpenFile(filePath, os.O_RDWR, 0644)
-	if err != nil {
-		return "", err
-	}
-
-	defer func() error {
-		if err := file.Close(); err != nil {
-			return err
-		}
-		return nil
-	}()
-
-	lineIdx := 0
-
-	for lineIdx < len(linesSlice) {
-		if isEmptyLineOrComment(linesSlice[lineIdx]) {
-			contentAtHead += (linesSlice[lineIdx] + "\n")
-			lineIdx += 1
-		} else {
-			break
-		}
-	}
-
-	writer := bufio.NewWriter(file)
-
-	for lineIdx < len(linesSlice) {
-		_, err = writer.WriteString(linesSlice[lineIdx] + "\n")
-		if err != nil {
-			return "", err
-		}
-		lineIdx += 1
-	}
-
-	writer.Flush()
-	return contentAtHead, nil
-}
-
 // The current node along with it's children is skipped and the tracker is moved to next sibling
 // of current node. If parent is mapping node, "value" in "key-value" pairs is also skipped.
 func updateTracker(nodeList *[]nodeInfo, tracker int) int {
@@ -478,6 +401,6 @@ func updateTracker(nodeList *[]nodeInfo, tracker int) int {
 	return updatedTracker
 }
 
-func getFixedYamlString(yamlLines []string) (fixedYamlString string) {
+func getStringFromSlice(yamlLines []string) (fixedYamlString string) {
 	return strings.Join(yamlLines, "\n")
 }

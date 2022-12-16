@@ -196,7 +196,7 @@ func addLinesToInsert(fixInfoMetadata *fixInfoMetadata) (int, int) {
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixInfoMetadata.fixedListTracker]
 
 	lineToInsert := getLineToInsert(fixInfoMetadata)
-	contentToInsert := constructContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
+	contentToInsert := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
 	newFixedTracker := updateTracker(fixInfoMetadata.fixedList, fixInfoMetadata.fixedListTracker)
 
