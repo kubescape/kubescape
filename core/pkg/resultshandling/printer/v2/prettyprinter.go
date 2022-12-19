@@ -50,6 +50,7 @@ func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessio
 }
 
 func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
+
 	prettyPrinter.writer = printer.GetWriter(outputFile)
 }
 

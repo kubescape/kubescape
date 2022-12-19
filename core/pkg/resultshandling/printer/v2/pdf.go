@@ -41,7 +41,7 @@ func NewPdfPrinter() *PdfPrinter {
 
 func (pdfPrinter *PdfPrinter) SetWriter(outputFile string) {
 	// Ensure to have an available output file, otherwise create it.
-	if outputFile == "" {
+	if strings.TrimSpace(outputFile) == "" {
 		outputFile = pdfOutputFile
 	}
 	// Ensure to have the right file extension.

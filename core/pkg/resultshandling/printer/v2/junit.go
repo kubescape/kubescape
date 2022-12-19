@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -14,6 +15,11 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
+)
+
+const (
+	junitOutputFile = "report"
+	junitOutputExt  = ".xml"
 )
 
 /*
@@ -93,6 +99,12 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 }
 
 func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
+	if strings.TrimSpace(outputFile) == "" {
+		outputFile = junitOutputFile
+	}
+	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
+		outputFile = outputFile + junitOutputExt
+	}
 	junitPrinter.writer = printer.GetWriter(outputFile)
 }
 

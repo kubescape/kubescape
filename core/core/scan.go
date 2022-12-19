@@ -95,12 +95,11 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	// setup printers
 	formats := scanInfo.GetFormats()
-	outputs := scanInfo.GetOutputFiles()
 
 	printerHandlers := make([]printer.IPrinter, 0)
-	for formatIdx, format := range formats {
+	for _, format := range formats {
 		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
-		printerHandler.SetWriter(outputs[formatIdx])
+		printerHandler.SetWriter(scanInfo.Output)
 		printerHandlers = append(printerHandlers, printerHandler)
 	}
 

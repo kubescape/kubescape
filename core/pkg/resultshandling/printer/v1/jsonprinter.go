@@ -4,10 +4,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+)
+
+const (
+	jsonOutputFile = "report"
+	jsonOutputExt  = ".json"
 )
 
 type JsonPrinter struct {
@@ -19,6 +26,12 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jsonPrinter *JsonPrinter) SetWriter(outputFile string) {
+	if strings.TrimSpace(outputFile) == "" {
+		outputFile = jsonOutputFile
+	}
+	if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
+		outputFile = outputFile + jsonOutputExt
+	}
 	jsonPrinter.writer = printer.GetWriter(outputFile)
 }
 
@@ -41,7 +54,13 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 	if err != nil {
 		logger.L().Fatal("failed to convert posture report object")
 	}
-	jsonPrinter.writer.Write(postureReportStr)
 
-	printer.LogOutputFile(jsonPrinter.writer.Name())
+	_, err = jsonPrinter.writer.Write(postureReportStr)
+
+	if err != nil {
+		logger.L().Fatal("failed to Write posture report object into JSON output")
+	} else {
+		printer.LogOutputFile(jsonPrinter.writer.Name())
+	}
+
 }
