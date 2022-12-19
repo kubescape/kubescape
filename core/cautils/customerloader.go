@@ -470,10 +470,7 @@ func (c *ClusterConfig) updateConfigMap() error {
 }
 
 func updateConfigFile(configObj *ConfigObj) error {
-	if err := os.WriteFile(ConfigFileFullPath(), configObj.Config(), 0664); err != nil {
-		return err
-	}
-	return nil
+	return os.WriteFile(ConfigFileFullPath(), configObj.Config(), 0664) //nolint:gosec
 }
 
 func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {

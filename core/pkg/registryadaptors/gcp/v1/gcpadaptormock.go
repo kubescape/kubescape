@@ -29,7 +29,7 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImagesVulnerabilities(imageIDs []regist
 
 		resultList = append(resultList, *result)
 
-		return resultList, nil
+		return resultList, nil //nolint:staticcheck // we return at once and shorten the mocked result
 	}
 
 	GCPAdaptorMock.resultList = resultList

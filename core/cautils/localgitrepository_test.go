@@ -27,7 +27,7 @@ func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
 		return nil, err
 	}
 	for _, f := range archive.File {
-		filePath := filepath.Join(destinationFolder, f.Name)
+		filePath := filepath.Join(destinationFolder, f.Name) //nolint:gosec
 		if !strings.HasPrefix(filePath, filepath.Clean(destinationFolder)+string(os.PathSeparator)) {
 			return nil, fmt.Errorf("invalid file path")
 		}
@@ -50,7 +50,7 @@ func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
 			return nil, err
 		}
 
-		if _, err := io.Copy(dstFile, fileInArchive); err != nil {
+		if _, err := io.Copy(dstFile, fileInArchive); err != nil { //nolint:gosec
 			return nil, err
 		}
 
