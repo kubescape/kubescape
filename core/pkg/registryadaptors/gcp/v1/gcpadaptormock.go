@@ -20,13 +20,14 @@ func (GCPAdaptorMock *GCPAdaptorMock) Login() error {
 
 func (GCPAdaptorMock *GCPAdaptorMock) GetImagesVulnerabilities(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageVulnerabilityReport, error) {
 	resultList := make([]registryvulnerabilities.ContainerImageVulnerabilityReport, 0)
-	for _, imageID := range imageIDs {
+	for _, toPin := range imageIDs {
+		imageID := toPin
 		result, err := GCPAdaptorMock.GetImageVulnerability(&imageID)
-		if err == nil {
-			resultList = append(resultList, *result)
-		} else {
+		if err != nil {
 			return nil, err
 		}
+
+		resultList = append(resultList, *result)
 
 		return resultList, nil
 	}
