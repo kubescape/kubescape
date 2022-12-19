@@ -25,7 +25,4 @@ type IKubescape interface {
 
 	// delete
 	DeleteExceptions(deleteexceptions *metav1.DeleteExceptions) error
-
-	// fix
-	Fix(fixInfo *metav1.FixInfo) error
 }
