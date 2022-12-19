@@ -65,18 +65,15 @@ func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureRepo
 // HandleResults handle the scan results according to the pre defined interfaces
 func (resultsHandler *ResultsHandler) HandleResults() error {
 
-	printerObjs := resultsHandler.printerObjs
-
-	for _, printerObj := range printerObjs {
-		printerObj.ActionPrint(resultsHandler.scanData)
-	}
-
 	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
 		return err
 	}
 
-	for _, printerObj := range printerObjs {
-		printerObj.Score(resultsHandler.GetRiskScore())
+	printerObjs := resultsHandler.printerObjs
+
+	for i := range printerObjs {
+		printerObjs[i].Score(resultsHandler.GetRiskScore())
+		printerObjs[i].ActionPrint(resultsHandler.scanData)
 	}
 
 	resultsHandler.reporterObj.DisplayReportURL()

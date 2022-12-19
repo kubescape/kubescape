@@ -191,37 +191,6 @@ func (scanInfo *ScanInfo) GetFormats() []string {
 	return strings.Split(scanInfo.Format, ",")
 }
 
-func (scanInfo *ScanInfo) GetOutputFiles() []string {
-	formats := scanInfo.GetFormats()
-	outputs := make([]string, 0)
-
-	for _, format := range formats {
-		if scanInfo.Output == "" {
-			outputs = append(outputs, "")
-		}
-
-		output := scanInfo.Output
-
-		if format == "json" {
-			if filepath.Ext(output) != ".json" {
-				output += ".json"
-			}
-		}
-		if format == "junit" {
-			if filepath.Ext(output) != ".xml" {
-				output += ".xml"
-			}
-		}
-		if format == "pdf" {
-			if filepath.Ext(output) != ".pdf" {
-				output += ".pdf"
-			}
-		}
-		outputs = append(outputs, output)
-	}
-	return outputs
-}
-
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
 		if !scanInfo.contains(policy) {

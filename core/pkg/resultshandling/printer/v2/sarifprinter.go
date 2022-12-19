@@ -66,7 +66,7 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(outputFile string) {
-	if outputFile == "" {
+	if strings.TrimSpace(outputFile) == "" {
 		outputFile = sarifOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {

@@ -39,7 +39,7 @@ func NewHtmlPrinter() *HtmlPrinter {
 }
 
 func (htmlPrinter *HtmlPrinter) SetWriter(outputFile string) {
-	if outputFile == "" {
+	if strings.TrimSpace(outputFile) == "" {
 		outputFile = htmlOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
