@@ -28,56 +28,56 @@ func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrin
 }
 
 // GetScore return scan risk-score
-func (resultsHandler *ResultsHandler) GetRiskScore() float32 {
-	return resultsHandler.scanData.Report.SummaryDetails.Score
+func (rh *ResultsHandler) GetRiskScore() float32 {
+	return rh.scanData.Report.SummaryDetails.Score
 }
 
 // GetData get scan/action related data (policies, resources, results, etc.). Call ToJson function if you wish the json representation of the data
-func (resultsHandler *ResultsHandler) GetData() *cautils.OPASessionObj {
-	return resultsHandler.scanData
+func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
+	return rh.scanData
 }
 
 // SetData set scan/action related data
-func (resultsHandler *ResultsHandler) SetData(data *cautils.OPASessionObj) {
-	resultsHandler.scanData = data
+func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
+	rh.scanData = data
 }
 
 // GetPrinter get printer object
-func (resultsHandler *ResultsHandler) GetPrinters() []printer.IPrinter {
-	return resultsHandler.printerObjs
+func (rh *ResultsHandler) GetPrinters() []printer.IPrinter {
+	return rh.printerObjs
 }
 
 // GetReporter get reporter object
-func (resultsHandler *ResultsHandler) GetReporter() reporter.IReport {
-	return resultsHandler.reporterObj
+func (rh *ResultsHandler) GetReporter() reporter.IReport {
+	return rh.reporterObj
 }
 
 // ToJson return results in json format
-func (resultsHandler *ResultsHandler) ToJson() ([]byte, error) {
-	return json.Marshal(printerv2.FinalizeResults(resultsHandler.scanData))
+func (rh *ResultsHandler) ToJson() ([]byte, error) {
+	return json.Marshal(printerv2.FinalizeResults(rh.scanData))
 }
 
 // GetResults return results
-func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
-	return printerv2.FinalizeResults(resultsHandler.scanData)
+func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
+	return printerv2.FinalizeResults(rh.scanData)
 }
 
 // HandleResults handles all necessary actions for the scan results
-func (resultsHandler *ResultsHandler) HandleResults() error {
-	for _, printer := range resultsHandler.printerObjs {
+func (rh *ResultsHandler) HandleResults() error {
+	for _, printer := range rh.printerObjs {
 		// First we output the results and then the score, so the
 		// score—a summary of the results—can always be seen at the end
 		// of output
-		printer.ActionPrint(resultsHandler.scanData)
-		printer.Score(resultsHandler.GetRiskScore())
+		printer.ActionPrint(rh.scanData)
+		printer.Score(rh.GetRiskScore())
 	}
 
 	// We should submit only after printing results, so a user can see
 	// results at all times, even if submission fails
-	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
+	if err := rh.reporterObj.Submit(rh.scanData); err != nil {
 		return err
 	}
-	resultsHandler.reporterObj.DisplayReportURL()
+	rh.reporterObj.DisplayReportURL()
 
 	return nil
 }
