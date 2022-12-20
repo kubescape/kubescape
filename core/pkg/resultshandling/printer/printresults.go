@@ -46,7 +46,7 @@ func GetWriter(outputFile string) *os.File {
 }
 
 func LogOutputFile(fileName string) {
-	if fileName != "/dev/stdout" && fileName != "/dev/stderr" {
+	if fileName != os.Stdout.Name() && fileName != os.Stderr.Name() {
 		logger.L().Success("Scan results saved", helpers.String("filename", fileName))
 	}
 }
