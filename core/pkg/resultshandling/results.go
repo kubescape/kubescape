@@ -62,20 +62,21 @@ func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureRepo
 	return printerv2.FinalizeResults(resultsHandler.scanData)
 }
 
-// HandleResults handle the scan results according to the pre defined interfaces
+// HandleResults handles all necessary actions for the scan results
 func (resultsHandler *ResultsHandler) HandleResults() error {
+	for _, printer := range resultsHandler.printerObjs {
+		// First we output the results and then the score, so the
+		// score—a summary of the results—can always be seen at the end
+		// of output
+		printer.ActionPrint(resultsHandler.scanData)
+		printer.Score(resultsHandler.GetRiskScore())
+	}
 
+	// We should submit only after printing results, so a user can see
+	// results at all times, even if submission fails
 	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
 		return err
 	}
-
-	printerObjs := resultsHandler.printerObjs
-
-	for i := range printerObjs {
-		printerObjs[i].Score(resultsHandler.GetRiskScore())
-		printerObjs[i].ActionPrint(resultsHandler.scanData)
-	}
-
 	resultsHandler.reporterObj.DisplayReportURL()
 
 	return nil
