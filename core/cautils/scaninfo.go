@@ -189,7 +189,12 @@ func (scanInfo *ScanInfo) setUseFrom() {
 
 // Formats returns a slice of output formats that have been requested for a given scan
 func (scanInfo *ScanInfo) Formats() []string {
-	return strings.Split(scanInfo.Format, ",")
+	formatString := scanInfo.Format
+	if formatString != "" {
+		return strings.Split(scanInfo.Format, ",")
+	} else {
+		return []string{}
+	}
 }
 
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {

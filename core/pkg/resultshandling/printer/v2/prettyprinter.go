@@ -3,7 +3,9 @@ package printer
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/enescakir/emoji"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -14,6 +16,11 @@ import (
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
+)
+
+const (
+	prettyPrinterOutputFile = "report"
+	prettyPrinterOutputExt  = ".txt"
 )
 
 type PrettyPrinter struct {
@@ -50,6 +57,20 @@ func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessio
 }
 
 func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
+	// PrettyPrinter should accept Stdout at least by its full name (path)
+	// and follow the common behavior of outputting to a default filename
+	// otherwise
+	if outputFile == os.Stdout.Name() {
+		prettyPrinter.writer = printer.GetWriter("")
+		return
+	}
+
+	if strings.TrimSpace(outputFile) == "" {
+		outputFile = prettyPrinterOutputFile
+	}
+	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
+		outputFile = outputFile + prettyPrinterOutputExt
+	}
 
 	prettyPrinter.writer = printer.GetWriter(outputFile)
 }
