@@ -94,7 +94,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, scanInfo.GetScanningContext())
 
 	// setup printers
-	formats := scanInfo.GetFormats()
+	formats := scanInfo.Formats()
 
 	printerHandlers := make([]printer.IPrinter, 0)
 	for _, format := range formats {
