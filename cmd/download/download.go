@@ -24,8 +24,8 @@ var (
   # Download the NSA framework. Run 'kubescape list frameworks' for all frameworks names
   kubescape download framework nsa
 
-  # Download the "HostPath mount" control. Run 'kubescape list controls' for all controls names
-  kubescape download control "HostPath mount"
+  # Download the "C-0001" control. Run 'kubescape list controls --id' for all controls ids
+  kubescape download control "C-0001"
 
   # Download the "C-0001" control. Run 'kubescape list controls --id' for all controls ids
   kubescape download control C-0001
@@ -71,12 +71,7 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			downloadInfo.Target = args[0]
 			if len(args) >= 2 {
 
-				// downloading a control is supported only by id.
-				if downloadInfo.Target == core.TargetControl {
-					downloadInfo.ID = args[1]
-				} else {
-					downloadInfo.Name = args[1]
-				}
+				downloadInfo.Identifier = args[1]
 
 			}
 			if err := ks.Download(&downloadInfo); err != nil {

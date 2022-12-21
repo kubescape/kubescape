@@ -94,8 +94,7 @@ const (
 )
 
 type PolicyIdentifier struct {
-	ID          string                        // policy ID e.g. c-0012 - relevant only to kind=control
-	Name        string                        // policy name e.g. nsa,mitre
+	Identifier  string                        // policy Identifier e.g. c-0012 for control, nsa,mitre for frameworks
 	Kind        apisv1.NotificationPolicyKind // policy kind e.g. Framework,Control,Rule
 	Designators armotypes.PortalDesignator
 }
@@ -184,7 +183,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		for _, policy := range scanInfo.PolicyIdentifier {
-			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Name+".json"))
+			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Identifier+".json"))
 		}
 	}
 }
@@ -215,13 +214,7 @@ func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.No
 		if !scanInfo.contains(policy) {
 			newPolicy := PolicyIdentifier{}
 			newPolicy.Kind = kind
-			// control can be identified only by it's id.
-			if kind == apisv1.KindControl {
-				newPolicy.ID = policy
-			} else {
-				newPolicy.Name = policy
-			}
-
+			newPolicy.Identifier = policy
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 		}
 	}
@@ -229,7 +222,7 @@ func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.No
 
 func (scanInfo *ScanInfo) contains(policyName string) bool {
 	for _, policy := range scanInfo.PolicyIdentifier {
-		if policy.Name == policyName {
+		if policy.Identifier == policyName {
 			return true
 		}
 	}
@@ -257,7 +250,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	}
 	// append frameworks
 	for _, policy := range scanInfo.PolicyIdentifier {
-		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Name)
+		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Identifier)
 	}
 
 	metadata.ScanMetadata.KubescapeVersion = BuildNumber

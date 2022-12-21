@@ -93,7 +93,7 @@ func downloadArtifacts(downloadInfo *metav1.DownloadInfo) error {
 func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Name, tenant.GetAccountID(), nil)
+	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Identifier, tenant.GetAccountID(), nil)
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
 	if err != nil {
 		return err
@@ -167,7 +167,7 @@ func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), true, nil)
 
-	if downloadInfo.Name == "" {
+	if downloadInfo.Identifier == "" {
 		// if framework name not specified - download all frameworks
 		frameworks, err := g.GetFrameworks()
 		if err != nil {
@@ -184,9 +184,9 @@ func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 		// return fmt.Errorf("missing framework name")
 	} else {
 		if downloadInfo.FileName == "" {
-			downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Name)
+			downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Identifier)
 		}
-		framework, err := g.GetFramework(downloadInfo.Name)
+		framework, err := g.GetFramework(downloadInfo.Identifier)
 		if err != nil {
 			return err
 		}
@@ -209,25 +209,25 @@ func downloadControl(downloadInfo *metav1.DownloadInfo) error {
 
 	g := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
 
-	if downloadInfo.ID == "" {
+	if downloadInfo.Identifier == "" {
 		// TODO - support
 		return fmt.Errorf("missing control ID")
 	}
 	if downloadInfo.FileName == "" {
-		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.ID)
+		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Identifier)
 	}
-	controls, err := g.GetControl(downloadInfo.ID)
+	controls, err := g.GetControl(downloadInfo.Identifier)
 	if err != nil {
-		return fmt.Errorf("failed to download control id '%s',  %s", downloadInfo.ID, err.Error())
+		return fmt.Errorf("failed to download control id '%s',  %s", downloadInfo.Identifier, err.Error())
 	}
 	if controls == nil {
-		return fmt.Errorf("failed to download control id '%s' - received an empty objects", downloadInfo.ID)
+		return fmt.Errorf("failed to download control id '%s' - received an empty objects", downloadInfo.Identifier)
 	}
 	downloadTo := filepath.Join(downloadInfo.Path, downloadInfo.FileName)
 	err = getter.SaveInFile(controls, downloadTo)
 	if err != nil {
 		return err
 	}
-	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("ID", downloadInfo.ID), helpers.String("path", downloadTo))
+	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("ID", downloadInfo.Identifier), helpers.String("path", downloadTo))
 	return nil
 }

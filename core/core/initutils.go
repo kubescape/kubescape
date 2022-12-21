@@ -122,18 +122,18 @@ func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector
 	return &resourcehandler.EmptySelector{}
 }
 
-func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
-	policiesNames := ""
+func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
+	policiesIdentities := ""
 	for i := range pi {
-		policiesNames += pi[i].Name
+		policiesIdentities += pi[i].Identifier
 		if i+1 < len(pi) {
-			policiesNames += ","
+			policiesIdentities += ","
 		}
 	}
-	if policiesNames == "" {
-		policiesNames = "all"
+	if policiesIdentities == "" {
+		policiesIdentities = "all"
 	}
-	return policiesNames
+	return policiesIdentities
 }
 
 // setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Kubescape Cloud BE

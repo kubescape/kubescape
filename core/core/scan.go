@@ -63,7 +63,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== version testing ======================================
 
 	v := cautils.NewIVersionCheckHandler()
-	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
 
 	// ================== setup host scanner object ======================================
 
