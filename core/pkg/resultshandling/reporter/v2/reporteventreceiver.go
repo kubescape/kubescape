@@ -142,7 +142,7 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 		// set result.RawResource
 		resourceID := v.GetResourceID()
 		if _, ok := allResources[resourceID]; !ok {
-			return fmt.Errorf("expected to find raw resource object for '%s'", resourceID)
+			continue
 		}
 		resource := reporthandling.NewResourceIMetadata(allResources[resourceID])
 		if r, ok := resourcesSource[resourceID]; ok {
