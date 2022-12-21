@@ -32,9 +32,9 @@ func TestToScanInfo(t *testing.T) {
 		assert.False(t, s.Submit)
 		assert.False(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
-		assert.Equal(t, "nsa", s.PolicyIdentifier[0].Name)
+		assert.Equal(t, "nsa", s.PolicyIdentifier[0].Identifier)
 		assert.Equal(t, apisv1.KindFramework, s.PolicyIdentifier[0].Kind)
-		assert.Equal(t, "mitre", s.PolicyIdentifier[1].Name)
+		assert.Equal(t, "mitre", s.PolicyIdentifier[1].Identifier)
 		assert.Equal(t, apisv1.KindFramework, s.PolicyIdentifier[1].Kind)
 	}
 	{
@@ -49,7 +49,7 @@ func TestToScanInfo(t *testing.T) {
 		assert.Equal(t, "kube-system,kube-public", s.IncludeNamespaces)
 		assert.Equal(t, "", s.ExcludedNamespaces)
 		assert.Equal(t, 1, len(s.PolicyIdentifier))
-		assert.Equal(t, "c-0001", s.PolicyIdentifier[0].ID)
+		assert.Equal(t, "c-0001", s.PolicyIdentifier[0].Identifier)
 		assert.Equal(t, apisv1.KindControl, s.PolicyIdentifier[0].Kind)
 	}
 	{
