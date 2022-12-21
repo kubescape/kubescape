@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"os"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -10,6 +11,8 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
@@ -253,4 +256,14 @@ func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.Down
 		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
 	}
 	return downloadReleasedPolicy
+}
+
+// getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
+func getUIPrinter(verboseMode bool, formatVersion string, viewType cautils.ViewTypes) printer.IPrinter {
+	p := printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
+
+	// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
+	p.SetWriter(os.Stdout.Name())
+
+	return p
 }

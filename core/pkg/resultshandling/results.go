@@ -17,57 +17,66 @@ import (
 type ResultsHandler struct {
 	reporterObj reporter.IReport
 	printerObjs []printer.IPrinter
+	uiPrinter   printer.IPrinter
 	scanData    *cautils.OPASessionObj
 }
 
-func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter) *ResultsHandler {
+func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {
 	return &ResultsHandler{
 		reporterObj: reporterObj,
 		printerObjs: printerObjs,
+		uiPrinter:   uiPrinter,
 	}
 }
 
-// GetScore return scan risk-score
+// GetScore returns the result’s risk score
 func (rh *ResultsHandler) GetRiskScore() float32 {
 	return rh.scanData.Report.SummaryDetails.Score
 }
 
-// GetData get scan/action related data (policies, resources, results, etc.). Call ToJson function if you wish the json representation of the data
+// GetData returns scan/action related data (policies, resources, results, etc.)
+//
+// Call the ToJson() method if you want the JSON representation of the data
 func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
 	return rh.scanData
 }
 
-// SetData set scan/action related data
+// SetData sets the scan/action related data
 func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
 	rh.scanData = data
 }
 
-// GetPrinter get printer object
+// GetPrinter returns all printers
 func (rh *ResultsHandler) GetPrinters() []printer.IPrinter {
 	return rh.printerObjs
 }
 
-// GetReporter get reporter object
+// GetReporter returns the reporter object
 func (rh *ResultsHandler) GetReporter() reporter.IReport {
 	return rh.reporterObj
 }
 
-// ToJson return results in json format
+// ToJson returns the results in the JSON format
 func (rh *ResultsHandler) ToJson() ([]byte, error) {
 	return json.Marshal(printerv2.FinalizeResults(rh.scanData))
 }
 
-// GetResults return results
+// GetResults returns the results
 func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 	return printerv2.FinalizeResults(rh.scanData)
 }
 
 // HandleResults handles all necessary actions for the scan results
 func (rh *ResultsHandler) HandleResults() error {
+	// Display scan results in the UI first to give immediate value.
+	// First we output the results and then the score, so the
+	// score—a summary of the results—can always be seen at the end
+	// of output
+	rh.uiPrinter.ActionPrint(rh.scanData)
+	rh.uiPrinter.Score(rh.GetRiskScore())
+
+	// Then print to output files
 	for _, printer := range rh.printerObjs {
-		// First we output the results and then the score, so the
-		// score—a summary of the results—can always be seen at the end
-		// of output
 		printer.ActionPrint(rh.scanData)
 		printer.Score(rh.GetRiskScore())
 	}
@@ -82,7 +91,7 @@ func (rh *ResultsHandler) HandleResults() error {
 	return nil
 }
 
-// NewPrinter defined output format
+// NewPrinter returns a new printer for a given format and configuration options
 func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType cautils.ViewTypes) printer.IPrinter {
 
 	switch printFormat {

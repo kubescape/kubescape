@@ -27,7 +27,8 @@ type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
 	report            reporter.IReport
-	printerHandlers   []printer.IPrinter
+	outputPrinters    []printer.IPrinter
+	uiPrinter         printer.IPrinter
 	hostSensorHandler hostsensorutils.IHostSensor
 }
 
@@ -96,12 +97,14 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// setup printers
 	formats := scanInfo.Formats()
 
-	printerHandlers := make([]printer.IPrinter, 0)
+	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
 		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
 		printerHandler.SetWriter(scanInfo.Output)
-		printerHandlers = append(printerHandlers, printerHandler)
+		outputPrinters = append(outputPrinters, printerHandler)
 	}
+
+	uiPrinter := getUIPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, cautils.ViewTypes(scanInfo.View))
 
 	// ================== return interface ======================================
 
@@ -109,7 +112,8 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		tenantConfig:      tenantConfig,
 		resourceHandler:   resourceHandler,
 		report:            reportHandler,
-		printerHandlers:   printerHandlers,
+		outputPrinters:    outputPrinters,
+		uiPrinter:         uiPrinter,
 		hostSensorHandler: hostSensorHandler,
 	}
 }
@@ -147,7 +151,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		}
 	}()
 
-	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.printerHandlers)
+	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
 
 	// ===================== policies & resources =====================
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
