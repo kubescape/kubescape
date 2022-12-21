@@ -187,7 +187,8 @@ func (scanInfo *ScanInfo) setUseFrom() {
 	}
 }
 
-func (scanInfo *ScanInfo) GetFormats() []string {
+// Formats returns a slice of output formats that have been requested for a given scan
+func (scanInfo *ScanInfo) Formats() []string {
 	return strings.Split(scanInfo.Format, ",")
 }
 
