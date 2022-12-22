@@ -38,6 +38,17 @@ func isGitTokenPresent(gitURL giturl.IGitAPI) bool {
 	return true
 }
 
+// Get the error message according to the provider
+func getProviderError(gitURL giturl.IGitAPI) error {
+	switch gitURL.GetProvider(){
+	case "github":
+		return fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
+	case "gitlab":
+		return fmt.Errorf("%w", errors.New("GITLAB_TOKEN is not present"))
+	}
+	return fmt.Errorf("%w", errors.New("unable to find the host name"))
+}
+
 // cloneRepo clones a repository to a local temporary directory and returns the directory
 func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 
@@ -60,9 +71,9 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 		auth = nil
 	} else {
 
-		// Return Error if the GITHUB_TOKEN is not present
+		// Return Error if the AUTH_TOKEN is not present
 		if isGitTokenPresent := isGitTokenPresent(gitURL); !isGitTokenPresent {
-			return "", fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
+			return "", getProviderError(gitURL)
 		}
 		auth = &http.BasicAuth{
 			Username: "anything Except Empty String",

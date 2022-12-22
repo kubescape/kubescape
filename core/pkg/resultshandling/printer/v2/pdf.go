@@ -1,4 +1,4 @@
-package v2
+package printer
 
 import (
 	_ "embed"
@@ -39,22 +39,22 @@ func NewPdfPrinter() *PdfPrinter {
 	return &PdfPrinter{}
 }
 
-func (pdfPrinter *PdfPrinter) SetWriter(outputFile string) {
+func (pp *PdfPrinter) SetWriter(outputFile string) {
 	// Ensure to have an available output file, otherwise create it.
-	if outputFile == "" {
+	if strings.TrimSpace(outputFile) == "" {
 		outputFile = pdfOutputFile
 	}
 	// Ensure to have the right file extension.
 	if filepath.Ext(strings.TrimSpace(outputFile)) != pdfOutputExt {
 		outputFile = outputFile + pdfOutputExt
 	}
-	pdfPrinter.writer = printer.GetWriter(outputFile)
+	pp.writer = printer.GetWriter(outputFile)
 }
 
-func (pdfPrinter *PdfPrinter) Score(score float32) {
+func (pp *PdfPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
 }
-func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap []infoStars) {
+func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap []infoStars) {
 	emptyRowCounter := 1
 	for i := range infoMap {
 		if infoMap[i].info != "" {
@@ -75,16 +75,16 @@ func (pdfPrinter *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsumm
 
 }
 
-func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	sortedControlNames := getSortedControlsNames(opaSessionObj.Report.SummaryDetails.Controls)
+func (pp *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
 	m := pdf.NewMaroto(consts.Portrait, consts.A4)
-	pdfPrinter.printHeader(m)
-	pdfPrinter.printFramework(m, opaSessionObj.Report.SummaryDetails.ListFrameworks())
-	pdfPrinter.printTable(m, &opaSessionObj.Report.SummaryDetails, sortedControlNames)
-	pdfPrinter.printFinalResult(m, &opaSessionObj.Report.SummaryDetails)
-	pdfPrinter.printInfo(m, &opaSessionObj.Report.SummaryDetails, infoToPrintInfo)
+	pp.printHeader(m)
+	pp.printFramework(m, opaSessionObj.Report.SummaryDetails.ListFrameworks())
+	pp.printTable(m, &opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+	pp.printFinalResult(m, &opaSessionObj.Report.SummaryDetails)
+	pp.printInfo(m, &opaSessionObj.Report.SummaryDetails, infoToPrintInfo)
 
 	// Extrat output buffer.
 	outBuff, err := m.Output()
@@ -93,14 +93,15 @@ func (pdfPrinter *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) 
 		return
 	}
 
-	logOUtputFile(pdfPrinter.writer.Name())
-	if _, err := pdfPrinter.writer.Write(outBuff.Bytes()); err != nil {
+	if _, err := pp.writer.Write(outBuff.Bytes()); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(pp.writer.Name())
 	}
 }
 
-// Print Kubescape logo and report date.
-func (pdfPrinter *PdfPrinter) printHeader(m pdf.Maroto) {
+// printHeader prints the Kubescape logo and report date
+func (pp *PdfPrinter) printHeader(m pdf.Maroto) {
 	// Retrieve current time (we need it for the report timestamp).
 	t := time.Now()
 	// Enconde PNG into Base64 to embed it into the pdf.
@@ -136,8 +137,8 @@ func (pdfPrinter *PdfPrinter) printHeader(m pdf.Maroto) {
 	m.Line(1)
 }
 
-// Print pdf frameworks after pdf header.
-func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IFrameworkSummary) {
+// printFramework prints the PDF frameworks after the PDF header
+func (pp *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IFrameworkSummary) {
 	m.Row(10, func() {
 		m.Text(frameworksScoresToString(frameworks), props.Text{
 			Align:  consts.Center,
@@ -148,17 +149,17 @@ func (pdfPrinter *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsu
 	})
 }
 
-// Create pdf table
-func (pdfPrinter *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, sortedControlNames [][]string) {
+// printTable creates the PDF table
+func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 	headers := getControlTableHeaders()
 	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
-	controls := make([][]string, len(sortedControlNames))
+	controls := make([][]string, len(sortedControlIDs))
 	for i := range controls {
 		controls[i] = make([]string, len(headers))
 	}
-	for i := len(sortedControlNames) - 1; i >= 0; i-- {
-		for _, c := range sortedControlNames[i] {
-			controls[i] = generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, c), infoToPrintInfoMap, true)
+	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
+		for _, c := range sortedControlIDs[i] {
+			controls[i] = generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap, true)
 		}
 	}
 
@@ -186,8 +187,8 @@ func (pdfPrinter *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsum
 	m.Row(2, func() {})
 }
 
-// Add final results.
-func (pdfPrinter *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails) {
+// printFinalResult adds the final results
+func (pp *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails) {
 	m.Row(_rowLen, func() {
 		m.Col(3, func() {
 			m.Text("Resource summary", props.Text{

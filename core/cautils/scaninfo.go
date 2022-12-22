@@ -94,7 +94,7 @@ const (
 )
 
 type PolicyIdentifier struct {
-	Name        string                        // policy name e.g. nsa,mitre,c-0012
+	Identifier  string                        // policy Identifier e.g. c-0012 for control, nsa,mitre for frameworks
 	Kind        apisv1.NotificationPolicyKind // policy kind e.g. Framework,Control,Rule
 	Designators armotypes.PortalDesignator
 }
@@ -140,7 +140,6 @@ type Getters struct {
 
 func (scanInfo *ScanInfo) Init() {
 	scanInfo.setUseFrom()
-	scanInfo.setOutputFile()
 	scanInfo.setUseArtifactsFrom()
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
@@ -183,29 +182,18 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		for _, policy := range scanInfo.PolicyIdentifier {
-			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Name+".json"))
+			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Identifier+".json"))
 		}
 	}
 }
 
-func (scanInfo *ScanInfo) setOutputFile() {
-	if scanInfo.Output == "" {
-		return
-	}
-	if scanInfo.Format == "json" {
-		if filepath.Ext(scanInfo.Output) != ".json" {
-			scanInfo.Output += ".json"
-		}
-	}
-	if scanInfo.Format == "junit" {
-		if filepath.Ext(scanInfo.Output) != ".xml" {
-			scanInfo.Output += ".xml"
-		}
-	}
-	if scanInfo.Format == "pdf" {
-		if filepath.Ext(scanInfo.Output) != ".pdf" {
-			scanInfo.Output += ".pdf"
-		}
+// Formats returns a slice of output formats that have been requested for a given scan
+func (scanInfo *ScanInfo) Formats() []string {
+	formatString := scanInfo.Format
+	if formatString != "" {
+		return strings.Split(scanInfo.Format, ",")
+	} else {
+		return []string{}
 	}
 }
 
@@ -214,7 +202,7 @@ func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.No
 		if !scanInfo.contains(policy) {
 			newPolicy := PolicyIdentifier{}
 			newPolicy.Kind = kind
-			newPolicy.Name = policy
+			newPolicy.Identifier = policy
 			scanInfo.PolicyIdentifier = append(scanInfo.PolicyIdentifier, newPolicy)
 		}
 	}
@@ -222,7 +210,7 @@ func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.No
 
 func (scanInfo *ScanInfo) contains(policyName string) bool {
 	for _, policy := range scanInfo.PolicyIdentifier {
-		if policy.Name == policyName {
+		if policy.Identifier == policyName {
 			return true
 		}
 	}
@@ -250,7 +238,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	}
 	// append frameworks
 	for _, policy := range scanInfo.PolicyIdentifier {
-		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Name)
+		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Identifier)
 	}
 
 	metadata.ScanMetadata.KubescapeVersion = BuildNumber

@@ -1,9 +1,10 @@
-package v2
+package printer
 
 import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -14,6 +15,11 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
+)
+
+const (
+	junitOutputFile = "report"
+	junitOutputExt  = ".xml"
 )
 
 /*
@@ -92,24 +98,31 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 	}
 }
 
-func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
-	junitPrinter.writer = printer.GetWriter(outputFile)
+func (jp *JunitPrinter) SetWriter(outputFile string) {
+	if strings.TrimSpace(outputFile) == "" {
+		outputFile = junitOutputFile
+	}
+	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
+		outputFile = outputFile + junitOutputExt
+	}
+	jp.writer = printer.GetWriter(outputFile)
 }
 
-func (junitPrinter *JunitPrinter) Score(score float32) {
+func (jp *JunitPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (jp *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	junitResult := testsSuites(opaSessionObj)
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {
 		logger.L().Fatal("failed to Marshal xml result object", helpers.Error(err))
 	}
 
-	logOUtputFile(junitPrinter.writer.Name())
-	if _, err := junitPrinter.writer.Write(postureReportStr); err != nil {
+	if _, err := jp.writer.Write(postureReportStr); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(jp.writer.Name())
 	}
 }
 

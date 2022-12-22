@@ -1,4 +1,4 @@
-package v2
+package reporter
 
 import (
 	"net/url"
