@@ -3,11 +3,16 @@ package policyhandler
 import (
 	"fmt"
 
+	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/cloudsupport"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 // PolicyHandler -
@@ -51,15 +56,8 @@ func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.
 func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
 
-	// attempting to get cloud provider from API server git version
-	if opaSessionObj.Report.ClusterAPIServerInfo != nil {
-		opaSessionObj.Report.ClusterCloudProvider = cloudsupport.GetCloudProvider(opaSessionObj.Report.ClusterAPIServerInfo.GitVersion)
-	}
-
-	// if didn't succeed getting cloud provider from API server git version, try from context.
-	if opaSessionObj.Report.ClusterCloudProvider == "" {
-		clusterName := k8sinterface.GetContextName()
-		opaSessionObj.Report.ClusterCloudProvider = cloudsupport.GetCloudProvider(clusterName)
+	if cloudMetadata := getCloudMetadata(opaSessionObj); cloudMetadata != nil {
+		opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata = reportv2.NewCloudMetadata(cloudMetadata)
 	}
 
 	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
@@ -79,4 +77,41 @@ func getDesignator(policyIdentifier []cautils.PolicyIdentifier) *armotypes.Porta
 		return &policyIdentifier[0].Designators
 	}
 	return &armotypes.PortalDesignator{}
+}
+
+func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
+	cloudMetadata := getCloudMetadata(opaSessionObj)
+	if cloudMetadata == nil {
+		return
+
+	}
+	opaSessionObj.Report.Metadata.ClusterMetadata.CloudMetadata = reportv2.NewCloudMetadata(cloudMetadata)
+	opaSessionObj.Report.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata = reportv2.NewCloudMetadata(cloudMetadata)
+	opaSessionObj.Report.ClusterCloudProvider = string(cloudMetadata.Provider()) // Fallback
+}
+
+func getCloudMetadata(opaSessionObj *cautils.OPASessionObj) apis.ICloudParser {
+
+	var provider string
+	context := k8sinterface.GetContextName()
+
+	// attempting to get cloud provider from API server git version
+	if opaSessionObj.Report.ClusterAPIServerInfo != nil {
+		provider = cloudsupport.GetCloudProvider(opaSessionObj.Report.ClusterAPIServerInfo.GitVersion)
+	}
+
+	if provider == "" {
+		// Fallback - get provider from context
+		provider = cloudsupport.GetCloudProvider(context)
+	}
+
+	switch provider {
+	case cloudsupportv1.GKE:
+		return helpersv1.NewGKEMetadata(context)
+	case cloudsupportv1.EKS:
+		return helpersv1.NewEKSMetadata(context)
+		// case cloudsupportv1.AKS: TODO: Implement AKS support
+		// 	return helpersv1.NewAKSMetadata()
+	}
+	return nil
 }

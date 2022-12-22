@@ -45,8 +45,7 @@ func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessio
 	if opaSessionObj.Metadata != nil {
 		reportObj.Metadata = *opaSessionObj.Metadata
 		if opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
-			reportObj.ClusterCloudProvider = opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider // DEPRECATED
-			reportObj.Metadata.ClusterMetadata = *opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata
+			reportObj.ClusterCloudProvider = opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider // DEPRECATED - left here as fallback
 		}
 	}
 	return reportObj

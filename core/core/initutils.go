@@ -102,7 +102,7 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	// we need to determined which controls needs host scanner
 	if scanInfo.HostSensorEnabled.Get() == nil && hasHostSensorControls {
 		scanInfo.HostSensorEnabled.SetBool(false) // default - do not run host scanner
-		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag")
+		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using the --enable-host-scan flag")
 	}
 	if hostSensorVal := scanInfo.HostSensorEnabled.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
