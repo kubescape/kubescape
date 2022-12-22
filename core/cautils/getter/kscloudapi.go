@@ -192,7 +192,7 @@ func (api *KSCloudAPI) GetFrameworks() ([]reporthandling.Framework, error) {
 	return frameworks, err
 }
 
-func (api *KSCloudAPI) GetControl(policyName string) (*reporthandling.Control, error) {
+func (api *KSCloudAPI) GetControl(ID string) (*reporthandling.Control, error) {
 	return nil, fmt.Errorf("control api is not public")
 }
 
