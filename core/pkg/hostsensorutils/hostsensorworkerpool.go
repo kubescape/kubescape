@@ -47,10 +47,7 @@ func (wp *workerPool) hostSensorWorker(hsh *HostSensorHandler, wg *sync.WaitGrou
 	for job := range wp.jobs {
 		hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
 		if err != nil {
-			// TODO: Add to the condition also cloud provider (as in main cloud providers there is no access to control plane)
-			if job.path != "/controlPlaneInfo" {
-				logger.L().Error("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
-			}
+			logger.L().Error("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
 		} else {
 			wp.results <- hostSensorDataEnvelope
 		}
