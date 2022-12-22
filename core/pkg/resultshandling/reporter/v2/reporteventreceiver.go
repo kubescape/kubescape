@@ -268,7 +268,7 @@ func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
 		switch report.submitContext {
 		case SubmitContextScan:
-			urlObj.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+			urlObj.Path = fmt.Sprintf("config-scanning/%s", report.clusterName)
 		case SubmitContextRBAC:
 			urlObj.Path = "rbac-visualizer"
 		case SubmitContextRepository:
