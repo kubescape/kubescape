@@ -48,10 +48,6 @@ def run(kubescape_exec: str):
     # msg = scan_all(kubescape_exec=kubescape_exec)
     # smoke_utils.assertion(msg)
 
-    # print("Testing scan control name")
-    # msg = scan_control_name(kubescape_exec=kubescape_exec)
-    # smoke_utils.assertion(msg)
-
     print("Testing scan control id")
     msg = scan_control_id(kubescape_exec=kubescape_exec)
     smoke_utils.assertion(msg)
