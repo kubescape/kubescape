@@ -26,29 +26,29 @@ func NewJsonPrinter() *JsonPrinter {
 	return &JsonPrinter{}
 }
 
-func (jsonPrinter *JsonPrinter) SetWriter(outputFile string) {
+func (jp *JsonPrinter) SetWriter(outputFile string) {
 	if strings.TrimSpace(outputFile) == "" {
 		outputFile = jsonOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
 		outputFile = outputFile + jsonOutputExt
 	}
-	jsonPrinter.writer = printer.GetWriter(outputFile)
+	jp.writer = printer.GetWriter(outputFile)
 }
 
-func (jsonPrinter *JsonPrinter) Score(score float32) {
+func (jp *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (jp *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	r, err := json.Marshal(FinalizeResults(opaSessionObj))
 	if err != nil {
 		logger.L().Fatal("failed to Marshal posture report object")
 	}
 
-	if _, err := jsonPrinter.writer.Write(r); err != nil {
+	if _, err := jp.writer.Write(r); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
 	} else {
-		printer.LogOutputFile(jsonPrinter.writer.Name())
+		printer.LogOutputFile(jp.writer.Name())
 	}
 }
