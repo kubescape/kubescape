@@ -98,31 +98,31 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 	}
 }
 
-func (junitPrinter *JunitPrinter) SetWriter(outputFile string) {
+func (jp *JunitPrinter) SetWriter(outputFile string) {
 	if strings.TrimSpace(outputFile) == "" {
 		outputFile = junitOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
 		outputFile = outputFile + junitOutputExt
 	}
-	junitPrinter.writer = printer.GetWriter(outputFile)
+	jp.writer = printer.GetWriter(outputFile)
 }
 
-func (junitPrinter *JunitPrinter) Score(score float32) {
+func (jp *JunitPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (junitPrinter *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (jp *JunitPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	junitResult := testsSuites(opaSessionObj)
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {
 		logger.L().Fatal("failed to Marshal xml result object", helpers.Error(err))
 	}
 
-	if _, err := junitPrinter.writer.Write(postureReportStr); err != nil {
+	if _, err := jp.writer.Write(postureReportStr); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
 	} else {
-		printer.LogOutputFile(junitPrinter.writer.Name())
+		printer.LogOutputFile(jp.writer.Name())
 	}
 }
 
