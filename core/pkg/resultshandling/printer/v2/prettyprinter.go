@@ -54,6 +54,12 @@ func (pp *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 
 	pp.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 
+	// When writing to Stdout, we aren’t really writing to an output file,
+	// so no need to print that we are
+	if pp.writer.Name() != os.Stdout.Name() {
+		printer.LogOutputFile(pp.writer.Name())
+	}
+
 }
 
 func (pp *PrettyPrinter) SetWriter(outputFile string) {
