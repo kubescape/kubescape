@@ -70,7 +70,7 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 func (rh *ResultsHandler) HandleResults() error {
 	// Display scan results in the UI first to give immediate value.
 	// First we output the results and then the score, so the
-	// score—a summary of the results—can always be seen at the end
+	// score - a summary of the results—can always be seen at the end
 	// of output
 	rh.uiPrinter.ActionPrint(rh.scanData)
 	rh.uiPrinter.Score(rh.GetRiskScore())
