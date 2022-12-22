@@ -38,6 +38,7 @@ spec:
       - name: host-sensor
         image: quay.io/kubescape/host-scanner:v1.0.39
         securityContext:
+          allowPrivilegeEscalation: true
           privileged: true
           readOnlyRootFilesystem: true
           procMount: Unmasked
