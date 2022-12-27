@@ -277,7 +277,7 @@ func isEmptyLineOrComment(lineContent string) bool {
 func readDocuments(reader io.Reader, decoder yqlib.Decoder) (*list.List, error) {
 	err := decoder.Init(reader)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Error Initializing the decoder, %w", err)
 	}
 	inputList := list.New()
 
@@ -293,7 +293,7 @@ func readDocuments(reader io.Reader, decoder yqlib.Decoder) (*list.List, error) 
 			}
 			return inputList, nil
 		} else if errorReading != nil {
-			return nil, fmt.Errorf("Error Decoding YAML file")
+			return nil, fmt.Errorf("Error Decoding YAML file, %w", errorReading)
 		}
 
 		candidateNode.Document = currentIndex

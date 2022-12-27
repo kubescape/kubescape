@@ -148,10 +148,10 @@ func TestApplyFixKeepsIndentation(t *testing.T) {
 
 		h, _ := NewFixHandlerMock()
 
-		got, _ := h.ApplyFix(string(input), expression)
+		got, _ := h.ApplyFixToContent(string(input), expression)
 
 		if got != string(want) {
-			t.Errorf("Fixed file does not match the expected.\n FilePath: %s \nGot: <%s>\nWant:<%s>", tc.inputFile, got, want)
+			t.Errorf("Fixed file does not match the expected.\n FilePath: %s \n\nGot:\n <%s>\n\n\nWant:\n<%s>", tc.inputFile, got, want)
 		}
 
 	}

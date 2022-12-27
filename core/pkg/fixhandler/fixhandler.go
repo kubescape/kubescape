@@ -193,14 +193,14 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 		fileAsString, err := getFileString(filepath)
 
 		if err != nil {
-			logger.L().Error(err.Error())
+			errors = append(errors, err)
 			continue
 		}
 
-		fixedYamlString, err := h.ApplyFix(fileAsString, yamlExpression)
+		fixedYamlString, err := h.ApplyFixToContent(fileAsString, yamlExpression)
 
 		if err != nil {
-			errors = append(errors, fmt.Errorf("failed to fix file %s: %w ", filepath, err))
+			errors = append(errors, fmt.Errorf("Failed to fix file %s: %w ", filepath, err))
 			continue
 		} else {
 			updatedFiles[filepath] = true
@@ -209,7 +209,7 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 		err = writeFixesToFile(filepath, fixedYamlString)
 
 		if err != nil {
-			logger.L().Error(fmt.Sprintf("Cannot Apply fixes to file %s, %v", filepath, err.Error()))
+			logger.L().Error(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
 			errors = append(errors, err)
 		}
 	}
@@ -231,23 +231,28 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) ApplyFix(yamlString, yamlExpression string) (fixedYamlString string, err error) {
-	yamlLines := strings.Split(yamlString, "\n")
+func (h *FixHandler) ApplyFixToContent(yamlAsString, yamlExpression string) (fixedString string, err error) {
+	yamlLines := strings.Split(yamlAsString, "\n")
 
-	originalRootNodes := decodeDocumentRoots(yamlString)
-	fixedRootNodes, err := getFixedNodes(yamlString, yamlExpression)
+	originalRootNodes, err := decodeDocumentRoots(yamlAsString)
 
 	if err != nil {
 		return "", err
 	}
 
-	contentsToAdd, linesToRemove := getFixInfo(originalRootNodes, fixedRootNodes)
+	fixedRootNodes, err := getFixedNodes(yamlAsString, yamlExpression)
 
-	fixedYamlLines := getFixedYamlLines(yamlLines, contentsToAdd, linesToRemove)
+	if err != nil {
+		return "", err
+	}
 
-	fixedYamlString = getStringFromSlice(fixedYamlLines)
+	fileFixInfo := getFixInfo(originalRootNodes, fixedRootNodes)
 
-	return fixedYamlString, nil
+	fixedYamlLines := getFixedYamlLines(yamlLines, fileFixInfo)
+
+	fixedString = getStringFromSlice(fixedYamlLines)
+
+	return fixedString, nil
 }
 
 func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {

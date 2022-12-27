@@ -56,3 +56,8 @@ type linesToRemove struct {
 	startLine int
 	endLine   int
 }
+
+type fileFixInfo struct {
+	contentsToAdd *[]contentToAdd
+	linesToRemove *[]linesToRemove
+}
