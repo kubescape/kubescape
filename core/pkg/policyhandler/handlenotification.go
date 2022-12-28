@@ -87,8 +87,8 @@ func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 		return
 	}
 	cloudMetadata := reportv2.NewCloudMetadata(iCloudMetadata)
-	opaSessionObj.Report.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata = cloudMetadata
-	opaSessionObj.Report.Metadata.ClusterMetadata.CloudMetadata = cloudMetadata      // deprecated - fallback
+	opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata = cloudMetadata
+	opaSessionObj.Metadata.ClusterMetadata.CloudMetadata = cloudMetadata             // deprecated - fallback
 	opaSessionObj.Report.ClusterCloudProvider = iCloudMetadata.Provider().ToString() // deprecated - fallback
 }
 
