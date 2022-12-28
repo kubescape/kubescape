@@ -5,7 +5,7 @@ import "testing"
 func Test_scoreToSeverityLevel(t *testing.T) {
 	tc := []struct {
 		Name               string
-		ScoreFactor              float32
+		ScoreFactor        float32
 		ExpectedSARIFLevel sarifSeverityLevel
 	}{
 		{"Score factor 1.0 should map to 'note' SARIF level", 1.0, sarifSeverityLevelNote},

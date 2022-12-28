@@ -24,15 +24,15 @@ func NewPrometheusPrinter(verboseMode bool) *PrometheusPrinter {
 	}
 }
 
-func (prometheusPrinter *PrometheusPrinter) SetWriter(outputFile string) {
-	prometheusPrinter.writer = printer.GetWriter(outputFile)
+func (pp *PrometheusPrinter) SetWriter(outputFile string) {
+	pp.writer = printer.GetWriter(outputFile)
 }
 
-func (prometheusPrinter *PrometheusPrinter) Score(score float32) {
+func (pp *PrometheusPrinter) Score(score float32) {
 	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
-func (printer *PrometheusPrinter) generatePrometheusFormat(
+func (pp *PrometheusPrinter) generatePrometheusFormat(
 	resources map[string]workloadinterface.IMetadata,
 	results map[string]resourcesresults.Result,
 	summaryDetails *reportsummary.SummaryDetails) *Metrics {
@@ -44,12 +44,13 @@ func (printer *PrometheusPrinter) generatePrometheusFormat(
 	return m
 }
 
-func (printer *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (pp *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 
-	metrics := printer.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
+	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
 
-	logOUtputFile(printer.writer.Name())
-	if _, err := printer.writer.Write([]byte(metrics.String())); err != nil {
+	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Error("failed to write results", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(pp.writer.Name())
 	}
 }

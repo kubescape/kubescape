@@ -37,7 +37,7 @@ func NewLoadPolicy(filePaths []string) *LoadPolicy {
 }
 
 // Return control from file
-func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, error) {
+func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, error) {
 
 	control := &reporthandling.Control{}
 	filePath := lp.filePath()
@@ -49,13 +49,13 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 	if err = json.Unmarshal(f, control); err != nil {
 		return control, err
 	}
-	if controlName != "" && !strings.EqualFold(controlName, control.Name) && !strings.EqualFold(controlName, control.ControlID) {
+	if controlID != "" && !strings.EqualFold(controlID, control.ControlID) && !strings.EqualFold(controlID, control.ControlID) {
 		framework, err := lp.GetFramework(control.Name)
 		if err != nil {
 			return nil, fmt.Errorf("control from file not matching")
 		} else {
 			for _, ctrl := range framework.Controls {
-				if strings.EqualFold(ctrl.Name, controlName) || strings.EqualFold(ctrl.ControlID, controlName) {
+				if strings.EqualFold(ctrl.ControlID, controlID) || strings.EqualFold(ctrl.ControlID, controlID) {
 					control = &ctrl
 					break
 				}

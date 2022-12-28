@@ -21,7 +21,7 @@ def scan_control_id(kubescape_exec: str):
 
 
 def scan_controls(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'HostPath mount,Allow privilege escalation', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048,C-0016', all_files, "--enable-host-scan=false"])
 
 
 def scan_framework(kubescape_exec: str):
@@ -47,10 +47,6 @@ def run(kubescape_exec: str):
     # print("Testing scan all yaml files")
     # msg = scan_all(kubescape_exec=kubescape_exec)
     # smoke_utils.assertion(msg)
-
-    print("Testing scan control name")
-    msg = scan_control_name(kubescape_exec=kubescape_exec)
-    smoke_utils.assertion(msg)
 
     print("Testing scan control id")
     msg = scan_control_id(kubescape_exec=kubescape_exec)
