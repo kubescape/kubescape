@@ -66,7 +66,7 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(outputFile string) {
-	if outputFile == "" {
+	if strings.TrimSpace(outputFile) == "" {
 		outputFile = sarifOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
@@ -144,6 +144,8 @@ func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	report.AddRun(run)
 
 	report.PrettyWrite(sp.writer)
+
+	printer.LogOutputFile(sp.writer.Name())
 }
 
 func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {

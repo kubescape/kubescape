@@ -43,7 +43,7 @@ type Vulnerability struct {
 	Categories               Categories  `json:"categories"`
 	NoteName                 string      `json:",omitempty"`
 	CreateTime               time.Time   `json:",omitempty"`
-	UpdateTime               time.Time      `json:",omitempty"` // Vulnerablity started
+	UpdateTime               time.Time   `json:",omitempty"` // Vulnerablity started
 	CVSS                     float32     `json:",omitempty"` // other cvss versions are available
 	AffectedCPEURI           string      `json:",omitempty"` // Package issue
 	AffectedPackage          string      `json:",omitempty"`

@@ -85,10 +85,18 @@ func (report *ReportEventReceiver) SetClusterName(clusterName string) {
 }
 
 func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
-	// All scans whose target is not a cluster, currently their target is a file, which is what the backend expects
-	// (e.g. local-git, directory, etc)
+	// The backend for Kubescape expects scanning targets to be either
+	// Clusters or Files, not other types we support (GitLocal, Directory
+	// etc). So, to submit a compatible report to the backend, we have to
+	// override the scanning target, submit the report and then restore the
+	// original value.
+	originalScanningTarget := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
+
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.Cluster {
 		opaSessionObj.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+		defer func() {
+			opaSessionObj.Metadata.ScanMetadata.ScanningTarget = originalScanningTarget
+		}()
 	}
 
 	report.initEventReceiverURL()

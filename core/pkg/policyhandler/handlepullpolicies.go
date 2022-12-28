@@ -56,7 +56,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 	switch getScanKind(policyIdentifier) {
 	case apisv1.KindFramework: // Download frameworks
 		for _, rule := range policyIdentifier {
-			receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(rule.Name)
+			receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(rule.Identifier)
 			if err != nil {
 				return frameworks, policyDownloadError(err)
 			}
@@ -65,7 +65,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
-				cache := getter.GetDefaultPath(rule.Name + ".json")
+				cache := getter.GetDefaultPath(rule.Identifier + ".json")
 				if err := getter.SaveInFile(receivedFramework, cache); err != nil {
 					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 				}
@@ -75,15 +75,15 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 		f := reporthandling.Framework{}
 		var receivedControl *reporthandling.Control
 		var err error
-		for _, rule := range policyIdentifier {
-			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(rule.Name)
+		for _, policy := range policyIdentifier {
+			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(policy.Identifier)
 			if err != nil {
 				return frameworks, policyDownloadError(err)
 			}
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
 
-				cache := getter.GetDefaultPath(rule.Name + ".json")
+				cache := getter.GetDefaultPath(policy.Identifier + ".json")
 				if err := getter.SaveInFile(receivedControl, cache); err != nil {
 					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 				}
@@ -100,7 +100,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 func policyIdentifierToSlice(rules []cautils.PolicyIdentifier) []string {
 	s := []string{}
 	for i := range rules {
-		s = append(s, fmt.Sprintf("%s: %s", rules[i].Kind, rules[i].Name))
+		s = append(s, fmt.Sprintf("%s: %s", rules[i].Kind, rules[i].Identifier))
 	}
 	return s
 }
