@@ -24,9 +24,9 @@ const (
 )
 
 type PrettyPrinter struct {
+	writer        *os.File
 	formatVersion string
 	viewType      cautils.ViewTypes
-	writer        *os.File
 	verboseMode   bool
 }
 
@@ -60,6 +60,7 @@ func (pp *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 		printer.LogOutputFile(pp.writer.Name())
 	}
 
+	pp.printAttackTracks(opaSessionObj)
 }
 
 func (pp *PrettyPrinter) SetWriter(outputFile string) {

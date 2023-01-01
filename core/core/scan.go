@@ -170,7 +170,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// ======================== prioritization ===================
 
-	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter); err != nil {
+	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 		logger.L().Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 	} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 		return resultsHandling, fmt.Errorf("%w", err)
