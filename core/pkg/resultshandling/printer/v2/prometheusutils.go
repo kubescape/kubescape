@@ -319,11 +319,13 @@ func (m *Metrics) setResourcesCounters(
 	resources map[string]workloadinterface.IMetadata,
 	results map[string]resourcesresults.Result) {
 
-	for resourceID, result := range results {
+	for resourceID, toPin := range results {
 		r, ok := resources[resourceID]
 		if !ok {
 			continue
 		}
+		result := toPin
+
 		passed, excluded, failed := resourceControlStatusCounters(&result)
 
 		mrc := mResources{}
@@ -339,5 +341,4 @@ func (m *Metrics) setResourcesCounters(
 
 		m.listResources = append(m.listResources, mrc)
 	}
-
 }
