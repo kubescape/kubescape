@@ -85,6 +85,10 @@ func getNumericValueFromEnvVar(envVar string, defaultValue int) int {
 	return defaultValue
 }
 func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPASessionObj) {
+	if prettyPrinter.printAttackTree == false || opaSessionObj.ResourceAttackTracks == nil {
+		return
+	}
+
 	// check if counters are set in env vars and use them, otherwise use default values
 	topResourceCount := getNumericValueFromEnvVar("ATTACK_TREE_TOP_RESOURCES", TOP_RESOURCE_COUNT)
 	topVectorCount := getNumericValueFromEnvVar("ATTACK_TREE_TOP_VECTORS", TOP_VECTOR_COUNT)

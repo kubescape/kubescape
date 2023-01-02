@@ -99,12 +99,12 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
-		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
+		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
 		printerHandler.SetWriter(scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
 
-	uiPrinter := getUIPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, cautils.ViewTypes(scanInfo.View))
+	uiPrinter := getUIPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View))
 
 	// ================== return interface ======================================
 
