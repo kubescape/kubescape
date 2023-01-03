@@ -73,7 +73,7 @@ func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fw
 	}
 	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework
-		return reporterv2.NewReportMock("", "run kubescape with the '--account' flag")
+		return reporterv2.NewReportMock("https://hub.armosec.io/docs/installing-kubescape", "run kubescape with the '--account' flag")
 	}
 	var message string
 	if !fwScan {

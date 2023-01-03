@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 type ReportMock struct {
@@ -31,11 +30,10 @@ func (reportMock *ReportMock) SetClusterName(clusterName string) {
 }
 
 func (reportMock *ReportMock) GetURL() string {
-	u := url.URL{}
-	u.Host = getter.GetKSCloudAPIConnector().GetCloudUIURL()
-	u.Path = "account/sign-up"
-
-	parseHost(&u)
+	u, err := url.Parse(reportMock.query)
+	if err != nil || u.String() == "" {
+		return ""
+	}
 
 	q := u.Query()
 	q.Add("utm_source", "GitHub")
@@ -52,7 +50,9 @@ func (reportMock *ReportMock) DisplayReportURL() {
 	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	message := sep + "\n"
 	message += "Scan results have not been submitted: " + reportMock.message + "\n"
-	message += "For more details: " + reportMock.GetURL() + "\n"
+	if link := reportMock.GetURL(); link != "" {
+		message += "For more details: " + link + "\n"
+	}
 	message += sep + "\n"
 	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", message))
 }
