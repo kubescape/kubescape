@@ -62,7 +62,7 @@ func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 					info:  control.GetStatus().Info(),
 					stars: starCount,
 				})
-				starCount += starCount
+				starCount += "*"
 				infoToPrintInfoMap[control.GetStatus().Info()] = nil
 			}
 		}

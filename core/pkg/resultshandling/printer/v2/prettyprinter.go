@@ -59,7 +59,7 @@ func (prettyPrinter *PrettyPrinter) Score(score float32) {
 func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlNames [][]string) {
 	for i := len(sortedControlNames) - 1; i >= 0; i-- {
 		for _, c := range sortedControlNames[i] {
-			controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
+			controlSummary := controls.GetControl(reportsummary.EControlCriteriaName, c)
 			prettyPrinter.printTitle(controlSummary)
 			prettyPrinter.printResources(controlSummary, allResources)
 			prettyPrinter.printSummary(c, controlSummary)
@@ -68,12 +68,9 @@ func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.Control
 }
 
 func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSummary reportsummary.IControlSummary) {
-	if controlSummary.GetStatus().IsSkipped() {
-		return
-	}
 	cautils.SimpleDisplay(prettyPrinter.writer, "Summary - ")
 	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", controlSummary.NumberOfResources().Passed())
-	cautils.WarningDisplay(prettyPrinter.writer, "Excluded:%v   ", controlSummary.NumberOfResources().Excluded())
+	cautils.WarningDisplay(prettyPrinter.writer, "Action Required:%v   ", controlSummary.NumberOfResources().Skipped())
 	cautils.FailureDisplay(prettyPrinter.writer, "Failed:%v   ", controlSummary.NumberOfResources().Failed())
 	cautils.InfoDisplay(prettyPrinter.writer, "Total:%v\n", controlSummary.NumberOfResources().All())
 	if controlSummary.GetStatus().IsFailed() {
@@ -84,19 +81,17 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 }
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
 	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
+	statusDetails := ""
+	if controlSummary.GetSubStatus() != apis.SubStatusUnknown {
+		statusDetails = fmt.Sprintf(" (%s)", controlSummary.GetSubStatus())
+	}
 	switch controlSummary.GetStatus().Status() {
 	case apis.StatusSkipped:
-		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
+		cautils.InfoDisplay(prettyPrinter.writer, "action required%s %v\n", statusDetails, emoji.ConfusedFace)
 	case apis.StatusFailed:
-		cautils.FailureDisplay(prettyPrinter.writer, "failed %v\n", emoji.SadButRelievedFace)
-	case apis.StatusExcluded:
-		cautils.WarningDisplay(prettyPrinter.writer, "excluded %v\n", emoji.NeutralFace)
-	case apis.StatusIrrelevant:
-		cautils.SuccessDisplay(prettyPrinter.writer, "irrelevant %v\n", emoji.ConfusedFace)
-	case apis.StatusError:
-		cautils.WarningDisplay(prettyPrinter.writer, "error %v\n", emoji.ConfusedFace)
+		cautils.FailureDisplay(prettyPrinter.writer, "failed%s %v\n", statusDetails, emoji.SadButRelievedFace)
 	default:
-		cautils.SuccessDisplay(prettyPrinter.writer, "passed %v\n", emoji.ThumbsUp)
+		cautils.SuccessDisplay(prettyPrinter.writer, "passed%s %v\n", statusDetails, emoji.ThumbsUp)
 	}
 	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.GetDescription())
 	if controlSummary.GetStatus().Info() != "" {
@@ -108,7 +103,7 @@ func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.
 	workloadsSummary := listResultSummary(controlSummary, allResources)
 
 	failedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryFailed)
-	excludedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryExclude)
+	skippedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummarySkipped)
 
 	var passedWorkloads map[string][]WorkloadSummary
 	if prettyPrinter.verboseMode {
@@ -118,9 +113,9 @@ func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.
 		cautils.FailureDisplay(prettyPrinter.writer, "Failed:\n")
 		prettyPrinter.printGroupedResources(failedWorkloads)
 	}
-	if len(excludedWorkloads) > 0 {
-		cautils.WarningDisplay(prettyPrinter.writer, "Excluded:\n")
-		prettyPrinter.printGroupedResources(excludedWorkloads)
+	if len(skippedWorkloads) > 0 {
+		cautils.WarningDisplay(prettyPrinter.writer, "Action required:\n")
+		prettyPrinter.printGroupedResources(skippedWorkloads)
 	}
 	if len(passedWorkloads) > 0 {
 		cautils.SuccessDisplay(prettyPrinter.writer, "Passed:\n")
@@ -174,11 +169,10 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	return relatedStr
 }
 func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
-	// Control name | # failed resources | all resources | % success
+	// Severity | Control name | failed resources | all resources | % success
 	row := make([]string, _rowLen)
 	row[columnName] = "Resource Summary"
 	row[columnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
-	row[columnCounterExclude] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded())
 	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
 	row[columnSeverity] = " "
 	row[columnRiskScore] = fmt.Sprintf("%.2f%s", summaryDetails.Score, "%")
@@ -193,8 +187,6 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	}
 	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
 	cautils.InfoTextDisplay(prettyPrinter.writer, renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters())+"\n\n")
-
-	// cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+"Severities: SOME OTHER"+"\n\n")
 
 	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 	summaryTable.SetAutoWrapText(false)
@@ -268,11 +260,11 @@ func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) str
 }
 
 func controlCountersForSummary(counters reportsummary.ICounters) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d, Skipped: %d)", counters.All(), counters.Failed(), counters.Excluded(), counters.Skipped())
+	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
 }
 
 func controlCountersForResource(l *helpersv1.AllLists) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Excluded: %d)", l.All().Len(), len(l.Failed()), len(l.Excluded()))
+	return fmt.Sprintf("Controls: %d (Failed: %d, action required: %d)", l.All().Len(), len(l.Failed()), len(l.Skipped()))
 }
 func getSeparator(sep string) string {
 	s := ""

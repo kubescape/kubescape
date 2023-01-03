@@ -12,13 +12,12 @@ import (
 )
 
 const (
-	columnSeverity       = iota
-	columnName           = iota
-	columnCounterFailed  = iota
-	columnCounterExclude = iota
-	columnCounterAll     = iota
-	columnRiskScore      = iota
-	_rowLen              = iota
+	columnSeverity      = iota
+	columnName          = iota
+	columnCounterFailed = iota
+	columnCounterAll    = iota
+	columnRiskScore     = iota
+	_rowLen             = iota
 )
 
 func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
@@ -29,15 +28,9 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 		return []string{}
 	}
 
-	// ignore irelevant results
-	if !verbose && (controlSummary.GetStatus().IsSkipped() && controlSummary.GetStatus().Status() == apis.StatusIrrelevant) {
-		return []string{}
-	}
-
 	row[columnSeverity] = getSeverityColumn(controlSummary)
 	row[columnName] = controlSummary.GetName()
 	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
-	row[columnCounterExclude] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded())
 	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
 	row[columnRiskScore] = getRiskScoreColumn(controlSummary, infoToPrintInfo)
 
@@ -55,7 +48,7 @@ func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo
 
 func getRiskScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
 	if controlSummary.GetStatus().IsSkipped() {
-		return fmt.Sprintf("%s%s", controlSummary.GetStatus().Status(), getInfoColumn(controlSummary, infoToPrintInfo))
+		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
 	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetScore())) + "%"
 }
@@ -95,7 +88,6 @@ func getControlTableHeaders() []string {
 	headers := make([]string, _rowLen)
 	headers[columnName] = "CONTROL NAME"
 	headers[columnCounterFailed] = "FAILED RESOURCES"
-	headers[columnCounterExclude] = "EXCLUDED RESOURCES"
 	headers[columnCounterAll] = "ALL RESOURCES"
 	headers[columnSeverity] = "SEVERITY"
 	headers[columnRiskScore] = "% RISK-SCORE"
@@ -106,7 +98,6 @@ func getColumnsAlignments() []int {
 	alignments := make([]int, _rowLen)
 	alignments[columnName] = tablewriter.ALIGN_LEFT
 	alignments[columnCounterFailed] = tablewriter.ALIGN_CENTER
-	alignments[columnCounterExclude] = tablewriter.ALIGN_CENTER
 	alignments[columnCounterAll] = tablewriter.ALIGN_CENTER
 	alignments[columnSeverity] = tablewriter.ALIGN_LEFT
 	alignments[columnRiskScore] = tablewriter.ALIGN_CENTER

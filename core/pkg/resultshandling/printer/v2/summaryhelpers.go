@@ -17,12 +17,12 @@ func workloadSummaryFailed(workloadSummary *WorkloadSummary) bool {
 	return workloadSummary.status == apis.StatusFailed
 }
 
-func workloadSummaryExclude(workloadSummary *WorkloadSummary) bool {
-	return workloadSummary.status == apis.StatusExcluded
-}
-
 func workloadSummaryPassed(workloadSummary *WorkloadSummary) bool {
 	return workloadSummary.status == apis.StatusPassed
+}
+
+func workloadSummarySkipped(workloadSummary *WorkloadSummary) bool {
+	return workloadSummary.status == apis.StatusSkipped
 }
 
 // Group workloads by namespace - return {"namespace": <[]WorkloadSummary>}
@@ -80,8 +80,8 @@ func listResultSummary(controlSummary reportsummary.IControlSummary, allResource
 	workloadsSummary := []WorkloadSummary{}
 
 	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Failed(), apis.StatusFailed)...)
-	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Excluded(), apis.StatusExcluded)...)
 	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Passed(), apis.StatusPassed)...)
+	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Skipped(), apis.StatusSkipped)...)
 
 	return workloadsSummary
 }

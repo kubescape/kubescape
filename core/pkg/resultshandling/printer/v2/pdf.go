@@ -206,7 +206,7 @@ func (pdfPrinter *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *rep
 			})
 		})
 		m.Col(2, func() {
-			m.Text(fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()), props.Text{
+			m.Text(fmt.Sprintf("%d", summaryDetails.NumberOfResources().Skipped()), props.Text{
 				Align:  consts.Left,
 				Size:   8.0,
 				Style:  consts.Bold,
