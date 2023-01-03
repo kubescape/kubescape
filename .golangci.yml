@@ -53,6 +53,3 @@ issues:
     - linters:
       - stylecheck
       text: "ST1003"
-run:
-  skip-dirs:
-    - git2go

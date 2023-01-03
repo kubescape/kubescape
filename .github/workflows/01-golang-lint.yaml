@@ -20,12 +20,10 @@ jobs:
     steps:
       - uses: actions/setup-go@v3
         with:
-          go-version: 1.18
+          go-version: 1.19
       - uses: actions/checkout@v3
         with:
           submodules: recursive
-      - name: Install libgit2
-        run: make libgit2
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v3
         with:
@@ -37,7 +35,7 @@ jobs:
 
           # Optional: golangci-lint command line arguments.
           # args: --issues-exit-code=0
-          args: --timeout 10m --build-tags=static
+          args: --timeout 10m
           #--new-from-rev dev
 
           # Optional: show only new issues if it's a pull request. The default value is `false`.

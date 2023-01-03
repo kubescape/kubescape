@@ -115,7 +115,6 @@ require (
 	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950 // indirect
 	github.com/kubescape/rbac-utils v0.0.19 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/libgit2/git2go/v33 v33.0.9 // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.12 // indirect
@@ -195,5 +194,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
-
-replace github.com/libgit2/git2go/v33 => ../git2go

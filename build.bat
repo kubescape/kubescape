@@ -1,7 +1,6 @@
 @ECHO OFF
 
 IF "%1"=="install" goto Install
-IF "%1"=="build" goto Build
 IF "%1"=="all" goto All
 IF "%1"=="" goto Error ELSE goto Error
 
@@ -33,12 +32,6 @@ pacman -S --needed --noconfirm mingw-w64-x86_64-gcc
 pacman -S --needed --noconfirm mingw-w64-x86_64-pkg-config
 pacman -S --needed --noconfirm msys2-w32api-runtime
 
-IF "%1"=="all" GOTO Build
-GOTO End
-
-:Build
-SET "PATH=C:\MSYS2\mingw64\bin;C:\MSYS2\usr\bin;%PATH%"
-make libgit2
 GOTO End
 
 :All

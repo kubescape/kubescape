@@ -19,7 +19,6 @@ require (
 	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950
 	github.com/kubescape/opa-utils v0.0.222
 	github.com/kubescape/rbac-utils v0.0.19
-	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.14
 	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/olekukonko/tablewriter v0.0.5
@@ -188,5 +187,3 @@ require (
 	sigs.k8s.io/json v0.0.0-20220713155537-f223a00ba0e2 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 )
-
-replace github.com/libgit2/git2go/v33 => ./git2go

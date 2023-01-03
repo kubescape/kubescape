@@ -19,9 +19,6 @@ RUN pip3 install --no-cache --upgrade pip setuptools
 WORKDIR /work
 ADD . .
 
-# install libgit2
-RUN rm -rf git2go && make libgit2
-
 # build kubescape server
 WORKDIR /work/httphandler
 RUN python build.py

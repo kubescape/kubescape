@@ -63,20 +63,16 @@ jobs:
         with:
           go-version: 1.19
 
-      - name: Install MSYS2 & libgit2 (Windows)
+      - name: Install MSYS2 (Windows)
         shell: cmd
         run: .\build.bat all
         if: matrix.os == 'windows-latest'
-
-      - name: Install libgit2 (Linux/macOS)
-        run: make libgit2
-        if: matrix.os != 'windows-latest'
  
       - name: Test core pkg
-        run: go test -tags=static -v ./...
+        run: go test -v ./...
 
       - name: Test httphandler pkg
-        run: cd httphandler && go test -tags=static -v ./...
+        run: cd httphandler && go test -v ./...
 
       - name: Build
         env:
