@@ -120,6 +120,7 @@ type ScanInfo struct {
 	FailThreshold         float32            // Failure score threshold
 	FailThresholdSeverity string             // Severity at and above which the command should fail
 	Submit                bool               // Submit results to Kubescape Cloud BE
+	CreateAccount         bool               // Create account in Kubescape Cloud BE if no account found in local cache
 	ScanID                string             // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag        // Deploy Kubescape K8s host scanner to collect data from certain controls
 	HostSensorYamlPath    string             // Path to hostsensor file
@@ -129,6 +130,7 @@ type ScanInfo struct {
 	FrameworkScan         bool               // false if scanning control
 	ScanAll               bool               // true if scan all frameworks
 	OmitRawResources      bool               // true if omit raw resources from the output
+	PrintAttackTree       bool               // true if print attack tree
 }
 
 type Getters struct {

@@ -15,12 +15,12 @@ import (
 
 // To Check if the given repository is Public(No Authentication needed), send a HTTP GET request to the URL
 // If response code is 200, the repository is Public.
-func isGitRepoPublic(URL string) bool {
-	resp, err := nethttp.Get(URL)
-
+func isGitRepoPublic(u string) bool {
+	resp, err := nethttp.Get(u) //nolint:gosec
 	if err != nil {
 		return false
 	}
+
 	// if the status code is 200, our get request is successful.
 	// It only happens when the repository is public.
 	if resp.StatusCode == 200 {

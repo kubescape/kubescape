@@ -24,17 +24,19 @@ const (
 )
 
 type PrettyPrinter struct {
-	formatVersion string
-	viewType      cautils.ViewTypes
-	writer        *os.File
-	verboseMode   bool
+	writer          *os.File
+	formatVersion   string
+	viewType        cautils.ViewTypes
+	verboseMode     bool
+	printAttackTree bool
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, viewType cautils.ViewTypes) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) *PrettyPrinter {
 	return &PrettyPrinter{
-		verboseMode:   verboseMode,
-		formatVersion: formatVersion,
-		viewType:      viewType,
+		verboseMode:     verboseMode,
+		formatVersion:   formatVersion,
+		viewType:        viewType,
+		printAttackTree: attackTree,
 	}
 }
 
@@ -60,6 +62,7 @@ func (pp *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 		printer.LogOutputFile(pp.writer.Name())
 	}
 
+	pp.printAttackTracks(opaSessionObj)
 }
 
 func (pp *PrettyPrinter) SetWriter(outputFile string) {

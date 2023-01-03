@@ -11,11 +11,11 @@
 :sunglasses: [Want to contribute?](#being-a-part-of-the-team) :innocent: 
 
 
-Kubescape is a K8s open-source tool providing a Kubernetes single pane of glass, including risk analysis, security compliance, RBAC visualizer, and image vulnerability scanning. 
-Kubescape scans K8s clusters, YAML files, and HELM charts, detecting misconfigurations according to multiple frameworks (such as the [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/)), software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline, calculates risk score instantly and shows risk trends over time.
+Kubescape is an open-source Kubernetes security platform. A single pane of glass access to view risk analysis, security compliance, RBAC visualization, and image vulnerability scanning. 
+Kubescape scans Kubernetes clusters, YAML files, and Helm charts. It detects misconfigurations according to multiple frameworks (such as [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) and [CIS Benchmark](https://www.armosec.io/blog/cis-kubernetes-benchmark-framework-scanning-tools-comparison/?utm_source=github&utm_medium=repository)). Kubescape also helps you find software vulnerabilities, and RBAC (role-based-access-control) violations at early stages of the CI/CD pipeline. It calculates your risk score instantly and shows risk trends over time.
 
-It has become one of the fastest-growing Kubernetes tools among developers due to its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities, saving Kubernetes users and admins precious time, effort, and resources.
-Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack, and supports multi-cloud K8s deployments like EKS, GKE, and AKS.
+Kubescape is one of the fastest-growing Kubernetes security tools among developers. It saves Kubernetes users and admins precious time, effort, and resources with its easy-to-use CLI interface, flexible output formats, and automated scanning capabilities.
+Kubescape integrates natively with other DevOps tools, including Jenkins, CircleCI, Github workflows, Prometheus, and Slack. It supports multi-cloud Kubernetes deployments like EKS, GKE, and AKS.
 
 </br>
 
@@ -72,12 +72,14 @@ kubescape scan --enable-host-scan --verbose
 # Being a part of the team
 
 ## Community
-We invite you to our community! We are excited about this project and want to return the love we get.
+You are in vited to our community! We are excited about this project and want to return the love we get.
 
-We hold community meetings in [Zoom](https://us02web.zoom.us/j/84020231442) on the first Tuesday of every month at 14:00 GMT! :sunglasses:
+We hold community meetings on [Zoom](https://us02web.zoom.us/j/84020231442) on the first Tuesday of every month at 14:00 GMT! :sunglasses:
+
+Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md). 
 
 ## Contributions 
-[Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md) Want to discuss something? Have an issue? Please make sure that you follow our [Code Of Conduct](https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md) . 
+Want to discuss something? Have an issue? [Want to contribute?](https://github.com/kubescape/kubescape/blob/master/CONTRIBUTING.md)  
 
 * Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own. [Contact us](MAINTAINERS.md) directly for more information :) 
 * [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose) , we are trying to respond within 48 hours
@@ -264,7 +266,7 @@ kubescape scan --format prometheus
 kubescape scan --format html --output results.html
 ```
 
-#### Scan with exceptions, objects with exceptions will be presented as `exclude` and not `fail`
+#### Scan with exceptions. Objects with exceptions will be presented as `exclude` and not `fail`
 [Full documentation](examples/exceptions/README.md)
 ```
 kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
@@ -276,13 +278,13 @@ kubescape scan </path/to/directory>
 ```
 > Kubescape will load the default value file
 
-#### Scan Kustomize Directory 
+#### Scan a Kustomize Directory 
 ```
 kubescape scan </path/to/directory>
 ```
-> Kubescape will generate Kubernetes Yaml Objects using 'Kustomize' file and scans them for security.
+> Kubescape will generate Kubernetes YAML objects using a 'Kustomize' file and scan them for security.
 
-### Offline/Air-gaped Environment Support
+### Offline/Air-gapped Environment Support
 
 [Video tutorial](https://youtu.be/IGXL9s37smM)
 
@@ -326,7 +328,7 @@ kubescape scan framework nsa --use-from /path/nsa.json
 
 ![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/kubescape.kubescape?label=VScode) ![Open VSX](https://img.shields.io/open-vsx/dt/kubescape/kubescape?label=openVSX&color=yellowgreen)
 
-Scan the YAML files while writing them using the [vs code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
+Scan the YAML files while writing them using the [VS Code extension](https://github.com/armosec/vscode-kubescape/blob/master/README.md) 
 
 ## Lens Extension
 
@@ -408,15 +410,15 @@ View Kubescape scan results directly in [Lens IDE](https://k8slens.dev/) using k
 <details>
 <summary>Instructions to use the playground</summary>
 
-* Apply changes you wish to make to the kubescape directory using text editors like `Vim`.
+* Apply changes you wish to make to the Kubescape directory using text editors like `Vim`.
 * [Build on Linux](https://github.com/kubescape/kubescape#build-on-linuxmacos)
-* Now, you can use Kubescape just like a normal user. Instead of using `kubescape`, use `./kubescape`. (Make sure you are inside kubescape directory because the command will execute the binary named `kubescape` in `kubescape directory`)
+* Now, you can use Kubescape like a regular user. Instead of using `kubescape`, use `./kubescape`. Make sure you are in the Kubescape directory because the command will execute the binary named `kubescape` in `kubescape directory`)
 
 </details>
 
-## VS code configuration samples
+## VS Code configuration samples
 
-You can use the sample files below to setup your VS code environment for building and debugging purposes.
+You can use the sample files below to setup your VS Code environment for building and debugging purposes.
 
 
 <details><summary>.vscode/settings.json</summary>
@@ -463,11 +465,11 @@ You can use the sample files below to setup your VS code environment for buildin
 ## Technology
 Kubescape is based on the [OPA engine](https://github.com/open-policy-agent/opa) and ARMO's posture controls.
 
-The tools retrieve Kubernetes objects from the API server and run a set of [rego's snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
+The tools retrieve Kubernetes objects from the API server and runs a set of [Rego snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
 
-The results by default are printed in a pretty "console friendly" manner, but they can be retrieved in JSON format for further processing.
+The results by default are printed in a "console friendly" manner, but they can be retrieved in JSON format for further processing.
 
-Kubescape is an open source project, we welcome your feedback and ideas for improvement. We’re also aiming to collaborate with the Kubernetes community to help make the tests more robust and complete as Kubernetes develops.
+Kubescape is an open source project, we welcome your feedback and ideas for improvement. We are part of the Kubernetes community and aim to make the tests more robust and complete as Kubernetes develops.
 
 ## Thanks to all the contributors ❤️
 <a href = "https://github.com/kubescape/kubescape/graphs/contributors">

@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -114,13 +113,10 @@ func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
 }
 
 func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
-	var err error
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
-
 	exceptionsGetter := getExceptionsGetter("", tenant.GetAccountID(), nil)
-	exceptions := []armotypes.PostureExceptionPolicy{}
 
-	exceptions, err = exceptionsGetter.GetExceptions(tenant.GetContextName())
+	exceptions, err := exceptionsGetter.GetExceptions(tenant.GetContextName())
 	if err != nil {
 		return err
 	}
