@@ -16,70 +16,83 @@ import (
 
 type ResultsHandler struct {
 	reporterObj reporter.IReport
-	printerObj  printer.IPrinter
+	printerObjs []printer.IPrinter
+	uiPrinter   printer.IPrinter
 	scanData    *cautils.OPASessionObj
 }
 
-func NewResultsHandler(reporterObj reporter.IReport, printerObj printer.IPrinter) *ResultsHandler {
+func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {
 	return &ResultsHandler{
 		reporterObj: reporterObj,
-		printerObj:  printerObj,
+		printerObjs: printerObjs,
+		uiPrinter:   uiPrinter,
 	}
 }
 
-// GetScore return scan risk-score
-func (resultsHandler *ResultsHandler) GetRiskScore() float32 {
-	return resultsHandler.scanData.Report.SummaryDetails.Score
+// GetScore returns the result’s risk score
+func (rh *ResultsHandler) GetRiskScore() float32 {
+	return rh.scanData.Report.SummaryDetails.Score
 }
 
-// GetData get scan/action related data (policies, resources, results, etc.). Call ToJson function if you wish the json representation of the data
-func (resultsHandler *ResultsHandler) GetData() *cautils.OPASessionObj {
-	return resultsHandler.scanData
+// GetData returns scan/action related data (policies, resources, results, etc.)
+//
+// Call the ToJson() method if you want the JSON representation of the data
+func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
+	return rh.scanData
 }
 
-// SetData set scan/action related data
-func (resultsHandler *ResultsHandler) SetData(data *cautils.OPASessionObj) {
-	resultsHandler.scanData = data
+// SetData sets the scan/action related data
+func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
+	rh.scanData = data
 }
 
-// GetPrinter get printer object
-func (resultsHandler *ResultsHandler) GetPrinter() printer.IPrinter {
-	return resultsHandler.printerObj
+// GetPrinter returns all printers
+func (rh *ResultsHandler) GetPrinters() []printer.IPrinter {
+	return rh.printerObjs
 }
 
-// GetReporter get reporter object
-func (resultsHandler *ResultsHandler) GetReporter() reporter.IReport {
-	return resultsHandler.reporterObj
+// GetReporter returns the reporter object
+func (rh *ResultsHandler) GetReporter() reporter.IReport {
+	return rh.reporterObj
 }
 
-// ToJson return results in json format
-func (resultsHandler *ResultsHandler) ToJson() ([]byte, error) {
-	return json.Marshal(printerv2.FinalizeResults(resultsHandler.scanData))
+// ToJson returns the results in the JSON format
+func (rh *ResultsHandler) ToJson() ([]byte, error) {
+	return json.Marshal(printerv2.FinalizeResults(rh.scanData))
 }
 
-// GetResults return results
-func (resultsHandler *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
-	return printerv2.FinalizeResults(resultsHandler.scanData)
+// GetResults returns the results
+func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
+	return printerv2.FinalizeResults(rh.scanData)
 }
 
-// HandleResults handle the scan results according to the pre defined interfaces
-func (resultsHandler *ResultsHandler) HandleResults() error {
+// HandleResults handles all necessary actions for the scan results
+func (rh *ResultsHandler) HandleResults() error {
+	// Display scan results in the UI first to give immediate value.
+	// First we output the results and then the score, so the
+	// score - a summary of the results—can always be seen at the end
+	// of output
+	rh.uiPrinter.ActionPrint(rh.scanData)
+	rh.uiPrinter.Score(rh.GetRiskScore())
 
-	resultsHandler.printerObj.ActionPrint(resultsHandler.scanData)
+	// Then print to output files
+	for _, printer := range rh.printerObjs {
+		printer.ActionPrint(rh.scanData)
+		printer.Score(rh.GetRiskScore())
+	}
 
-	if err := resultsHandler.reporterObj.Submit(resultsHandler.scanData); err != nil {
+	// We should submit only after printing results, so a user can see
+	// results at all times, even if submission fails
+	if err := rh.reporterObj.Submit(rh.scanData); err != nil {
 		return err
 	}
-
-	resultsHandler.printerObj.Score(resultsHandler.GetRiskScore())
-
-	resultsHandler.reporterObj.DisplayReportURL()
+	rh.reporterObj.DisplayReportURL()
 
 	return nil
 }
 
-// NewPrinter defined output format
-func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType cautils.ViewTypes) printer.IPrinter {
+// NewPrinter returns a new printer for a given format and configuration options
+func NewPrinter(printFormat, formatVersion string, verboseMode bool, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
 
 	switch printFormat {
 	case printer.JsonFormat:
@@ -104,6 +117,6 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType ca
 		if printFormat != printer.PrettyFormat {
 			logger.L().Error(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
-		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
+		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
 	}
 }

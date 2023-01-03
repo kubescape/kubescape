@@ -1,4 +1,4 @@
-package v2
+package printer
 
 import (
 	_ "embed"
@@ -38,17 +38,17 @@ func NewHtmlPrinter() *HtmlPrinter {
 	return &HtmlPrinter{}
 }
 
-func (htmlPrinter *HtmlPrinter) SetWriter(outputFile string) {
-	if outputFile == "" {
+func (hp *HtmlPrinter) SetWriter(outputFile string) {
+	if strings.TrimSpace(outputFile) == "" {
 		outputFile = htmlOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
 		outputFile = outputFile + htmlOutputExt
 	}
-	htmlPrinter.writer = printer.GetWriter(outputFile)
+	hp.writer = printer.GetWriter(outputFile)
 }
 
-func (htmlPrinter *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (hp *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0
@@ -104,13 +104,16 @@ func (htmlPrinter *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 
 	resourceTableView := buildResourceTableView(opaSessionObj)
 	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView}
-	err := tpl.Execute(htmlPrinter.writer, reportingCtx)
+	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Error("failed to render template", helpers.Error(err))
+	} else {
+		printer.LogOutputFile(hp.writer.Name())
 	}
+
 }
 
-func (htmlPrinter *HtmlPrinter) Score(score float32) {
+func (hp *HtmlPrinter) Score(score float32) {
 	return
 }
 
@@ -141,7 +144,7 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	var ctlResults []ResourceControlResult
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
-			control := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaName, resourceControl.GetName())
+			control := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, resourceControl.GetID())
 			ctlResult := buildResourceControlResult(resourceControl, control)
 
 			ctlResults = append(ctlResults, ctlResult)

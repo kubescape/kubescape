@@ -9,7 +9,7 @@ import (
 type IPolicyGetter interface {
 	GetFramework(name string) (*reporthandling.Framework, error)
 	GetFrameworks() ([]reporthandling.Framework, error)
-	GetControl(name string) (*reporthandling.Control, error)
+	GetControl(ID string) (*reporthandling.Control, error)
 
 	ListFrameworks() ([]string, error)
 	ListControls() ([]string, error)

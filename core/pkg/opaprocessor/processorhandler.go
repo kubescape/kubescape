@@ -69,23 +69,26 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 
 	cautils.StartSpinner()
 
-	var errs error
-	for _, control := range policies.Controls {
+	for _, toPin := range policies.Controls {
+		control := toPin
 
 		resourcesAssociatedControl, err := opap.processControl(&control)
 		if err != nil {
 			logger.L().Error(err.Error())
 		}
+
+		if len(resourcesAssociatedControl) == 0 {
+			continue
+		}
+
 		// update resources with latest results
-		if len(resourcesAssociatedControl) != 0 {
-			for resourceID, controlResult := range resourcesAssociatedControl {
-				if _, ok := opap.ResourcesResult[resourceID]; !ok {
-					opap.ResourcesResult[resourceID] = resourcesresults.Result{ResourceID: resourceID}
-				}
-				t := opap.ResourcesResult[resourceID]
-				t.AssociatedControls = append(t.AssociatedControls, controlResult)
-				opap.ResourcesResult[resourceID] = t
+		for resourceID, controlResult := range resourcesAssociatedControl {
+			if _, ok := opap.ResourcesResult[resourceID]; !ok {
+				opap.ResourcesResult[resourceID] = resourcesresults.Result{ResourceID: resourceID}
 			}
+			t := opap.ResourcesResult[resourceID]
+			t.AssociatedControls = append(t.AssociatedControls, controlResult)
+			opap.ResourcesResult[resourceID] = t
 		}
 	}
 
@@ -95,7 +98,7 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 
 	opap.loggerDoneScanning()
 
-	return errs
+	return nil
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {

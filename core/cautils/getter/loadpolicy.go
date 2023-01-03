@@ -36,11 +36,11 @@ func NewLoadPolicy(filePaths []string) *LoadPolicy {
 	}
 }
 
-// Return control from file
-func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, error) {
-
+// GetControl returns a control from the policy file.
+func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, error) {
 	control := &reporthandling.Control{}
 	filePath := lp.filePath()
+
 	f, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, err
@@ -49,20 +49,26 @@ func (lp *LoadPolicy) GetControl(controlName string) (*reporthandling.Control, e
 	if err = json.Unmarshal(f, control); err != nil {
 		return control, err
 	}
-	if controlName != "" && !strings.EqualFold(controlName, control.Name) && !strings.EqualFold(controlName, control.ControlID) {
-		framework, err := lp.GetFramework(control.Name)
-		if err != nil {
-			return nil, fmt.Errorf("control from file not matching")
-		} else {
-			for _, ctrl := range framework.Controls {
-				if strings.EqualFold(ctrl.Name, controlName) || strings.EqualFold(ctrl.ControlID, controlName) {
-					control = &ctrl
-					break
-				}
-			}
+
+	if controlID == "" || strings.EqualFold(controlID, control.ControlID) {
+		return control, nil
+	}
+
+	framework, err := lp.GetFramework(control.Name)
+	if err != nil {
+		return nil, fmt.Errorf("control from file not matching")
+	}
+
+	for _, toPin := range framework.Controls {
+		ctrl := toPin
+		if strings.EqualFold(ctrl.ControlID, controlID) {
+			control = &ctrl
+
+			break
 		}
 	}
-	return control, err
+
+	return control, nil
 }
 
 func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framework, error) {

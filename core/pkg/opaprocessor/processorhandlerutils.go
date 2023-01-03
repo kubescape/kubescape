@@ -117,9 +117,11 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
-							if k8sObj == nil {
-								// logger.L().Debug("skipping", helpers.String("resource", groupResource))
-							}
+							/*
+								if k8sObj == nil {
+									// logger.L().Debug("skipping", helpers.String("resource", groupResource))
+								}
+							*/
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}

@@ -1,4 +1,4 @@
-package v2
+package printer
 
 import (
 	"fmt"
@@ -66,7 +66,7 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(outputFile string) {
-	if outputFile == "" {
+	if strings.TrimSpace(outputFile) == "" {
 		outputFile = sarifOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
@@ -129,7 +129,9 @@ func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 				logger.L().Debug("failed to create location resolver", helpers.Error(err))
 			}
 
-			for _, ac := range result.AssociatedControls {
+			for _, toPin := range result.AssociatedControls {
+				ac := toPin
+
 				if ac.GetStatus(nil).IsFailed() {
 					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
 					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
@@ -144,6 +146,8 @@ func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	report.AddRun(run)
 
 	report.PrettyWrite(sp.writer)
+
+	printer.LogOutputFile(sp.writer.Name())
 }
 
 func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {

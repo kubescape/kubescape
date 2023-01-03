@@ -1,0 +1,58 @@
+linters-settings:
+  govet:
+    check-shadowing: true
+  dupl:
+    threshold: 200
+  goconst:
+    min-len: 3
+    min-occurrences: 2
+  gocognit:
+    min-complexity: 65
+
+linters:
+  enable:
+    - gosec
+    - staticcheck
+    - nolintlint
+  disable:
+    # temporarily disabled
+    - varcheck
+    - ineffassign
+    - unused
+    - typecheck
+    - errcheck
+    - govet
+    - gosimple
+    - deadcode
+    - gofmt
+    - goimports
+    - bodyclose
+    - dupl
+    - gocognit
+    - gocritic
+    - goimports
+    - nakedret
+    - revive
+    - stylecheck
+    - unconvert
+    - unparam
+    #- forbidigo # <- see later
+    # should remain disabled
+    - maligned
+    - lll
+    - gochecknoinits
+    - gochecknoglobals
+issues:
+  exclude-rules:
+    - linters:
+      - revive
+      text: "var-naming"
+    - linters:
+      - revive
+      text: "type name will be used as (.+?) by other packages, and that stutters"
+    - linters:
+      - stylecheck
+      text: "ST1003"
+run:
+  skip-dirs:
+    - git2go

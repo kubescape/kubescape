@@ -15,12 +15,12 @@ import (
 
 // To Check if the given repository is Public(No Authentication needed), send a HTTP GET request to the URL
 // If response code is 200, the repository is Public.
-func isGitRepoPublic(URL string) bool {
-	resp, err := nethttp.Get(URL)
-
+func isGitRepoPublic(u string) bool {
+	resp, err := nethttp.Get(u) //nolint:gosec
 	if err != nil {
 		return false
 	}
+
 	// if the status code is 200, our get request is successful.
 	// It only happens when the repository is public.
 	if resp.StatusCode == 200 {
@@ -36,6 +36,17 @@ func isGitTokenPresent(gitURL giturl.IGitAPI) bool {
 		return false
 	}
 	return true
+}
+
+// Get the error message according to the provider
+func getProviderError(gitURL giturl.IGitAPI) error {
+	switch gitURL.GetProvider(){
+	case "github":
+		return fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
+	case "gitlab":
+		return fmt.Errorf("%w", errors.New("GITLAB_TOKEN is not present"))
+	}
+	return fmt.Errorf("%w", errors.New("unable to find the host name"))
 }
 
 // cloneRepo clones a repository to a local temporary directory and returns the directory
@@ -60,9 +71,9 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 		auth = nil
 	} else {
 
-		// Return Error if the GITHUB_TOKEN is not present
+		// Return Error if the AUTH_TOKEN is not present
 		if isGitTokenPresent := isGitTokenPresent(gitURL); !isGitTokenPresent {
-			return "", fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
+			return "", getProviderError(gitURL)
 		}
 		auth = &http.BasicAuth{
 			Username: "anything Except Empty String",

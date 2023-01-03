@@ -99,7 +99,7 @@ func ResourceAssociatedControlMock(controlID string, status apis.ScanningStatus)
 }
 
 func TestNewResourcesPrioritizationHandler(t *testing.T) {
-	handler, err := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{})
+	handler, err := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{}, false)
 	assert.NoError(t, err)
 	assert.Len(t, handler.attackTracks, 2)
 	assert.Equal(t, handler.attackTracks[0].GetName(), "TestAttackTrack")
@@ -184,7 +184,7 @@ func TestResourcesPrioritizationHandler_PrioritizeResources(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			handler, _ := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{})
+			handler, _ := NewResourcesPrioritizationHandler(&AttackTracksGetterMock{}, false)
 			sessionObj := OPASessionObjMock(tt.allPoliciesControls, tt.results, tt.controls, tt.resources)
 			err := handler.PrioritizeResources(sessionObj)
 			assert.NoError(t, err, "expected to have no errors in PrioritizeResources()")

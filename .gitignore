@@ -6,3 +6,5 @@
 .idea
 .history
 ca.srl
+*.out
+ks

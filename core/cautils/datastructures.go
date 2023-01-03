@@ -5,6 +5,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -22,8 +23,10 @@ type OPASessionObj struct {
 	ResourcesResult       map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
 	ResourceSource        map[string]reporthandling.Source              // resources sources, map[<resource ID>]<resource result>
 	ResourcesPrioritized  map[string]prioritization.PrioritizedResource // resources prioritization information, map[<resource ID>]<prioritized resource>
-	Report                *reporthandlingv2.PostureReport               // scan results v2 - Remove
-	RegoInputData         RegoInputData                                 // input passed to rego for scanning. map[<control name>][<input arguments>]
+	ResourceAttackTracks  map[string]v1alpha1.IAttackTrack              // resources attack tracks, map[<resource ID>]<attack track>
+	AttackTracks          map[string]v1alpha1.IAttackTrack
+	Report                *reporthandlingv2.PostureReport // scan results v2 - Remove
+	RegoInputData         RegoInputData                   // input passed to rego for scanning. map[<control name>][<input arguments>]
 	Metadata              *reporthandlingv2.Metadata
 	InfoMap               map[string]apis.StatusInfo         // Map errors of resources to StatusInfo
 	ResourceToControlsMap map[string][]string                // map[<apigroup/apiversion/resource>] = [<control_IDs>]
