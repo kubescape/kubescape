@@ -99,12 +99,12 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 
 	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
-		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
+		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
 		printerHandler.SetWriter(scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
 
-	uiPrinter := getUIPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, cautils.ViewTypes(scanInfo.View))
+	uiPrinter := getUIPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View))
 
 	// ================== return interface ======================================
 
@@ -170,7 +170,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// ======================== prioritization ===================
 
-	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter); err != nil {
+	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 		logger.L().Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 	} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 		return resultsHandling, fmt.Errorf("%w", err)

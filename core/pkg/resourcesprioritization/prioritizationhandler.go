@@ -1,6 +1,7 @@
 package resourcesprioritization
 
 import (
+	"encoding/json"
 	"fmt"
 
 	logger "github.com/kubescape/go-logger"
@@ -13,12 +14,16 @@ import (
 )
 
 type ResourcesPrioritizationHandler struct {
-	attackTracks []v1alpha1.IAttackTrack
+	resourceToAttackTracks map[string]v1alpha1.IAttackTrack
+	attackTracks           []v1alpha1.IAttackTrack
+	buildResourcesMap      bool
 }
 
-func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGetter) (*ResourcesPrioritizationHandler, error) {
+func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
 	handler := &ResourcesPrioritizationHandler{
-		attackTracks: make([]v1alpha1.IAttackTrack, 0),
+		attackTracks:           make([]v1alpha1.IAttackTrack, 0),
+		resourceToAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		buildResourcesMap:      buildResourcesMap,
 	}
 
 	tracks, err := attackTracksGetter.GetAttackTracks()
@@ -64,7 +69,6 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 		resourcePriorityVector := []prioritization.ControlsVector{}
 		resource, exist := sessionObj.AllResources[resourceId]
 		if !exist {
-			logger.L().Error("resource not found in resources map", helpers.String("resource ID", resourceId))
 			continue
 		}
 
@@ -85,6 +89,12 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 					// Load the failed controls into the attack track
 					allPathsHandler := v1alpha1.NewAttackTrackAllPathsHandler(attackTrack, &controlsLookup)
+
+					// only build the map if the user requested it
+					if handler.buildResourcesMap {
+						// Store the attack track for returning to the caller
+						handler.resourceToAttackTracks[resourceId] = handler.copyAttackTrack(attackTrack, &controlsLookup)
+					}
 
 					// Calculate all the paths for the attack track
 					allAttackPaths := allPathsHandler.CalculateAllPaths()
@@ -128,6 +138,8 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 		sessionObj.ResourcesPrioritized[resourceId] = prioritizedResource
 	}
 
+	sessionObj.ResourceAttackTracks = handler.resourceToAttackTracks
+
 	return nil
 }
 
@@ -146,4 +158,19 @@ func (handler *ResourcesPrioritizationHandler) isSupportedKind(obj workloadinter
 		}
 	}
 	return false
+}
+
+func (handler *ResourcesPrioritizationHandler) copyAttackTrack(attackTrack v1alpha1.IAttackTrack, lookup v1alpha1.IAttackTrackControlsLookup) v1alpha1.IAttackTrack {
+	copyBytes, _ := json.Marshal(attackTrack)
+	var copyObj v1alpha1.AttackTrack
+	json.Unmarshal(copyBytes, &copyObj)
+
+	iter := copyObj.Iterator()
+	for iter.HasNext() {
+		step := iter.Next()
+		failedControls := lookup.GetAssociatedControls(copyObj.GetName(), step.GetName())
+		step.SetControls(failedControls)
+	}
+
+	return &copyObj
 }
