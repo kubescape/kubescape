@@ -15,9 +15,9 @@ import (
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
 //
 // The function:
-//  - removes sensible data
-//  - adds exceptions
-//  - summarizes results
+//   - removes sensible data
+//   - adds exceptions (and updates controls status)
+//   - summarizes results
 func (opap *OPAProcessor) updateResults() {
 
 	// remove data from all objects
@@ -32,7 +32,7 @@ func (opap *OPAProcessor) updateResults() {
 
 		// first set exceptions
 		if resource, ok := opap.AllResources[i]; ok {
-			t.SetExceptions(resource, opap.Exceptions, cautils.ClusterName)
+			t.SetExceptions(resource, opap.Exceptions, cautils.ClusterName, opap.AllPolicies.Controls)
 		}
 
 		// summarize the resources
@@ -71,7 +71,7 @@ func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[str
 }
 
 func isEmptyResources(counters reportsummary.ICounters) bool {
-	return counters.Failed() == 0 && counters.Excluded() == 0 && counters.Passed() == 0
+	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
 func getAllSupportedObjects(k8sResources *cautils.K8SResources, ksResources *cautils.KSResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
