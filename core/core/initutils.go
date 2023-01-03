@@ -182,6 +182,10 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		scanInfo.Submit = true
 	}
 
+	if scanInfo.CreateAccount {
+		scanInfo.Submit = true
+	}
+
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
