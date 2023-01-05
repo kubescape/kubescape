@@ -28,40 +28,58 @@ func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	for _, f := range archive.File {
 		filePath := filepath.Join(destinationFolder, f.Name) //nolint:gosec
 		if !strings.HasPrefix(filePath, filepath.Clean(destinationFolder)+string(os.PathSeparator)) {
 			return nil, fmt.Errorf("invalid file path")
 		}
+
 		if f.FileInfo().IsDir() {
 			os.MkdirAll(filePath, os.ModePerm)
 			continue
 		}
 
-		if err := os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
-			return nil, err
+		if erc := copyFileInFolder(filePath, f); erc != nil {
+			return nil, erc
 		}
-
-		dstFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-		if err != nil {
-			return nil, err
-		}
-
-		fileInArchive, err := f.Open()
-		if err != nil {
-			return nil, err
-		}
-
-		if _, err := io.Copy(dstFile, fileInArchive); err != nil { //nolint:gosec
-			return nil, err
-		}
-
-		dstFile.Close()
-		fileInArchive.Close()
 	}
 
 	return archive, err
+}
 
+func copyFileInFolder(filePath string, f *zip.File) (err error) {
+	if err = os.MkdirAll(filepath.Dir(filePath), os.ModePerm); err != nil {
+		return err
+	}
+
+	dstFile, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = dstFile.Close()
+	}()
+
+	fileInArchive, err := f.Open()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = fileInArchive.Close()
+	}()
+
+	_, err = io.Copy(dstFile, fileInArchive) //nolint:gosec
+
+	if err = dstFile.Close(); err != nil {
+		return err
+	}
+
+	if err = fileInArchive.Close(); err != nil {
+		return err
+	}
+
+	return err
 }
 
 func (s *LocalGitRepositoryTestSuite) SetupSuite() {

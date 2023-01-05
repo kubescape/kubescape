@@ -82,13 +82,13 @@ func (wp *workerPool) hostSensorGetResults(result *[]hostsensor.HostSensorDataEn
 func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path, requestKind string) {
 	go func() {
 		for podName, nodeName := range podList {
-			job := job{
+			thisJob := job{
 				podName:     podName,
 				nodeName:    nodeName,
 				requestKind: requestKind,
 				path:        path,
 			}
-			wp.jobs <- job
+			wp.jobs <- thisJob
 
 		}
 		close(wp.jobs)
