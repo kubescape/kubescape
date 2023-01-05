@@ -114,7 +114,6 @@ func (hp *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 }
 
 func (hp *HtmlPrinter) Score(score float32) {
-	return
 }
 
 func buildResourceTableView(opaSessionObj *cautils.OPASessionObj) ResourceTableView {

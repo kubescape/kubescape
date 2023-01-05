@@ -87,7 +87,7 @@ func getNumericValueFromEnvVar(envVar string, defaultValue int) int {
 	return defaultValue
 }
 func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPASessionObj) {
-	if prettyPrinter.printAttackTree == false || opaSessionObj.ResourceAttackTracks == nil {
+	if !prettyPrinter.printAttackTree || opaSessionObj.ResourceAttackTracks == nil {
 		return
 	}
 

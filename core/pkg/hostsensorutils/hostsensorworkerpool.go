@@ -32,7 +32,7 @@ func NewWorkerPool() workerPool {
 }
 
 func (wp *workerPool) init(noOfPods ...int) {
-	if noOfPods != nil && len(noOfPods) > 0 && noOfPods[0] < noOfWorkers {
+	if len(noOfPods) > 0 && noOfPods[0] < noOfWorkers {
 		wp.noOfWorkers = noOfPods[0]
 	}
 	// init the channels
