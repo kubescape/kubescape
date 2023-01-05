@@ -40,7 +40,7 @@ func isGitTokenPresent(gitURL giturl.IGitAPI) bool {
 
 // Get the error message according to the provider
 func getProviderError(gitURL giturl.IGitAPI) error {
-	switch gitURL.GetProvider(){
+	switch gitURL.GetProvider() {
 	case "github":
 		return fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
 	case "gitlab":
