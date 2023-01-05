@@ -20,6 +20,9 @@ func isGitRepoPublic(u string) bool {
 	if err != nil {
 		return false
 	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// if the status code is 200, our get request is successful.
 	// It only happens when the repository is public.
