@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+/* unused for now
 func maskID(id string) string {
 	sep := "-"
 	splitted := strings.Split(id, sep)
@@ -22,6 +23,7 @@ func maskID(id string) string {
 
 	return strings.TrimSuffix(str, sep)
 }
+*/
 
 func parseHost(urlObj *url.URL) {
 	if strings.Contains(urlObj.Host, "http://") {

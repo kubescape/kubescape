@@ -10,7 +10,6 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/opa-utils/reporthandling"
 )
 
 // Clone git repository
@@ -63,6 +62,7 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 
 }
 
+/* unused for now
 func addCommitData(input string, workloadIDToSource map[string]reporthandling.Source) {
 	giRepo, err := cautils.NewLocalGitRepository(input)
 	if err != nil || giRepo == nil {
@@ -84,3 +84,4 @@ func addCommitData(input string, workloadIDToSource map[string]reporthandling.So
 		workloadIDToSource[k] = sourceObj
 	}
 }
+*/
