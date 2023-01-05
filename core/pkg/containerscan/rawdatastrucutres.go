@@ -71,19 +71,19 @@ type PackageFile struct {
 
 // types to provide unmarshalling:
 
-//VulnerabilitiesList -s.e
+// VulnerabilitiesList -s.e
 type LayersList []ScanResultLayer
 
-//VulnerabilitiesList -s.e
+// VulnerabilitiesList -s.e
 type VulnerabilitiesList []Vulnerability
 
-//LinuxPkgs - slice of linux pkgs
+// LinuxPkgs - slice of linux pkgs
 type LinuxPkgs []LinuxPackage
 
-//VulFixes - information bout when/how this vul was fixed
+// VulFixes - information bout when/how this vul was fixed
 type VulFixes []FixedIn
 
-//PkgFiles - slice of files belong to specific pkg
+// PkgFiles - slice of files belong to specific pkg
 type PkgFiles []PackageFile
 
 func (v *ScanResultReport) AsFNVHash() string {

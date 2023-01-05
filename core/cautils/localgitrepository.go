@@ -79,10 +79,13 @@ func (g *LocalGitRepository) GetRemoteUrl() (string, error) {
 	}
 
 	const defaultRemoteName string = "origin"
-	if len(g.config.Remotes[defaultRemoteName].URLs) == 0 {
+	defaultRemote, ok := g.config.Remotes[defaultRemoteName]
+	if !ok {
+		return "", fmt.Errorf("did not find a default remote with name '%s'", defaultRemoteName)
+	} else if len(defaultRemote.URLs) == 0 {
 		return "", fmt.Errorf("expected to find URLs for remote '%s'", defaultRemoteName)
 	}
-	return g.config.Remotes[defaultRemoteName].URLs[0], nil
+	return defaultRemote.URLs[0], nil
 }
 
 // GetName get origin name without the .git suffix
