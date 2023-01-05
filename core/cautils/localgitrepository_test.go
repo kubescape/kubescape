@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	configv5 "github.com/go-git/go-git/v5/config"
+	plumbingv5 "github.com/go-git/go-git/v5/plumbing"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -172,4 +174,51 @@ func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
 
 		}
 	})
+}
+
+func TestGetRemoteUrl(t *testing.T) {
+	testCases := []struct {
+		Name      string
+		LocalRepo LocalGitRepository
+		Want      string
+		WantErr   error
+	}{
+		{
+			Name: "Branch with missing upstream and missing 'origin' fallback should return an error",
+			LocalRepo: LocalGitRepository{
+				config: &configv5.Config{
+					Branches: make(map[string]*configv5.Branch),
+					Remotes:  make(map[string]*configv5.RemoteConfig),
+				},
+				head: plumbingv5.NewReferenceFromStrings("HEAD", "ref: refs/heads/v4"),
+			},
+			Want:    "",
+			WantErr: fmt.Errorf("did not find a default remote with name 'origin'"),
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			localRepo := LocalGitRepository{
+				config: &configv5.Config{
+					Branches: make(map[string]*configv5.Branch),
+					Remotes:  make(map[string]*configv5.RemoteConfig),
+				},
+				head: plumbingv5.NewReferenceFromStrings("HEAD", "ref: refs/heads/v4"),
+			}
+
+			want := tc.Want
+			wantErr := tc.WantErr
+			got, gotErr := localRepo.GetRemoteUrl()
+
+			if got != want {
+				t.Errorf("Remote URLs don’t match: got '%s', want '%s'", got, want)
+			}
+
+			if gotErr.Error() != wantErr.Error() {
+				t.Errorf("Errors don’t match: got '%v', want '%v'", gotErr, wantErr)
+			}
+		},
+		)
+	}
 }
