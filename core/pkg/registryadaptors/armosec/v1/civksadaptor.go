@@ -25,14 +25,17 @@ func (ksCivAdaptor *KSCivAdaptor) Login() error {
 }
 func (ksCivAdaptor *KSCivAdaptor) GetImagesVulnerabilities(imageIDs []registryvulnerabilities.ContainerImageIdentifier) ([]registryvulnerabilities.ContainerImageVulnerabilityReport, error) {
 	resultList := make([]registryvulnerabilities.ContainerImageVulnerabilityReport, 0)
-	for _, imageID := range imageIDs {
+	for _, toPin := range imageIDs {
+		imageID := toPin
 		result, err := ksCivAdaptor.GetImageVulnerability(&imageID)
-		if err == nil {
-			resultList = append(resultList, *result)
-		} else {
+		if err != nil {
 			logger.L().Debug("failed to get image vulnerabilities", helpers.String("image", imageID.Tag), helpers.Error(err))
+			continue
 		}
+
+		resultList = append(resultList, *result)
 	}
+
 	return resultList, nil
 }
 

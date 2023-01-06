@@ -92,7 +92,7 @@ func (rh *ResultsHandler) HandleResults() error {
 }
 
 // NewPrinter returns a new printer for a given format and configuration options
-func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType cautils.ViewTypes) printer.IPrinter {
+func NewPrinter(printFormat, formatVersion string, verboseMode bool, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
 
 	switch printFormat {
 	case printer.JsonFormat:
@@ -117,6 +117,6 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, viewType ca
 		if printFormat != printer.PrettyFormat {
 			logger.L().Error(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
-		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
+		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
 	}
 }

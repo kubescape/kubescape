@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	configv5 "github.com/go-git/go-git/v5/config"
+	plumbingv5 "github.com/go-git/go-git/v5/plumbing"
 	"github.com/stretchr/testify/suite"
 )
 
@@ -27,7 +29,7 @@ func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
 		return nil, err
 	}
 	for _, f := range archive.File {
-		filePath := filepath.Join(destinationFolder, f.Name)
+		filePath := filepath.Join(destinationFolder, f.Name) //nolint:gosec
 		if !strings.HasPrefix(filePath, filepath.Clean(destinationFolder)+string(os.PathSeparator)) {
 			return nil, fmt.Errorf("invalid file path")
 		}
@@ -50,7 +52,7 @@ func unzipFile(zipPath, destinationFolder string) (*zip.ReadCloser, error) {
 			return nil, err
 		}
 
-		if _, err := io.Copy(dstFile, fileInArchive); err != nil {
+		if _, err := io.Copy(dstFile, fileInArchive); err != nil { //nolint:gosec
 			return nil, err
 		}
 
@@ -132,44 +134,49 @@ func (s *LocalGitRepositoryTestSuite) TestGetOriginUrl() {
 	}
 }
 
-func (s *LocalGitRepositoryTestSuite) TestGetLastCommit() {
-	if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
-		if commit, err := localRepo.GetLastCommit(); s.NoError(err) {
-			s.Equal("7e09312b8017695fadcd606882e3779f10a5c832", commit.SHA)
-			s.Equal("Amir Malka", commit.Author.Name)
-			s.Equal("amirm@armosec.io", commit.Author.Email)
-			s.Equal("2022-05-22 19:11:57 +0300 +0300", commit.Author.Date.String())
-			s.Equal("added file B\n", commit.Message)
-		}
+func TestGetRemoteUrl(t *testing.T) {
+	testCases := []struct {
+		Name      string
+		LocalRepo LocalGitRepository
+		Want      string
+		WantErr   error
+	}{
+		{
+			Name: "Branch with missing upstream and missing 'origin' fallback should return an error",
+			LocalRepo: LocalGitRepository{
+				config: &configv5.Config{
+					Branches: make(map[string]*configv5.Branch),
+					Remotes:  make(map[string]*configv5.RemoteConfig),
+				},
+				head: plumbingv5.NewReferenceFromStrings("HEAD", "ref: refs/heads/v4"),
+			},
+			Want:    "",
+			WantErr: fmt.Errorf("did not find a default remote with name 'origin'"),
+		},
 	}
-}
 
-func (s *LocalGitRepositoryTestSuite) TestGetFileLastCommit() {
-	s.Run("fileA", func() {
-		if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
-
-			if commit, err := localRepo.GetFileLastCommit("fileA"); s.NoError(err) {
-				s.Equal("9fae4be19624297947d2b605cefbff516628612d", commit.SHA)
-				s.Equal("Amir Malka", commit.Author.Name)
-				s.Equal("amirm@armosec.io", commit.Author.Email)
-				s.Equal("2022-05-22 18:55:48 +0300 +0300", commit.Author.Date.String())
-				s.Equal("added file A\n", commit.Message)
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			localRepo := LocalGitRepository{
+				config: &configv5.Config{
+					Branches: make(map[string]*configv5.Branch),
+					Remotes:  make(map[string]*configv5.RemoteConfig),
+				},
+				head: plumbingv5.NewReferenceFromStrings("HEAD", "ref: refs/heads/v4"),
 			}
 
-		}
-	})
+			want := tc.Want
+			wantErr := tc.WantErr
+			got, gotErr := localRepo.GetRemoteUrl()
 
-	s.Run("fileB", func() {
-		if localRepo, err := NewLocalGitRepository(s.gitRepositoryPaths["localrepo"]); s.NoError(err) {
-
-			if commit, err := localRepo.GetFileLastCommit("dirA/fileB"); s.NoError(err) {
-				s.Equal("7e09312b8017695fadcd606882e3779f10a5c832", commit.SHA)
-				s.Equal("Amir Malka", commit.Author.Name)
-				s.Equal("amirm@armosec.io", commit.Author.Email)
-				s.Equal("2022-05-22 19:11:57 +0300 +0300", commit.Author.Date.String())
-				s.Equal("added file B\n", commit.Message)
+			if got != want {
+				t.Errorf("Remote URLs don’t match: got '%s', want '%s'", got, want)
 			}
 
-		}
-	})
+			if gotErr.Error() != wantErr.Error() {
+				t.Errorf("Errors don’t match: got '%v', want '%v'", gotErr, wantErr)
+			}
+		},
+		)
+	}
 }

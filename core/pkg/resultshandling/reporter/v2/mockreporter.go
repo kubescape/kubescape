@@ -2,13 +2,11 @@ package reporter
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
-
-const NO_SUBMIT_QUERY = "utm_source=GitHub&utm_medium=CLI&utm_campaign=no_submit"
 
 type ReportMock struct {
 	query   string
@@ -32,11 +30,19 @@ func (reportMock *ReportMock) SetClusterName(clusterName string) {
 }
 
 func (reportMock *ReportMock) GetURL() string {
-	u := fmt.Sprintf("https://%s/account/sign-up", getter.GetKSCloudAPIConnector().GetCloudUIURL())
-	if reportMock.query != "" {
-		u += fmt.Sprintf("?%s", reportMock.query)
+	u, err := url.Parse(reportMock.query)
+	if err != nil || u.String() == "" {
+		return ""
 	}
-	return u
+
+	q := u.Query()
+	q.Add("utm_source", "GitHub")
+	q.Add("utm_medium", "CLI")
+	q.Add("utm_campaign", "Submit")
+
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }
 
 func (reportMock *ReportMock) DisplayReportURL() {
@@ -44,8 +50,8 @@ func (reportMock *ReportMock) DisplayReportURL() {
 	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
 	message := sep + "\n"
 	message += "Scan results have not been submitted: " + reportMock.message + "\n"
-	if reportMock.query != "" {
-		message += "For more details: " + reportMock.query + "\n"
+	if link := reportMock.GetURL(); link != "" {
+		message += "For more details: " + link + "\n"
 	}
 	message += sep + "\n"
 	cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", message))

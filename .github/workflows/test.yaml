@@ -61,7 +61,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
-          go-version: 1.18
+          go-version: 1.19
 
       - name: Install MSYS2 & libgit2 (Windows)
         shell: cmd
@@ -73,10 +73,10 @@ jobs:
         if: matrix.os != 'windows-latest'
  
       - name: Test core pkg
-        run: go test -tags=static -v ./...
+        run: go test "-tags=static,gitenabled" -v ./...
 
       - name: Test httphandler pkg
-        run: cd httphandler && go test -tags=static -v ./...
+        run: cd httphandler && go test "-tags=static,gitenabled" -v ./...
 
       - name: Build
         env:

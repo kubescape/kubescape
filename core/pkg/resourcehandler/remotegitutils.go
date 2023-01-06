@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/protocol/packp/capability"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	giturl "github.com/kubescape/go-git-url"
@@ -15,12 +16,12 @@ import (
 
 // To Check if the given repository is Public(No Authentication needed), send a HTTP GET request to the URL
 // If response code is 200, the repository is Public.
-func isGitRepoPublic(URL string) bool {
-	resp, err := nethttp.Get(URL)
-
+func isGitRepoPublic(u string) bool {
+	resp, err := nethttp.Get(u) //nolint:gosec
 	if err != nil {
 		return false
 	}
+
 	// if the status code is 200, our get request is successful.
 	// It only happens when the repository is public.
 	if resp.StatusCode == 200 {
@@ -40,11 +41,13 @@ func isGitTokenPresent(gitURL giturl.IGitAPI) bool {
 
 // Get the error message according to the provider
 func getProviderError(gitURL giturl.IGitAPI) error {
-	switch gitURL.GetProvider(){
+	switch gitURL.GetProvider() {
 	case "github":
 		return fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
 	case "gitlab":
 		return fmt.Errorf("%w", errors.New("GITLAB_TOKEN is not present"))
+	case "azure":
+		return fmt.Errorf("%w", errors.New("AZURE_TOKEN is not present"))
 	}
 	return fmt.Errorf("%w", errors.New("unable to find the host name"))
 }
@@ -79,6 +82,10 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 			Username: "anything Except Empty String",
 			Password: gitURL.GetToken(),
 		}
+	}
+
+	transport.UnsupportedCapabilities = []capability.Capability{
+		capability.ThinPack,
 	}
 
 	// Clone option

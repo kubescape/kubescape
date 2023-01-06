@@ -182,6 +182,10 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		scanInfo.Submit = true
 	}
 
+	if scanInfo.CreateAccount {
+		scanInfo.Submit = true
+	}
+
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
@@ -259,8 +263,8 @@ func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.Down
 }
 
 // getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
-func getUIPrinter(verboseMode bool, formatVersion string, viewType cautils.ViewTypes) printer.IPrinter {
-	p := printerv2.NewPrettyPrinter(verboseMode, formatVersion, viewType)
+func getUIPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
+	p := printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
 
 	// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
 	p.SetWriter(os.Stdout.Name())
