@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -247,7 +247,10 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	return getter.NativeFrameworks
 }
 
-func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+func getAttackTracksGetter(attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+	if len(attackTracks) > 0 {
+		return getter.NewLoadPolicy([]string{attackTracks})
+	}
 	if accountID != "" {
 		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
 		return g
@@ -255,6 +258,7 @@ func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.Down
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
+
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
 		logger.L().Warning("failed to get attack tracks from github release, loading attack tracks from cache", helpers.Error(err))
 		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
