@@ -9,6 +9,7 @@ def run_command(command, stdin=subprocess.PIPE, stderr=subprocess.STDOUT):
     try:
         return f"{subprocess.check_output(command, stdin=stdin, stderr=stderr)}"
     except Exception as e:
+        print(e.output)
         return f"{e}"
 
 
