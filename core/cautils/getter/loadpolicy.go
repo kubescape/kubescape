@@ -71,27 +71,29 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 	return control, nil
 }
 
+// GetFramework retrieves a framework configuration from the policy.
 func (lp *LoadPolicy) GetFramework(frameworkName string) (*reporthandling.Framework, error) {
-	var framework reporthandling.Framework
-	var err error
+	if frameworkName == "" {
+		return &reporthandling.Framework{}, nil
+	}
+
 	for _, filePath := range lp.filePaths {
-		framework = reporthandling.Framework{}
 		f, err := os.ReadFile(filePath)
 		if err != nil {
 			return nil, err
 		}
-		if err = json.Unmarshal(f, &framework); err != nil {
+
+		var fw reporthandling.Framework
+		if err = json.Unmarshal(f, &fw); err != nil {
 			return nil, err
 		}
-		if strings.EqualFold(frameworkName, framework.Name) {
-			break
+
+		if strings.EqualFold(frameworkName, fw.Name) {
+			return &fw, nil
 		}
 	}
-	if frameworkName != "" && !strings.EqualFold(frameworkName, framework.Name) {
 
-		return nil, fmt.Errorf("framework from file not matching")
-	}
-	return &framework, err
+	return nil, fmt.Errorf("framework from file not matching")
 }
 
 func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
@@ -103,6 +105,7 @@ func (lp *LoadPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
 func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	fwNames := []string{}
 	framework := &reporthandling.Framework{}
+
 	for _, f := range lp.filePaths {
 		file, err := os.ReadFile(f)
 		if err == nil {
@@ -113,6 +116,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 			}
 		}
 	}
+
 	return fwNames, nil
 }
 

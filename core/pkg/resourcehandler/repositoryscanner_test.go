@@ -10,7 +10,7 @@ var (
 	urlA = "https://github.com/kubescape/kubescape"
 	urlB = "https://github.com/kubescape/kubescape/blob/master/examples/online-boutique/adservice.yaml"
 	urlC = "https://github.com/kubescape/kubescape/tree/master/examples/online-boutique"
-	urlD = "https://raw.githubusercontent.com/kubescape/kubescape/master/examples/online-boutique/adservice.yaml"
+	// urlD = "https://raw.githubusercontent.com/kubescape/kubescape/master/examples/online-boutique/adservice.yaml"
 )
 
 /*

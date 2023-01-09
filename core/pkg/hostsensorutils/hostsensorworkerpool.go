@@ -32,7 +32,7 @@ func NewWorkerPool() workerPool {
 }
 
 func (wp *workerPool) init(noOfPods ...int) {
-	if noOfPods != nil && len(noOfPods) > 0 && noOfPods[0] < noOfWorkers {
+	if len(noOfPods) > 0 && noOfPods[0] < noOfWorkers {
 		wp.noOfWorkers = noOfPods[0]
 	}
 	// init the channels
@@ -82,13 +82,13 @@ func (wp *workerPool) hostSensorGetResults(result *[]hostsensor.HostSensorDataEn
 func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path, requestKind string) {
 	go func() {
 		for podName, nodeName := range podList {
-			job := job{
+			thisJob := job{
 				podName:     podName,
 				nodeName:    nodeName,
 				requestKind: requestKind,
 				path:        path,
 			}
-			wp.jobs <- job
+			wp.jobs <- thisJob
 
 		}
 		close(wp.jobs)
