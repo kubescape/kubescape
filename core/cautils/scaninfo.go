@@ -324,7 +324,6 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 			ContextName: k8sinterface.GetContextName(),
 		}
 	case ContextGitURL:
-		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 		// url
 		context, err := metadataGitURL(input)
 		if err != nil {
@@ -332,19 +331,16 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		}
 		contextMetadata.RepoContextMetadata = context
 	case ContextDir:
-		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
 			BasePath: getAbsPath(input),
 			HostName: getHostname(),
 		}
 	case ContextFile:
-		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
 			FilePath: getAbsPath(input),
 			HostName: getHostname(),
 		}
 	case ContextGitLocal:
-		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
 		// local
 		context, err := metadataGitLocal(input)
 		if err != nil {
