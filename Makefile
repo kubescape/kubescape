@@ -11,7 +11,7 @@ libgit2:
 	cd git2go; make install-static
 
 # go build tags
-TAGS = "static"
+TAGS = "gitenabled,static"
 
 build:
 	go build -v -tags=$(TAGS) .
