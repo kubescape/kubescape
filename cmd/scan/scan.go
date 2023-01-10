@@ -10,25 +10,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scanCmdExamples = `
+var scanCmdExamples = fmt.Sprintf(`
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
   # Scan current cluster with all frameworks
-  kubescape scan --enable-host-scan --verbose
+  %[1]s scan --enable-host-scan --verbose
 
   # Scan kubernetes YAML manifest files
-  kubescape scan .
+  %[1]s scan .
 
   # Scan and save the results in the JSON format
-  kubescape scan --format json --output results.json --format-version=v2
+  %[1]s scan --format json --output results.json --format-version=v2
 
   # Display all resources
-  kubescape scan --verbose
+  %[1]s scan --verbose
 
   # Scan different clusters from the kubectl context 
-  kubescape scan --kube-context <kubernetes context>
-  
-`
+  %[1]s scan --kube-context <kubernetes context>
+`, cautils.ExecName())
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
