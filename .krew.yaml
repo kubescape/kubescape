@@ -1,0 +1,36 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: kubescape
+spec:
+  homepage: https://kubescape.io/
+  shortDescription: An open-source Kubernetes security platform for your IDE, CI/CD pipelines, and clusters
+  version: {{ .TagName }}
+  description: |
+    Kubescape is an open-source Kubernetes security platform.
+    It includes risk analysis, security compliance, and misconfiguration scanning.
+    Targeted at the DevSecOps practitioner or platform engineer,
+    it offers an easy-to-use CLI interface, flexible output formats, and automated scanning capabilities.
+    It saves Kubernetes users and admins precious time, effort, and resources.
+    
+    Kubescape was created by [ARMO](https://www.armosec.io/?utm_source=github&utm_medium=repository)
+    and is a [Cloud Native Computing Foundation (CNCF) sandbox project](https://www.cncf.io/sandbox-projects/).
+  platforms:
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-macos-latest" .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-ubuntu-latest" .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-windows-latest" .TagName }}
+    bin: kubescape

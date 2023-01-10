@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/google/uuid"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
 	logger "github.com/kubescape/go-logger"
@@ -50,7 +51,7 @@ func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinter
 
 func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 	var resultsCmd = &cobra.Command{
-		Use:   "results <json file>\nExample:\n$ kubescape submit results path/to/results.json --format-version v2",
+		Use:   fmt.Sprintf("results <json file>\nExample:\n$ %[1]s submit results path/to/results.json --format-version v2", cautils.ExecName()),
 		Short: "Submit a pre scanned results file. The file must be in json format",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -87,7 +88,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			return nil
 		},
 	}
-	resultsCmd.PersistentFlags().StringVar(&formatVersion, "format-version", "v1", "Output object can be differnet between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
+	resultsCmd.PersistentFlags().StringVar(&formatVersion, "format-version", "v1", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 
 	return resultsCmd
 }

@@ -1,18 +1,21 @@
 package delete
 
 import (
+	"fmt"
+
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
-var deleteExceptionsExamples = `
+var deleteExceptionsExamples = fmt.Sprintf(`
   # Delete single exception
-  kubescape delete exceptions "exception name"
+  %[1]s delete exceptions "exception name"
 
   # Delete multiple exceptions
-  kubescape delete exceptions "first exception;second exception;third exception"
-`
+  %[1]s delete exceptions "first exception;second exception;third exception"
+`, cautils.ExecName())
 
 func GetDeleteCmd(ks meta.IKubescape) *cobra.Command {
 	var deleteInfo v1.Delete
