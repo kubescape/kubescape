@@ -39,22 +39,22 @@ func getTestCases() []indentationTestCase {
 	indentationTestCases := []indentationTestCase{
 		// Insertion Scenarios
 		{
-			"insert_scenarios/original_yaml_scenario_1.yml",
+			"inserts/tc-01-00-input.yaml",
 			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"insert_scenarios/fixed_yaml_scenario_1.yml",
+			"inserts/tc-01-01-expected.yaml",
 		},
 		{
-			"insert_scenarios/original_yaml_scenario_2.yml",
+			"inserts/tc-02-00-input.yaml",
 			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
-			"insert_scenarios/fixed_yaml_scenario_2.yml",
+			"inserts/tc-02-01-expected.yaml",
 		},
 		{
-			"insert_scenarios/original_yaml_scenario_3.yml",
+			"inserts/tc-03-00-input.yaml",
 			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
-			"insert_scenarios/fixed_yaml_scenario_3.yml",
+			"inserts/tc-03-01-expected.yaml",
 		},
 		{
-			"insert_scenarios/original_yaml_scenario_4.yml",
+			"inserts/tc-04-00-input.yaml",
 
 			`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false |
 			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"] |
@@ -62,70 +62,69 @@ func getTestCases() []indentationTestCase {
 			 select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
 			 select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true`,
 
-			"insert_scenarios/fixed_yaml_scenario_4.yml",
+			"inserts/tc-04-01-expected.yaml",
 		},
 		{
-			"insert_scenarios/original_yaml_scenario_5.yml",
+			"inserts/tc-05-00-input.yaml",
 			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
-			"insert_scenarios/fixed_yaml_scenario_5.yml",
+			"inserts/tc-05-01-expected.yaml",
 		},
 		{
-			"insert_scenarios/original_yaml_scenario_6.yml",
+			"inserts/tc-06-00-input.yaml",
 			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
-			"insert_scenarios/fixed_yaml_scenario_6.yml",
+			"inserts/tc-06-01-expected.yaml",
 		},
 		{
-			"insert_scenarios/original_yaml_scenario_7.yml",
+			"inserts/tc-07-00-input.yaml",
 
 			`select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
 			 select(di==1).spec.containers[0].securityContext.allowPrivilegeEscalation |= false`,
 
-			"insert_scenarios/fixed_yaml_scenario_7.yml",
+			"inserts/tc-07-01-expected.yaml",
 		},
 
 		// Removal Scenarios
-
 		{
-			"remove_scenarios/original_yaml_scenario_1.yml",
+			"removals/tc-01-00-input.yaml",
 			"del(select(di==0).spec.containers[0].securityContext)",
-			"remove_scenarios/fixed_yaml_scenario_1.yml",
+			"removals/tc-01-01-expected.yaml",
 		},
 		{
-			"remove_scenarios/original_yaml_scenario_2.yml",
+			"removals/tc-02-00-input.yaml",
 			"del(select(di==0).spec.containers[1])",
-			"remove_scenarios/fixed_yaml_scenario_2.yml",
+			"removals/tc-02-01-expected.yaml",
 		},
 		{
-			"remove_scenarios/original_yaml_scenario_3.yml",
+			"removals/tc-03-00-input.yaml",
 			"del(select(di==0).spec.containers[0].securityContext.capabilities.drop[1])",
-			"remove_scenarios/fixed_yaml_scenario_3.yml",
+			"removals/tc-03-01-expected.yaml",
 		},
 		{
-			"remove_scenarios/original_yaml_scenario_4.yml",
+			"removes/tc-04-00-input.yaml",
 			`del(select(di==0).spec.containers[0].securityContext) | 
 			 del(select(di==1).spec.containers[1])`,
-			"remove_scenarios/fixed_yaml_scenario_4.yml",
+			"removes/tc-04-01-expected.yaml",
 		},
 
 		// Replace Scenarios
 		{
-			"replace_scenarios/original_yaml_scenario_1.yml",
+			"replaces/tc-01-00-input.yaml",
 			"select(di==0).spec.containers[0].securityContext.runAsRoot |= false",
-			"replace_scenarios/fixed_yaml_scenario_1.yml",
+			"replaces/tc-01-01-expected.yaml",
 		},
 		{
-			"replace_scenarios/original_yaml_scenario_2.yml",
+			"replaces/tc-02-00-input.yaml",
 			`select(di==0).spec.containers[0].securityContext.capabilities.drop[0] |= "SYS_ADM" |
 			 select(di==0).spec.containers[0].securityContext.capabilities.add[0] |= "NET_RAW"`,
-			"replace_scenarios/fixed_yaml_scenario_2.yml",
+			"replaces/tc-02-01-expected.yaml",
 		},
 
 		// Hybrid Scenarios
 		{
-			"hybrid_scenarios/original_yaml_scenario_1.yml",
+			"hybrids/tc-01-00-input.yaml",
 			`del(select(di==0).spec.containers[0].securityContext) |
 			 select(di==0).spec.securityContext.runAsRoot |= false`,
-			"hybrid_scenarios/fixed_yaml_scenario_1.yml",
+			"hybrids/tc-01-01-expected.yaml",
 		},
 	}
 
@@ -136,23 +135,34 @@ func TestApplyFixKeepsIndentation(t *testing.T) {
 	testCases := getTestCases()
 
 	for _, tc := range testCases {
-		getTestDataPath := func(filename string) string {
-			currentDir, _ := os.Getwd()
-			currentFile := "testdata/" + filename
-			return filepath.Join(currentDir, currentFile)
-		}
+		t.Run(tc.inputFile, func(t *testing.T) {
+			getTestDataPath := func(filename string) string {
+				currentDir, _ := os.Getwd()
+				currentFile := "testdata/" + filename
+				return filepath.Join(currentDir, currentFile)
+			}
 
-		input, _ := os.ReadFile(getTestDataPath(tc.inputFile))
-		want, _ := os.ReadFile(getTestDataPath(tc.expectedFile))
-		expression := tc.yamlExpression
+			input, _ := os.ReadFile(getTestDataPath(tc.inputFile))
+			want, _ := os.ReadFile(getTestDataPath(tc.expectedFile))
+			expression := tc.yamlExpression
 
-		h, _ := NewFixHandlerMock()
+			h, _ := NewFixHandlerMock()
 
-		got, _ := h.ApplyFixToContent(string(input), expression)
+			got, _ := h.ApplyFixToContent(string(input), expression)
 
-		if got != string(want) {
-			t.Errorf("Fixed file does not match the expected.\n FilePath: %s \n\nGot:\n <%s>\n\n\nWant:\n<%s>", tc.inputFile, got, want)
-		}
+			if got != string(want) {
+				t.Errorf(
+					"Contents of the fixed file don't match the expectation.\n"+
+						"FilePath: %s\n\n"+
+						"Got:\n<%s>\n\n"+
+						"Want:\n<%s>",
+					tc.inputFile,
+					got,
+					want,
+				)
+			}
+		},
+		)
 
 	}
 }
