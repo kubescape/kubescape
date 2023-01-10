@@ -8,6 +8,7 @@
     build.bat all
     ```
 
+> **Note**
 > You can install MSYS2 separately by running `build.bat install` and build libgit2 separately by running `build.bat build`
 
 2. Build kubescape
@@ -31,6 +32,7 @@
     make libgit2
     ```
 
+> **Note**
 > `cmake` is required to build libgit2. You can install it by running `sudo apt-get install cmake` (Linux) or `brew install cmake` (macOS).
 
 2. Build kubescape

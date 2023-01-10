@@ -28,6 +28,7 @@ Expecting:
   "secretKey": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 }
 ```
+> **Note**
 > If you are missing the `accountID` field, set it by running `kubescape config set accountID <>`
 
 For CICD, set environments variables as following:

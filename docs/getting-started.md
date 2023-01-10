@@ -40,6 +40,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     kubescape scan --enable-host-scan  --verbose
     ```
 
+    > **Note**
     > [Read more about host scanning](https://hub.armosec.io/docs/host-sensor?utm_source=github&utm_medium=repository).
 
 * Scan a running Kubernetes cluster with the [NSA framework](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/):
@@ -107,6 +108,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     kubescape scan </path/to/directory>
     ```
 
+    > **Note**
     > Kubescape will load the default VALUES file.
 
 * Scan a Kustomize directory 
@@ -115,6 +117,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     kubescape scan </path/to/directory>
     ```
 
+    > **Note**
     > Kubescape will generate Kubernetes YAML objects using a `kustomize` file and scan them for security.
 
 ### Output formats
@@ -125,6 +128,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     kubescape scan --format json --format-version v2 --output results.json
     ```
 
+    > **Note**
     > Add the `--format-version v2` flag for maximum compatibility.
 
 * junit XML: 
