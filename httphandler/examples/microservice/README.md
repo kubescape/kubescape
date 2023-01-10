@@ -4,7 +4,7 @@
     ```bash
     kubectl apply -f ks-deployment.yaml
     ```
-    > **Note** 
+    > **Note**  
     > Make sure the configurations suit your cluster (e.g. `serviceType`, namespace, etc.)
 
 2. Trigger scan
