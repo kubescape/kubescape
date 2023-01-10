@@ -132,6 +132,12 @@ func getTestCases() []indentationTestCase {
 			 select(di==0).spec.securityContext.runAsRoot |= false`,
 			"hybrids/tc-02-01-expected.yaml",
 		},
+		{
+			"hybrids/tc-03-00-input-comments.yaml",
+			`del(select(di==0).spec.containers[0].securityContext) |
+			 select(di==0).spec.securityContext.runAsRoot |= false`,
+			"hybrids/tc-03-01-expected.yaml",
+		},
 	}
 
 	return indentationTestCases
