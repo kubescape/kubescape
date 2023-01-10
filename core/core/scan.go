@@ -7,7 +7,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -137,7 +137,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
 	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
-	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {

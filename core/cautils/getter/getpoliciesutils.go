@@ -26,8 +26,8 @@ func SaveInFile(policy interface{}, pathStr string) error {
 		if os.IsNotExist(err) {
 			pathDir := path.Dir(pathStr)
 			// pathDir could contain subdirectories
-			if err := os.MkdirAll(pathDir, 0755); err != nil {
-				return err
+			if erm := os.MkdirAll(pathDir, 0755); erm != nil {
+				return erm
 			}
 		} else {
 			return err

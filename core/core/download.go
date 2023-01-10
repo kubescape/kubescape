@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
@@ -137,7 +137,7 @@ func downloadAttackTracks(downloadInfo *metav1.DownloadInfo) error {
 	var err error
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	attackTracksGetter := getAttackTracksGetter(tenant.GetAccountID(), nil)
+	attackTracksGetter := getAttackTracksGetter("", tenant.GetAccountID(), nil)
 
 	attackTracks, err := attackTracksGetter.GetAttackTracks()
 	if err != nil {

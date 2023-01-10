@@ -168,7 +168,6 @@ func (pp *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSu
 }
 
 func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
-	preIndent := indent
 	if title != "" {
 		cautils.SimpleDisplay(pp.writer, "%s%s\n", indent, title)
 		indent += indent
@@ -184,8 +183,6 @@ func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc [
 	for i := range resources {
 		cautils.SimpleDisplay(pp.writer, resources[i]+"\n")
 	}
-
-	indent = preIndent
 }
 
 func generateRelatedObjectsStr(workload WorkloadSummary) string {

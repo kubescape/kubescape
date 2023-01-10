@@ -34,10 +34,7 @@ func NewExcludeSelector(ns string) *ExcludeSelector {
 
 func (es *ExcludeSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
 	// for selector, 'namespace' is in Namespaced scope
-	if resource.Resource == "namespaces" {
-		return true
-	}
-	return false
+	return resource.Resource == "namespaces"
 }
 
 type IncludeSelector struct {
@@ -50,10 +47,7 @@ func NewIncludeSelector(ns string) *IncludeSelector {
 
 func (is *IncludeSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
 	// for selector, 'namespace' is in Namespaced scope
-	if resource.Resource == "namespaces" {
-		return true
-	}
-	return false
+	return resource.Resource == "namespaces"
 }
 
 func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {

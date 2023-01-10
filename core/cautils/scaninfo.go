@@ -11,7 +11,7 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	giturl "github.com/kubescape/go-git-url"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -104,6 +104,7 @@ type ScanInfo struct {
 	PolicyIdentifier      []PolicyIdentifier // TODO - remove from object
 	UseExceptions         string             // Load file with exceptions configuration
 	ControlsInputs        string             // Load file with inputs for controls
+	AttackTracks          string             // Load file with attack tracks
 	UseFrom               []string           // Load framework from local file (instead of download). Use when running offline
 	UseDefault            bool               // Load framework from cached file (instead of download). Use when running offline
 	UseArtifactsFrom      string             // Load artifacts from local path. Use when running offline
@@ -179,6 +180,9 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	scanInfo.ControlsInputs = filepath.Join(scanInfo.UseArtifactsFrom, localControlInputsFilename)
 	// set exceptions
 	scanInfo.UseExceptions = filepath.Join(scanInfo.UseArtifactsFrom, LocalExceptionsFilename)
+
+	// set attack tracks
+	scanInfo.AttackTracks = filepath.Join(scanInfo.UseArtifactsFrom, LocalAttackTracksFilename)
 }
 
 func (scanInfo *ScanInfo) setUseFrom() {

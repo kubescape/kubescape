@@ -21,14 +21,13 @@ func isGitRepoPublic(u string) bool {
 	if err != nil {
 		return false
 	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// if the status code is 200, our get request is successful.
 	// It only happens when the repository is public.
-	if resp.StatusCode == 200 {
-		return true
-	}
-
-	return false
+	return resp.StatusCode == nethttp.StatusOK
 }
 
 // Check if the GITHUB_TOKEN is present
