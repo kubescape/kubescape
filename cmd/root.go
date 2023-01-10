@@ -26,19 +26,19 @@ import (
 
 var rootInfo cautils.RootInfo
 
-var ksExamples = `
+var ksExamples = fmt.Sprintf(`
   # Scan command
-  kubescape scan
+  %[1]s scan
 
   # List supported frameworks
-  kubescape list frameworks
+  %[1]s list frameworks
 
   # Download artifacts (air-gapped environment support)
-  kubescape download artifacts
+  %[1]s download artifacts
 
   # View cached configurations
-  kubescape config view
-`
+  %[1]s config view
+`, cautils.ExecName())
 
 func NewDefaultKubescapeCommand() *cobra.Command {
 	ks := core.NewKubescape()
@@ -51,6 +51,16 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		Use:     "kubescape",
 		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://hub.armosec.io/docs",
 		Example: ksExamples,
+	}
+
+	if cautils.IsKrewPlugin() {
+		// Invoked as a kubectl plugin.
+
+		// Cobra doesn't have a way to specify a two word command (i.e. "kubectl kubescape"), so set a custom usage template
+		// with kubectl in it. Cobra will use this template for the root and all child commands.
+		oldUsageTemplate := rootCmd.UsageTemplate()
+		newUsageTemplate := strings.NewReplacer("{{.UseLine}}", "kubectl {{.UseLine}}", "{{.CommandPath}}", "kubectl {{.CommandPath}}").Replace(oldUsageTemplate)
+		rootCmd.SetUsageTemplate(newUsageTemplate)
 	}
 
 	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLsDep, "environment", "", envFlagUsage)
