@@ -19,13 +19,13 @@ import (
 )
 
 var (
-	rbacExamples = `
+	rbacExamples = fmt.Sprintf(`
 	# Submit cluster's Role-Based Access Control(RBAC)
-	kubescape submit rbac
+	%[1]s submit rbac
 
 	# Submit cluster's Role-Based Access Control(RBAC) with account ID 
-	kubescape submit rbac --account <account-id>
-	`
+	%[1]s submit rbac --account <account-id>
+	`, cautils.ExecName())
 )
 
 // getRBACCmd represents the RBAC command
@@ -36,7 +36,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 		Example:    rbacExamples,
 		Short:      "Submit cluster's Role-Based Access Control(RBAC)",
 		Long:       ``,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 
 			if err := flagValidationSubmit(submitInfo); err != nil {
 				return err
@@ -51,7 +51,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			}
 
 			if clusterConfig.GetAccountID() == "" {
-				return fmt.Errorf("account ID is not set, run 'kubescape submit rbac --account <account-id>'")
+				return fmt.Errorf("account ID is not set, run '%[1]s submit rbac --account <account-id>'", cautils.ExecName())
 			}
 
 			// list RBAC
