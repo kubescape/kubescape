@@ -270,7 +270,7 @@ Try it out in an ephemeral shell: `nix-shell -p kubescape`
 
 NixOS:
 
-```nix
+```
   # your other config ...
   environment.systemPackages = with pkgs; [
     # your other packages ...
@@ -280,7 +280,7 @@ NixOS:
 
 home-manager:
 
-```nix
+```
   # your other config ...
   home.packages = with pkgs; [
     # your other packages ...

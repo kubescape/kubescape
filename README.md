@@ -56,6 +56,7 @@ Kubescape uses [Open Policy Agent](https://github.com/open-policy-agent/opa) to 
 By default, the results are printed in a console-friendly manner, but they can be:
 
 * exported to JSON or junit XML
+* rendered to HTML or PDF
 * submitted to a [cloud service](docs/providers.md)
 
 It retrieves Kubernetes objects from the API server and runs a set of [Rego snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
