@@ -109,7 +109,8 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		repoRoot, _ = filepath.Abs(path)
 	}
 
-	// Adjusting the repoRoot incase a file is passed to scan
+	// when scanning a single file, we consider the repository root to be
+	// the directory of the scanned file
 	if cautils.IsYaml(repoRoot) {
 		repoRoot = filepath.Dir(repoRoot)
 	}
