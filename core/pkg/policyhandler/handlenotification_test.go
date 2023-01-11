@@ -248,13 +248,13 @@ func Test_getResources(t *testing.T) {
 	}
 	policyIdentifier := []cautils.PolicyIdentifier{{}}
 
-	assert.Panics(t, func() {
+	assert.NotPanics(t, func() {
 		policyHandler.getResources(policyIdentifier, objSession, &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
 		policyHandler.getResources(policyIdentifier, objSession, &cautils.ScanInfo{})
-	}, "Cluster named .*eks.* without a cloud config not panicking on non-cluster scan !")
+	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }
