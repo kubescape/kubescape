@@ -85,10 +85,18 @@ func (report *ReportEventReceiver) SetClusterName(clusterName string) {
 }
 
 func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
-	// All scans whose target is not a cluster, currently their target is a file, which is what the backend expects
-	// (e.g. local-git, directory, etc)
+	// The backend for Kubescape expects scanning targets to be either
+	// Clusters or Files, not other types we support (GitLocal, Directory
+	// etc). So, to submit a compatible report to the backend, we have to
+	// override the scanning target, submit the report and then restore the
+	// original value.
+	originalScanningTarget := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
+
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.Cluster {
 		opaSessionObj.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
+		defer func() {
+			opaSessionObj.Metadata.ScanMetadata.ScanningTarget = originalScanningTarget
+		}()
 	}
 
 	report.initEventReceiverURL()
@@ -142,7 +150,7 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 		// set result.RawResource
 		resourceID := v.GetResourceID()
 		if _, ok := allResources[resourceID]; !ok {
-			return fmt.Errorf("expected to find raw resource object for '%s'", resourceID)
+			continue
 		}
 		resource := reporthandling.NewResourceIMetadata(allResources[resourceID])
 		if r, ok := resourcesSource[resourceID]; ok {
@@ -260,7 +268,7 @@ func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
 		switch report.submitContext {
 		case SubmitContextScan:
-			urlObj.Path = fmt.Sprintf("configuration-scanning/%s", report.clusterName)
+			urlObj.Path = fmt.Sprintf("config-scanning/%s", report.clusterName)
 		case SubmitContextRBAC:
 			urlObj.Path = "rbac-visualizer"
 		case SubmitContextRepository:

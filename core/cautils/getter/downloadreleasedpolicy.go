@@ -25,11 +25,11 @@ func NewDownloadReleasedPolicy() *DownloadReleasedPolicy {
 	}
 }
 
-func (drp *DownloadReleasedPolicy) GetControl(policyName string) (*reporthandling.Control, error) {
+func (drp *DownloadReleasedPolicy) GetControl(ID string) (*reporthandling.Control, error) {
 	var control *reporthandling.Control
 	var err error
 
-	control, err = drp.gs.GetOPAControl(policyName)
+	control, err = drp.gs.GetOPAControlByID(ID)
 	if err != nil {
 		return nil, err
 	}

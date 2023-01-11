@@ -15,9 +15,9 @@ import (
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
 //
 // The function:
-//  - removes sensible data
-//  - adds exceptions
-//  - summarizes results
+//   - removes sensible data
+//   - adds exceptions
+//   - summarizes results
 func (opap *OPAProcessor) updateResults() {
 
 	// remove data from all objects
@@ -91,9 +91,6 @@ func getKSObjects(k8sResources *cautils.KSResources, allResources map[string]wor
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
-							// if k8sObj == nil {
-							// 	logger.L().Debug(fmt.Sprintf("resource '%s' is nil, probably failed to pull the resource", groupResource))
-							// }
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
@@ -117,9 +114,11 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
-							if k8sObj == nil {
-								// logger.L().Debug("skipping", helpers.String("resource", groupResource))
-							}
+							/*
+								if k8sObj == nil {
+									// logger.L().Debug("skipping", helpers.String("resource", groupResource))
+								}
+							*/
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}

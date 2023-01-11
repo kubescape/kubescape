@@ -2,14 +2,17 @@ package core
 
 import (
 	"fmt"
+	"os"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
 
@@ -99,7 +102,7 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	// we need to determined which controls needs host scanner
 	if scanInfo.HostSensorEnabled.Get() == nil && hasHostSensorControls {
 		scanInfo.HostSensorEnabled.SetBool(false) // default - do not run host scanner
-		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using  the --enable-host-scan flag")
+		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using the --enable-host-scan flag")
 	}
 	if hostSensorVal := scanInfo.HostSensorEnabled.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
@@ -122,18 +125,18 @@ func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector
 	return &resourcehandler.EmptySelector{}
 }
 
-func policyIdentifierNames(pi []cautils.PolicyIdentifier) string {
-	policiesNames := ""
+func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
+	policiesIdentities := ""
 	for i := range pi {
-		policiesNames += pi[i].Name
+		policiesIdentities += pi[i].Identifier
 		if i+1 < len(pi) {
-			policiesNames += ","
+			policiesIdentities += ","
 		}
 	}
-	if policiesNames == "" {
-		policiesNames = "all"
+	if policiesIdentities == "" {
+		policiesIdentities = "all"
 	}
-	return policiesNames
+	return policiesIdentities
 }
 
 // setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Kubescape Cloud BE
@@ -176,6 +179,10 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
 		scanInfo.Submit = false
 	} else {
+		scanInfo.Submit = true
+	}
+
+	if scanInfo.CreateAccount {
 		scanInfo.Submit = true
 	}
 
@@ -240,7 +247,10 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	return getter.NativeFrameworks
 }
 
-func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+func getAttackTracksGetter(attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+	if len(attackTracks) > 0 {
+		return getter.NewLoadPolicy([]string{attackTracks})
+	}
 	if accountID != "" {
 		g := getter.GetKSCloudAPIConnector() // download attack tracks from Kubescape Cloud backend
 		return g
@@ -248,9 +258,20 @@ func getAttackTracksGetter(accountID string, downloadReleasedPolicy *getter.Down
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
+
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
 		logger.L().Warning("failed to get attack tracks from github release, loading attack tracks from cache", helpers.Error(err))
 		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
 	}
 	return downloadReleasedPolicy
+}
+
+// getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
+func getUIPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
+	p := printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
+
+	// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
+	p.SetWriter(os.Stdout.Name())
+
+	return p
 }

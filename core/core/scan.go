@@ -7,7 +7,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -27,7 +27,8 @@ type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
 	report            reporter.IReport
-	printerHandler    printer.IPrinter
+	outputPrinters    []printer.IPrinter
+	uiPrinter         printer.IPrinter
 	hostSensorHandler hostsensorutils.IHostSensor
 }
 
@@ -63,7 +64,7 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// ================== version testing ======================================
 
 	v := cautils.NewIVersionCheckHandler()
-	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierNames(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
+	v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
 
 	// ================== setup host scanner object ======================================
 
@@ -93,9 +94,17 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 	// reporting behavior - setup reporter
 	reportHandler := getReporter(tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, scanInfo.GetScanningContext())
 
-	// setup printer
-	printerHandler := resultshandling.NewPrinter(scanInfo.Format, scanInfo.FormatVersion, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
-	printerHandler.SetWriter(scanInfo.Output)
+	// setup printers
+	formats := scanInfo.Formats()
+
+	outputPrinters := make([]printer.IPrinter, 0)
+	for _, format := range formats {
+		printerHandler := resultshandling.NewPrinter(format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
+		printerHandler.SetWriter(scanInfo.Output)
+		outputPrinters = append(outputPrinters, printerHandler)
+	}
+
+	uiPrinter := getUIPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View))
 
 	// ================== return interface ======================================
 
@@ -103,7 +112,8 @@ func getInterfaces(scanInfo *cautils.ScanInfo) componentInterfaces {
 		tenantConfig:      tenantConfig,
 		resourceHandler:   resourceHandler,
 		report:            reportHandler,
-		printerHandler:    printerHandler,
+		outputPrinters:    outputPrinters,
+		uiPrinter:         uiPrinter,
 		hostSensorHandler: hostSensorHandler,
 	}
 }
@@ -127,7 +137,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	scanInfo.Getters.PolicyGetter = getPolicyGetter(scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
 	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
-	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
@@ -141,7 +151,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 		}
 	}()
 
-	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.printerHandler)
+	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
 
 	// ===================== policies & resources =====================
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
@@ -160,7 +170,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// ======================== prioritization ===================
 
-	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter); err != nil {
+	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 		logger.L().Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 	} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 		return resultsHandling, fmt.Errorf("%w", err)

@@ -3,7 +3,9 @@ package printer
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/enescakir/emoji"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -16,94 +18,123 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
+const (
+	prettyPrinterOutputFile = "report"
+	prettyPrinterOutputExt  = ".txt"
+)
+
 type PrettyPrinter struct {
-	formatVersion string
-	viewType      cautils.ViewTypes
-	writer        *os.File
-	verboseMode   bool
+	writer          *os.File
+	formatVersion   string
+	viewType        cautils.ViewTypes
+	verboseMode     bool
+	printAttackTree bool
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, viewType cautils.ViewTypes) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) *PrettyPrinter {
 	return &PrettyPrinter{
-		verboseMode:   verboseMode,
-		formatVersion: formatVersion,
-		viewType:      viewType,
+		verboseMode:     verboseMode,
+		formatVersion:   formatVersion,
+		viewType:        viewType,
+		printAttackTree: attackTree,
 	}
 }
 
-func (prettyPrinter *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
-	fmt.Fprintf(prettyPrinter.writer, "\n"+getSeparator("^")+"\n")
+func (pp *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+	fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
 
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
-	switch prettyPrinter.viewType {
+	switch pp.viewType {
 	case cautils.ControlViewType:
-		prettyPrinter.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
+		pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
 	case cautils.ResourceViewType:
-		if prettyPrinter.verboseMode {
-			prettyPrinter.resourceTable(opaSessionObj)
+		if pp.verboseMode {
+			pp.resourceTable(opaSessionObj)
 		}
 	}
 
-	prettyPrinter.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+	pp.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 
+	// When writing to Stdout, we aren’t really writing to an output file,
+	// so no need to print that we are
+	if pp.writer.Name() != os.Stdout.Name() {
+		printer.LogOutputFile(pp.writer.Name())
+	}
+
+	pp.printAttackTracks(opaSessionObj)
 }
 
-func (prettyPrinter *PrettyPrinter) SetWriter(outputFile string) {
-	prettyPrinter.writer = printer.GetWriter(outputFile)
+func (pp *PrettyPrinter) SetWriter(outputFile string) {
+	// PrettyPrinter should accept Stdout at least by its full name (path)
+	// and follow the common behavior of outputting to a default filename
+	// otherwise
+	if outputFile == os.Stdout.Name() {
+		pp.writer = printer.GetWriter("")
+		return
+	}
+
+	if strings.TrimSpace(outputFile) == "" {
+		outputFile = prettyPrinterOutputFile
+	}
+	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
+		outputFile = outputFile + prettyPrinterOutputExt
+	}
+
+	pp.writer = printer.GetWriter(outputFile)
 }
 
-func (prettyPrinter *PrettyPrinter) Score(score float32) {
+func (pp *PrettyPrinter) Score(score float32) {
 }
 
-func (prettyPrinter *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlIDs [][]string) {
+func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlIDs [][]string) {
 	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
 		for _, c := range sortedControlIDs[i] {
 			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
-			prettyPrinter.printTitle(controlSummary)
-			prettyPrinter.printResources(controlSummary, allResources)
-			prettyPrinter.printSummary(c, controlSummary)
+			pp.printTitle(controlSummary)
+			pp.printResources(controlSummary, allResources)
+			pp.printSummary(c, controlSummary)
 		}
 	}
 }
 
-func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSummary reportsummary.IControlSummary) {
+func (pp *PrettyPrinter) printSummary(controlName string, controlSummary reportsummary.IControlSummary) {
 	if controlSummary.GetStatus().IsSkipped() {
 		return
 	}
-	cautils.SimpleDisplay(prettyPrinter.writer, "Summary - ")
-	cautils.SuccessDisplay(prettyPrinter.writer, "Passed:%v   ", controlSummary.NumberOfResources().Passed())
-	cautils.WarningDisplay(prettyPrinter.writer, "Excluded:%v   ", controlSummary.NumberOfResources().Excluded())
-	cautils.FailureDisplay(prettyPrinter.writer, "Failed:%v   ", controlSummary.NumberOfResources().Failed())
-	cautils.InfoDisplay(prettyPrinter.writer, "Total:%v\n", controlSummary.NumberOfResources().All())
+	cautils.SimpleDisplay(pp.writer, "Summary - ")
+	cautils.SuccessDisplay(pp.writer, "Passed:%v   ", controlSummary.NumberOfResources().Passed())
+	cautils.WarningDisplay(pp.writer, "Excluded:%v   ", controlSummary.NumberOfResources().Excluded())
+	cautils.FailureDisplay(pp.writer, "Failed:%v   ", controlSummary.NumberOfResources().Failed())
+	cautils.InfoDisplay(pp.writer, "Total:%v\n", controlSummary.NumberOfResources().All())
 	if controlSummary.GetStatus().IsFailed() {
-		cautils.DescriptionDisplay(prettyPrinter.writer, "Remediation: %v\n", controlSummary.GetRemediation())
+		cautils.DescriptionDisplay(pp.writer, "Remediation: %v\n", controlSummary.GetRemediation())
 	}
-	cautils.DescriptionDisplay(prettyPrinter.writer, "\n")
+	cautils.DescriptionDisplay(pp.writer, "\n")
 
 }
-func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
-	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
+func (pp *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
+	cautils.InfoDisplay(pp.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
 	switch controlSummary.GetStatus().Status() {
 	case apis.StatusSkipped:
-		cautils.InfoDisplay(prettyPrinter.writer, "skipped %v\n", emoji.ConfusedFace)
+		cautils.InfoDisplay(pp.writer, "skipped %v\n", emoji.ConfusedFace)
 	case apis.StatusFailed:
-		cautils.FailureDisplay(prettyPrinter.writer, "failed %v\n", emoji.SadButRelievedFace)
+		cautils.FailureDisplay(pp.writer, "failed %v\n", emoji.SadButRelievedFace)
 	case apis.StatusExcluded:
-		cautils.WarningDisplay(prettyPrinter.writer, "excluded %v\n", emoji.NeutralFace)
+		cautils.WarningDisplay(pp.writer, "excluded %v\n", emoji.NeutralFace)
 	case apis.StatusIrrelevant:
-		cautils.SuccessDisplay(prettyPrinter.writer, "irrelevant %v\n", emoji.ConfusedFace)
+		cautils.SuccessDisplay(pp.writer, "irrelevant %v\n", emoji.ConfusedFace)
 	case apis.StatusError:
-		cautils.WarningDisplay(prettyPrinter.writer, "error %v\n", emoji.ConfusedFace)
+		cautils.WarningDisplay(pp.writer, "error %v\n", emoji.ConfusedFace)
 	default:
-		cautils.SuccessDisplay(prettyPrinter.writer, "passed %v\n", emoji.ThumbsUp)
+		cautils.SuccessDisplay(pp.writer, "passed %v\n", emoji.ThumbsUp)
 	}
-	cautils.DescriptionDisplay(prettyPrinter.writer, "Description: %s\n", controlSummary.GetDescription())
+	cautils.DescriptionDisplay(pp.writer, "Description: %s\n", controlSummary.GetDescription())
 	if controlSummary.GetStatus().Info() != "" {
-		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
+		cautils.WarningDisplay(pp.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
 	}
 }
-func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
+func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)
 
@@ -111,35 +142,34 @@ func (prettyPrinter *PrettyPrinter) printResources(controlSummary reportsummary.
 	excludedWorkloads := groupByNamespaceOrKind(workloadsSummary, workloadSummaryExclude)
 
 	var passedWorkloads map[string][]WorkloadSummary
-	if prettyPrinter.verboseMode {
+	if pp.verboseMode {
 		passedWorkloads = groupByNamespaceOrKind(workloadsSummary, workloadSummaryPassed)
 	}
 	if len(failedWorkloads) > 0 {
-		cautils.FailureDisplay(prettyPrinter.writer, "Failed:\n")
-		prettyPrinter.printGroupedResources(failedWorkloads)
+		cautils.FailureDisplay(pp.writer, "Failed:\n")
+		pp.printGroupedResources(failedWorkloads)
 	}
 	if len(excludedWorkloads) > 0 {
-		cautils.WarningDisplay(prettyPrinter.writer, "Excluded:\n")
-		prettyPrinter.printGroupedResources(excludedWorkloads)
+		cautils.WarningDisplay(pp.writer, "Excluded:\n")
+		pp.printGroupedResources(excludedWorkloads)
 	}
 	if len(passedWorkloads) > 0 {
-		cautils.SuccessDisplay(prettyPrinter.writer, "Passed:\n")
-		prettyPrinter.printGroupedResources(passedWorkloads)
+		cautils.SuccessDisplay(pp.writer, "Passed:\n")
+		pp.printGroupedResources(passedWorkloads)
 	}
 
 }
 
-func (prettyPrinter *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
+func (pp *PrettyPrinter) printGroupedResources(workloads map[string][]WorkloadSummary) {
 	indent := "  "
 	for title, rsc := range workloads {
-		prettyPrinter.printGroupedResource(indent, title, rsc)
+		pp.printGroupedResource(indent, title, rsc)
 	}
 }
 
-func (prettyPrinter *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
-	preIndent := indent
+func (pp *PrettyPrinter) printGroupedResource(indent string, title string, rsc []WorkloadSummary) {
 	if title != "" {
-		cautils.SimpleDisplay(prettyPrinter.writer, "%s%s\n", indent, title)
+		cautils.SimpleDisplay(pp.writer, "%s%s\n", indent, title)
 		indent += indent
 	}
 
@@ -151,10 +181,8 @@ func (prettyPrinter *PrettyPrinter) printGroupedResource(indent string, title st
 
 	sort.Strings(resources)
 	for i := range resources {
-		cautils.SimpleDisplay(prettyPrinter.writer, resources[i]+"\n")
+		cautils.SimpleDisplay(pp.writer, resources[i]+"\n")
 	}
-
-	indent = preIndent
 }
 
 func generateRelatedObjectsStr(workload WorkloadSummary) string {
@@ -185,24 +213,24 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 
 	return row
 }
-func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (pp *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
 	if summaryDetails.NumberOfControls().All() == 0 {
-		fmt.Fprintf(prettyPrinter.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
+		fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
 		return
 	}
-	cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
-	cautils.InfoTextDisplay(prettyPrinter.writer, renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters())+"\n\n")
+	cautils.InfoTextDisplay(pp.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
+	cautils.InfoTextDisplay(pp.writer, renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters())+"\n\n")
 
 	// cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+"Severities: SOME OTHER"+"\n\n")
 
-	summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
+	summaryTable := tablewriter.NewWriter(pp.writer)
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeader(getControlTableHeaders())
 	summaryTable.SetHeaderLine(true)
 	summaryTable.SetColumnAlignment(getColumnsAlignments())
 
-	printAll := prettyPrinter.verboseMode
+	printAll := pp.verboseMode
 	if summaryDetails.NumberOfResources().Failed() == 0 {
 		// if there are no failed controls, print the resource table and detailed information
 		printAll = true
@@ -223,16 +251,16 @@ func (prettyPrinter *PrettyPrinter) printSummaryTable(summaryDetails *reportsumm
 	summaryTable.Render()
 
 	// When scanning controls the framework list will be empty
-	cautils.InfoTextDisplay(prettyPrinter.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
+	cautils.InfoTextDisplay(pp.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
 
-	prettyPrinter.printInfo(infoToPrintInfo)
+	pp.printInfo(infoToPrintInfo)
 
 }
 
-func (prettyPrinter *PrettyPrinter) printInfo(infoToPrintInfo []infoStars) {
+func (pp *PrettyPrinter) printInfo(infoToPrintInfo []infoStars) {
 	fmt.Println()
 	for i := range infoToPrintInfo {
-		cautils.InfoDisplay(prettyPrinter.writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].stars, infoToPrintInfo[i].info))
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].stars, infoToPrintInfo[i].info))
 	}
 }
 

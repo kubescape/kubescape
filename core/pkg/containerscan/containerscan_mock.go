@@ -50,7 +50,7 @@ func randSeq(n int, bank []rune) string {
 
 	b := make([]rune, n)
 	for i := range b {
-		b[i] = bank[rand.Intn(len(bank))]
+		b[i] = bank[rand.Intn(len(bank))] //nolint:gosec
 	}
 	return string(b)
 }
@@ -60,7 +60,7 @@ func GenerateContainerScanLayer(layer *ScanResultLayer) {
 	layer.LayerHash = randSeq(32, hash)
 	layer.Vulnerabilities = make(VulnerabilitiesList, 0)
 	layer.Packages = make(LinuxPkgs, 0)
-	vuls := rand.Intn(10) + 1
+	vuls := rand.Intn(10) + 1 //nolint:gosec
 
 	for i := 0; i < vuls; i++ {
 		v := Vulnerability{}

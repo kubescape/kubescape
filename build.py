@@ -40,7 +40,7 @@ def main():
 
     client_var = "github.com/kubescape/kubescape/v2/core/cautils.Client"
     client_name = os.getenv("CLIENT")
-    
+
     # Create build directory
     build_dir = get_build_dir()
 
@@ -56,15 +56,15 @@ def main():
         ldflags += " -X {}={}".format(build_url, release_version)
     if client_name:
         ldflags += " -X {}={}".format(client_var, client_name)
- 
-    build_command = ["go", "build", "-buildmode=pie", "-tags=static", "-o", ks_file, "-ldflags" ,ldflags]
+
+    build_command = ["go", "build", "-buildmode=pie", "-tags=static,gitenabled", "-o", ks_file, "-ldflags" ,ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))
 
     status = subprocess.call(build_command)
     check_status(status, "Failed to build kubescape")
-    
+
     sha256 = hashlib.sha256()
     with open(ks_file, "rb") as kube:
         sha256.update(kube.read())
@@ -74,7 +74,7 @@ def main():
             kube_sha.write(sha256.hexdigest())
 
     print("Build Done")
- 
- 
+
+
 if __name__ == "__main__":
     main()

@@ -32,7 +32,7 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 
 	// UseCachedArtifacts
 	if scanRequest.UseCachedArtifacts != nil {
-		if useCachedArtifacts := cautils.NewBoolPtr(scanRequest.UseCachedArtifacts); useCachedArtifacts.Get() != nil && !*useCachedArtifacts.Get() {
+		if useCachedArtifacts := cautils.NewBoolPtr(scanRequest.UseCachedArtifacts); useCachedArtifacts.Get() != nil && *useCachedArtifacts.Get() {
 			scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 		}
 	}

@@ -1,8 +1,9 @@
 package scan
 
 import (
-	"github.com/kubescape/kubescape/v2/core/cautils"
 	"testing"
+
+	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
 // Test_validateControlScanInfo tests how scan info is validated for the `scan control` command

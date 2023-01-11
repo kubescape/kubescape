@@ -21,18 +21,19 @@ func SaveInFile(policy interface{}, pathStr string) error {
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+	err = os.WriteFile(pathStr, encodedData, 0644) //nolint:gosec
 	if err != nil {
 		if os.IsNotExist(err) {
 			pathDir := path.Dir(pathStr)
-			if err := os.Mkdir(pathDir, 0744); err != nil {
-				return err
+			// pathDir could contain subdirectories
+			if erm := os.MkdirAll(pathDir, 0755); erm != nil {
+				return erm
 			}
 		} else {
 			return err
 
 		}
-		err = os.WriteFile(pathStr, []byte(fmt.Sprintf("%v", string(encodedData))), 0644)
+		err = os.WriteFile(pathStr, encodedData, 0644) //nolint:gosec
 		if err != nil {
 			return err
 		}

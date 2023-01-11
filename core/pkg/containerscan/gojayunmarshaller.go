@@ -64,7 +64,7 @@ func (pkgs *LinuxPkgs) UnmarshalJSONArray(dec *gojay.Decoder) error {
 	return nil
 }
 
-//--------Vul fixed in----------------------------------
+// --------Vul fixed in----------------------------------
 func (fx *FixedIn) UnmarshalJSONObject(dec *gojay.Decoder, key string) (err error) {
 
 	switch key {

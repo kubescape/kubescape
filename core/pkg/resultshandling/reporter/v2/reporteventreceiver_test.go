@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -32,7 +33,7 @@ func TestReportEventReceiver_addPathURL(t *testing.T) {
 			want: &url.URL{
 				Scheme: "https",
 				Host:   "localhost:8080",
-				Path:   "configuration-scanning/test",
+				Path:   "config-scanning/test",
 			},
 		},
 	}
@@ -58,7 +59,7 @@ func TestGetURL(t *testing.T) {
 			"",
 			SubmitContextScan,
 		)
-		assert.Equal(t, "https://cloud.armosec.io/configuration-scanning/test?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+		assert.Equal(t, "https://cloud.armosec.io/config-scanning/test?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
 	}
 
 	// Test rbac submit and registered url
@@ -104,5 +105,51 @@ func TestGetURL(t *testing.T) {
 			SubmitContextScan,
 		)
 		assert.Equal(t, "https://cloud.armosec.io/account/sign-up?customerGUID=1234&invitationToken=token&utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+	}
+}
+
+func Test_prepareReportKeepsOriginalScanningTarget(t *testing.T) {
+
+	// prepareReport should keep the original scanning target it received, and not mutate it
+	testCases := []struct {
+		Name string
+		Want reporthandlingv2.ScanningTarget
+	}{
+		{"Cluster", reporthandlingv2.Cluster},
+		{"File", reporthandlingv2.File},
+		{"Repo", reporthandlingv2.Repo},
+		{"GitLocal", reporthandlingv2.GitLocal},
+		{"Directory", reporthandlingv2.Directory},
+	}
+
+	reporter := NewReportEventReceiver(
+		&cautils.ConfigObj{
+			AccountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
+			Token:       "token",
+			ClusterName: "test",
+		},
+		"",
+		SubmitContextScan,
+	)
+
+	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			want := tc.Want
+
+			opaSessionObj := &cautils.OPASessionObj{
+				Report: &reporthandlingv2.PostureReport{},
+				Metadata: &reporthandlingv2.Metadata{
+					ScanMetadata: reporthandlingv2.ScanMetadata{ScanningTarget: want},
+				},
+			}
+
+			reporter.prepareReport(opaSessionObj)
+
+			got := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
+			if got != want {
+				t.Errorf("Scanning targets don’t match after preparing report. Got: %v, want %v", got, want)
+			}
+		},
+		)
 	}
 }
