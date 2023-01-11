@@ -2,11 +2,7 @@ package hostsensorutils
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net/http"
-	"net/url"
-	"os"
 	"strings"
 	"sync"
 
@@ -15,10 +11,6 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
-	"k8s.io/apimachinery/pkg/util/runtime"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/client-go/tools/portforward"
-	"k8s.io/client-go/transport/spdy"
 
 	"sigs.k8s.io/yaml"
 )
@@ -113,7 +105,7 @@ func (hsh *HostSensorHandler) GetVersion() (string, error) {
 	// loop over pods and port-forward it to each of them
 	podList, err := hsh.getPodList()
 	if err != nil {
-		return "", fmt.Errorf("in GetVersion, failed to getPodList: %v", err)
+		return "", fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
 	}
 
 	// initialization of the channels
@@ -122,7 +114,7 @@ func (hsh *HostSensorHandler) GetVersion() (string, error) {
 	for job := range hsh.workerPool.jobs {
 		resBytes, err := hsh.HTTPGetToPod(job.podName, job.path)
 		if err != nil {
-			logger.L().Debug(err.Error())
+			return "", err
 		} else {
 			version := strings.ReplaceAll(string(resBytes), "\"", "")
 			version = strings.ReplaceAll(version, "\n", "")
@@ -222,59 +214,7 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSenso
 	return res, err
 }
 
-// return host-scanner version
-func (hsh *HostSensorHandler) TestPortForwarding(buff *strings.Builder) (string, error) {
-	// loop over pods and port-forward it to each of them
-	podList, err := hsh.getPodList()
-	if err != nil {
-		return "", fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
-	}
-
-	// initialization of the channels
-	hsh.workerPool.init(len(podList))
-	hsh.workerPool.hostSensorApplyJobs(podList, "/version", "version")
-	for job := range hsh.workerPool.jobs {
-		buff.WriteString("POST /test/demo_form.php HTTP/1.1\r\n")
-		resBytes, err := hsh.HTTPGetToPod(job.podName, job.path)
-		if err != nil {
-			logger.L().Debug(err.Error())
-		} else {
-			version := strings.ReplaceAll(string(resBytes), "\"", "")
-			version = strings.ReplaceAll(version, "\n", "")
-			return version, nil
-		}
-	}
-	return "", nil
-}
-
 func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
-	podList, err := hsh.getPodList()
-	if err != nil {
-		logger.L().Debug("In CollectResources error getting podslist, err:" + err.Error())
-	}
-	for podName := range podList {
-		pr, err := NewPortForwarder(hsh.GetNamespace(), podName, int(hsh.HostSensorPort))
-		if err != nil {
-			logger.L().Warning(err.Error())
-		}
-		err = pr.ForwardPorts()
-		if err != nil {
-			logger.L().Warning(err.Error())
-		}
-		test, err := hsh.TestPortForwarding(pr.port.Local)
-		pr.port.ReadyPort <- true
-		// wait for interrupt or conn closure
-		select {
-		case <-pr.stopChan:
-		case <-pr.streamConn.CloseChan():
-			runtime.HandleError(errors.New("lost connection to pod"))
-		}
-		fmt.Printf("test: %s", test)
-	}
-	return hsh.GetHostSensorDataEnveloped()
-}
-
-func (hsh *HostSensorHandler) GetHostSensorDataEnveloped() ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	res := make([]hostsensor.HostSensorDataEnvelope, 0)
 	infoMap := make(map[string]apis.StatusInfo)
 	if hsh.DaemonSet == nil {
@@ -399,190 +339,3 @@ func (hsh *HostSensorHandler) GetHostSensorDataEnveloped() ([]hostsensor.HostSen
 	logger.L().Debug("Done reading information from host scanner")
 	return res, infoMap, nil
 }
-
-// =====================
-
-func NewPortForwarder(namespace, podName string, port int) (*PortForwarder, error) {
-	fmt.Print("NewPortForwarder")
-	// var config *rest.Config
-	config := k8sinterface.GetK8sConfig()
-	if config == nil {
-		return nil, errors.New("failed to create new PortForwarder, config is nil")
-	}
-	path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", namespace, podName)
-	hostIP := strings.TrimLeft(config.Host, "https:/")
-
-	transport, upgrader, err := spdy.RoundTripperFor(config)
-	if err != nil {
-		return nil, err
-	}
-	// stopCh control the port forwarding lifecycle. When it gets closed the
-	// port forward will terminate
-	stopCh := make(chan struct{}, 1)
-	// readyCh communicate when the port forward is ready to get traffic
-	readyCh := make(chan struct{})
-
-	stream := genericclioptions.IOStreams{
-		In:     os.Stdin,
-		Out:    os.Stdout,
-		ErrOut: os.Stderr,
-	}
-
-	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "https", Path: path, Host: hostIP})
-	if dialer == nil {
-		return nil, errors.New("failed to create new PortForwarder, dialer is nil")
-	}
-	_, err = portforward.New(dialer, []string{fmt.Sprintf("%d", port)}, stopCh, readyCh, stream.Out, stream.ErrOut)
-	if err != nil {
-		return nil, err
-	}
-	streamConn, _, err := dialer.Dial(PortForwardProtocolV1Name)
-	if err != nil {
-		return nil, err
-	}
-	localBuff := &strings.Builder{}
-	localBuff.Grow(5000)
-	forwardedPort := ForwardedPort{ReadyPort: make(chan bool), Local: localBuff, Remote: port}
-
-	// fw, err := portforward.New(dialer, []string{fmt.Sprintf("%d:%d", req.LocalPort, req.PodPort)}, req.StopCh, req.ReadyCh, req.Streams.Out, req.Streams.ErrOut)
-
-	return &PortForwarder{
-		dialer: dialer,
-		// addresses: parsedAddresses,
-		port:       forwardedPort,
-		streamConn: streamConn,
-		stopChan:   stopCh,
-		Ready:      readyCh,
-		// requestID:  0,
-		// out:       out,
-		// errOut:    errOut,
-		// listeners  []io.Closer
-	}, nil
-}
-
-// PortForwarder knows how to listen for local connections and forward them to
-// a remote pod via an upgraded HTTP request.
-const PortForwardProtocolV1Name = "portforward.k8s.io"
-
-// type PortForwarder struct {
-// 	// addresses []listenAddress
-// 	// ports    []ForwardedPort
-// 	stopChan <-chan struct{}
-
-// 	dialer        httpstream.Dialer
-// 	streamConn    httpstream.Connection
-// 	listeners     []io.Closer
-// 	Ready         chan struct{}
-// 	requestIDLock sync.Mutex
-// 	requestID     int
-// 	out           io.Writer
-// 	errOut        io.Writer
-// }
-
-// // handleConnection copies data between the local connection and the stream to
-// // the remote server.
-// func (pf *PortForwarder) handleConnection(port int) error {
-// 	// defer conn.Close()
-// 	var err error
-// 	buff := &strings.Builder{}
-// 	buff.WriteString("POST /test/demo_form.php HTTP/1.1\r\n")
-// 	resBuff := &strings.Builder{}
-// 	resBuff.Grow(5000)
-
-// 	// POST /test/demo_form.php HTTP/1.1
-// 	// Host: w3schools.com
-
-// 	// name1=value1&name2=value2
-
-// 	defer pf.streamConn.Close()
-// 	if pf.out != nil {
-// 		logger.L().Debug("Handling connection for", helpers.Int("port", port))
-// 		// fmt.Fprintf(pf.out, "Handling connection for %d\n", port.Local)
-// 	}
-
-// 	// requestID := pf.nextRequestID()
-
-// 	// create error stream
-// 	headers := http.Header{}
-// 	headers.Set(v1.StreamType, v1.StreamTypeError)
-// 	headers.Set(v1.PortHeader, fmt.Sprintf("%d", port))
-// 	headers.Set(v1.PortForwardRequestIDHeader, strconv.Itoa(pf.requestID))
-// 	errorStream, err := pf.streamConn.CreateStream(headers)
-// 	if err != nil {
-// 		errmsg := fmt.Errorf("error creating error stream for port %d: %v", port, err)
-// 		runtime.HandleError(errmsg)
-// 		return errmsg
-// 	}
-// 	// we're not writing to this stream
-// 	errorStream.Close()
-
-// 	errorChan := make(chan error)
-// 	go func() {
-// 		message, err := ioutil.ReadAll(errorStream)
-// 		switch {
-// 		case err != nil:
-// 			errorChan <- fmt.Errorf("error reading from error stream for port %d: %v", port, err)
-// 		case len(message) > 0:
-// 			errorChan <- fmt.Errorf("an error occurred forwarding %d: %v", port, string(message))
-// 		}
-// 		close(errorChan)
-// 	}()
-
-// 	// create data stream
-// 	headers.Set(v1.StreamType, v1.StreamTypeData)
-// 	dataStream, err := pf.streamConn.CreateStream(headers)
-// 	if err != nil {
-// 		errmsg := fmt.Errorf("error creating forwarding stream for port %d: %v", port, err)
-// 		runtime.HandleError(errmsg)
-// 		return errmsg
-// 	}
-
-// 	localError := make(chan struct{})
-// 	remoteDone := make(chan struct{})
-
-// 	go func() {
-
-// 		// Copy from the remote side to the local port.
-// 		if data, err := io.Copy(os.Stdout, dataStream); err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
-// 			runtime.HandleError(fmt.Errorf("error copying from remote stream to local connection: %v", err))
-// 		} else {
-// 			fmt.Print(data)
-// 		}
-
-// 		// inform the select below that the remote copy is done
-// 		close(remoteDone)
-// 	}()
-
-// 	go func() {
-
-// 		<-pf.Ready
-
-// 		// inform server we're not sending any more data after copy unblocks
-// 		defer dataStream.Close()
-
-// 		// Copy from the local port to the remote side.
-// 		if data, err := io.Copy(dataStream, strings.NewReader(buff.String())); err != nil && !strings.Contains(err.Error(), "use of closed network connection") {
-// 			runtime.HandleError(fmt.Errorf("error copying from local connection to remote stream: %v", err))
-// 			// break out of the select below without waiting for the other copy to finish
-// 			close(localError)
-// 		} else {
-// 			fmt.Print(data)
-// 		}
-// 	}()
-
-// 	// wait for either a local->remote error or for copying from remote->local to finish
-// 	select {
-// 	case <-remoteDone:
-// 	case <-localError:
-// 	}
-
-// 	// always expect something on errorChan (it may be nil)
-// 	err = <-errorChan
-// 	if err != nil {
-// 		runtime.HandleError(err)
-// 		pf.streamConn.Close()
-// 	}
-// 	return nil
-// }
-
-// ============================
