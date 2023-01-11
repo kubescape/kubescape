@@ -9,6 +9,7 @@ import (
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
+	"github.com/stretchr/testify/assert"
 	"gopkg.in/op/go-logging.v1"
 )
 
@@ -149,7 +150,7 @@ func getTestCases() []indentationTestCase {
 	return indentationTestCases
 }
 
-func TestApplyFixKeepsIndentation(t *testing.T) {
+func TestApplyFixKeepsFormatting(t *testing.T) {
 	testCases := getTestCases()
 
 	for _, tc := range testCases {
@@ -161,24 +162,22 @@ func TestApplyFixKeepsIndentation(t *testing.T) {
 			}
 
 			input, _ := os.ReadFile(getTestDataPath(tc.inputFile))
-			want, _ := os.ReadFile(getTestDataPath(tc.expectedFile))
+			wantRaw, _ := os.ReadFile(getTestDataPath(tc.expectedFile))
+			want := string(wantRaw)
 			expression := tc.yamlExpression
 
 			h, _ := NewFixHandlerMock()
 
 			got, _ := h.ApplyFixToContent(string(input), expression)
 
-			if got != string(want) {
-				t.Errorf(
-					"Contents of the fixed file don't match the expectation.\n"+
-						"FilePath: %s\n\n"+
-						"Got:\n<%s>\n\n"+
-						"Want:\n<%s>",
-					tc.inputFile,
-					got,
-					want,
-				)
-			}
+			assert.Equalf(
+				t, want, got,
+				"Contents of the fixed file don't match the expectation.\n"+
+					"Input file: %s\n\n"+
+					"Got: <%s>\n\n"+
+					"Want: <%s>",
+				tc.inputFile, got, want,
+			)
 		},
 		)
 
