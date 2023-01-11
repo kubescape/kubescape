@@ -2,7 +2,6 @@ package getter
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -41,13 +40,6 @@ func SaveInFile(policy interface{}, pathStr string) error {
 	return nil
 }
 
-// JSONDecoder returns JSON decoder for given string
-func JSONDecoder(origin string) *json.Decoder {
-	dec := json.NewDecoder(strings.NewReader(origin))
-	dec.UseNumber()
-	return dec
-}
-
 func HttpDelete(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
 
 	req, err := http.NewRequest("DELETE", fullURL, nil)
@@ -66,6 +58,7 @@ func HttpDelete(httpClient *http.Client, fullURL string, headers map[string]stri
 	}
 	return respStr, nil
 }
+
 func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
 
 	req, err := http.NewRequest("GET", fullURL, nil)
