@@ -60,7 +60,10 @@ func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.
 func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
 
-	setCloudMetadata(opaSessionObj)
+	// set cloud metadata only when scanning a cluster
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reportv2.Cluster {
+		setCloudMetadata(opaSessionObj)
+	}
 
 	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
 	if err != nil {
