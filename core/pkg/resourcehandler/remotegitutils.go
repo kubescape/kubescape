@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/protocol/packp/capability"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	giturl "github.com/kubescape/go-git-url"
@@ -44,6 +45,8 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 		return fmt.Errorf("%w", errors.New("GITHUB_TOKEN is not present"))
 	case "gitlab":
 		return fmt.Errorf("%w", errors.New("GITLAB_TOKEN is not present"))
+	case "azure":
+		return fmt.Errorf("%w", errors.New("AZURE_TOKEN is not present"))
 	}
 	return fmt.Errorf("%w", errors.New("unable to find the host name"))
 }
@@ -78,6 +81,11 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 			Username: "anything Except Empty String",
 			Password: gitURL.GetToken(),
 		}
+	}
+
+	// For Azure repo cloning
+	transport.UnsupportedCapabilities = []capability.Capability{
+		capability.ThinPack,
 	}
 
 	// Clone option
