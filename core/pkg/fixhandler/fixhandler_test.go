@@ -40,22 +40,22 @@ func getTestCases() []indentationTestCase {
 	indentationTestCases := []indentationTestCase{
 		// Insertion Scenarios
 		{
-			"inserts/tc-01-00-input.yaml",
+			"inserts/tc-01-00-input-mapping-insert-mapping.yaml",
 			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
 			"inserts/tc-01-01-expected.yaml",
 		},
 		{
-			"inserts/tc-02-00-input.yaml",
+			"inserts/tc-02-00-input-mapping-insert-mapping-with-list.yaml",
 			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
 			"inserts/tc-02-01-expected.yaml",
 		},
 		{
-			"inserts/tc-03-00-input.yaml",
+			"inserts/tc-03-00-input-list-append-scalar.yaml",
 			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
 			"inserts/tc-03-01-expected.yaml",
 		},
 		{
-			"inserts/tc-04-00-input.yaml",
+			"inserts/tc-04-00-input-multiple-inserts.yaml",
 
 			`select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation |= false |
 			 select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"] |
@@ -66,22 +66,37 @@ func getTestCases() []indentationTestCase {
 			"inserts/tc-04-01-expected.yaml",
 		},
 		{
-			"inserts/tc-05-00-input.yaml",
+			"inserts/tc-05-00-input-comment-blank-line-single-insert.yaml",
 			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
 			"inserts/tc-05-01-expected.yaml",
 		},
 		{
-			"inserts/tc-06-00-input.yaml",
+			"inserts/tc-06-00-input-list-append-scalar-oneline.yaml",
 			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"SYS_ADM\"]",
 			"inserts/tc-06-01-expected.yaml",
 		},
 		{
-			"inserts/tc-07-00-input.yaml",
+			"inserts/tc-07-00-input-multiple-documents.yaml",
 
 			`select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false |
 			 select(di==1).spec.containers[0].securityContext.allowPrivilegeEscalation |= false`,
 
 			"inserts/tc-07-01-expected.yaml",
+		},
+		{
+			"inserts/tc-08-00-input-mapping-insert-mapping-indented.yaml",
+			"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+			"inserts/tc-08-01-expected.yaml",
+		},
+		{
+			"inserts/tc-09-00-input-list-insert-new-mapping-indented.yaml",
+			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
+			"inserts/tc-09-01-expected.yaml",
+		},
+		{
+			"inserts/tc-10-00-input-list-insert-new-mapping.yaml",
+			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
+			"inserts/tc-10-01-expected.yaml",
 		},
 
 		// Removal Scenarios
