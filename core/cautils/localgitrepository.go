@@ -73,6 +73,10 @@ func (g *LocalGitRepository) GetRemoteUrl() (string, error) {
 	branchName := g.GetBranchName()
 	if branchRef, branchFound := g.config.Branches[branchName]; branchFound {
 		remoteName := branchRef.Remote
+		// branchRef.Remote can be a reference to a config.Remotes entry or directly a gitUrl
+		if _, found := g.config.Remotes[remoteName]; !found {
+			return remoteName, nil
+		}
 		if len(g.config.Remotes[remoteName].URLs) == 0 {
 			return "", fmt.Errorf("expected to find URLs for remote '%s', branch '%s'", remoteName, branchName)
 		}
