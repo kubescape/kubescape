@@ -1,0 +1,15 @@
+# Fix to Apply:
+# del(select(di==0).spec.containers[1])
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: remove_example
+
+spec:
+  containers:
+  - name: nginx_container
+    image: nginx
+
+  - name: container_with_security_issues
+    image: image_with_security_issues

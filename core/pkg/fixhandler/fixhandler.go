@@ -145,6 +145,7 @@ func (h *FixHandler) PrepareResourcesToFix() []ResourceFixInfo {
 			FilePath:        absolutePath,
 			Resource:        resourceObj,
 			YamlExpressions: make(map[string]*armotypes.FixPath, 0),
+			DocumentIndex:   documentIndex,
 		}
 
 		for i := range result.AssociatedControls {
@@ -185,19 +186,34 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []error) {
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
-	for _, resourceToFix := range resourcesToFix {
-		singleExpression := reduceYamlExpressions(&resourceToFix)
-		if err := h.applyFixToFile(resourceToFix.FilePath, singleExpression); err != nil {
-			errors = append(errors,
-				fmt.Errorf("failed to fix resource [Name: '%s', Kind: '%s'] in '%s': %w ",
-					resourceToFix.Resource.GetName(),
-					resourceToFix.Resource.GetKind(),
-					resourceToFix.FilePath,
-					err))
+
+	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
+
+	for filepath, yamlExpression := range fileYamlExpressions {
+		fileAsString, err := getFileString(filepath)
+
+		if err != nil {
+			errors = append(errors, err)
+			continue
+		}
+
+		fixedYamlString, err := h.ApplyFixToContent(fileAsString, yamlExpression)
+
+		if err != nil {
+			errors = append(errors, fmt.Errorf("Failed to fix file %s: %w ", filepath, err))
+			continue
 		} else {
-			updatedFiles[resourceToFix.FilePath] = true
+			updatedFiles[filepath] = true
+		}
+
+		err = writeFixesToFile(filepath, fixedYamlString)
+
+		if err != nil {
+			logger.L().Error(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
+			errors = append(errors, err)
 		}
 	}
+
 	return len(updatedFiles), errors
 }
 
@@ -215,34 +231,45 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) applyFixToFile(filePath, yamlExpression string) (cmdError error) {
-	var completedSuccessfully bool
-	writeInPlaceHandler := yqlib.NewWriteInPlaceHandler(filePath)
-	out, err := writeInPlaceHandler.CreateTempFile()
+func (h *FixHandler) ApplyFixToContent(yamlAsString, yamlExpression string) (fixedString string, err error) {
+	yamlLines := strings.Split(yamlAsString, "\n")
+
+	originalRootNodes, err := decodeDocumentRoots(yamlAsString)
+
 	if err != nil {
-		return fmt.Errorf("unable to create a tmp file for in-place YAML update: %s", err)
+		return "", err
 	}
 
-	defer func() {
-		if cmdError == nil {
-			cmdError = writeInPlaceHandler.FinishWriteInPlace(completedSuccessfully)
+	fixedRootNodes, err := getFixedNodes(yamlAsString, yamlExpression)
+
+	if err != nil {
+		return "", err
+	}
+
+	fileFixInfo := getFixInfo(originalRootNodes, fixedRootNodes)
+
+	fixedYamlLines := getFixedYamlLines(yamlLines, fileFixInfo)
+
+	fixedString = getStringFromSlice(fixedYamlLines)
+
+	return fixedString, nil
+}
+
+func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
+	fileYamlExpressions := make(map[string]string, 0)
+	for _, resourceToFix := range resourcesToFix {
+		singleExpression := reduceYamlExpressions(&resourceToFix)
+		resourceFilePath := resourceToFix.FilePath
+
+		if _, pathExistsInMap := fileYamlExpressions[resourceFilePath]; !pathExistsInMap {
+			fileYamlExpressions[resourceFilePath] = singleExpression
+		} else {
+			fileYamlExpressions[resourceFilePath] = joinStrings(fileYamlExpressions[resourceFilePath], " | ", singleExpression)
 		}
-	}()
 
-	encoder := yqlib.NewYamlEncoder(2, false, yqlib.ConfiguredYamlPreferences)
+	}
 
-	printer := yqlib.NewPrinter(encoder, yqlib.NewSinglePrinterWriter(out))
-	allAtOnceEvaluator := yqlib.NewAllAtOnceEvaluator()
-
-	preferences := yqlib.ConfiguredYamlPreferences
-	preferences.EvaluateTogether = true
-	decoder := yqlib.NewYamlDecoder(preferences)
-
-	err = allAtOnceEvaluator.EvaluateFiles(yamlExpression, []string{filePath}, printer, decoder)
-
-	completedSuccessfully = err == nil
-
-	return err
+	return fileYamlExpressions
 }
 
 func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(documentIndex int, ac *resourcesresults.ResourceAssociatedControl, skipUserValues bool) {
@@ -292,4 +319,28 @@ func fixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int
 
 	// select document index and add a dot for the root node
 	return fmt.Sprintf("select(di==%d).%s |= %s", documentIndexInYaml, fixPath, value)
+}
+
+func joinStrings(inputStrings ...string) string {
+	return strings.Join(inputStrings, "")
+}
+
+func getFileString(filepath string) (string, error) {
+	bytes, err := ioutil.ReadFile(filepath)
+
+	if err != nil {
+		return "", fmt.Errorf("Error reading file %s", filepath)
+	}
+
+	return string(bytes), nil
+}
+
+func writeFixesToFile(filepath, content string) error {
+	err := ioutil.WriteFile(filepath, []byte(content), 0644)
+
+	if err != nil {
+		return fmt.Errorf("Error writing fixes to file: %w", err)
+	}
+
+	return nil
 }

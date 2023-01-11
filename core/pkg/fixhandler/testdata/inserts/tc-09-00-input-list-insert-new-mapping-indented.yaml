@@ -1,0 +1,11 @@
+# Fix to Apply:
+# select(di==0).spec.containers += {"name": "redis", "image": "redis"}
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: indented-parent-list-insert-list-value
+spec:
+  containers:
+    - name: nginx_container
+      image: nginx
