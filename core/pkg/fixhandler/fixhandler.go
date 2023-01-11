@@ -68,7 +68,7 @@ func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 		return nil
 	}
 
-	return fmt.Errorf("unsupported scanning target. Only local git, directory and file scanning targets are supported")
+	return fmt.Errorf("unsupported scanning target. Supported scanning targets are: a local git repo, a directory or a file")
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
