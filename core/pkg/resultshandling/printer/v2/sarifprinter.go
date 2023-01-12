@@ -62,7 +62,6 @@ func NewSARIFPrinter() *SARIFPrinter {
 }
 
 func (sp *SARIFPrinter) Score(score float32) {
-	return
 }
 
 func (sp *SARIFPrinter) SetWriter(outputFile string) {

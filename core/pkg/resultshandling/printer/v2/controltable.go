@@ -84,6 +84,7 @@ func getSortedControlsIDs(controls reportsummary.ControlSummaries) [][]string {
 	return controlIDs
 }
 
+/* unused for now
 func getSortedControlsNames(controls reportsummary.ControlSummaries) [][]string {
 	controlNames := make([][]string, 5)
 	for k := range controls {
@@ -96,6 +97,7 @@ func getSortedControlsNames(controls reportsummary.ControlSummaries) [][]string 
 	}
 	return controlNames
 }
+*/
 
 func getControlTableHeaders() []string {
 	headers := make([]string, _rowLen)

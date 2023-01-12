@@ -1,13 +1,6 @@
 package resourcehandler
 
-import (
-	giturl "github.com/kubescape/go-git-url"
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-)
-
+/* unused for now
 func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterface.IMetadata, error) {
 	if len(inputPatterns) == 0 {
 		return nil, nil
@@ -46,3 +39,4 @@ func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterfac
 
 	return workloads, nil
 }
+*/

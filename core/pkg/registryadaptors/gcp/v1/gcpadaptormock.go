@@ -41,7 +41,7 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImageVulnerability(imageID *registryvul
 	occurrence := []*grafeaspb.Occurrence{}
 	arr := GetMockData()
 
-	for i, _ := range arr {
+	for i := range arr {
 		if imageID.Tag == "gcr.io/myproject/nginx@sha256:2XXXXX" && i == 4 {
 			break
 		}

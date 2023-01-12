@@ -14,23 +14,21 @@ linters:
     - gosec
     - staticcheck
     - nolintlint
+    - gofmt
+    - unused
+    - govet
+    - bodyclose
+    - typecheck
+    - goimports
+    - ineffassign
+    - gosimple
   disable:
     # temporarily disabled
     - varcheck
-    - ineffassign
-    - unused
-    - typecheck
     - errcheck
-    - govet
-    - gosimple
-    - deadcode
-    - gofmt
-    - goimports
-    - bodyclose
     - dupl
-    - gocognit
     - gocritic
-    - goimports
+    - gocognit
     - nakedret
     - revive
     - stylecheck
@@ -38,6 +36,7 @@ linters:
     - unparam
     #- forbidigo # <- see later
     # should remain disabled
+    - deadcode   # deprecated linter
     - maligned
     - lll
     - gochecknoinits

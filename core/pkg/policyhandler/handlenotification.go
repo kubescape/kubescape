@@ -11,7 +11,6 @@ import (
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/cloudsupport"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -60,7 +59,10 @@ func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.
 func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
 
-	setCloudMetadata(opaSessionObj)
+	// set cloud metadata only when scanning a cluster
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reportv2.Cluster {
+		setCloudMetadata(opaSessionObj)
+	}
 
 	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
 	if err != nil {
@@ -74,12 +76,14 @@ func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.Poli
 	return nil
 }
 
+/* unused for now
 func getDesignator(policyIdentifier []cautils.PolicyIdentifier) *armotypes.PortalDesignator {
 	if len(policyIdentifier) > 0 {
 		return &policyIdentifier[0].Designators
 	}
 	return &armotypes.PortalDesignator{}
 }
+*/
 
 func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 	iCloudMetadata := getCloudMetadata(opaSessionObj, k8sinterface.GetConfig())
