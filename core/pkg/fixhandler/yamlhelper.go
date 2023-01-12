@@ -401,6 +401,6 @@ func updateTracker(nodeList *[]nodeInfo, tracker int) int {
 	return updatedTracker
 }
 
-func getStringFromSlice(yamlLines []string) (fixedYamlString string) {
-	return strings.Join(yamlLines, "\n")
+func getStringFromSlice(yamlLines []string, newline string) (fixedYamlString string) {
+	return strings.Join(yamlLines, newline)
 }

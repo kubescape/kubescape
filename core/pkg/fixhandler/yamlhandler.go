@@ -244,7 +244,7 @@ func removeNewLinesAtTheEnd(yamlLines []string) []string {
 	return yamlLines
 }
 
-func getFixedYamlLines(yamlLines []string, fileFixInfo fileFixInfo) (fixedYamlLines []string) {
+func getFixedYamlLines(yamlLines []string, fileFixInfo fileFixInfo, newline string) (fixedYamlLines []string) {
 
 	// Determining last line requires original yaml lines slice. The placeholder for last line is replaced with the real last line
 	assignLastLine(fileFixInfo.contentsToAdd, fileFixInfo.linesToRemove, &yamlLines)
@@ -267,7 +267,7 @@ func getFixedYamlLines(yamlLines []string, fileFixInfo fileFixInfo) (fixedYamlLi
 			lineIdx += 1
 		}
 
-		content := (*fileFixInfo.contentsToAdd)[lineToAddIdx].content
+		content := (*fileFixInfo.contentsToAdd)[lineToAddIdx].Content(newline)
 		fixedYamlLines = append(fixedYamlLines, content)
 
 		lineToAddIdx += 1

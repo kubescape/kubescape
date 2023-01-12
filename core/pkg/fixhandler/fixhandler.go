@@ -24,6 +24,10 @@ import (
 
 const UserValuePrefix = "YOUR_"
 
+const windowsNewline = "\r\n"
+const unixNewline = "\n"
+const oldMacNewline = "\r"
+
 func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 	jsonFile, err := os.Open(fixInfo.ReportFile)
 	if err != nil {
@@ -232,7 +236,9 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 }
 
 func (h *FixHandler) ApplyFixToContent(yamlAsString, yamlExpression string) (fixedString string, err error) {
-	yamlLines := strings.Split(yamlAsString, "\n")
+	newline := determineNewlineSeparator(yamlAsString)
+
+	yamlLines := strings.Split(yamlAsString, newline)
 
 	originalRootNodes, err := decodeDocumentRoots(yamlAsString)
 
@@ -248,9 +254,9 @@ func (h *FixHandler) ApplyFixToContent(yamlAsString, yamlExpression string) (fix
 
 	fileFixInfo := getFixInfo(originalRootNodes, fixedRootNodes)
 
-	fixedYamlLines := getFixedYamlLines(yamlLines, fileFixInfo)
+	fixedYamlLines := getFixedYamlLines(yamlLines, fileFixInfo, newline)
 
-	fixedString = getStringFromSlice(fixedYamlLines)
+	fixedString = getStringFromSlice(fixedYamlLines, newline)
 
 	return fixedString, nil
 }
@@ -343,4 +349,13 @@ func writeFixesToFile(filepath, content string) error {
 	}
 
 	return nil
+}
+
+func determineNewlineSeparator(contents string) string {
+	switch {
+	case strings.Contains(contents, windowsNewline):
+		return windowsNewline
+	default:
+		return unixNewline
+	}
 }

@@ -98,6 +98,11 @@ func getTestCases() []indentationTestCase {
 			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
 			"inserts/tc-10-01-expected.yaml",
 		},
+		{
+			"inserts/tc-11-00-input-list-insert-new-mapping-crlf-newlines.yaml",
+			`select(di==0).spec.containers += {"name": "redis", "image": "redis"}`,
+			"inserts/tc-11-01-expected.yaml",
+		},
 
 		// Removal Scenarios
 		{
