@@ -1,13 +1,39 @@
-## Describe your changes
+## Overview
+<!-- Please provide a brief overview of the changes made in this pull request. e.g. current behavior/future behavior -->
 
-## Screenshots - If Any (Optional)
+<!-- 
+## Additional Information
 
-## This PR fixes:
+> Any additional information that may be useful for reviewers to know 
+-->
 
-* Resolved #
+<!--
+## How to Test
 
+> Please provide instructions on how to test the changes made in this pull request
+-->
+
+<!--
+## Examples/Screenshots
+
+> Here you add related screenshots 
+-->
+
+<!-- 
+## Related issues/PRs:
+
+Here you add related issues and PRs.
+If this resolved an issue, write "Resolved #<issue number>
+
+e.g. If this PR resolves issues 1 and 2, it should look as follows:
+* Resolved #1
+* Resolved #2
+-->
+
+<!--
 ## Checklist before requesting a review
-<!-- put an [x] in the box to get it checked -->
+
+put an [x] in the box to get it checked 
 
 - [ ] My code follows the style guidelines of this project
 - [ ] I have commented on my code, particularly in hard-to-understand areas
@@ -16,3 +42,6 @@
 - [ ] New and existing unit tests pass locally with my changes
 
 **Please open the PR against the `dev` branch (Unless the PR contains only documentation changes)**
+
+-->
+ 
