@@ -5,10 +5,19 @@ on:
       - dev
   pull_request:
     types: [ edited, opened, synchronize, reopened ]
-    branches: [ master, dev ]
+    branches: 
+      - 'master'
+      - 'main'
+      - 'dev'
     paths-ignore:
       - '**.yaml'
       - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
 permissions:
   contents: read
   # Optional: allow read access to pull request. Use with `only-new-issues` option.

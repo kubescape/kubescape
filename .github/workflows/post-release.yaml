@@ -3,7 +3,9 @@ name: create release digests
 on:
   release:
     types: [ published]
-    branches: [ master ]
+    branches:
+    - 'master'
+    - 'main'
   
 jobs:
   once:

@@ -2,9 +2,18 @@ name: build
 
 on:
   push:
-    branches: [ master ]
+    branches: 
+      - 'master'
+      - 'main'
     paths-ignore:
+      - '**.yaml'
       - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
 jobs:
   test:
     uses: ./.github/workflows/test.yaml
