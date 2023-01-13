@@ -75,6 +75,7 @@ func (hsh *HostSensorHandler) Init() error {
 	// store pod names
 	// make sure all pods are running, after X seconds treat has running anyway, and log an error on the pods not running yet
 	logger.L().Info("Installing host scanner")
+	logger.L().Debug("The host scanner is a DaemonSet that runs on each node in the cluster. The DaemonSet will be running in it's own namespace and will be deleted once the scan is completed. If you do not wish to install the host scanner, please run the scan without the --enable-host-scan flag.")
 
 	cautils.StartSpinner()
 
