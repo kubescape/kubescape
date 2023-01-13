@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
+	"gopkg.in/yaml.v3"
 
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
@@ -24,12 +26,26 @@ func IsHelmDirectory(path string) (bool, error) {
 	return helmchartutil.IsChartDir(path)
 }
 
-func NewHelmChart(path string) (*HelmChart, error) {
+func NewHelmChart(path string, helmValueFilePaths []string) (*HelmChart, error) {
 	chart, err := helmloader.Load(path)
 	if err != nil {
 		return nil, err
 	}
-
+	
+	// enters only if path is mentioned
+	if len(helmValueFilePaths) != 0 {
+		for _, helmValueFile := range helmValueFilePaths {
+			currentMap := map[string]interface{}{}
+			bytes, err := os.ReadFile(helmValueFile)
+			if err != nil {
+				return nil, err
+			}
+			if err := yaml.Unmarshal(bytes, &currentMap); err != nil {
+				return nil, err
+			}
+			chart.Values = mergeMaps(chart.Values, currentMap)
+		}
+	}
 	return &HelmChart{
 		chart: chart,
 		path:  path,
@@ -89,4 +105,24 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		}
 	}
 	return workloads, errs
+}
+
+// code from helm/helm repo under pkg/cli/values/option.go
+func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(a))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		if v, ok := v.(map[string]interface{}); ok {
+			if bv, ok := out[k]; ok {
+				if bv, ok := bv.(map[string]interface{}); ok {
+					out[k] = mergeMaps(bv, v)
+					continue
+				}
+			}
+		}
+		out[k] = v
+	}
+	return out
 }

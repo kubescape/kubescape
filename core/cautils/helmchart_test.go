@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"reflect"
 
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/suite"
@@ -17,6 +18,7 @@ type HelmChartTestSuite struct {
 	helmChartPath         string
 	expectedFiles         []string
 	expectedDefaultValues map[string]interface{}
+	pathToValueFiles      []string
 }
 
 func TestHelmChartTestSuite(t *testing.T) {
@@ -44,23 +46,23 @@ func (s *HelmChartTestSuite) SetupSuite() {
 }
 
 func (s *HelmChartTestSuite) TestInvalidHelmDirectory() {
-	_, err := NewHelmChart("/invalid_path")
+	_, err := NewHelmChart("/invalid_path", s.pathToValueFiles)
 	s.Error(err)
 }
 
 func (s *HelmChartTestSuite) TestValidHelmDirectory() {
-	chart, err := NewHelmChart(s.helmChartPath)
+	chart, err := NewHelmChart(s.helmChartPath, s.pathToValueFiles)
 	s.NoError(err)
 	s.NotNil(chart)
 }
 
 func (s *HelmChartTestSuite) TestGetName() {
-	chart, _ := NewHelmChart(s.helmChartPath)
+	chart, _ := NewHelmChart(s.helmChartPath, s.pathToValueFiles)
 	s.Equal("kubescape", chart.GetName())
 }
 
 func (s *HelmChartTestSuite) TestGetDefaultValues() {
-	chart, _ := NewHelmChart(s.helmChartPath)
+	chart, _ := NewHelmChart(s.helmChartPath, s.pathToValueFiles)
 
 	values := chart.GetDefaultValues()
 
@@ -71,10 +73,18 @@ func (s *HelmChartTestSuite) TestGetDefaultValues() {
 }
 
 func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
-	chart, err := NewHelmChart(s.helmChartPath)
+	o, _ := os.Getwd()
+
+	path := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart", "newvalues.yaml")
+	s.pathToValueFiles = append(s.pathToValueFiles, path)
+	chart, err := NewHelmChart(s.helmChartPath, s.pathToValueFiles)
 	s.NoError(err, "Expected a valid helm chart")
 
 	values := chart.GetDefaultValues()
+
+	// Overriden test value = pass
+	testValue := values["override"].(map[string]interface{})["test"].(string)
+	s.Equal(testValue, "pass")
 
 	// Default pullPolicy value = Always
 	pullPolicyValue := values["image"].(map[string]interface{})["pullPolicy"].(string)
@@ -106,7 +116,7 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
 }
 
 func (s *HelmChartTestSuite) TestGetWorkloadsMissingValue() {
-	chart, _ := NewHelmChart(s.helmChartPath)
+	chart, _ := NewHelmChart(s.helmChartPath, s.pathToValueFiles)
 
 	values := chart.GetDefaultValues()
 	delete(values, "image")
@@ -130,3 +140,59 @@ func (s *HelmChartTestSuite) TestIsHelmDirectory() {
 	s.False(ok)
 	s.Contains(err.Error(), "no Chart.yaml exists in directory")
 }
+
+func TestMergeValues(t *testing.T) {
+	nestedMap := map[string]interface{}{
+		"foo": "bar",
+		"baz": map[string]string{
+			"cool": "stuff",
+		},
+	}
+	anotherNestedMap := map[string]interface{}{
+		"foo": "bar",
+		"baz": map[string]string{
+			"cool":    "things",
+			"awesome": "stuff",
+		},
+	}
+	flatMap := map[string]interface{}{
+		"foo": "bar",
+		"baz": "stuff",
+	}
+	anotherFlatMap := map[string]interface{}{
+		"testing": "fun",
+	}
+
+	testMap := mergeMaps(flatMap, nestedMap)
+	equal := reflect.DeepEqual(testMap, nestedMap)
+	if !equal {
+		t.Errorf("Expected a nested map to overwrite a flat value. Expected: %v, got %v", nestedMap, testMap)
+	}
+
+	testMap = mergeMaps(nestedMap, flatMap)
+	equal = reflect.DeepEqual(testMap, flatMap)
+	if !equal {
+		t.Errorf("Expected a flat value to overwrite a map. Expected: %v, got %v", flatMap, testMap)
+	}
+
+	testMap = mergeMaps(nestedMap, anotherNestedMap)
+	equal = reflect.DeepEqual(testMap, anotherNestedMap)
+	if !equal {
+		t.Errorf("Expected a nested map to overwrite another nested map. Expected: %v, got %v", anotherNestedMap, testMap)
+	}
+
+	testMap = mergeMaps(anotherFlatMap, anotherNestedMap)
+	expectedMap := map[string]interface{}{
+		"testing": "fun",
+		"foo":     "bar",
+		"baz": map[string]string{
+			"cool":    "things",
+			"awesome": "stuff",
+		},
+	}
+	equal = reflect.DeepEqual(testMap, expectedMap)
+	if !equal {
+		t.Errorf("Expected a map with different keys to merge properly with another map. Expected: %v, got %v", expectedMap, testMap)
+	}
+}
+

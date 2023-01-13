@@ -100,6 +100,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().MarkHidden("omit-raw-resources")
 	scanCmd.PersistentFlags().MarkHidden("print-attack-tree")
 
+	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmValueFilePath, "helm-value-file", "", "If you want to override the helm values.yaml file. For multiple files separate them with `,`")
+
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
 

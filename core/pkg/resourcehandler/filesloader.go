@@ -30,7 +30,7 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, scanInfo *cautils.ScanInfo) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 
 	//
 	// build resources map
@@ -47,7 +47,10 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	cautils.StartSpinner()
 
 	for path := range fileHandler.inputPatterns {
-		workloadIDToSource, workloads, err := getResourcesFromPath(fileHandler.inputPatterns[path])
+		if fileHandler.inputPatterns[path] == scanInfo.HelmValueFilePath {
+			continue
+		}
+		workloadIDToSource, workloads, err := getResourcesFromPath(fileHandler.inputPatterns[path], scanInfo.HelmValueFilePath)
 		if err != nil {
 			return nil, allResources, nil, err
 		}
@@ -87,7 +90,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	return k8sResources, allResources, ksResources, nil
 }
 
-func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+func getResourcesFromPath(path string, helmValueFilePath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	workloads := []workloadinterface.IMetadata{}
 
@@ -159,7 +162,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	}
 
 	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(path)
+	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(path, helmValueFilePath)
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChartName := helmSourceToChartName[source]

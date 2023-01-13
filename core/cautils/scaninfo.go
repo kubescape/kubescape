@@ -123,6 +123,7 @@ type ScanInfo struct {
 	CreateAccount         bool               // Create account in Kubescape Cloud BE if no account found in local cache
 	ScanID                string             // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag        // Deploy Kubescape K8s host scanner to collect data from certain controls
+	HelmValueFilePath     string             // To override the helm value file store the location of new values.yaml file
 	HostSensorYamlPath    string             // Path to hostsensor file
 	Local                 bool               // Do not submit results
 	Credentials           Credentials        // account ID

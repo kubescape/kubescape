@@ -65,7 +65,6 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
 			}

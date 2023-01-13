@@ -31,7 +31,7 @@ const (
 )
 
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
+func LoadResourcesFromHelmCharts(basePath string, helmValueFilePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -42,8 +42,24 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChartName := map[string]string{}
+	overrideHelmFilesPath := make(map[string][]string)
+
+	if helmValueFilePath != "" {   
+		for _, arguments  := range strings.Split(helmValueFilePath, " ") {
+		charts := strings.Split(arguments, ":")
+		        for _, path := range strings.Split(charts[1], ",") {
+			      overrideHelmFilesPath[charts[0]] = append(overrideHelmFilesPath[charts[0]], path)
+			}
+		}
+	}
+
 	for _, helmDir := range helmDirectories {
-		chart, err := NewHelmChart(helmDir)
+			
+		var valuesFile []string
+		if paths, found := overrideHelmFilesPath[helmDir]; found {
+			valuesFile = paths
+		}
+		chart , err := NewHelmChart(helmDir, valuesFile)
 		if err == nil {
 			wls, errs := chart.GetWorkloadsWithDefaultValues()
 			if len(errs) > 0 {
@@ -56,6 +72,8 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 				sourceToWorkloads[k] = v
 				sourceToChartName[k] = chartName
 			}
+		} else {
+		        logger.L().Warning(err.Error())  // throw a warning if any path given by user is incorrect or any such error related to path
 		}
 	}
 	return sourceToWorkloads, sourceToChartName
