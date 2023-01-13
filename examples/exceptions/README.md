@@ -28,8 +28,10 @@ You can find [here](https://github.com/kubescape/kubescape/tree/master/examples/
 
 ## Usage
 
-The `resources` list and `posturePolicies` list are designed to be a combination of the resources and policies to exclude
-> You must declare at least one resource and one policy
+The `resources` list and `posturePolicies` list are designed to be a combination of the resources and policies to exclude.
+
+> **Warning** 
+> You must declare at least one resource and one policy.
 
 e.g. If you wish to exclude all namespaces with the label `"environment": "dev"`, the resource list should look as follows:
 ```

@@ -34,6 +34,7 @@ func (prettyPrinter *PrettyPrinter) printAttackTreeNode(node v1alpha1.IAttackTra
 }
 */
 
+
 func (prettyPrinter *PrettyPrinter) createFailedControlList(node v1alpha1.IAttackTrackStep) string {
 	var r string
 	for i, control := range node.GetControls() {

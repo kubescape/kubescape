@@ -28,6 +28,7 @@ var (
 	kubeConfigMock string
 )
 
+
 func getKubeConfigMock() *clientcmdapi.Config {
 	kubeConfig := clientcmdapi.Config{}
 	if err := json.Unmarshal([]byte(kubeConfigMock), &kubeConfig); err != nil {
@@ -258,3 +259,4 @@ func Test_getResources(t *testing.T) {
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }
+
