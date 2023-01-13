@@ -1,6 +1,7 @@
 package submit
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -49,7 +50,7 @@ func (resultsObject *ResultsObject) ListAllResources() (map[string]workloadinter
 	return map[string]workloadinterface.IMetadata{}, nil
 }
 
-func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
+func getResultsCmd(ctx context.Context, ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 	var resultsCmd = &cobra.Command{
 		Use:   fmt.Sprintf("results <json file>\nExample:\n$ %[1]s submit results path/to/results.json --format-version v2", cautils.ExecName()),
 		Short: "Submit a pre scanned results file. The file must be in json format",
@@ -69,7 +70,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			// get config
 			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", "", k8s)
 			if err := clusterConfig.SetTenant(); err != nil {
-				logger.L().Error("failed setting account ID", helpers.Error(err))
+				logger.L().Ctx(ctx).Error("failed setting account ID", helpers.Error(err))
 			}
 
 			resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetContextName(), args[0])
@@ -82,8 +83,8 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 				Reporter:      r,
 			}
 
-			if err := ks.Submit(submitInterfaces); err != nil {
-				logger.L().Fatal(err.Error())
+			if err := ks.Submit(ctx, submitInterfaces); err != nil {
+				logger.L().Ctx(ctx).Fatal(err.Error())
 			}
 			return nil
 		},

@@ -13,7 +13,7 @@ func loadResourcesFromUrl(inputPatterns []string) (map[string][]workloadinterfac
 	files, errs := g.DownloadFilesWithExtension(append(cautils.YAML_PREFIX, cautils.JSON_PREFIX...))
 	if len(errs) > 0 {
 		for i, j := range errs {
-			logger.L().Error(i, helpers.Error(j))
+			logger.L().Ctx(ctx).Error(i, helpers.Error(j))
 		}
 	}
 

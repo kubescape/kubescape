@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func getSetCmd(ks meta.IKubescape) *cobra.Command {
+func getSetCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 
 	// configCmd represents the config command
 	configSetCmd := &cobra.Command{
@@ -24,7 +25,7 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 			if err := ks.SetCachedConfig(setConfig); err != nil {
-				logger.L().Fatal(err.Error())
+				logger.L().Ctx(ctx).Fatal(err.Error())
 			}
 			return nil
 		},

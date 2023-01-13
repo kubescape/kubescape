@@ -13,6 +13,7 @@ import (
 	handlerequestsv1 "github.com/kubescape/kubescape/v2/httphandler/handlerequests/v1"
 
 	"github.com/gorilla/mux"
+	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 )
 
 const (
@@ -40,6 +41,7 @@ func SetupHTTPListener() error {
 	}
 
 	rtr := mux.NewRouter()
+	rtr.Use(otelmux.Middleware("kubescape-svc"))
 	// rtr.HandleFunc(opapolicy.PostureRestAPIPathV1, resthandler.RestAPIReceiveNotification)
 
 	// listen

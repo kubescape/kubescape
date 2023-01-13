@@ -70,7 +70,7 @@ type ITenantConfig interface {
 	// set
 	SetTenant() error
 	UpdateCachedConfig() error
-	DeleteCachedConfig() error
+	DeleteCachedConfig(ctx context.Context) error
 
 	// getters
 	GetContextName() string
@@ -175,9 +175,9 @@ func (lc *LocalConfig) UpdateCachedConfig() error {
 	return updateConfigFile(lc.configObj)
 }
 
-func (lc *LocalConfig) DeleteCachedConfig() error {
+func (lc *LocalConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	return nil
 }
@@ -330,12 +330,12 @@ func (c *ClusterConfig) UpdateCachedConfig() error {
 	return updateConfigFile(c.configObj)
 }
 
-func (c *ClusterConfig) DeleteCachedConfig() error {
+func (c *ClusterConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := c.deleteConfigMap(); err != nil {
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	return nil
 }

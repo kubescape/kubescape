@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -10,7 +11,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-
+	"go.opentelemetry.io/otel"
 	"golang.org/x/mod/semver"
 )
 
@@ -25,12 +26,12 @@ var LatestReleaseVersion string
 const UnknownBuildNumber = "unknown"
 
 type IVersionCheckHandler interface {
-	CheckLatestVersion(*VersionCheckRequest) error
+	CheckLatestVersion(context.Context, *VersionCheckRequest) error
 }
 
-func NewIVersionCheckHandler() IVersionCheckHandler {
+func NewIVersionCheckHandler(ctx context.Context) IVersionCheckHandler {
 	if BuildNumber == "" {
-		logger.L().Warning("unknown build number, this might affect your scan results. Please make sure you are updated to latest version")
+		logger.L().Ctx(ctx).Warning("unknown build number, this might affect your scan results. Please make sure you are updated to latest version")
 	}
 
 	if v, ok := os.LookupEnv(CLIENT_ENV); ok && v != "" {
@@ -98,15 +99,17 @@ func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanni
 	}
 }
 
-func (v *VersionCheckHandlerMock) CheckLatestVersion(versionData *VersionCheckRequest) error {
+func (v *VersionCheckHandlerMock) CheckLatestVersion(_ context.Context, _ *VersionCheckRequest) error {
 	logger.L().Info("Skipping version check")
 	return nil
 }
 
-func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckRequest) error {
+func (v *VersionCheckHandler) CheckLatestVersion(ctx context.Context, versionData *VersionCheckRequest) error {
+	ctx, span := otel.Tracer("").Start(ctx, "versionCheckHandler.CheckLatestVersion")
+	defer span.End()
 	defer func() {
 		if err := recover(); err != nil {
-			logger.L().Warning("failed to get latest version", helpers.Interface("error", err))
+			logger.L().Ctx(ctx).Warning("failed to get latest version", helpers.Interface("error", err))
 		}
 	}()
 
@@ -119,7 +122,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(versionData *VersionCheckReques
 
 	if latestVersion.ClientUpdate != "" {
 		if BuildNumber != "" && semver.Compare(BuildNumber, LatestReleaseVersion) == -1 {
-			logger.L().Warning(warningMessage(LatestReleaseVersion))
+			logger.L().Ctx(ctx).Warning(warningMessage(LatestReleaseVersion))
 		}
 	}
 

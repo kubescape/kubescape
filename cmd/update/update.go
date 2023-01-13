@@ -5,6 +5,7 @@ package update
 //          kubescape update
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -19,7 +20,7 @@ var updateCmdExamples = fmt.Sprintf(`
   %[1]s update
 `, cautils.ExecName())
 
-func GetUpdateCmd() *cobra.Command {
+func GetUpdateCmd(ctx context.Context) *cobra.Command {
 	updateCmd := &cobra.Command{
 		Use:     "update",
 		Short:   "Update your version",
@@ -43,7 +44,7 @@ func GetUpdateCmd() *cobra.Command {
 					_, err := exec.Command(ShellToUse, "-c", "iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex").Output()
 
 					if err != nil {
-						logger.L().Fatal(err.Error())
+						logger.L().Ctx(ctx).Fatal(err.Error())
 					}
 					cautils.StopSpinner()
 
@@ -53,7 +54,7 @@ func GetUpdateCmd() *cobra.Command {
 					//run the installation command for linux and macOS
 					_, err := exec.Command(ShellToUse, "-c", "curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash").Output()
 					if err != nil {
-						logger.L().Fatal(err.Error())
+						logger.L().Ctx(ctx).Fatal(err.Error())
 					}
 
 					cautils.StopSpinner()

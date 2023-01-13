@@ -28,7 +28,7 @@ type RegistryAdaptors struct {
 func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	// list supported adaptors
 	registryAdaptors := &RegistryAdaptors{}
-	adaptors, err := listAdaptores()
+	adaptors, err := listAdaptors()
 	if err != nil {
 		return registryAdaptors, err
 	}
@@ -148,7 +148,7 @@ func imageTagsToContainerImageIdentifier(images []string) []registryvulnerabilit
 	}
 	return imagesIdentifiers
 }
-func listAdaptores() ([]registryvulnerabilities.IContainerImageVulnerabilityAdaptor, error) {
+func listAdaptors() ([]registryvulnerabilities.IContainerImageVulnerabilityAdaptor, error) {
 
 	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
 

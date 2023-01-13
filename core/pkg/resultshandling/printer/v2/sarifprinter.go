@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path"
@@ -64,14 +65,14 @@ func NewSARIFPrinter() *SARIFPrinter {
 func (sp *SARIFPrinter) Score(score float32) {
 }
 
-func (sp *SARIFPrinter) SetWriter(outputFile string) {
+func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
 	if strings.TrimSpace(outputFile) == "" {
 		outputFile = sarifOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
 		outputFile = outputFile + sarifOutputExt
 	}
-	sp.writer = printer.GetWriter(outputFile)
+	sp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 // addRule adds a rule description to the scan run based on the given control summary
@@ -103,7 +104,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		)
 }
 
-func (sp *SARIFPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
 		panic(err)

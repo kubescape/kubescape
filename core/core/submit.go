@@ -1,6 +1,8 @@
 package core
 
 import (
+	"context"
+
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
@@ -9,7 +11,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 )
 
-func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error {
+func (ks *Kubescape) Submit(ctx context.Context, submitInterfaces cliinterfaces.SubmitInterfaces) error {
 
 	// list resources
 	report, err := submitInterfaces.SubmitObjects.SetResourcesReport()
@@ -26,7 +28,7 @@ func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) err
 		AllResources: allresources,
 		Metadata:     &report.Metadata,
 	}
-	if err := submitInterfaces.Reporter.Submit(o); err != nil {
+	if err := submitInterfaces.Reporter.Submit(ctx, o); err != nil {
 		return err
 	}
 	logger.L().Success("Data has been submitted successfully")
@@ -35,13 +37,13 @@ func (ks *Kubescape) Submit(submitInterfaces cliinterfaces.SubmitInterfaces) err
 	return nil
 }
 
-func (ks *Kubescape) SubmitExceptions(credentials *cautils.Credentials, excPath string) error {
+func (ks *Kubescape) SubmitExceptions(ctx context.Context, credentials *cautils.Credentials, excPath string) error {
 	logger.L().Info("submitting exceptions", helpers.String("path", excPath))
 
 	// load cached config
 	tenantConfig := getTenantConfig(credentials, "", "", getKubernetesApi())
 	if err := tenantConfig.SetTenant(); err != nil {
-		logger.L().Error("failed setting account ID", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed setting account ID", helpers.Error(err))
 	}
 
 	// load exceptions from file

@@ -1,6 +1,7 @@
 package reporter
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -19,7 +20,7 @@ func NewReportMock(query, message string) *ReportMock {
 		message: message,
 	}
 }
-func (reportMock *ReportMock) Submit(opaSessionObj *cautils.OPASessionObj) error {
+func (reportMock *ReportMock) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	return nil
 }
 

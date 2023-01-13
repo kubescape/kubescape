@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,6 +17,7 @@ import (
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // executeScan execute the scan request passed in the channel
@@ -28,9 +30,9 @@ func (handler *HTTPHandler) executeScan() {
 		response := &utilsmetav1.Response{}
 
 		logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-		results, err := scan(scanReq.scanInfo, scanReq.scanID)
+		results, err := scan(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
 		if err != nil {
-			logger.L().Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
 			if scanReq.scanQueryParams.ReturnResults {
 				response.Type = utilsapisv1.ErrorScanResponseType
 				response.Response = err.Error()
@@ -50,14 +52,15 @@ func (handler *HTTPHandler) executeScan() {
 
 	}
 }
-func scan(scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
-
+func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
+	span := trace.SpanFromContext(ctx)
+	logger.L().Info("span Matthias", helpers.String("span", fmt.Sprintf("%#v", span)))
 	ks := core.NewKubescape()
-	result, err := ks.Scan(scanInfo)
+	result, err := ks.Scan(ctx, scanInfo)
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}
-	if err := result.HandleResults(); err != nil {
+	if err := result.HandleResults(context.TODO()); err != nil {
 		return nil, err
 	}
 	return result.GetResults(), nil

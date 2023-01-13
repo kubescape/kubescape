@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,21 +26,21 @@ func NewJsonPrinter() *JsonPrinter {
 	return &JsonPrinter{}
 }
 
-func (jsonPrinter *JsonPrinter) SetWriter(outputFile string) {
+func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
 	if strings.TrimSpace(outputFile) == "" {
 		outputFile = jsonOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
 		outputFile = outputFile + jsonOutputExt
 	}
-	jsonPrinter.writer = printer.GetWriter(outputFile)
+	jsonPrinter.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
 	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	var postureReportStr []byte
@@ -52,13 +53,13 @@ func (jsonPrinter *JsonPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj
 	}
 
 	if err != nil {
-		logger.L().Fatal("failed to convert posture report object")
+		logger.L().Ctx(ctx).Fatal("failed to convert posture report object")
 	}
 
 	_, err = jsonPrinter.writer.Write(postureReportStr)
 
 	if err != nil {
-		logger.L().Fatal("failed to Write posture report object into JSON output")
+		logger.L().Ctx(ctx).Fatal("failed to Write posture report object into JSON output")
 	} else {
 		printer.LogOutputFile(jsonPrinter.writer.Name())
 	}

@@ -1,6 +1,7 @@
 package submit
 
 import (
+	"context"
 	"fmt"
 
 	logger "github.com/kubescape/go-logger"
@@ -10,7 +11,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func getExceptionsCmd(ks meta.IKubescape, submitInfo *metav1.Submit) *cobra.Command {
+func getExceptionsCmd(ctx context.Context, ks meta.IKubescape, submitInfo *metav1.Submit) *cobra.Command {
 	return &cobra.Command{
 		Use:   "exceptions <full path to exceptions file>",
 		Short: "Submit exceptions to the Kubescape SaaS version",
@@ -23,11 +24,11 @@ func getExceptionsCmd(ks meta.IKubescape, submitInfo *metav1.Submit) *cobra.Comm
 		Run: func(cmd *cobra.Command, args []string) {
 
 			if err := flagValidationSubmit(submitInfo); err != nil {
-				logger.L().Fatal(err.Error())
+				logger.L().Ctx(ctx).Fatal(err.Error())
 			}
 
-			if err := ks.SubmitExceptions(&submitInfo.Credentials, args[0]); err != nil {
-				logger.L().Fatal(err.Error())
+			if err := ks.SubmitExceptions(ctx, &submitInfo.Credentials, args[0]); err != nil {
+				logger.L().Ctx(ctx).Fatal(err.Error())
 			}
 		},
 	}

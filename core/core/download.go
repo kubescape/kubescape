@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,7 +22,7 @@ const (
 	TargetAttackTracks   = "attack-tracks"
 )
 
-var downloadFunc = map[string]func(*metav1.DownloadInfo) error{
+var downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{
 	TargetControlsInputs: downloadConfigInputs,
 	TargetExceptions:     downloadExceptions,
 	TargetControl:        downloadControl,
@@ -38,20 +39,20 @@ func DownloadSupportCommands() []string {
 	return commands
 }
 
-func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
+func (ks *Kubescape) Download(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	setPathandFilename(downloadInfo)
 	if err := os.MkdirAll(downloadInfo.Path, os.ModePerm); err != nil {
 		return err
 	}
-	if err := downloadArtifact(downloadInfo, downloadFunc); err != nil {
+	if err := downloadArtifact(ctx, downloadInfo, downloadFunc); err != nil {
 		return err
 	}
 	return nil
 }
 
-func downloadArtifact(downloadInfo *metav1.DownloadInfo, downloadArtifactFunc map[string]func(*metav1.DownloadInfo) error) error {
+func downloadArtifact(ctx context.Context, downloadInfo *metav1.DownloadInfo, downloadArtifactFunc map[string]func(context.Context, *metav1.DownloadInfo) error) error {
 	if f, ok := downloadArtifactFunc[downloadInfo.Target]; ok {
-		if err := f(downloadInfo); err != nil {
+		if err := f(ctx, downloadInfo); err != nil {
 			return err
 		}
 		return nil
@@ -73,26 +74,26 @@ func setPathandFilename(downloadInfo *metav1.DownloadInfo) {
 	}
 }
 
-func downloadArtifacts(downloadInfo *metav1.DownloadInfo) error {
+func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	downloadInfo.FileName = ""
-	var artifacts = map[string]func(*metav1.DownloadInfo) error{
+	var artifacts = map[string]func(context.Context, *metav1.DownloadInfo) error{
 		"controls-inputs": downloadConfigInputs,
 		"exceptions":      downloadExceptions,
 		"framework":       downloadFramework,
 		"attack-tracks":   downloadAttackTracks,
 	}
 	for artifact := range artifacts {
-		if err := downloadArtifact(&metav1.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
-			logger.L().Error("error downloading", helpers.String("artifact", artifact), helpers.Error(err))
+		if err := downloadArtifact(ctx, &metav1.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
+			logger.L().Ctx(ctx).Error("error downloading", helpers.String("artifact", artifact), helpers.Error(err))
 		}
 	}
 	return nil
 }
 
-func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
+func downloadConfigInputs(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	controlsInputsGetter := getConfigInputsGetter(downloadInfo.Identifier, tenant.GetAccountID(), nil)
+	controlsInputsGetter := getConfigInputsGetter(ctx, downloadInfo.Identifier, tenant.GetAccountID(), nil)
 	controlInputs, err := controlsInputsGetter.GetControlsInputs(tenant.GetContextName())
 	if err != nil {
 		return err
@@ -112,9 +113,9 @@ func downloadConfigInputs(downloadInfo *metav1.DownloadInfo) error {
 	return nil
 }
 
-func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
+func downloadExceptions(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
-	exceptionsGetter := getExceptionsGetter("", tenant.GetAccountID(), nil)
+	exceptionsGetter := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil)
 
 	exceptions, err := exceptionsGetter.GetExceptions(tenant.GetContextName())
 	if err != nil {
@@ -129,15 +130,15 @@ func downloadExceptions(downloadInfo *metav1.DownloadInfo) error {
 	if err != nil {
 		return err
 	}
-	logger.L().Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
+	logger.L().Ctx(ctx).Success("Downloaded", helpers.String("artifact", downloadInfo.Target), helpers.String("path", filepath.Join(downloadInfo.Path, downloadInfo.FileName)))
 	return nil
 }
 
-func downloadAttackTracks(downloadInfo *metav1.DownloadInfo) error {
+func downloadAttackTracks(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 	var err error
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	attackTracksGetter := getAttackTracksGetter("", tenant.GetAccountID(), nil)
+	attackTracksGetter := getAttackTracksGetter(ctx, "", tenant.GetAccountID(), nil)
 
 	attackTracks, err := attackTracksGetter.GetAttackTracks()
 	if err != nil {
@@ -157,11 +158,11 @@ func downloadAttackTracks(downloadInfo *metav1.DownloadInfo) error {
 
 }
 
-func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
+func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	g := getPolicyGetter(nil, tenant.GetTenantEmail(), true, nil)
+	g := getPolicyGetter(ctx, nil, tenant.GetTenantEmail(), true, nil)
 
 	if downloadInfo.Identifier == "" {
 		// if framework name not specified - download all frameworks
@@ -199,11 +200,11 @@ func downloadFramework(downloadInfo *metav1.DownloadInfo) error {
 	return nil
 }
 
-func downloadControl(downloadInfo *metav1.DownloadInfo) error {
+func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
 
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	g := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
+	g := getPolicyGetter(ctx, nil, tenant.GetTenantEmail(), false, nil)
 
 	if downloadInfo.Identifier == "" {
 		// TODO - support

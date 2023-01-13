@@ -1,6 +1,7 @@
 package completion
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -19,7 +20,7 @@ var completionCmdExamples = fmt.Sprintf(`
   $ echo 'source <(kubectl completion zsh)' >> "${fpath[1]}/_kubectl"
 `, cautils.ExecName())
 
-func GetCompletionCmd() *cobra.Command {
+func GetCompletionCmd(_ context.Context) *cobra.Command {
 	completionCmd := &cobra.Command{
 		Use:                   "completion [bash|zsh|fish|powershell]",
 		Short:                 "Generate autocompletion script",

@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"reflect"
@@ -555,7 +556,7 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 	}
 
 	sessionObj := cautils.NewOPASessionObjMock()
-	setMapNamespaceToNumOfResources(allResources, sessionObj)
+	setMapNamespaceToNumOfResources(context.TODO(), allResources, sessionObj)
 	expected := map[string]int{
 		"kube-system": 1,
 		"armo-system": 3,

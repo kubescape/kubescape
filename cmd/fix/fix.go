@@ -1,6 +1,7 @@
 package fix
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -21,7 +22,7 @@ var fixCmdExamples = fmt.Sprintf(`
 
 `, cautils.ExecName())
 
-func GetFixCmd(ks meta.IKubescape) *cobra.Command {
+func GetFixCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 	var fixInfo metav1.FixInfo
 
 	fixCmd := &cobra.Command{
@@ -35,7 +36,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 			}
 			fixInfo.ReportFile = args[0]
 
-			return ks.Fix(&fixInfo)
+			return ks.Fix(ctx, &fixInfo)
 		},
 	}
 

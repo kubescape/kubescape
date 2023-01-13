@@ -1,6 +1,7 @@
 package list
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -28,7 +29,7 @@ var (
 `, cautils.ExecName())
 )
 
-func GetListCmd(ks meta.IKubescape) *cobra.Command {
+func GetListCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 	var listPolicies = v1.ListPolicies{}
 
 	listCmd := &cobra.Command{
@@ -55,8 +56,8 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 
 			listPolicies.Target = args[0]
 
-			if err := ks.List(&listPolicies); err != nil {
-				logger.L().Fatal(err.Error())
+			if err := ks.List(ctx, &listPolicies); err != nil {
+				logger.L().Ctx(ctx).Fatal(err.Error())
 			}
 			return nil
 		},

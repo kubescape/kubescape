@@ -1,6 +1,8 @@
 package submit
 
 import (
+	"context"
+
 	"fmt"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -17,7 +19,7 @@ var submitCmdExamples = fmt.Sprintf(`
 %[1]s submit exceptions
 `, cautils.ExecName())
 
-func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
+func GetSubmitCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 	var submitInfo metav1.Submit
 
 	submitCmd := &cobra.Command{
@@ -32,9 +34,9 @@ func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
 	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
 	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 
-	submitCmd.AddCommand(getExceptionsCmd(ks, &submitInfo))
-	submitCmd.AddCommand(getResultsCmd(ks, &submitInfo))
-	submitCmd.AddCommand(getRBACCmd(ks, &submitInfo))
+	submitCmd.AddCommand(getExceptionsCmd(ctx, ks, &submitInfo))
+	submitCmd.AddCommand(getResultsCmd(ctx, ks, &submitInfo))
+	submitCmd.AddCommand(getRBACCmd(ctx, ks, &submitInfo))
 
 	return submitCmd
 }

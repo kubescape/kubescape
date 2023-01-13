@@ -1,13 +1,14 @@
 package policyhandler
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
-
+	"go.opentelemetry.io/otel"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
@@ -23,7 +24,7 @@ import (
 // PolicyHandler -
 type PolicyHandler struct {
 	resourceHandler resourcehandler.IResourceHandler
-	// we are listening on this chan in opaprocessor/processorhandler.go/ProcessRulesListenner func
+	// we are listening on this chan in opaprocessor/processorhandler.go/ProcessRulesListener func
 	getters *cautils.Getters
 }
 
@@ -34,19 +35,19 @@ func NewPolicyHandler(resourceHandler resourcehandler.IResourceHandler) *PolicyH
 	}
 }
 
-func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(nil, nil, scanInfo)
+func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
+	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
 
 	// validate notification
 	// TODO
 	policyHandler.getters = &scanInfo.Getters
 
 	// get policies
-	if err := policyHandler.getPolicies(policyIdentifier, opaSessionObj); err != nil {
+	if err := policyHandler.getPolicies(ctx, policyIdentifier, opaSessionObj); err != nil {
 		return opaSessionObj, err
 	}
 
-	err := policyHandler.getResources(policyIdentifier, opaSessionObj, scanInfo)
+	err := policyHandler.getResources(ctx, policyIdentifier, opaSessionObj)
 	if err != nil {
 		return opaSessionObj, err
 	}
@@ -58,15 +59,17 @@ func (policyHandler *PolicyHandler) CollectResources(policyIdentifier []cautils.
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) error {
-	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo()
+func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj) error {
+	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getResources")
+	defer span.End()
+	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo(ctx)
 
 	// set cloud metadata only when scanning a cluster
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reportv2.Cluster {
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
+	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators)
 	if err != nil {
 		return err
 	}

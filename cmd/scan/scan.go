@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"flag"
 	"fmt"
 
@@ -29,7 +30,7 @@ var scanCmdExamples = fmt.Sprintf(`
   %[1]s scan --kube-context <kubernetes context>
 `, cautils.ExecName())
 
-func GetScanCommand(ks meta.IKubescape) *cobra.Command {
+func GetScanCommand(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
 
 	// scanCmd represents the scan command
@@ -42,7 +43,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if len(args) > 0 {
 				if args[0] != "framework" && args[0] != "control" {
 					scanInfo.ScanAll = true
-					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{"all"}, args...))
+					return getFrameworkCmd(ctx, ks, &scanInfo).RunE(cmd, append([]string{"all"}, args...))
 				}
 			}
 			return nil
@@ -51,7 +52,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
-				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{"all"})
+				return getFrameworkCmd(ctx, ks, &scanInfo).RunE(cmd, []string{"all"})
 			}
 			return nil
 		},
@@ -106,8 +107,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 
-	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
-	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
+	scanCmd.AddCommand(getControlCmd(ctx, ks, &scanInfo))
+	scanCmd.AddCommand(getFrameworkCmd(ctx, ks, &scanInfo))
 
 	return scanCmd
 }
