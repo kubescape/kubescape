@@ -1,15 +1,25 @@
 package policyhandler
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/version"
+	"k8s.io/client-go/dynamic/fake"
+	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
@@ -17,6 +27,7 @@ var (
 	//go:embed kubeconfig_mock.json
 	kubeConfigMock string
 )
+
 
 func getKubeConfigMock() *clientcmdapi.Config {
 	kubeConfig := clientcmdapi.Config{}
@@ -199,3 +210,53 @@ func Test_isAKS(t *testing.T) {
 		})
 	}
 }
+
+type iResourceHandlerMock struct{}
+
+func (*iResourceHandlerMock) GetResources(*cautils.OPASessionObj, *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+	return nil, nil, nil, nil
+}
+func (*iResourceHandlerMock) GetClusterAPIServerInfo() *version.Info {
+	return nil
+}
+
+// https://github.com/kubescape/kubescape/pull/1004
+// Cluster named .*eks.* config without a cloudconfig panics whereas we just want to scan a file
+func getResourceHandlerMock() *resourcehandler.K8sResourceHandler {
+	client := fakeclientset.NewSimpleClientset()
+	fakeDiscovery := client.Discovery()
+
+	k8s := &k8sinterface.KubernetesApi{
+		KubernetesClient: client,
+		DynamicClient:    fake.NewSimpleDynamicClient(runtime.NewScheme()),
+		DiscoveryClient:  fakeDiscovery,
+		Context:          context.Background(),
+	}
+
+	return resourcehandler.NewK8sResourceHandler(k8s, &resourcehandler.EmptySelector{}, nil, nil, nil)
+}
+func Test_getResources(t *testing.T) {
+	policyHandler := &PolicyHandler{resourceHandler: getResourceHandlerMock()}
+	objSession := &cautils.OPASessionObj{
+		Metadata: &reporthandlingv2.Metadata{
+			ScanMetadata: reporthandlingv2.ScanMetadata{
+				ScanningTarget: reportv2.Cluster,
+			},
+		},
+		Report: &reporthandlingv2.PostureReport{
+			ClusterAPIServerInfo: nil,
+		},
+	}
+	policyIdentifier := []cautils.PolicyIdentifier{{}}
+
+	assert.NotPanics(t, func() {
+		policyHandler.getResources(policyIdentifier, objSession, &cautils.ScanInfo{})
+	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
+
+	assert.NotPanics(t, func() {
+		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
+		policyHandler.getResources(policyIdentifier, objSession, &cautils.ScanInfo{})
+	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
+
+}
+

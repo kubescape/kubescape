@@ -4,11 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 type metricsName string
@@ -231,11 +229,11 @@ type mFrameworkRiskScore struct {
 }
 
 type mResources struct {
-	name                  string
-	namespace             string
-	apiVersion            string
-	kind                  string
-	controlsCountPassed   int
+	name       string
+	namespace  string
+	apiVersion string
+	kind       string
+	// controlsCountPassed   int // unused
 	controlsCountFailed   int
 	controlsCountExcluded int
 }
@@ -298,6 +296,7 @@ func (m *Metrics) setRiskScores(summaryDetails *reportsummary.SummaryDetails) {
 	}
 }
 
+/* unused for now
 // return -> (passed, exceluded, failed)
 func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, int) {
 	failed := 0
@@ -315,6 +314,7 @@ func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, i
 	}
 	return passed, excluded, failed
 }
+
 func (m *Metrics) setResourcesCounters(
 	resources map[string]workloadinterface.IMetadata,
 	results map[string]resourcesresults.Result) {
@@ -342,3 +342,4 @@ func (m *Metrics) setResourcesCounters(
 		m.listResources = append(m.listResources, mrc)
 	}
 }
+*/

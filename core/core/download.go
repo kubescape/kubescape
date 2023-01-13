@@ -137,7 +137,7 @@ func downloadAttackTracks(downloadInfo *metav1.DownloadInfo) error {
 	var err error
 	tenant := getTenantConfig(&downloadInfo.Credentials, "", "", getKubernetesApi())
 
-	attackTracksGetter := getAttackTracksGetter(tenant.GetAccountID(), nil)
+	attackTracksGetter := getAttackTracksGetter("", tenant.GetAccountID(), nil)
 
 	attackTracks, err := attackTracksGetter.GetAttackTracks()
 	if err != nil {

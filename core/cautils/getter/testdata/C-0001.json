@@ -1,0 +1,85 @@
+{
+  "guid": "",
+  "name": "Forbidden Container Registries",
+  "attributes": {
+    "armoBuiltin": true,
+    "attackTracks": [
+      {
+        "attackTrack": "container",
+        "categories": [
+          "Initial access"
+        ]
+      }
+    ],
+    "controlTypeTags": [
+      "security",
+      "compliance"
+    ],
+    "microsoftMitreColumns": [
+      "Initial Access"
+    ]
+  },
+  "id": "C-0001",
+  "controlID": "C-0001",
+  "creationTime": "",
+  "description": "In cases where the Kubernetes cluster is provided by a CSP (e.g., AKS in Azure, GKE in GCP, or EKS in AWS), compromised cloud credential can lead to the cluster takeover. Attackers may abuse cloud account credentials or IAM mechanism to the cluster’s management layer.",
+  "remediation": "Limit the registries from which you pull container images from",
+  "rules": [
+    {
+      "guid": "",
+      "name": "rule-identify-blocklisted-image-registries",
+      "attributes": {
+        "armoBuiltin": true,
+        "m$K8sThreatMatrix": "Initial Access::Compromised images in registry"
+      },
+      "creationTime": "",
+      "rule": "package armo_builtins\nimport data\n# Check for images from blocklisted repos\n\nuntrustedImageRepo[msga] {\n\tpod := input[_]\n\tk := pod.kind\n\tk == \"Pod\"\n\tcontainer := pod.spec.containers[i]\n\tpath := sprintf(\"spec.containers[%v].image\", [format_int(i, 10)])\n\timage := container.image\n    untrusted_or_public_registries(image)\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"image '%v' in container '%s' comes from untrusted registry\", [image, container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"fixPaths\": [],\n\t\t\"failedPaths\": [path],\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n    }\n}\n\nuntrustedImageRepo[msga] {\n\twl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n\tcontainer := wl.spec.template.spec.containers[i]\n\tpath := sprintf(\"spec.template.spec.containers[%v].image\", [format_int(i, 10)])\n\timage := container.image\n    untrusted_or_public_registries(image)\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"image '%v' in container '%s' comes from untrusted registry\", [image, container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"fixPaths\": [],\n\t\t\"failedPaths\": [path],\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n    }\n}\n\nuntrustedImageRepo[msga] {\n\twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer := wl.spec.jobTemplate.spec.template.spec.containers[i]\n\tpath := sprintf(\"spec.jobTemplate.spec.template.spec.containers[%v].image\", [format_int(i, 10)])\n\timage := container.image\n    untrusted_or_public_registries(image)\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"image '%v' in container '%s' comes from untrusted registry\", [image, container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"fixPaths\": [],\n\t\t\"failedPaths\": [path],\n        \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n    }\n}\n\nuntrusted_or_public_registries(image){\n\t# see default-config-inputs.json for list values\n\tuntrusted_registries := data.postureControlInputs.untrustedRegistries\n\trepo_prefix := untrusted_registries[_]\n\tstartswith(image, repo_prefix)\n}\n\nuntrusted_or_public_registries(image){\n\t# see default-config-inputs.json for list values\n\tpublic_registries := data.postureControlInputs.publicRegistries\n\trepo_prefix := public_registries[_]\n\tstartswith(image, repo_prefix)\n}",
+      "resourceEnumerator": "",
+      "ruleLanguage": "Rego",
+      "match": [
+        {
+          "apiGroups": [
+            "*"
+          ],
+          "apiVersions": [
+            "*"
+          ],
+          "resources": [
+            "Pod",
+            "Deployment",
+            "ReplicaSet",
+            "DaemonSet",
+            "StatefulSet",
+            "Job",
+            "CronJob"
+          ]
+        }
+      ],
+      "ruleDependencies": [],
+      "configInputs": [
+        "settings.postureControlInputs.publicRegistries",
+        "settings.postureControlInputs.untrustedRegistries"
+      ],
+      "controlConfigInputs": [
+        {
+          "path": "settings.postureControlInputs.publicRegistries",
+          "name": "Public registries",
+          "description": "Kubescape checks none of these public registries are in use."
+        },
+        {
+          "path": "settings.postureControlInputs.untrustedRegistries",
+          "name": "Registries block list",
+          "description": "Kubescape checks none of the following registries are in use."
+        }
+      ],
+      "description": "Identifying if pod container images are from unallowed registries",
+      "remediation": "Use images from safe registry",
+      "ruleQuery": "",
+      "relevantCloudProviders": null
+    }
+  ],
+  "rulesIDs": [
+    ""
+  ],
+  "baseScore": 7
+}

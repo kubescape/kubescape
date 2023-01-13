@@ -2,7 +2,6 @@ package getter
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -26,8 +25,8 @@ func SaveInFile(policy interface{}, pathStr string) error {
 		if os.IsNotExist(err) {
 			pathDir := path.Dir(pathStr)
 			// pathDir could contain subdirectories
-			if err := os.MkdirAll(pathDir, 0755); err != nil {
-				return err
+			if erm := os.MkdirAll(pathDir, 0755); erm != nil {
+				return erm
 			}
 		} else {
 			return err
@@ -39,13 +38,6 @@ func SaveInFile(policy interface{}, pathStr string) error {
 		}
 	}
 	return nil
-}
-
-// JSONDecoder returns JSON decoder for given string
-func JSONDecoder(origin string) *json.Decoder {
-	dec := json.NewDecoder(strings.NewReader(origin))
-	dec.UseNumber()
-	return dec
 }
 
 func HttpDelete(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
@@ -66,6 +58,7 @@ func HttpDelete(httpClient *http.Client, fullURL string, headers map[string]stri
 	}
 	return respStr, nil
 }
+
 func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
 
 	req, err := http.NewRequest("GET", fullURL, nil)

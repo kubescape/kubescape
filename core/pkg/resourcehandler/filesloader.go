@@ -88,6 +88,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 }
 
 func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	workloads := []workloadinterface.IMetadata{}
 
@@ -108,14 +109,22 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		repoRoot, _ = filepath.Abs(path)
 	}
 
+	// when scanning a single file, we consider the repository root to be
+	// the directory of the scanned file
+	if cautils.IsYaml(repoRoot) {
+		repoRoot = filepath.Dir(repoRoot)
+	}
+
 	// load resource from local file system
 	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
 
 	// update workloads and workloadIDToSource
+	var warnIssued bool
 	for source, ws := range sourceToWorkloads {
 		workloads = append(workloads, ws...)
 
 		relSource, err := filepath.Rel(repoRoot, source)
+
 		if err == nil {
 			source = relSource
 		}
@@ -131,7 +140,12 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 
 		var lastCommit reporthandling.LastCommit
 		if gitRepo != nil {
-			commitInfo, _ := gitRepo.GetFileLastCommit(source)
+			commitInfo, err := gitRepo.GetFileLastCommit(source)
+			if err != nil && !warnIssued {
+				logger.L().Warning("git scan skipped", helpers.Error(err))
+				warnIssued = true // croak only once
+			}
+
 			if commitInfo != nil {
 				lastCommit = reporthandling.LastCommit{
 					Hash:           commitInfo.SHA,

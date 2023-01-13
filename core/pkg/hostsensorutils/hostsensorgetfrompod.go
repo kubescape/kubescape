@@ -204,9 +204,9 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSenso
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
 	for resIdx := range res {
-		jsonBytes, err := yaml.YAMLToJSON(res[resIdx].Data)
-		if err != nil {
-			logger.L().Error("failed to convert kubelet configurations from yaml to json", helpers.Error(err))
+		jsonBytes, ery := yaml.YAMLToJSON(res[resIdx].Data)
+		if ery != nil {
+			logger.L().Error("failed to convert kubelet configurations from yaml to json", helpers.Error(ery))
 			continue
 		}
 		res[resIdx].SetData(jsonBytes)

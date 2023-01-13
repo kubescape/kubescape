@@ -1,0 +1,6407 @@
+[
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "coredns-[A-Za-z0-9]+-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "etcd-.*",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "kube-proxy-.*",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "coredns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "kube-proxy",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-6",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Namespace",
+          "name": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-7",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "storage-provisioner",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "kube-scheduler-.*",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-system-resources-9",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "kube-controller-manager-.*",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-public-resources-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Namespace",
+          "name": "kube-public"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-public-resources-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "default",
+          "namespace": "kube-public"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-node-lease-resources-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Namespace",
+          "name": "kube-node-lease"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-minikube-kube-node-lease-resources-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "default",
+          "namespace": "kube-node-lease"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "default",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "certificate-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "bootstrap-signer",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "clusterrole-aggregation-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "root-ca-cert-publisher",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-6",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "pvc-protection-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-7",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "statefulset-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "ttl-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-9",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "coredns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-10",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "service-account-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-11",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "horizontal-pod-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-12",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "expand-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-13",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "replicaset-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-14",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "replication-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-16",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "resourcequota-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-17",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "endpoint-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-18",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "endpointslice-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-19",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "endpointslicemirroring-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-20",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "ephemeral-volume-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-21",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "node-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-22",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "pv-protection-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-23",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "job-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-24",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "daemon-set-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-25",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "deployment-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-26",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "generic-garbage-collector",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-27",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "persistent-volume-binder",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-28",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "storage-provisioner",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-29",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "token-cleaner",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-30",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "kube-proxy",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-31",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "namespace-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-32",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "cronjob-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-33",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "attachdetach-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-34",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "service-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-35",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "disruption-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-36",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "pod-garbage-collector",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-37",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "ttl-after-finished-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "apiVersion": "rbac.authorization.k8s.io",
+          "kind": "User",
+          "name": "system:kube-scheduler"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "apiVersion": "rbac.authorization.k8s.io",
+          "kind": "User",
+          "name": "system:kube-controller-manager"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "apiVersion": "rbac.authorization.k8s.io",
+          "kind": "Group",
+          "name": "system:masters"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-prometheus-security-context",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubescape",
+          "namespace": "kubescape-prometheus"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0055"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0017"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.2"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.3"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-prometheus-deployment-allowed-registry",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubescape",
+          "namespace": "kubescape-prometheus"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0001"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0078"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-prometheus-deployment-ingress-and-egress",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubescape",
+          "namespace": "kubescape-prometheus"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0030"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "aws-node-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "kube-proxy-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "metrics-server-[A-Za-z0-9]+-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "aws-node",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "metrics-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-9",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ReplicaSet",
+          "name": "coredns-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-10",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ReplicaSet",
+          "name": "metrics-server-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-11",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Service",
+          "name": "metrics-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-12",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Service",
+          "name": "kube-dns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-13",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "aws-cloud-provider",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-14",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "aws-node",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-15",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "eks-admin",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-16",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "eks-vpc-resource-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-17",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "metrics-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-18",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "tagging-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-19",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "vpc-resource-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-20",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "eks:fargate-manager"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-21",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "eks:addon-manager"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-22",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "eks:certificate-controller"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-23",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "eks:node-manager"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-eks-resources-24",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Group",
+          "name": "system:masters"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-deployments-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "coredns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": []
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-deployments-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "coredns-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": []
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-deployments-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "konnectivity-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": []
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-deployments-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "metrics-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": []
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-deployments-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "omsagent-rs",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": []
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "azure-ip-masq-agent-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "cloud-node-manager-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "coredns-autoscaler--[A-Za-z0-9]+-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "csi-azuredisk-node-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-6",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "csi-azurefile-node-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-7",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "konnectivity-agent-[A-Za-z0-9]+-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-10",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "omsagent-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-pods-11",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "omsagent-rs-[A-Za-z0-9]+-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-services-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Service",
+          "name": "kube-dns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-services-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Service",
+          "name": "metrics-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "azure-ip-masq-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "cloud-node-manager",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "cloud-node-manager-windows",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "csi-azuredisk-node",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "csi-azuredisk-node-win",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-6",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "csi-azurefile-node",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-7",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "csi-azurefile-node-win",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "kube-proxy",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-9",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "omsagent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-daemonsets-10",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "omsagent-win",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-replicasets-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ReplicaSet",
+          "name": "coredns-autoscaler-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-replicasets-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ReplicaSet",
+          "name": "coredns-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-replicasets-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ReplicaSet",
+          "name": "konnectivity-agent-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-replicasets-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ReplicaSet",
+          "name": "metrics-server-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-replicasets-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ReplicaSet",
+          "name": "omsagent-rs-[A-Za-z0-9]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-namespaces-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Namespace",
+          "name": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "azure-cloud-provider",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "cloud-node-manager",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "coredns-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-10",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "csi-azuredisk-node-sa",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-11",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "csi-azurefile-node-sa",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-24",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "konnectivity-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-26",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "metrics-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-29",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "omsagent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-45",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "kube-root-ca.crt",
+          "namespace": "default"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-46",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "kube-root-ca.crt",
+          "namespace": "kube-node-lease"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-47",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "kube-root-ca.crt",
+          "namespace": "kube-public"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-48",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "azure-ip-masq-agent-config-reconciled",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-49",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "cluster-autoscaler-status",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-50",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "container-azm-ms-aks-k8scluster",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-51",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "coredns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-52",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "coredns-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-53",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "coredns-custom",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-54",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "extension-apiserver-authentication",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-55",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "kube-root-ca.crt",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-56",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "omsagent-rs-config",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-57",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "overlay-upgrade-data",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-58",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "aks-webhook-admission-controller"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-59",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "aks-node-mutating-webhook"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-60",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ValidatingWebhookConfiguration",
+          "name": "aks-node-validating-webhook"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-61",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Group",
+          "name": "system:masters"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-62",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Group",
+          "name": "system:nodes"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-63",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "clusterAdmin"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-64",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:kube-controller-manager"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-aks-kube-system-sa-65",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:kube-scheduler"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-default-namespace-resources-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ConfigMap",
+          "name": "kubescape",
+          "namespace": "default"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-default-namespace-resources-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Namespace",
+          "name": "default"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-default-namespace-resources-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "default",
+          "namespace": "default"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-pod-kube-apiserver",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "kube-apiserver-.*",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0013"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0077"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0017"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0013 "
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0020"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0030"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0034"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0016"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0004"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0050"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0009"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0048"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0041"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-security-context-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubescape",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0055"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0017"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.2"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.3"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-security-context-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "operator",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0055"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0017"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.2"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.3"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-security-context-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "gateway",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0055"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0017"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.2"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.3"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-security-context-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubevuln",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0055"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0017"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.2"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.3"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-security-context-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "StatefulSet",
+          "name": "kollector",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0055"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0017"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.2"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "cis-5.7.3"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-allowed-registry-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubescape",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0001"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0078"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-allowed-registry-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "operator",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0001"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0078"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-allowed-registry-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "gateway",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0001"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0078"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-allowed-registry-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubevuln",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0001"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0078"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-allowed-registry-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "StatefulSet",
+          "name": "kollector",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0001"
+      },
+      {
+        "frameworkName": "",
+        "controlID": "c-0078"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-ingress-and-egress-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubescape",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0030"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-ingress-and-egress-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "operator",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0030"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-ingress-and-egress-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "gateway",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0030"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-ingress-and-egress-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kubevuln",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0030"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kubescape-deployment-ingress-and-egress-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "StatefulSet",
+          "name": "kollector",
+          "namespace": "kubescape"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "c-0030"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Pod",
+          "name": "kube-proxy-[A-Za-z0-9-]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "metadata-proxy-v[0-9.]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "node-local-dns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-6",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "gke-metrics-agent.*",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-7",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "pdcsi-node-windows",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "anetd",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-9",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "netd",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-10",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "fluentbit-gke-big",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-11",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "fluentbit-gke-small",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-12",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "fluentbit-gke-max",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-13",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "fluentbit-gke.*",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-14",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "nccl-fastsocket-installer",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-15",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "filestore-node",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-16",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "pdcsi-node",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-17",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "ip-masq-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-18",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "anetd-win",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-19",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "gke-metadata-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-20",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "gke-metrics-agent-windows",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-22",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "nvidia-gpu-device-plugin",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-24",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kube-dns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-25",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "egress-nat-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-26",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "event-exporter-gke",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-27",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "antrea-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-28",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "antrea-controller-horizontal-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-29",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "kube-dns-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-30",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "metrics-server-v[0-9.]+",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-31",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "konnectivity-agent-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-32",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "DaemonSet",
+          "name": "fluentd-elasticsearch",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-33",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "konnectivity-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-gke-kube-system-resources-34",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "Deployment",
+          "name": "l7-default-backend",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": "",
+        "controlID": "C-.*"
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-38",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "konnectivity-agent-cpha",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-49",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "cloud-provider",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-71",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "kube-dns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-78",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "kube-dns-autoscaler",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-79",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "netd",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-80",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "metadata-proxy",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-81",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "antrea-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-82",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "cilium",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-83",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "node-local-dns",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-84",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "gke-metrics-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-85",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "egress-nat-controller",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-86",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "antrea-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-87",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "event-exporter-sa",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-88",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "antrea-cpha",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-89",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "fluentbit-gke",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-90",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "pdcsi-node-sa",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-91",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "ip-masq-agent",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-92",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "filestorecsi-node-sa",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-service-accounts-93",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ServiceAccount",
+          "name": "gke-metadata-server",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-users-and-groups-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:vpa-recommender",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-kube-system-users-and-groups-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:anet-operator",
+          "namespace": "kube-system"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:clustermetrics"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:controller:glbc"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-6",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:l7-lb-controller"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-7",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:managed-certificate-controller"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:gke-common-webhooks"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-11",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:gcp-controller-manager"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-12",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:resource-tracker"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-13",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:storageversionmigrator"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-users-and-groups-15",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "User",
+          "name": "system:kubestore-collector"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-1",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ValidatingWebhookConfiguration",
+          "name": "ca-validate-cfg"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-2",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ValidatingWebhookConfiguration",
+          "name": "flowcontrol-guardrails.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-3",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ValidatingWebhookConfiguration",
+          "name": "validation-webhook.snapshot.storage.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-4",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ValidatingWebhookConfiguration",
+          "name": "nodelimit.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-5",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ValidatingWebhookConfiguration",
+          "name": "gkepolicy.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-6",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "ValidatingWebhookConfiguration",
+          "name": "validation-webhook.snapshot.storage.k8s.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-7",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "APIService",
+          "name": "v1beta1.metrics.k8s.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-8",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "pod-ready.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-9",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "ca-mutate-cfg"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-10",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "neg-annotation.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-11",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "mutate-scheduler-profile.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-12",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "sasecret-redacter.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-13",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "workload-defaulter.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-14",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "admissionwebhookcontroller.config.common-webhooks.networking.gke.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-15",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "gke-vpa-webhook-config"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  },
+  {
+    "guid": "",
+    "name": "exclude-system-resources-16",
+    "attributes": {
+      "systemException": true
+    },
+    "policyType": "postureExceptionPolicy",
+    "creationTime": "",
+    "actions": [
+      "alertOnly"
+    ],
+    "resources": [
+      {
+        "designatorType": "Attributes",
+        "attributes": {
+          "kind": "MutatingWebhookConfiguration",
+          "name": "filestorecsi-mutation-webhook.storage.k8s.io"
+        }
+      }
+    ],
+    "posturePolicies": [
+      {
+        "frameworkName": ""
+      }
+    ]
+  }
+]

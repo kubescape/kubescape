@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -11,7 +13,6 @@ import (
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/cloudsupport"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -77,12 +78,14 @@ func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.Poli
 	return nil
 }
 
+/* unused for now
 func getDesignator(policyIdentifier []cautils.PolicyIdentifier) *armotypes.PortalDesignator {
 	if len(policyIdentifier) > 0 {
 		return &policyIdentifier[0].Designators
 	}
 	return &armotypes.PortalDesignator{}
 }
+*/
 
 func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 	iCloudMetadata := getCloudMetadata(opaSessionObj, k8sinterface.GetConfig())
@@ -93,6 +96,8 @@ func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 	opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata = cloudMetadata
 	opaSessionObj.Metadata.ClusterMetadata.CloudMetadata = cloudMetadata             // deprecated - fallback
 	opaSessionObj.Report.ClusterCloudProvider = iCloudMetadata.Provider().ToString() // deprecated - fallback
+
+	logger.L().Debug("Cloud metadata", helpers.String("provider", iCloudMetadata.Provider().ToString()), helpers.String("name", iCloudMetadata.GetName()))
 }
 
 // getCloudMetadata - get cloud metadata from kubeconfig or API server

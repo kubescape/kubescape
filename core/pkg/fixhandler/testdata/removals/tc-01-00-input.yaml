@@ -1,0 +1,14 @@
+# Fix to Apply:
+# del(select(di==0).spec.containers[0].securityContext)
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: remove_example
+
+spec:
+  containers:
+  - name: nginx_container
+    image: nginx
+    securityContext:
+      runAsRoot: false
