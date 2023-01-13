@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -62,11 +63,12 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 }
 
 func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
-	if report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.GitLocal || report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Directory {
+	scanningTarget := report.Metadata.ScanMetadata.ScanningTarget
+	if scanningTarget == reporthandlingv2.GitLocal || scanningTarget == reporthandlingv2.Directory || scanningTarget == reporthandlingv2.File {
 		return nil
 	}
 
-	return fmt.Errorf("unsupported scanning target. Only local git and directory scanning targets are supported")
+	return fmt.Errorf("unsupported scanning target. Supported scanning targets are: a local git repo, a directory or a file")
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
@@ -76,6 +78,10 @@ func getLocalPath(report *reporthandlingv2.PostureReport) string {
 
 	if report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Directory {
 		return report.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
+	}
+
+	if report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.File {
+		return filepath.Dir(report.Metadata.ContextMetadata.FileContextMetadata.FilePath)
 	}
 
 	return ""

@@ -88,6 +88,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 }
 
 func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	workloads := []workloadinterface.IMetadata{}
 
@@ -108,6 +109,12 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		repoRoot, _ = filepath.Abs(path)
 	}
 
+	// when scanning a single file, we consider the repository root to be
+	// the directory of the scanned file
+	if cautils.IsYaml(repoRoot) {
+		repoRoot = filepath.Dir(repoRoot)
+	}
+
 	// load resource from local file system
 	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
 
@@ -117,6 +124,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		workloads = append(workloads, ws...)
 
 		relSource, err := filepath.Rel(repoRoot, source)
+
 		if err == nil {
 			source = relSource
 		}
