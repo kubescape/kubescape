@@ -47,6 +47,8 @@ func getProviderError(gitURL giturl.IGitAPI) error {
 		return fmt.Errorf("%w", errors.New("GITLAB_TOKEN is not present"))
 	case "azure":
 		return fmt.Errorf("%w", errors.New("AZURE_TOKEN is not present"))
+	case "bitbucket":
+		return fmt.Errorf("%w", errors.New("BITBUCKET_TOKEN is not present"))
 	}
 	return fmt.Errorf("%w", errors.New("unable to find the host name"))
 }

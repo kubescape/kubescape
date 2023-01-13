@@ -112,7 +112,7 @@ require (
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
-	github.com/kubescape/go-git-url v0.0.21 // indirect
+	github.com/kubescape/go-git-url v0.0.23 // indirect
 	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950 // indirect
 	github.com/kubescape/rbac-utils v0.0.19 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
