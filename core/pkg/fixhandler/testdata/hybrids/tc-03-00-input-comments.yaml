@@ -1,0 +1,21 @@
+# Fix to Apply:
+# REMOVE:
+# "del(select(di==0).spec.containers[0].securityContext)"
+
+# INSERT:
+# select(di==0).spec.securityContext.runAsRoot: false
+
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+
+spec:
+  # These are the container comments
+  containers:
+    # These are the first containers comments
+    - name: nginx_container
+      image: nginx
+      securityContext:
+        runAsRoot: true
