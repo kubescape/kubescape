@@ -1,4 +1,4 @@
-name: build
+name: 03-publish-image
 
 on:
   workflow_call:

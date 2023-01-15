@@ -1,4 +1,4 @@
-name: build
+name: 01-create-release
 
 on:
   workflow_call:
@@ -7,7 +7,7 @@ on:
         description: 'release'
         required: true
         type: string
-      tag_name:
+      tag:
         description: 'tag'
         required: true
         type: string
@@ -34,8 +34,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ inputs.tag_name }}
           release_name: ${{ inputs.release_name }}
+          tag_name: ${{ inputs.tag }}
           draft: ${{ inputs.draft }}
           prerelease: false
    
