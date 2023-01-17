@@ -15,7 +15,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.37.0
 	github.com/json-iterator/go v1.1.12
-	github.com/kubescape/go-git-url v0.0.21
+	github.com/kubescape/go-git-url v0.0.23
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950
 	github.com/kubescape/opa-utils v0.0.223

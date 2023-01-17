@@ -4,8 +4,14 @@ on:
   push:
     branches: [ dev ]
     paths-ignore:
-      # Do not run the pipeline if only Markdown files changed
+      - '**.yaml'
       - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
 jobs:
   test:
     uses: ./.github/workflows/test.yaml
