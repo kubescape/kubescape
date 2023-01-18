@@ -23,6 +23,7 @@ var (
 	}
 	CloudResources = []string{
 		"ClusterDescribe",
+		"DescribeRepositories",
 		string(cloudsupport.TypeApiServerInfo),
 	}
 )

@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
+	cloudapis "github.com/kubescape/k8s-interface/cloudsupport/apis"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
@@ -133,14 +134,23 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
+		// get ClusterDescribe from cloud provider
 		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
+			logger.L().Warning("failed to collect ClusterDescribe from cloud provider", helpers.Error(err))
 		}
 		if provider != "" {
 			if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
 				sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
+			}
+		}
+		// get DescribeRepositories from cloud provider if there are controls that use it
+		if describeRepositoriesRequired(cloudResources) {
+			err = getCloudProviderDescriptionRepositories(allResources, ksResourceMap)
+			if err != nil {
+				cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
+				logger.L().Warning("failed to collect DescribeRepositories from cloud provider", helpers.Error(err))
 			}
 		}
 
@@ -152,6 +162,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, nil
+}
+
+func describeRepositoriesRequired(cloudResources []string) bool {
+	for _, resource := range cloudResources {
+		if strings.Contains(resource, cloudapis.CloudProviderDescribeRepositoriesKind) {
+			return true
+		}
+	}
+	return false
 }
 
 func (k8sHandler *K8sResourceHandler) collectAPIServerInfoResource(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
@@ -314,7 +333,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 }
 
 func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (string, error) {
-	logger.L().Debug("Collecting cloud data")
+	logger.L().Debug("Collecting cloud data - describe cluster")
 
 	clusterName := cautils.ClusterName
 
@@ -333,6 +352,33 @@ func getCloudProviderDescription(allResources map[string]workloadinterface.IMeta
 		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
 	return provider, nil
+
+}
+
+func getCloudProviderDescriptionRepositories(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
+	logger.L().Debug("Collecting cloud data - describe repositories")
+
+	clusterName := cautils.ClusterName
+
+	provider := cloudsupport.GetCloudProvider(clusterName)
+
+	if provider != "" {
+		logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
+
+		wl, err := cloudsupport.GetDescribeRepositoriesFromCloudProvider(clusterName, provider)
+		if err != nil {
+			// can be removed when GKE and AWS are supported
+			if strings.Contains(err.Error(), "not supported") {
+				return nil
+			}
+			// Return error with useful info on how to configure credentials for getting cloud provider info
+			logger.L().Debug("failed to get descriptive information", helpers.Error(err))
+			return fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
+		}
+		allResources[wl.GetID()] = wl
+		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+	}
+	return nil
 
 }
 
