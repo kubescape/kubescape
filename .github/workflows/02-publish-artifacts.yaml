@@ -67,5 +67,13 @@ jobs:
           asset_path: build/ubuntu-latest/*
         if: matrix.os == 'ubuntu-20.04'
 
+  publish-krew-plugin:
+    name: Publish Krew plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
       - name: Update new version in krew-index
         uses: rajatjindal/krew-release-bot@v0.0.43
