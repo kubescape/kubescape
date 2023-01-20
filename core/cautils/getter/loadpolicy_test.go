@@ -179,6 +179,29 @@ func TestLoadPolicy(t *testing.T) {
 			require.Equal(t, extraFramework, fws[1])
 		})
 
+		t.Run("should not return an empty framework", func(t *testing.T) {
+			t.Parallel()
+
+			const (
+				extraFramework = "NSA"
+				attackTracks   = "attack-tracks"
+				controlsInputs = "controls-inputs"
+			)
+			p := NewLoadPolicy([]string{
+				testFrameworkFile(testFramework),
+				testFrameworkFile(extraFramework),
+				testFrameworkFile(attackTracks),   // should be ignored
+				testFrameworkFile(controlsInputs), // should be ignored
+			})
+			fws, err := p.ListFrameworks()
+			require.NoError(t, err)
+			require.Len(t, fws, 2)
+			require.NotContains(t, fws, "")
+
+			require.Equal(t, testFramework, fws[0])
+			require.Equal(t, extraFramework, fws[1])
+		})
+
 		t.Run("should fail on file error", func(t *testing.T) {
 			t.Parallel()
 
