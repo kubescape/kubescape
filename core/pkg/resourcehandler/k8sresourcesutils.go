@@ -1,7 +1,9 @@
 package resourcehandler
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -192,4 +194,55 @@ func getGroupNVersion(apiVersion string) (string, string) {
 		version = gv[1]
 	}
 	return group, version
+}
+
+// errCollection collects and renders several accumulated errors.
+//
+// It is safe to use it from concurrent goroutines.
+type errCollection struct {
+	mx   sync.Mutex
+	errs []error
+}
+
+func (e *errCollection) Append(err error) {
+	if err == nil {
+		return
+	}
+
+	e.mx.Lock()
+	defer e.mx.Unlock()
+
+	e.errs = append(e.errs, err)
+}
+
+func (e *errCollection) NilIfEmpty() error {
+	e.mx.Lock()
+	defer e.mx.Unlock()
+
+	if len(e.errs) == 0 {
+		return nil
+	}
+
+	return e
+}
+
+func (e *errCollection) Error() string {
+	e.mx.Lock()
+	defer e.mx.Unlock()
+
+	switch len(e.errs) {
+	case 0:
+		return ""
+	case 1:
+		return e.errs[0].Error()
+	default:
+		msg := new(strings.Builder)
+		msg.WriteString(e.errs[0].Error())
+
+		for _, err := range e.errs[1:] {
+			fmt.Fprintf(msg, "; %v", err)
+		}
+
+		return msg.String()
+	}
 }

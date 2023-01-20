@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -11,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -199,32 +201,74 @@ func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.I
 	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
-func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
+func (k8sHandler *K8sResourceHandler) pullResources(
+	k8sResources *cautils.K8SResources,
+	allResources map[string]workloadinterface.IMetadata,
+	namespace string,
+	labels map[string]string,
+) error {
+	errs := new(errCollection)
+	pullGroup, _ := errgroup.WithContext(context.Background()) // NOTE: no timeout for now
+	pullGroup.SetLimit(10)                                     // TODO: configurable
+	resultK8sResources := new(sync.Map)
+	resultAllResources := new(sync.Map)
 
-	var errs error
-	for groupResource := range *k8sResources {
-		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(groupResource)
-		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels)
-		if err != nil {
-			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
-				// handle error
-				if errs == nil {
-					errs = err
-				} else {
-					errs = fmt.Errorf("%s; %s", errs, err.Error())
+	for key := range *k8sResources {
+		groupResource := key
+
+		pullGroup.Go(func() error {
+			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(groupResource)
+			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
+
+			result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels)
+			if err != nil {
+				if !strings.Contains(err.Error(), "the server could not find the requested resource") {
+					// don't interrupt the process on errors: keep pulling and report the full collection of
+					// errors ("not found" errors are ignored).
+					errs.Append(err)
 				}
+
+				return nil
 			}
-			continue
-		}
-		// store result as []map[string]interface{}
-		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
-		for i := range metaObjs {
-			allResources[metaObjs[i].GetID()] = metaObjs[i]
-		}
-		(*k8sResources)[groupResource] = workloadinterface.ListMetaIDs(metaObjs)
+
+			// store result as []map[string]interface{}
+			metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+			for i := range metaObjs {
+				resultAllResources.Store(metaObjs[i].GetID(), metaObjs[i])
+			}
+			resultK8sResources.Store(groupResource, workloadinterface.ListMetaIDs(metaObjs))
+
+			return nil
+		})
 	}
-	return errs
+
+	if err := pullGroup.Wait(); err != nil { // NOTE: in case we want to switch the logic to fail fast on error
+		errs.Append(err)
+	}
+
+	//  copy maps
+	copyGroup, _ := errgroup.WithContext(context.Background())
+	copyGroup.Go(func() error {
+		resultAllResources.Range(func(key, value any) bool {
+			allResources[key.(string)] = value.(workloadinterface.IMetadata)
+			//allResources[metaObjs[i].GetID()] = metaObjs[i]
+			return true
+		})
+
+		return nil
+	})
+	copyGroup.Go(func() error {
+		resultK8sResources.Range(func(key, value any) bool {
+			(*k8sResources)[key.(string)] = value.([]string)
+			//(*k8sResources)[groupResource] = workloadinterface.ListMetaIDs(metaObjs)
+			return true
+		})
+
+		return nil
+	})
+	_ = copyGroup.Wait()
+
+	return errs.NilIfEmpty()
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string) ([]unstructured.Unstructured, error) {
