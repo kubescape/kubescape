@@ -21,7 +21,7 @@ Please follow our [code of conduct](CODE_OF_CONDUCT.md) in all of your interacti
    build.
 2. Update the README.md with details of changes to the interface, this includes new environment 
    variables, exposed ports, useful file locations and container parameters.
-3. Open Pull Request to `dev` branch - we test the component before merging into the `master` branch
+3. Open Pull Request to the `master` branch.
 4. We will merge the Pull Request once you have the sign-off.
 
 ## Developer Certificate of Origin
