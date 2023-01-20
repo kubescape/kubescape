@@ -39,7 +39,7 @@ type HostSensorHandler struct {
 	daemonSet                     *appsv1.DaemonSet
 	podListLock                   sync.RWMutex
 	gracePeriod                   int64
-	workerPool                    workerPool
+	version                       []byte
 }
 
 // NewHostSensorHandler builds a new http client to the host-scanner API.
@@ -61,7 +61,6 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 		hostSensorPodNames:            map[string]string{},
 		hostSensorUnscheduledPodNames: map[string]string{},
 		gracePeriod:                   int64(15),
-		workerPool:                    newWorkerPool(),
 	}
 
 	// Don't deploy on a cluster with no nodes. Some cloud providers prevent the termination of K8s objects for cluster with no nodes!!!
@@ -210,6 +209,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 
 func (hsh *HostSensorHandler) checkPodForEachNode() error {
 	deadline := time.Now().Add(time.Second * 100)
+
 	for {
 		nodesList, err := hsh.k8sObj.KubernetesClient.CoreV1().Nodes().List(hsh.k8sObj.Context, metav1.ListOptions{})
 		if err != nil {

@@ -1,13 +1,15 @@
 package hostsensorutils
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/kubescape/v2/internal/testutils"
-	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -50,12 +52,69 @@ func TestHostSensorHandler(t *testing.T) {
 						foundControl = true
 					}
 					if sensed.Kind == CloudProviderInfo.String() {
-						foundProvider = hasCloudProviderInfo([]hostsensor.HostSensorDataEnvelope{sensed})
+						foundProvider = hasCloudProviderInfo(sensed)
 					}
 				}
 
 				require.False(t, foundControl)
 				require.True(t, foundProvider)
+
+				t.Run("envelope should contain expected content", func(t *testing.T) {
+					for _, data := range envelope {
+						require.NotEmpty(t, data.GetApiVersion())
+						require.NotEmpty(t, data.GetName())
+						payload := data.GetData()
+						require.NotEmpty(t, payload)
+
+						switch data.Kind {
+						case OsReleaseFile.String():
+							assert.True(t, bytes.HasPrefix(payload, []byte("NAME=")))
+						case KernelVersion.String():
+							assert.True(t, bytes.HasPrefix(payload, []byte("Linux version"))) // mock captured on Linux host
+						case LinuxSecurityHardeningStatus.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "appArmor")
+							assert.Contains(t, fromJSON, "seLinux")
+						case CloudProviderInfo.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "providerID")
+							assert.NotEmpty(t, fromJSON["providerID"])
+						case OpenPortsList.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "tcpPorts")
+						case KubeletCommandLine.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "fullCommand")
+						case KubeletInfo.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "serviceFiles")
+						case KubeProxyInfo.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "cmdLine")
+						case CNIInfo.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "CNIConfigFiles")
+						case KubeletConfiguration.String():
+							var fromJSON map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							assert.Contains(t, fromJSON, "apiVersion")
+						case LinuxKernelVariables.String():
+							var fromJSON []map[string]interface{}
+							require.NoError(t, json.Unmarshal(payload, &fromJSON))
+							require.Greater(t, len(fromJSON), 0)
+
+						default:
+							t.Errorf("unexpected kind: %s", data.Kind)
+						}
+					}
+				})
 			})
 		})
 
@@ -75,13 +134,7 @@ func TestHostSensorHandler(t *testing.T) {
 				require.Len(t, h.hostSensorPodNames, 2)
 			})
 
-			t.Run("should get version", func(t *testing.T) {
-				version, err := h.getVersion()
-				require.NoError(t, err)
-				require.Equal(t, "v1.0.45", version)
-			})
-
-			t.Run("ForwardToPod is a stub, not implemented", func(t *testing.T) {
+			t.Run("forwardToPod is a stub, not implemented", func(t *testing.T) {
 				resp, err := h.forwardToPod("pod1", "/version")
 				require.Contains(t, err.Error(), "not implemented")
 				require.Nil(t, resp)
@@ -90,6 +143,11 @@ func TestHostSensorHandler(t *testing.T) {
 			t.Run("should collect resources from pods", func(t *testing.T) {
 				envelope, status, err := h.CollectResources(ctx)
 				require.NoError(t, err)
+
+				t.Run("should get version", func(t *testing.T) {
+					version := h.getVersion()
+					require.Equal(t, "v1.0.45", version)
+				})
 
 				require.Len(t, envelope, 12*2) // has empty cloud provider, has control plane info
 				require.Len(t, status, 0)
@@ -100,7 +158,7 @@ func TestHostSensorHandler(t *testing.T) {
 						foundControl = true
 					}
 					if sensed.Kind == CloudProviderInfo.String() {
-						foundProvider = hasCloudProviderInfo([]hostsensor.HostSensorDataEnvelope{sensed})
+						foundProvider = hasCloudProviderInfo(sensed)
 					}
 				}
 
@@ -109,13 +167,13 @@ func TestHostSensorHandler(t *testing.T) {
 			})
 		})
 
-		t.Run("should build host sensor with error in response from /version", func(t *testing.T) {
+		t.Run(fmt.Sprintf("should build host sensor with error in response from %s", Version.Path()), func(t *testing.T) {
 			k8s := NewKubernetesApiMock(WithNode(mockNode1()),
 				WithPod(mockPod1()),
 				WithPod(mockPod2()),
 				WithResponses(mockResponsesNoCloudProvider()),
-				WithErrorResponse(RestURL{"http", "pod1", "7888", "/version"}), // this endpoint will return an error from this pod
-				WithErrorResponse(RestURL{"http", "pod2", "7888", "/version"}), // this endpoint will return an error from this pod
+				WithErrorResponse(RestURL{"http", "pod1", "7888", Version.Path()}), // this endpoint will return an error from this pod
+				WithErrorResponse(RestURL{"http", "pod2", "7888", Version.Path()}), // this endpoint will return an error from this pod
 			)
 
 			h, err := NewHostSensorHandler(k8s, "")
@@ -133,20 +191,17 @@ func TestHostSensorHandler(t *testing.T) {
 			})
 
 			t.Run("should NOT be able to get version", func(t *testing.T) {
-				// NOTE: GetVersion might be successful if only one pod responds successfully.
-				// In order to ensure an error, we need ALL pods to error.
-				_, err := h.getVersion()
-				require.Error(t, err)
-				require.Contains(t, err.Error(), "mock")
+				version := h.getVersion()
+				require.Empty(t, version)
 			})
 		})
 
-		t.Run("should build host sensor with error in response from /kubeletConfigurations", func(t *testing.T) {
+		t.Run(fmt.Sprintf("should build host sensor with error in response from %s", KubeletConfiguration.Path()), func(t *testing.T) {
 			k8s := NewKubernetesApiMock(WithNode(mockNode1()),
 				WithPod(mockPod1()),
 				WithPod(mockPod2()),
 				WithResponses(mockResponsesNoCloudProvider()),
-				WithErrorResponse(RestURL{"http", "pod1", "7888", "/kubeletConfigurations"}), // this endpoint will return an error from this pod
+				WithErrorResponse(RestURL{"http", "pod1", "7888", KubeletConfiguration.Path()}), // this endpoint will return an error from this pod
 			)
 
 			h, err := NewHostSensorHandler(k8s, "")
@@ -168,7 +223,7 @@ func TestHostSensorHandler(t *testing.T) {
 				require.NoError(t, err)
 
 				require.Len(t, envelope, 12*2-1) // one resource is missing
-				require.Len(t, status, 0)        // error is not reported in status: this is due to the worker pool not bubbling up errors
+				require.Len(t, status, 1)        // error is now reported in status
 			})
 		})
 
@@ -238,5 +293,5 @@ func TestHostSensorHandler(t *testing.T) {
 	// * watch pods with a Delete event
 	// * explicit TearDown()
 	//
-	// Notice that the package doesn't current pass tests with the race detector enabled.
+	// Notice that the package now passes tests with the race detector enabled.
 }

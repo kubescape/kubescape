@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/require"
 )
@@ -43,16 +44,6 @@ func TestAddInfoToMap(t *testing.T) {
 				},
 			},
 		},
-		{
-			Resource: scannerResource("invalid"),
-			Err:      testErr,
-			Expected: map[string]apis.StatusInfo{
-				"//invalid": { // no group, no version
-					InnerStatus: apis.StatusSkipped,
-					InnerInfo:   testErr.Error(),
-				},
-			},
-		},
 	} {
 		tc := toPin
 
@@ -60,9 +51,51 @@ func TestAddInfoToMap(t *testing.T) {
 			t.Parallel()
 
 			result := make(map[string]apis.StatusInfo, 1)
+			require.NotEmpty(t, tc.Resource.Path())
 			addInfoToMap(tc.Resource, result, tc.Err)
 
 			require.EqualValues(t, tc.Expected, result)
 		})
 	}
+
+	t.Run("should panic (dev error) when resource is invalid", func(t *testing.T) {
+		require.Panics(t, func() {
+			scannerResource("invalid").Path()
+		})
+
+		require.Panics(t, func() {
+			addInfoToMap(scannerResource("invalid"), map[string]apis.StatusInfo{}, testErr)
+		})
+	})
+}
+
+func TestReformatResponses(t *testing.T) {
+	t.Parallel()
+
+	t.Run("with reformat kubelet command line", func(t *testing.T) {
+		t.Run("should convert command line", func(t *testing.T) {
+			envelope := hostsensor.HostSensorDataEnvelope{
+				Data: []byte(`abc`),
+			}
+			reformatKubeletCommandLine(&envelope)
+			require.JSONEq(t, `{"fullCommand":"abc"}`, string(envelope.GetData()))
+		})
+	})
+
+	t.Run("with reformat kubelet configurations", func(t *testing.T) {
+		t.Run("should convert YAML", func(t *testing.T) {
+			envelope := hostsensor.HostSensorDataEnvelope{
+				Data: []byte("object:\n  key: value\n"),
+			}
+			require.NoError(t, reformatKubeletConfiguration(&envelope))
+			require.JSONEq(t, `{"object":{"key":"value"}}`, string(envelope.GetData()))
+		})
+
+		t.Run("should error on invalid YAML", func(t *testing.T) {
+			envelope := hostsensor.HostSensorDataEnvelope{
+				Data: []byte("object:\n\tkey: value\n"),
+			}
+			require.Error(t, reformatKubeletConfiguration(&envelope))
+		})
+	})
 }

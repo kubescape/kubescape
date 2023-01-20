@@ -2,96 +2,138 @@ package hostsensorutils
 
 import (
 	"context"
-	"sync"
+	"fmt"
 
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"golang.org/x/sync/errgroup"
 )
 
-const noOfWorkers int = 10
+type (
+	// fetchFunc knows how to fetch a scannerResource from a pod and pack the response into an envelope.
+	fetcherFunc func(context.Context, string, string, scannerResource, string) (hostsensor.HostSensorDataEnvelope, error)
 
-type job struct {
-	podName     string
-	nodeName    string
-	requestKind scannerResource
-	path        string
+	// workerResult holds the response from the scanner API.
+	workerResult struct {
+		Kind    scannerResource
+		Payload hostsensor.HostSensorDataEnvelope
+		Err     error
+	}
+
+	// workerPool propagates requests asynchronously to all registered pods.
+	workerPool struct {
+		workers *errgroup.Group
+		results chan workerResult
+		fetcher fetcherFunc
+		ctx     context.Context
+
+		*poolOptions
+	}
+
+	// poolOption specifies the configuration of the worker pool.
+	poolOption func(*poolOptions)
+
+	poolOptions struct {
+		podMap     map[string]string
+		maxWorkers int
+	}
+)
+
+// poolWithMaxWorkers sets the maximum number of go routines to spawn.
+//
+// The default is 10.
+func poolWithMaxWorkers(maxWorkers int) poolOption {
+	return func(o *poolOptions) {
+		o.maxWorkers = maxWorkers
+	}
 }
 
-type workerPool struct {
-	jobs        chan job
-	results     chan hostsensor.HostSensorDataEnvelope
-	done        chan bool
-	noOfWorkers int
+// poolWithPods registers the map of pod names to node names to be queried by the pool.
+func poolWithPods(podMap map[string]string) poolOption {
+	return func(o *poolOptions) {
+		o.podMap = podMap
+	}
 }
 
-func newWorkerPool() workerPool {
-	wp := workerPool{}
-	wp.noOfWorkers = noOfWorkers
-	wp.init()
+func (r workerResult) IsEmpty() bool {
+	return len(r.Payload.GetData()) == 0
+}
+
+// newWorkerPool creates a pool of go routines to apply the fetcherFunc on registered pods and post the responses in the Results() channel.
+func newWorkerPool(parentCtx context.Context, fetcher fetcherFunc, opts ...poolOption) *workerPool {
+	workersGroup, ctx := errgroup.WithContext(parentCtx)
+	wp := &workerPool{
+		poolOptions: poolOptionsWithDefaults(opts),
+		fetcher:     fetcher,
+		workers:     workersGroup,
+		ctx:         ctx,
+	}
+
+	wp.workers.SetLimit(wp.maxWorkers)
+	wp.results = make(chan workerResult)
+
 	return wp
 }
 
-func (wp *workerPool) init(noOfPods ...int) {
-	if len(noOfPods) > 0 && noOfPods[0] < noOfWorkers {
-		wp.noOfWorkers = noOfPods[0]
+func poolOptionsWithDefaults(opts []poolOption) *poolOptions {
+	o := &poolOptions{
+		maxWorkers: 10,
 	}
-	// init the channels
-	wp.jobs = make(chan job, noOfWorkers)
-	wp.results = make(chan hostsensor.HostSensorDataEnvelope, noOfWorkers)
-	wp.done = make(chan bool)
-}
 
-// The worker takes a job out of the chan, executes the request, and pushes the result to the results chan
-func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
-	defer wg.Done()
-	for job := range wp.jobs {
-		hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
-			continue
-		}
-		wp.results <- hostSensorDataEnvelope
+	for _, apply := range opts {
+		apply(o)
 	}
+
+	return o
 }
 
-func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
-	for i := 0; i < noOfWorkers; i++ {
-		wg.Add(1)
-		go wp.hostSensorWorker(ctx, hsh, wg)
-	}
+func (wp *workerPool) Results() <-chan workerResult {
+	return wp.results
 }
 
-func (wp *workerPool) waitForDone(wg *sync.WaitGroup) {
-	// Waiting for workers to finish
-	wg.Wait()
-	close(wp.results)
-
-	// Waiting for the results to be processed
-	<-wp.done
-}
-
-func (wp *workerPool) hostSensorGetResults(result *[]hostsensor.HostSensorDataEnvelope) {
-	go func() {
-		for res := range wp.results {
-			*result = append(*result, res)
-		}
-		wp.done <- true
+// Close the worker pool, waiting on all outstanding requests to complete and closing the results channel.
+func (wp *workerPool) Close() error {
+	defer func() {
+		close(wp.results)
 	}()
+
+	return wp.workers.Wait()
 }
 
-func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path string, requestKind scannerResource) {
-	go func() {
-		for podName, nodeName := range podList {
-			thisJob := job{
-				podName:     podName,
-				nodeName:    nodeName,
-				requestKind: requestKind,
-				path:        path,
+// QueryPods asynchronously sends a request kind to all the pods registered for this workerPool.
+// It errors if the pool's context is cancelled.
+//
+// Responses are returned to the Results() channel, possibly with an error from the API.
+//
+// QueryPods runs as many workers as necessary, within the limit of the maximum allowed workers.
+//
+// Requests are interrupted if the worker pool's context is cancelled.
+func (wp *workerPool) QueryPods(requestKind scannerResource) error {
+	for k, v := range wp.podMap {
+		podName := k
+		nodeName := v
+
+		wp.workers.Go(func() error {
+			hostSensorDataEnvelope, err := wp.fetcher(wp.ctx, podName, nodeName, requestKind, requestKind.Path())
+			if err != nil {
+				err = fmt.Errorf(
+					"path: %s, node: %s, pod: %s: %w",
+					requestKind.Path(), nodeName, podName, err,
+				)
 			}
-			wp.jobs <- thisJob
 
-		}
-		close(wp.jobs)
-	}()
+			select {
+			case <-wp.ctx.Done():
+				return wp.ctx.Err()
+			case wp.results <- workerResult{
+				Kind:    requestKind,
+				Payload: hostSensorDataEnvelope,
+				Err:     err,
+			}:
+			}
+
+			return nil
+		})
+	}
+
+	return nil
 }
