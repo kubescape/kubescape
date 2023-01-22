@@ -1,0 +1,37 @@
+name: 'Tag validator and retag'
+description: 'This action will check if the tag is rc and create a new tag for release'
+inputs:
+  ORIGINAL_TAG:  # id of input
+    description: 'Original tag'
+    required: true
+    default: ${{ github.ref_name }}
+  SUB_STRING: 
+    description: 'Sub string for rc tag'
+    required: true
+    default: "-rc"
+outputs:
+  NEW_TAG:
+    description: "The new tag for release"
+    value: ${{ steps.retag.outputs.NEW_TAG }}
+runs:
+  using: "composite"
+  steps:
+    - run: |
+        SUB='-rc'
+        if [[ "${{ inputs.ORIGINAL_TAG }}" == *"${{ inputs.SUB_STRING }}"* ]]; then
+            echo "Release candidate tag found."
+        else
+            echo "Release candidate tag not found."
+            exit 1
+        fi
+      shell: bash
+
+
+    - id: retag
+      run: | 
+          NEW_TAG=
+          echo "Original tag: ${{ inputs.ORIGINAL_TAG }}"
+          NEW_TAG=$(echo ${{ inputs.ORIGINAL_TAG }} | awk -F '-rc' '{print $1}')
+          echo "New tag: $NEW_TAG"
+          echo "NEW_TAG=$NEW_TAG" >> $GITHUB_OUTPUT
+      shell: bash
