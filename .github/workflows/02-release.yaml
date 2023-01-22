@@ -1,0 +1,55 @@
+name: 02-create_release
+
+on:
+  push:
+    tags:
+    - 'v*.*.*-rc.*'
+    # - 'v*.*.*'
+
+jobs:
+  retag:
+    outputs:
+      NEW_TAG: ${{ steps.tag-calculator.outputs.NEW_TAG }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: tag-calculator
+        uses: ./.github/actions/tag-action
+        with:
+          SUB_STRING: "-rc"
+
+  binary-build:
+    needs: [retag]
+    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
+    with:
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 0
+      GO111MODULE: ""
+      GO_VERSION: "1.19"
+      RELEASE: ${{ github.ref_name}}
+      CLIENT: release
+    secrets: inherit
+
+  create-release:
+    permissions:
+      contents: write    
+    needs: [retag, binary-build]
+    uses: ./.github/workflows/c-create-release.yaml
+    with:
+      RELEASE_NAME: "Release ${{ needs.retag.outputs.NEW_TAG }}"
+      TAG: ${{ needs.retag.outputs.NEW_TAG }}
+      DRAFT: false
+    secrets: inherit    
+
+
+  publish-image:
+    uses: ./.github/workflows/03-publish-image.yaml
+    needs: create-release
+    with:
+      client: "image-release"
+      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
+      image_tag: ${{ needs.retag.outputs.NEW_TAG }}
+      support_platforms: true
+      cosign: true
+    secrets: inherit
