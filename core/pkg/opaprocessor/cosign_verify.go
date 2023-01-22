@@ -15,7 +15,6 @@ import (
 )
 
 // VerifyCommand verifies a signature on a supplied container image
-// nolint
 type VerifyCommand struct {
 	options.RegistryOptions
 	Annotations                  sigs.AnnotationsMap
