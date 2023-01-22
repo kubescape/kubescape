@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
+	cloudapis "github.com/kubescape/k8s-interface/cloudsupport/apis"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
@@ -22,8 +23,8 @@ var (
 		"CloudProviderInfo",
 	}
 	CloudResources = []string{
-		"ClusterDescribe",
-		"DescribeRepositories",
+		cloudapis.CloudProviderDescribeKind,
+		cloudapis.CloudProviderDescribeRepositoriesKind,
 		string(cloudsupport.TypeApiServerInfo),
 	}
 )

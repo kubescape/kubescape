@@ -134,39 +134,57 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
-		// get ClusterDescribe from cloud provider
-		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
+		err := k8sHandler.collectCloudResources(sessionObj, allResources, ksResourceMap, cloudResources)
 		if err != nil {
-			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-			logger.L().Warning("failed to collect ClusterDescribe from cloud provider", helpers.Error(err))
-		}
-		if provider != "" {
-			if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
-				sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
-			}
-		}
-		// get DescribeRepositories from cloud provider if there are controls that use it
-		if describeRepositoriesRequired(cloudResources) {
-			err = getCloudProviderDescriptionRepositories(allResources, ksResourceMap)
-			if err != nil {
-				cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-				logger.L().Warning("failed to collect DescribeRepositories from cloud provider", helpers.Error(err))
-			}
-		}
-
-		// api server info resource
-		err = k8sHandler.collectAPIServerInfoResource(allResources, ksResourceMap)
-		if err != nil {
-			logger.L().Warning("failed to collect api server info resource", helpers.Error(err))
+			logger.L().Warning("failed to collect cloud resources", helpers.Error(err))
 		}
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, nil
 }
 
-func describeRepositoriesRequired(cloudResources []string) bool {
-	for _, resource := range cloudResources {
-		if strings.Contains(resource, cloudapis.CloudProviderDescribeRepositoriesKind) {
+func (k8sHandler *K8sResourceHandler) collectCloudResources(sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources, cloudResources []string) error {
+	var err error
+	clusterName := cautils.ClusterName
+	provider := cloudsupport.GetCloudProvider(clusterName)
+	if provider == "" {
+		return fmt.Errorf("failed to get cloud provider, cluster: %s", clusterName)
+	}
+	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
+	}
+	logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
+
+	// get ClusterDescribe from cloud provider
+	if cloudResourceRequired(cloudResources, cloudapis.CloudProviderDescribeKind) {
+		err = getCloudProviderClusterDescribe(allResources, ksResourceMap, clusterName, provider)
+		if err != nil {
+			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
+			logger.L().Debug("failed to collect ClusterDescribe from cloud provider", helpers.Error(err))
+		}
+	}
+	// get DescribeRepositories from cloud provider if there are controls that use it
+	if cloudResourceRequired(cloudResources, cloudapis.CloudProviderDescribeRepositoriesKind) {
+		err = getCloudProviderDescriptionRepositories(allResources, ksResourceMap, clusterName, provider)
+		if err != nil {
+			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
+			logger.L().Debug("failed to collect DescribeRepositories from cloud provider", helpers.Error(err))
+		}
+	}
+
+	// get api server info resource
+	if cloudResourceRequired(cloudResources, string(cloudsupport.TypeApiServerInfo)) {
+		err = k8sHandler.collectAPIServerInfoResource(allResources, ksResourceMap)
+		if err != nil {
+			logger.L().Debug("failed to collect api server info resource", helpers.Error(err))
+		}
+	}
+	return err
+}
+
+func cloudResourceRequired(cloudResources []string, resource string) bool {
+	for _, cresource := range cloudResources {
+		if strings.Contains(cresource, resource) {
 			return true
 		}
 	}
@@ -332,52 +350,35 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
-func getCloudProviderDescription(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (string, error) {
+func getCloudProviderClusterDescribe(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources, clusterName, provider string) error {
 	logger.L().Debug("Collecting cloud data - describe cluster")
-
-	clusterName := cautils.ClusterName
-
-	provider := cloudsupport.GetCloudProvider(clusterName)
-
-	if provider != "" {
-		logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
-
-		wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider)
-		if err != nil {
-			// Return error with useful info on how to configure credentials for getting cloud provider info
-			logger.L().Debug("failed to get descriptive information", helpers.Error(err))
-			return provider, fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
-		}
-		allResources[wl.GetID()] = wl
-		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+	wl, err := cloudsupport.GetDescriptiveInfoFromCloudProvider(clusterName, provider)
+	if err != nil {
+		// Return error with useful info on how to configure credentials for getting cloud provider info
+		logger.L().Debug("failed to get descriptive information", helpers.Error(err))
+		return fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
 	}
-	return provider, nil
+	allResources[wl.GetID()] = wl
+	(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+	return nil
 
 }
 
-func getCloudProviderDescriptionRepositories(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
+func getCloudProviderDescriptionRepositories(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources, clusterName, provider string) error {
 	logger.L().Debug("Collecting cloud data - describe repositories")
-
-	clusterName := cautils.ClusterName
-
-	provider := cloudsupport.GetCloudProvider(clusterName)
-
-	if provider != "" {
-		logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
-
-		wl, err := cloudsupport.GetDescribeRepositoriesFromCloudProvider(clusterName, provider)
-		if err != nil {
-			// can be removed when GKE and AWS are supported
-			if strings.Contains(err.Error(), "not supported") {
-				return nil
-			}
-			// Return error with useful info on how to configure credentials for getting cloud provider info
-			logger.L().Debug("failed to get descriptive information", helpers.Error(err))
-			return fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
+	wl, err := cloudsupport.GetDescribeRepositoriesFromCloudProvider(clusterName, provider)
+	if err != nil {
+		// can be removed when GKE and AKS are supported
+		if strings.Contains(err.Error(), "not supported") {
+			return nil
 		}
-		allResources[wl.GetID()] = wl
-		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+		// Return error with useful info on how to configure credentials for getting cloud provider info
+		logger.L().Debug("failed to get descriptive information", helpers.Error(err))
+		return fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
 	}
+	allResources[wl.GetID()] = wl
+	(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+
 	return nil
 
 }
