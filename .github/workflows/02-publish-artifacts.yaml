@@ -1,37 +1,20 @@
-name: build
+name: publish-artifacts
 
 on:
-  push:
-    branches: 
-      - 'master'
-      - 'main'
-    paths-ignore:
-      - '**.yaml'
-      - '**.md'
-      - '**.sh'
-      - 'website/*'
-      - 'examples/*'
-      - 'docs/*'
-      - 'build/*'
-      - '.github/*'
+  workflow_call:
+    inputs:
+      upload_url:
+        description: 'upload url'
+        required: true
+        type: string
+      release:
+        description: 'release tag'
+        required: true
+        type: string
+
 jobs:
-  test:
-    uses: ./.github/workflows/test.yaml
-    with:
-      release: "v2.0.${{ github.run_number }}"
-      client: test
-
-  create-release:
-    uses: ./.github/workflows/release.yaml
-    needs: test
-    with:
-      release_name: "Release v2.0.${{ github.run_number }}"
-      tag_name: "v2.0.${{ github.run_number }}"
-    secrets: inherit
-
   publish-artifacts:
     name: Build and publish artifacts
-    needs: create-release
     runs-on: ${{ matrix.os }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,7 +42,7 @@ jobs:
 
       - name: Build
         env:
-          RELEASE: v2.0.${{ github.run_number }}
+          RELEASE: ${{ inputs.release }}
           CLIENT: release
           CGO_ENABLED: 1
         run: python3 --version && python3 build.py
@@ -70,7 +53,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ inputs.upload_url }}
           asset_path: build/${{ matrix.os }}/kubescape
           asset_name: kubescape-${{ matrix.os }}
           asset_content_type: application/octet-stream
@@ -82,7 +65,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ inputs.upload_url }}
           asset_path: build/ubuntu-latest/kubescape
           asset_name: kubescape-ubuntu-latest
           asset_content_type: application/octet-stream
@@ -94,7 +77,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ inputs.upload_url }}
           asset_path: build/${{ matrix.os }}/kubescape.sha256
           asset_name: kubescape-${{ matrix.os }}-sha256
           asset_content_type: application/octet-stream
@@ -106,19 +89,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
+          upload_url: ${{ inputs.upload_url }}
           asset_path: build/ubuntu-latest/kubescape.sha256
           asset_name: kubescape-ubuntu-latest-sha256
           asset_content_type: application/octet-stream     
         if: matrix.os == 'ubuntu-20.04'
-
-  publish-image:
-    uses: ./.github/workflows/build-image.yaml
-    needs: create-release
-    with:
-      client: "image-release"
-      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
-      image_tag: "v2.0.${{ github.run_number }}"
-      support_platforms: true
-      cosign: true
-    secrets: inherit
+   
+   

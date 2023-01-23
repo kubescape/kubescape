@@ -241,8 +241,11 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjec
 	if err != nil {
 		return nil, fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
 	}
+	rego.RegisterBuiltin2(cosignVerifySignatureDeclaration, cosignVerifySignatureDefinition)
+	rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
 	modules[rule.Name] = getRuleData(rule)
 	compiled, err := ast.CompileModules(modules)
+
 	if err != nil {
 		return nil, fmt.Errorf("in 'runRegoOnSingleRule', failed to compile rule, name: %s, reason: %s", rule.Name, err.Error())
 	}
