@@ -26,7 +26,7 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - uses: actions/setup-go@v3
+      - uses: actions/setup-go@v3 # Install go because go-licenses use it
         name: Installing go
         with:
           go-version: '1.19'
@@ -65,7 +65,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: Comment results to PR
+      - name: Comment results to PR # Warninig: This might break opening PRs from forks
         uses: peter-evans/create-or-update-comment@v2.1.0
         with:
           issue-number:  ${{ github.event.pull_request.number }}
