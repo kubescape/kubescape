@@ -39,9 +39,9 @@ jobs:
 
   merge-to-master:
     needs: binary-build
-    if: ${{ env.REGISTRY_PASSWORD && 
-          (github.event.review.state == 'approved' && github.event.pull_request.base.ref == 'master') && 
-          (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
+    if: ${{ env.GH_PERSONAL_ACCESS_TOKEN && 
+            (github.event.review.state == 'approved' && github.event.pull_request.base.ref == 'master') && 
+            (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
     env:
       GH_PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
     runs-on: ubuntu-latest
