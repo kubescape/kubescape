@@ -40,9 +40,9 @@ jobs:
   merge-to-master:
     needs: binary-build
     if: ${{ (always() && 
-    github.event.review.state == 'approved' && 
-    github.event.pull_request.base.ref == 'master' && 
-    (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
+            github.event.review.state == 'approved' && 
+            github.event.pull_request.base.ref == 'master' && 
+            (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
     runs-on: ubuntu-latest
     steps:
       - name: merge-to-master
