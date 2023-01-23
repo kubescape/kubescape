@@ -160,7 +160,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 			continue
 		}
 
-		if contains(frameworkNames, framework.Name) {
+		if framework.Name == "" || contains(frameworkNames, framework.Name) {
 			continue
 		}
 
