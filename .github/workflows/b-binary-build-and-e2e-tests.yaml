@@ -5,7 +5,6 @@ on:
       COMPONENT_NAME:
         required: true
         type: string
-        default: kubescape
       RELEASE:
         required: true
         type: string
@@ -13,19 +12,15 @@ on:
         required: true
         type: string
       GO_VERSION:
-        required: true
         type: string
         default: "1.19"
       GO111MODULE:
         required: true
         type: string
-        default: ""
       CGO_ENABLED:
-        required: true
         type: number
-        default: 0
+        default: 1
       BINARY_TESTS:
-        # required: true
         type: string
         default: '[
                     "scan_nsa",                                                                                            
@@ -121,7 +116,7 @@ jobs:
         env:
           RELEASE: ${{ inputs.RELEASE }}
           CLIENT: ${{ inputs.CLIENT }}
-          CGO_ENABLED: 1
+          CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
         run: python3 --version && python3 build.py
 
       - name: Smoke Testing (Windows / MacOS)
@@ -176,7 +171,7 @@ jobs:
       matrix:
         TEST: ${{ fromJson(needs.binary-build.outputs.TEST_NAMES) }}
     needs: binary-build
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-20.04 # This cannot change
     steps:
 
       - uses: actions/download-artifact@v3.0.2
