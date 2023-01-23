@@ -5,6 +5,15 @@ on:
     branches:
       - 'master'
       - 'main'
+    paths-ignore:
+      - '**.yaml'
+      - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
 
 concurrency:
   group: code-review-approved
@@ -30,7 +39,10 @@ jobs:
 
   merge-to-master:
     needs: binary-build
-    if: ${{ (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
+    if: ${{ (always() && 
+    github.event.review.state == 'approved' && 
+    github.event.pull_request.base.ref == 'master' && 
+    (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
     runs-on: ubuntu-latest
     steps:
       - name: merge-to-master

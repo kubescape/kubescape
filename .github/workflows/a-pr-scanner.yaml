@@ -75,7 +75,6 @@ jobs:
             - Credentials scan: ${{ steps.credentials-scan.outcome }}
             - Vulnerabilities scan: ${{ steps.vulnerabilities-scan.outcome }}
           reactions: 'eyes'
-          # token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
 
   basic-tests:
     needs: scanners
