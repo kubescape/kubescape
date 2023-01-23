@@ -127,40 +127,40 @@ func (hsh *HostSensorHandler) GetVersion() (string, error) {
 // return list of LinuxKernelVariables
 func (hsh *HostSensorHandler) GetKernelVariables() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/LinuxKernelVariables", "LinuxKernelVariables")
+	return hsh.sendAllPodsHTTPGETRequest("/LinuxKernelVariables", LinuxKernelVariables)
 }
 
 // return list of OpenPortsList
 func (hsh *HostSensorHandler) GetOpenPortsList() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/openedPorts", "OpenPortsList")
+	return hsh.sendAllPodsHTTPGETRequest("/openedPorts", OpenPortsList)
 }
 
 // return list of LinuxSecurityHardeningStatus
 func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening", "LinuxSecurityHardeningStatus")
+	return hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening", LinuxSecurityHardeningStatus)
 }
 
 // return list of KubeletInfo
 func (hsh *HostSensorHandler) GetKubeletInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/kubeletInfo", "KubeletInfo")
+	return hsh.sendAllPodsHTTPGETRequest("/kubeletInfo", KubeletInfo)
 }
 
-// return list of KubeProxyInfo
+// return list of kubeProxyInfo
 func (hsh *HostSensorHandler) GetKubeProxyInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/kubeProxyInfo", "KubeProxyInfo")
+	return hsh.sendAllPodsHTTPGETRequest("/kubeProxyInfo", KubeProxyInfo)
 }
 
-// return list of KubeProxyInfo
+// return list of controlPlaneInfo
 func (hsh *HostSensorHandler) GetControlPlaneInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	return hsh.sendAllPodsHTTPGETRequest("/controlPlaneInfo", ControlPlaneInfo)
 }
 
-// return list of KubeProxyInfo
+// return list of cloudProviderInfo
 func (hsh *HostSensorHandler) GetCloudProviderInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	return hsh.sendAllPodsHTTPGETRequest("/cloudProviderInfo", CloudProviderInfo)
@@ -169,7 +169,7 @@ func (hsh *HostSensorHandler) GetCloudProviderInfo() ([]hostsensor.HostSensorDat
 // return list of KubeletCommandLine
 func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	resps, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", "KubeletCommandLine")
+	resps, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", KubeletCommandLine)
 	if err != nil {
 		return resps, err
 	}
@@ -187,19 +187,25 @@ func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDa
 
 }
 
-// return list of
+// return list of CNIInfo
+func (hsh *HostSensorHandler) GetCNIInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+	// loop over pods and port-forward it to each of them
+	return hsh.sendAllPodsHTTPGETRequest("/CNIInfo", CNIInfo)
+}
+
+// return list of kernelVersion
 func (hsh *HostSensorHandler) GetKernelVersion() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	return hsh.sendAllPodsHTTPGETRequest("/kernelVersion", "KernelVersion")
 }
 
-// return list of
+// return list of osRelease
 func (hsh *HostSensorHandler) GetOsReleaseFile() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	return hsh.sendAllPodsHTTPGETRequest("/osRelease", "OsReleaseFile")
 }
 
-// return list of
+// return list of kubeletConfigurations
 func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
@@ -330,6 +336,16 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	kcData, err = hsh.GetCloudProviderInfo()
 	if err != nil {
 		addInfoToMap(CloudProviderInfo, infoMap, err)
+		logger.L().Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
+	}
+
+	// GetCNIInfo
+	kcData, err = hsh.GetCNIInfo()
+	if err != nil {
+		addInfoToMap(CNIInfo, infoMap, err)
 		logger.L().Warning(err.Error())
 	}
 	if len(kcData) > 0 {
