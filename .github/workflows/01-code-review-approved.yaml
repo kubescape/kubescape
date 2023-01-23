@@ -22,14 +22,28 @@ concurrency:
 jobs:
 
   binary-build:
-    if: ${{ github.event.review.state == 'approved' && 
+    if: ${{ env.CUSTOMER && 
+            env.USERNAME && 
+            env.PASSWORD && 
+            env.CLIENT_ID_PROD && 
+            env.SECRET_KEY_PROD && 
+            env.REGISTRY_USERNAME && 
+            env.REGISTRY_PASSWORD &&
+            github.event.review.state == 'approved' && 
             contains( github.event.pull_request.labels.*.name, 'trigger-integration-test') && 
             github.event.pull_request.base.ref == 'master' }} ## run only if labeled as "trigger-integration-test" and base branch is master
-
+    env:
+      CUSTOMER: ${{ secrets.CUSTOMER }}
+      USERNAME: ${{ secrets.USERNAME }}
+      PASSWORD: ${{ secrets.PASSWORD }}
+      CLIENT_ID: ${{ secrets.CLIENT_ID_PROD }}
+      SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
       COMPONENT_NAME: kubescape
-      CGO_ENABLED: 0
+      CGO_ENABLED: 1
       GO111MODULE: ""
       GO_VERSION: "1.19"
       RELEASE: ${{ github.ref_name}}
@@ -39,7 +53,7 @@ jobs:
 
   merge-to-master:
     needs: binary-build
-    if: ${{ env.GH_PERSONAL_ACCESS_TOKEN && 
+    if: ${{ ${{ env.GH_PERSONAL_ACCESS_TOKEN }} && 
             (github.event.review.state == 'approved' && github.event.pull_request.base.ref == 'master') && 
             (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
     env:
