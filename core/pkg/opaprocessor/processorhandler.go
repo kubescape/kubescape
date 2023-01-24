@@ -27,6 +27,12 @@ import (
 
 const ScoreConfigPath = "/resources/config"
 
+type IJobProgressNotificationClient interface {
+	Start(allSteps int)
+	ProgressJob(step int, message string)
+	Stop()
+}
+
 type OPAProcessor struct {
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
@@ -42,14 +48,14 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		regoDependenciesData: regoDependenciesData,
 	}
 }
-func (opap *OPAProcessor) ProcessRulesListenner() error {
+func (opap *OPAProcessor) ProcessRulesListenner(progressListener IJobProgressNotificationClient) error {
 
 	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
 	// process
-	if err := opap.Process(opap.OPASessionObj.AllPolicies); err != nil {
+	if err := opap.Process(opap.OPASessionObj.AllPolicies, progressListener); err != nil {
 		logger.L().Error(err.Error())
 		// Return error?
 	}
@@ -64,12 +70,15 @@ func (opap *OPAProcessor) ProcessRulesListenner() error {
 	return nil
 }
 
-func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
+func (opap *OPAProcessor) Process(policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
 	opap.loggerStartScanning()
 
-	cautils.StartSpinner()
+	progressListener.Start(len(policies.Controls))
+	defer progressListener.Stop()
 
 	for _, toPin := range policies.Controls {
+		progressListener.ProgressJob(1, fmt.Sprintf("Control %s", toPin.ControlID))
+
 		control := toPin
 
 		resourcesAssociatedControl, err := opap.processControl(&control)
@@ -93,8 +102,6 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies) error {
 	}
 
 	opap.Report.ReportGenerationTime = time.Now().UTC()
-
-	cautils.StopSpinner()
 
 	opap.loggerDoneScanning()
 
