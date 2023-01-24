@@ -51,18 +51,16 @@ func NewProgressHandler(title string) *ProgressHandler {
 }
 
 func (p *ProgressHandler) Start(allSteps int) {
-	if isatty.IsTerminal(os.Stdout.Fd()) {
+	if isatty.IsTerminal(os.Stderr.Fd()) {
 		p.pb = progressbar.Default(int64(allSteps), p.title)
 	} else {
-		p.pb = nil
+		p.pb = progressbar.DefaultSilent(int64(allSteps), p.title)
 	}
 }
 
 func (p *ProgressHandler) ProgressJob(step int, message string) {
-	if p.pb != nil {
-		p.pb.Add(step)
-		p.pb.Describe(message)
-	}
+	p.pb.Add(step)
+	p.pb.Describe(message)
 }
 
 func (p *ProgressHandler) Stop() {
