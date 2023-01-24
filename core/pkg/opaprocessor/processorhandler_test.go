@@ -38,7 +38,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj.AllResources[deployment.GetID()] = deployment
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())
-	opap.Process(policies)
+	opap.Process(policies, nil)
 
 	assert.Equal(t, 1, len(opaSessionObj.ResourcesResult))
 	res := opaSessionObj.ResourcesResult[deployment.GetID()]
