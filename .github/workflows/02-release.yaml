@@ -43,7 +43,10 @@ jobs:
 
 
   publish-image:
-    uses: ./.github/workflows/d-publish-image.yaml
+    permissions:
+      id-token: write
+      packages: write
+      contents: read    uses: ./.github/workflows/d-publish-image.yaml
     needs: create-release
     with:
       client: "image-release"
