@@ -41,7 +41,33 @@ on:
                   ]'
 
 jobs:
+
+  check-secret:
+    name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+    runs-on: ubuntu-latest
+    outputs:
+      is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
+    steps:
+      - name: Check whether unity activation requests should be done
+        id: check-secret-set
+        env:
+            QUAYIO_REGISTRY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
+            QUAYIO_REGISTRY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+            CUSTOMER: ${{ secrets.CUSTOMER }}
+            USERNAME: ${{ secrets.USERNAME }}
+            PASSWORD: ${{ secrets.PASSWORD }}
+            CLIENT_ID: ${{ secrets.CLIENT_ID_PROD }}
+            SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
+            REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+            REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+            echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && \ 
+                                    env.QUAYIO_REGISTRY_PASSWORD != '' && }}" >> $GITHUB_OUTPUT
+
+
   binary-build:
+    needs: [check-secret]
+    if: needs.check-secret.outputs.is-secret-set == 'true'
     name: Create cross-platform build
     outputs:
       TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}    
