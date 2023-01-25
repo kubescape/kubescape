@@ -20,21 +20,6 @@ jobs:
 
   binary-build:
     needs: [retag]
-    env:
-      CUSTOMER: ${{ secrets.CUSTOMER }}
-      USERNAME: ${{ secrets.USERNAME }}
-      PASSWORD: ${{ secrets.PASSWORD }}
-      CLIENT_ID: ${{ secrets.CLIENT_ID_PROD }}
-      SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
-      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-    if: ${{ env.CUSTOMER && 
-            env.USERNAME && 
-            env.PASSWORD && 
-            env.CLIENT_ID_PROD && 
-            env.SECRET_KEY_PROD && 
-            env.REGISTRY_USERNAME && 
-            env.REGISTRY_PASSWORD }} # Check if the secrets set
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
       COMPONENT_NAME: kubescape
