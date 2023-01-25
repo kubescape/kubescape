@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.224
+	github.com/kubescape/opa-utils v0.0.223
 	github.com/stretchr/testify v1.8.1
 	k8s.io/utils v0.0.0-20221128185143-99ec85e7a448
 )
@@ -62,7 +62,7 @@ require (
 	github.com/alibabacloud-go/tea-utils v1.4.4 // indirect
 	github.com/alibabacloud-go/tea-xml v1.1.2 // indirect
 	github.com/aliyun/credentials-go v1.2.3 // indirect
-	github.com/armosec/armoapi-go v0.0.151 // indirect
+	github.com/armosec/armoapi-go v0.0.119 // indirect
 	github.com/armosec/utils-k8s-go v0.0.12 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/aws/aws-sdk-go v1.44.114 // indirect
@@ -197,7 +197,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.23 // indirect
 	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950 // indirect
 	github.com/kubescape/rbac-utils v0.0.19 // indirect
-	github.com/kubescape/regolibrary v1.0.247 // indirect
+	github.com/kubescape/regolibrary v1.0.248 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20221109233200-85aa52084eaf // indirect
