@@ -1,4 +1,4 @@
-name: 03-publish-image
+name: d-publish-image
 
 on:
   workflow_call:
