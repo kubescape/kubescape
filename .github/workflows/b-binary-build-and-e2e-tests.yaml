@@ -43,12 +43,12 @@ on:
 jobs:
 
   check-secret:
-    name: check if the necessary secrets are set in github secrets
+    name: secret-validator
     runs-on: ubuntu-latest
     outputs:
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
     steps:
-      - name: Check whether unity activation requests should be done
+      - name: check if the necessary secrets are set in github secrets
         id: check-secret-set
         env:
             CUSTOMER: ${{ secrets.CUSTOMER }}
