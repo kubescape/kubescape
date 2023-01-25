@@ -62,7 +62,7 @@ jobs:
             REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
             echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && 
-                                    env.QUAYIO_REGISTRY_PASSWORD != '' && }}" >> $GITHUB_OUTPUT
+                                    env.QUAYIO_REGISTRY_PASSWORD != '' }}" >> $GITHUB_OUTPUT
 
 
   binary-build:
