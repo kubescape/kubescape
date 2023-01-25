@@ -51,8 +51,6 @@ jobs:
       - name: Check whether unity activation requests should be done
         id: check-secret-set
         env:
-            QUAYIO_REGISTRY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
-            QUAYIO_REGISTRY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
             CUSTOMER: ${{ secrets.CUSTOMER }}
             USERNAME: ${{ secrets.USERNAME }}
             PASSWORD: ${{ secrets.PASSWORD }}
@@ -61,8 +59,14 @@ jobs:
             REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
             REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-            echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && 
-                                    env.QUAYIO_REGISTRY_PASSWORD != '' }}" >> $GITHUB_OUTPUT
+            echo "is-secret-set=${{ env.CUSTOMER != '' && 
+                                    env.USERNAME != '' &&
+                                    env.PASSWORD != '' &&
+                                    env.CLIENT_ID != '' &&
+                                    env.SECRET_KEY != '' &&
+                                    env.REGISTRY_USERNAME != '' &&
+                                    env.REGISTRY_PASSWORD != ''
+                                  }}" >> $GITHUB_OUTPUT
 
 
   binary-build:
