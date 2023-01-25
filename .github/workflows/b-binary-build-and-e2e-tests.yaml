@@ -43,7 +43,7 @@ on:
 jobs:
 
   check-secret:
-    name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+    name: check if the necessary secrets are set in github secrets
     runs-on: ubuntu-latest
     outputs:
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
@@ -61,7 +61,7 @@ jobs:
             REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
             REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-            echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && \ 
+            echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && 
                                     env.QUAYIO_REGISTRY_PASSWORD != '' && }}" >> $GITHUB_OUTPUT
 
 
