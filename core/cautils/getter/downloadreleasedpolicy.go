@@ -8,8 +8,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 
-	// "github.com/kubescape/regolibrary/gitregostore"
-	"github.com/kubescape/opa-utils/gitregostore"
+	"github.com/kubescape/regolibrary/gitregostore"
 )
 
 // =======================================================================================================================
