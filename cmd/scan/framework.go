@@ -20,24 +20,24 @@ import (
 )
 
 var (
-	frameworkExample = `
+	frameworkExample = fmt.Sprintf(`
   # Scan all frameworks
-  kubescape scan framework all
+  %[1]s scan framework all
   
   # Scan the NSA framework
-  kubescape scan framework nsa
+  %[1]s scan framework nsa
   
   # Scan the NSA and MITRE framework
-  kubescape scan framework nsa,mitre
+  %[1]s scan framework nsa,mitre
   
   # Scan all frameworks
-  kubescape scan framework all
+  %[1]s scan framework all
 
   # Scan kubernetes YAML manifest files (single file or glob)
-  kubescape scan framework nsa .
+  %[1]s scan framework nsa .
 
-  Run 'kubescape list frameworks' for the list of supported frameworks
-`
+  Run '%[1]s list frameworks' for the list of supported frameworks
+`, cautils.ExecName())
 
 	ErrUnknownSeverity = errors.New("unknown severity")
 )
@@ -46,7 +46,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 	return &cobra.Command{
 		Use:     "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
-		Short:   "The framework you wish to use. Run 'kubescape list frameworks' for the list of supported frameworks",
+		Short:   fmt.Sprintf("The framework you wish to use. Run '%[1]s list frameworks' for the list of supported frameworks", cautils.ExecName()),
 		Example: frameworkExample,
 		Long:    "Execute a scan on a running Kubernetes cluster or `yaml`/`json` files (use glob) or `-` for stdin",
 		Args: func(cmd *cobra.Command, args []string) error {

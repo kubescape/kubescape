@@ -1,34 +1,37 @@
 package config
 
 import (
+	"fmt"
+
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	"github.com/spf13/cobra"
 )
 
 var (
-	configExample = `
+	configExample = fmt.Sprintf(`
   # View cached configurations 
-  kubescape config view
+  %[1]s config view
 
   # Delete cached configurations
-  kubescape config delete
+  %[1]s config delete
 
   # Set cached configurations
-  kubescape config set --help
-`
-	setConfigExample = `
+  %[1]s config set --help
+`, cautils.ExecName())
+	setConfigExample = fmt.Sprintf(`
   # Set account id
-  kubescape config set accountID <account id>
+  %[1]s config set accountID <account id>
 
   # Set client id
-  kubescape config set clientID <client id> 
+  %[1]s config set clientID <client id> 
 
   # Set access key
-  kubescape config set secretKey <access key>
+  %[1]s config set secretKey <access key>
 
   # Set cloudAPIURL
-  kubescape config set cloudAPIURL <cloud API URL>
-`
+  %[1]s config set cloudAPIURL <cloud API URL>
+`, cautils.ExecName())
 )
 
 func GetConfigCmd(ks meta.IKubescape) *cobra.Command {
