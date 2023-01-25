@@ -32,9 +32,18 @@ concurrency:
 jobs:
 
   binary-build:
-    if: ${{ github.event.review.state == 'approved' && 
-            contains( github.event.pull_request.labels.*.name, 'trigger-integration-test') && 
-            github.event.pull_request.base.ref == 'master' }} ## run only if labeled as "trigger-integration-test" and base branch is master
+    # if: ${{ env.CUSTOMER && 
+    #         env.USERNAME && 
+    #         env.PASSWORD && 
+    #         env.CLIENT_ID_PROD && 
+    #         env.SECRET_KEY_PROD && 
+    #         env.REGISTRY_USERNAME && 
+    #         env.REGISTRY_PASSWORD &&
+    #         github.event.review.state == 'approved' && 
+    #         contains( github.event.pull_request.labels.*.name, 'trigger-integration-test') && 
+    #         github.event.pull_request.base.ref == 'master' }} ## run only if labeled as "trigger-integration-test" and base branch is master
+    if: ${{ env.CUSTOMER }} ## run only if labeled as "trigger-integration-test" and base branch is master
+
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
       COMPONENT_NAME: kubescape
