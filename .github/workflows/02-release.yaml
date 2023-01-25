@@ -48,7 +48,7 @@ jobs:
       packages: write
       contents: read    
     uses: ./.github/workflows/d-publish-image.yaml
-    needs: create-release
+    needs: [ create-release, retag ]
     with:
       client: "image-release"
       image_name: "quay.io/${{ github.repository_owner }}/kubescape"
