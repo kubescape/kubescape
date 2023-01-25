@@ -73,11 +73,15 @@ func (opap *OPAProcessor) ProcessRulesListenner(progressListener IJobProgressNot
 func (opap *OPAProcessor) Process(policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
 	opap.loggerStartScanning()
 
-	progressListener.Start(len(policies.Controls))
-	defer progressListener.Stop()
+	if progressListener != nil {
+		progressListener.Start(len(policies.Controls))
+		defer progressListener.Stop()
+	}
 
 	for _, toPin := range policies.Controls {
-		progressListener.ProgressJob(1, fmt.Sprintf("Control %s", toPin.ControlID))
+		if progressListener != nil {
+			progressListener.ProgressJob(1, fmt.Sprintf("Control %s", toPin.ControlID))
+		}
 
 		control := toPin
 
