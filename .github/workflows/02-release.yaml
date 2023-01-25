@@ -43,7 +43,7 @@ jobs:
 
 
   publish-image:
-    uses: ./.github/workflows/03-publish-image.yaml
+    uses: ./.github/workflows/d-publish-image.yaml
     needs: create-release
     with:
       client: "image-release"
