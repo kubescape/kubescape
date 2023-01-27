@@ -18,7 +18,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.23
 	github.com/kubescape/go-logger v0.0.6
-	github.com/kubescape/k8s-interface v0.0.95
+	github.com/kubescape/k8s-interface v0.0.97
 	github.com/kubescape/opa-utils v0.0.223
 	github.com/kubescape/rbac-utils v0.0.19
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -105,6 +105,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ecr v1.18.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ecrpublic v1.12.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/eks v1.21.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/iam v1.19.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.17 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.11.23 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.13.6 // indirect
@@ -304,7 +305,7 @@ require (
 	go.etcd.io/etcd/server/v3 v3.6.0-alpha.0 // indirect
 	go.etcd.io/etcd/tests/v3 v3.6.0-alpha.0 // indirect
 	go.etcd.io/etcd/v3 v3.6.0-alpha.0 // indirect
-	go.mongodb.org/mongo-driver v1.10.0 // indirect
+	go.mongodb.org/mongo-driver v1.11.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.28.0 // indirect
 	go.opentelemetry.io/otel v1.7.0 // indirect

@@ -14,6 +14,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
 	cloudapis "github.com/kubescape/k8s-interface/cloudsupport/apis"
+	cloudv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
@@ -28,12 +29,12 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-// cloudsupport.GetDescribeRepositoriesFromCloudProvider(clusterName, provider)
 type cloudResourceGetter func(string, string) (workloadinterface.IMetadata, error)
 
 var cloudResourceGetterMapping = map[string]cloudResourceGetter{
-	cloudapis.CloudProviderDescribeKind:             cloudsupport.GetDescriptiveInfoFromCloudProvider,
-	cloudapis.CloudProviderDescribeRepositoriesKind: cloudsupport.GetDescribeRepositoriesFromCloudProvider,
+	cloudapis.CloudProviderDescribeKind:                cloudsupport.GetDescriptiveInfoFromCloudProvider,
+	cloudapis.CloudProviderDescribeRepositoriesKind:    cloudsupport.GetDescribeRepositoriesFromCloudProvider,
+	cloudapis.CloudProviderListEntitiesForPoliciesKind: cloudsupport.GetListEntitiesForPoliciesFromCloudProvider,
 }
 
 type K8sResourceHandler struct {
@@ -168,8 +169,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(sessionObj *cautils.
 			logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
 			wl, err := resourceGetter(clusterName, provider)
 			if err != nil {
-				// can be removed when GKE and AKS are supported
-				if !strings.Contains(err.Error(), "not supported") {
+				if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
 					// Return error with useful info on how to configure credentials for getting cloud provider info
 					logger.L().Debug("failed to get cloud data", helpers.String("resourceKind", resourceKind), helpers.Error(err))
 					err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))

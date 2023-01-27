@@ -25,6 +25,7 @@ var (
 	CloudResources = []string{
 		cloudapis.CloudProviderDescribeKind,
 		cloudapis.CloudProviderDescribeRepositoriesKind,
+		cloudapis.CloudProviderListEntitiesForPoliciesKind,
 		string(cloudsupport.TypeApiServerInfo),
 	}
 )
