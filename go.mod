@@ -21,7 +21,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950
 	github.com/kubescape/opa-utils v0.0.223
 	github.com/kubescape/rbac-utils v0.0.19
-	github.com/kubescape/regolibrary v1.0.248
+	github.com/kubescape/regolibrary v1.0.249
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.16
 	github.com/mikefarah/yq/v4 v4.29.1
