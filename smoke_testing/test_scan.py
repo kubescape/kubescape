@@ -50,6 +50,7 @@ def run(kubescape_exec: str):
 
     print("Testing scan control id")
     msg = scan_control_id(kubescape_exec=kubescape_exec)
+    print(f"scan_control_id message: {msg}")
     smoke_utils.assertion(msg)
 
     print("Testing scan controls")
