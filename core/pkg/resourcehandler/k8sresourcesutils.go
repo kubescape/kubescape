@@ -12,6 +12,8 @@ import (
 
 var (
 	ClusterDescribe              = "ClusterDescribe"
+	DescribeRepositories         = "DescribeRepositories"
+	ListEntitiesForPolicies      = "ListEntitiesForPolicies"
 	KubeletConfiguration         = "KubeletConfiguration"
 	OsReleaseFile                = "OsReleaseFile"
 	KernelVersion                = "KernelVersion"
@@ -43,7 +45,10 @@ var (
 	MapResourceToApiGroupVuln = map[string][]string{
 		ImageVulnerabilities: {"armo.vuln.images/v1", "image.vulnscan.com/v1"}}
 	MapResourceToApiGroupCloud = map[string][]string{
-		ClusterDescribe: {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"}}
+		ClusterDescribe:         {"container.googleapis.com/v1", "eks.amazonaws.com/v1", "management.azure.com/v1"},
+		DescribeRepositories:    {"eks.amazonaws.com/v1"}, //TODO - add google and azure when they are supported
+		ListEntitiesForPolicies: {"eks.amazonaws.com/v1"}, //TODO - add google and azure when they are supported
+	}
 )
 
 func isEmptyImgVulns(ksResourcesMap cautils.KSResources) bool {

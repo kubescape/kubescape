@@ -54,6 +54,11 @@ for pdir in ${PATH//:/ }; do
     fi
 done
 
+# Create install dir if it does not exist
+if [ ! -d "$install_dir" ]; then
+  $SUDO mkdir -p $install_dir
+fi
+
 chmod +x $OUTPUT 2>/dev/null 
 $SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true # clearning up old install
 $SUDO cp $OUTPUT $install_dir/$KUBESCAPE_EXEC 

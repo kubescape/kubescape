@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
+	cloudapis "github.com/kubescape/k8s-interface/cloudsupport/apis"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
@@ -23,7 +24,9 @@ var (
 		"CNIInfo",
 	}
 	CloudResources = []string{
-		"ClusterDescribe",
+		cloudapis.CloudProviderDescribeKind,
+		cloudapis.CloudProviderDescribeRepositoriesKind,
+		cloudapis.CloudProviderListEntitiesForPoliciesKind,
 		string(cloudsupport.TypeApiServerInfo),
 	}
 )
