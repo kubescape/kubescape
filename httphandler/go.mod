@@ -196,7 +196,7 @@ require (
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/klauspost/compress v1.15.11 // indirect
 	github.com/kubescape/go-git-url v0.0.23 // indirect
-	github.com/kubescape/k8s-interface v0.0.97 // indirect
+	github.com/kubescape/k8s-interface v0.0.98 // indirect
 	github.com/kubescape/rbac-utils v0.0.19 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
