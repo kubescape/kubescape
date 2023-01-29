@@ -197,7 +197,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.23 // indirect
 	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950 // indirect
 	github.com/kubescape/rbac-utils v0.0.19 // indirect
-	github.com/kubescape/regolibrary v1.0.248 // indirect
+	github.com/kubescape/regolibrary v1.0.249 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20221109233200-85aa52084eaf // indirect
