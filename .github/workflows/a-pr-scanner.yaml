@@ -65,7 +65,8 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - name: Comment results to PR # Warninig: This might break opening PRs from forks
+      - name: Comment results to PR
+        continue-on-error: true # Warninig: This might break opening PRs from forks
         uses: peter-evans/create-or-update-comment@v2.1.0
         with:
           issue-number:  ${{ github.event.pull_request.number }}
