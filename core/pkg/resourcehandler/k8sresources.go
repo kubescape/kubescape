@@ -136,7 +136,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
+			logger.L().Debug("failed to collect cloud data", helpers.Error(err))
 		}
 		if provider != "" {
 			if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
