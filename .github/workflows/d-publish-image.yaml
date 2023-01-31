@@ -1,4 +1,4 @@
-name: 03-publish-image
+name: d-publish-image
 
 on:
   workflow_call:
@@ -33,7 +33,7 @@ jobs:
     outputs:
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
     steps:
-      - name: Check whether unity activation requests should be done
+      - name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
         id: check-secret-set
         env:
             QUAYIO_REGISTRY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
@@ -46,10 +46,6 @@ jobs:
     if: needs.check-secret.outputs.is-secret-set == 'true'
     name: Build image and upload to registry
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      packages: write
-      contents: read
 
     steps:
       - uses: actions/checkout@v3

@@ -1,0 +1,57 @@
+name: 01-code_review_approved
+on:
+  pull_request_review:
+    types: [submitted]
+    branches:
+      - 'master'
+      - 'main'
+    paths-ignore:
+      - '**.yaml'
+      - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
+
+
+concurrency:
+  group: code-review-approved
+  cancel-in-progress: true
+
+jobs:
+
+  binary-build:
+    if: ${{ github.event.review.state == 'approved' && 
+            contains( github.event.pull_request.labels.*.name, 'trigger-integration-test') && 
+            github.event.pull_request.base.ref == 'master' }} ## run only if labeled as "trigger-integration-test" and base branch is master
+    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
+    with:
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 1
+      GO111MODULE: ""
+      GO_VERSION: "1.19"
+      RELEASE: ${{ github.ref_name}}
+      CLIENT: test
+    secrets: inherit
+
+
+  merge-to-master:
+    needs: binary-build
+    env:
+      GH_PERSONAL_ACCESS_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+    if: ${{ (github.event.review.state == 'approved' && github.event.pull_request.base.ref == 'master') && 
+            (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: merge-to-master
+        if: ${{ env.GH_PERSONAL_ACCESS_TOKEN }}
+        uses: pascalgn/automerge-action@v0.15.5
+        env:
+          GITHUB_TOKEN: "${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}"
+          MERGE_COMMIT_MESSAGE: "Merge to master - PR number: {pullRequest.number}"
+          MERGE_ERROR_FAIL: "true"
+          MERGE_METHOD: "merge"
+          MERGE_LABELS: ""
+          UPDATE_LABELS: ""

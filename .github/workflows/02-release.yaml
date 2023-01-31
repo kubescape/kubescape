@@ -1,0 +1,69 @@
+name: 02-create_release
+
+on:
+  push:
+    tags:
+    - 'v*.*.*-rc.*'
+
+jobs:
+  retag:
+    outputs:
+      NEW_TAG: ${{ steps.tag-calculator.outputs.NEW_TAG }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - id: tag-calculator
+        uses: ./.github/actions/tag-action
+        with:
+          SUB_STRING: "-rc"
+
+  binary-build:
+    needs: [retag]
+    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
+    with:
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 1
+      GO111MODULE: ""
+      GO_VERSION: "1.19"
+      RELEASE: ${{ github.ref_name}}
+      CLIENT: release
+    secrets: inherit
+
+  create-release:
+    permissions:
+      contents: write    
+    needs: [retag, binary-build]
+    uses: ./.github/workflows/c-create-release.yaml
+    with:
+      RELEASE_NAME: "Release ${{ needs.retag.outputs.NEW_TAG }}"
+      TAG: ${{ needs.retag.outputs.NEW_TAG }}
+      DRAFT: false
+    secrets: inherit    
+
+  publish-krew-plugin:
+    name: Publish Krew plugin
+    runs-on: ubuntu-latest
+    if: "${{ github.repository_owner }} == kubescape"
+    needs: create-release
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Update new version in krew-index
+        uses: rajatjindal/krew-release-bot@v0.0.43
+
+  publish-image:
+    permissions:
+      id-token: write
+      packages: write
+      contents: read    
+    uses: ./.github/workflows/d-publish-image.yaml
+    needs: [ create-release, retag ]
+    with:
+      client: "image-release"
+      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
+      image_tag: ${{ needs.retag.outputs.NEW_TAG }}
+      support_platforms: true
+      cosign: true
+    secrets: inherit
