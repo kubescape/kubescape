@@ -22,11 +22,19 @@ require (
 	github.com/kubescape/opa-utils v0.0.223
 	github.com/kubescape/rbac-utils v0.0.19
 	github.com/libgit2/git2go/v33 v33.0.9
+<<<<<<< HEAD
 	github.com/mattn/go-isatty v0.0.16
+=======
+	github.com/mattn/go-isatty v0.0.17
+>>>>>>> merge-from-master
 	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/olekukonko/tablewriter v0.0.5
 	github.com/open-policy-agent/opa v0.45.0
 	github.com/owenrumney/go-sarif/v2 v2.1.2
+<<<<<<< HEAD
+=======
+	github.com/schollz/progressbar/v3 v3.13.0
+>>>>>>> merge-from-master
 	github.com/sigstore/cosign v1.13.1
 	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.8.1
@@ -221,9 +229,16 @@ require (
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
+<<<<<<< HEAD
 	github.com/mattn/go-runewidth v0.0.13 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
 	github.com/miekg/pkcs11 v1.1.1 // indirect
+=======
+	github.com/mattn/go-runewidth v0.0.14 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.2-0.20181231171920-c182affec369 // indirect
+	github.com/miekg/pkcs11 v1.1.1 // indirect
+	github.com/mitchellh/colorstring v0.0.0-20190213212951-d06e56a500db // indirect
+>>>>>>> merge-from-master
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
@@ -249,7 +264,11 @@ require (
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
+<<<<<<< HEAD
 	github.com/rivo/uniseg v0.2.0 // indirect
+=======
+	github.com/rivo/uniseg v0.4.3 // indirect
+>>>>>>> merge-from-master
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/ruudk/golang-pdf417 v0.0.0-20181029194003-1af4ab5afa58 // indirect
 	github.com/sassoftware/relic v0.0.0-20210427151427-dfb082b79b74 // indirect

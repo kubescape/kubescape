@@ -31,7 +31,7 @@ RUN ls -ltr build/ubuntu-latest
 WORKDIR /work
 RUN python build.py
 
-RUN /work/build/ubuntu-latest/kubescape download artifacts -o /work/artifacts
+RUN /work/build/ubuntu-latest/kubescape-ubuntu-latest download artifacts -o /work/artifacts
 
 FROM alpine:3.16.2
 
@@ -46,6 +46,6 @@ USER ks
 WORKDIR /home/ks
 
 COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/ksserver
-COPY --from=builder /work/build/ubuntu-latest/kubescape /usr/bin/kubescape
+COPY --from=builder /work/build/ubuntu-latest/kubescape-ubuntu-latest /usr/bin/kubescape
 
 ENTRYPOINT ["ksserver"]
