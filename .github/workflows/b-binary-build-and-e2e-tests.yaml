@@ -151,16 +151,16 @@ jobs:
 
       - name: Smoke Testing (Windows / MacOS)
         env:
-          RELEASE: ${{ env.RELEASE }} 
+          RELEASE: ${{ inputs.RELEASE }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape
+        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape-${{ matrix.os }}
         if: matrix.os != 'ubuntu-20.04'
 
       - name: Smoke Testing (Linux)
         env:
-          RELEASE: ${{ env.RELEASE }} 
+          RELEASE: ${{ inputs.RELEASE }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py ${PWD}/build/ubuntu-20.04/kubescape
+        run: python3 smoke_testing/init.py ${PWD}/build/ubuntu-latest/kubescape-ubuntu-latest
         if: matrix.os == 'ubuntu-20.04'      
 
       - name: golangci-lint
@@ -210,8 +210,10 @@ jobs:
           name: kubescape-ubuntu-latest
           path: "~"
 
+      - run: ls -laR
+
       - name: chmod +x
-        run: chmod +x ${{steps.download-artifact.outputs.download-path}}/kubescape
+        run: chmod +x ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
 
       - name: Checkout systests repo
         uses: actions/checkout@v3
@@ -260,7 +262,7 @@ jobs:
             -c CyberArmorTests               \
             --duration 3                     \
             --logger DEBUG                   \
-            --kwargs kubescape=${{steps.download-artifact.outputs.download-path}}/kubescape
+            --kwargs kubescape=${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
           
           deactivate
           
