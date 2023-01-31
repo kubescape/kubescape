@@ -45,7 +45,7 @@ USER ks
 
 WORKDIR /home/ks
 
-COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape-ubuntu-latest /usr/bin/ksserver
+COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/ksserver
 COPY --from=builder /work/build/ubuntu-latest/kubescape-ubuntu-latest /usr/bin/kubescape
 
 ENTRYPOINT ["ksserver"]
