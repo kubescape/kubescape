@@ -1,0 +1,33 @@
+name: 00-pr_scanner
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+    branches: 
+      - 'master'
+      - 'main'
+      - 'dev'
+    paths-ignore:
+      - '**.yaml'
+      - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
+
+concurrency:
+  group: ${{ github.head_ref }}
+  cancel-in-progress: true
+
+  
+jobs:
+  pr-scanner:
+    permissions: 
+      pull-requests: write
+    uses: ./.github/workflows/a-pr-scanner.yaml
+    with:
+      RELEASE: ${{ github.ref_name}}
+      CLIENT: test
+    secrets: inherit

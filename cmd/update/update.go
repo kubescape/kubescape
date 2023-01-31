@@ -5,6 +5,7 @@ package update
 //          kubescape update
 
 import (
+	"fmt"
 	"os/exec"
 	"runtime"
 
@@ -13,11 +14,17 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var updateCmdExamples = fmt.Sprintf(`
+  # Update to the latest kubescape release
+  %[1]s update
+`, cautils.ExecName())
+
 func GetUpdateCmd() *cobra.Command {
 	updateCmd := &cobra.Command{
-		Use:   "update",
-		Short: "Update your version",
-		Long:  ``,
+		Use:     "update",
+		Short:   "Update your version",
+		Long:    ``,
+		Example: updateCmdExamples,
 		RunE: func(_ *cobra.Command, args []string) error {
 			//Checking the user's version of kubescape to the latest release
 			if cautils.BuildNumber == cautils.LatestReleaseVersion {

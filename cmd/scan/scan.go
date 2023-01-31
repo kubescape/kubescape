@@ -10,25 +10,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scanCmdExamples = `
+var scanCmdExamples = fmt.Sprintf(`
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
   # Scan current cluster with all frameworks
-  kubescape scan --enable-host-scan --verbose
+  %[1]s scan --enable-host-scan --verbose
 
   # Scan kubernetes YAML manifest files
-  kubescape scan .
+  %[1]s scan .
 
   # Scan and save the results in the JSON format
-  kubescape scan --format json --output results.json --format-version=v2
+  %[1]s scan --format json --output results.json --format-version=v2
 
   # Display all resources
-  kubescape scan --verbose
+  %[1]s scan --verbose
 
   # Scan different clusters from the kubectl context 
-  kubescape scan --kube-context <kubernetes context>
-  
-`
+  %[1]s scan --kube-context <kubernetes context>
+`, cautils.ExecName())
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
@@ -66,7 +65,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	}
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	// scanCmd.PersistentFlags().BoolVar(&scanInfo.CreateAccount, "create-account", false, "Create a Kubescape SaaS account ID account ID is not found in cache. After creating the account, the account ID will be saved in cache. In addition, the scanning results will be uploaded to the Kubescape SaaS")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.CreateAccount, "create-account", false, "Create a Kubescape SaaS account ID account ID is not found in cache. After creating the account, the account ID will be saved in cache. In addition, the scanning results will be uploaded to the Kubescape SaaS")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")

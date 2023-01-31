@@ -34,6 +34,7 @@ func (prettyPrinter *PrettyPrinter) printAttackTreeNode(node v1alpha1.IAttackTra
 }
 */
 
+
 func (prettyPrinter *PrettyPrinter) createFailedControlList(node v1alpha1.IAttackTrackStep) string {
 	var r string
 	for i, control := range node.GetControls() {
@@ -120,7 +121,9 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 		fmt.Fprintf(prettyPrinter.writer, "Severity: %s\n", apis.SeverityNumberToString(resource.Severity))
 		fmt.Fprintf(prettyPrinter.writer, "Total vectors: %v\n\n", len(resources[i].PriorityVector))
 
-		prettyPrinter.printResourceAttackGraph(resourceToAttackTrack[resource.ResourceID])
+		if v, found := resourceToAttackTrack[resource.ResourceID]; found {
+			prettyPrinter.printResourceAttackGraph(v)
+		}
 
 		sort.Slice(resource.PriorityVector, func(x, y int) bool {
 			return resource.PriorityVector[x].Score > resource.PriorityVector[y].Score

@@ -1,0 +1,177 @@
+name: a-pr-scanner
+
+on:
+  workflow_call:
+    inputs:
+      RELEASE:
+        description: 'release'
+        required: true
+        type: string
+      CLIENT:
+        description: 'Client name'
+        required: true
+        type: string
+
+
+jobs:
+  scanners:
+    env:
+       GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    name: PR Scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-go@v3 # Install go because go-licenses use it
+        name: Installing go
+        with:
+          go-version: '1.19'
+          cache: true
+
+      - name: Scanning - Forbidden Licenses (go-licenses)
+        id: licenses-scan
+        continue-on-error: true
+        run: |
+          echo "## Installing go-licenses tool"
+          go install github.com/google/go-licenses@latest
+          echo "## Scanning for forbiden licenses ##"
+          go-licenses check .
+
+      - name: Scanning - Credentials (GitGuardian)
+        if: ${{ env.GITGUARDIAN_API_KEY }}
+        continue-on-error: true      
+        id: credentials-scan
+        uses: GitGuardian/ggshield-action@master
+        with:
+          args: -v --all-policies        
+        env:
+          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
+          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
+          GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
+
+      - name: Scanning - Vulnerabilities (Snyk)
+        if: ${{ env.SNYK_TOKEN }}
+        id: vulnerabilities-scan
+        continue-on-error: true
+        uses: snyk/actions/golang@master
+        with:
+          command: test --all-projects
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Comment results to PR
+        continue-on-error: true # Warninig: This might break opening PRs from forks
+        uses: peter-evans/create-or-update-comment@v2.1.0
+        with:
+          issue-number:  ${{ github.event.pull_request.number }}
+          body: |
+            Scan results:
+            - License scan: ${{ steps.licenses-scan.outcome }}
+            - Credentials scan: ${{ steps.credentials-scan.outcome }}
+            - Vulnerabilities scan: ${{ steps.vulnerabilities-scan.outcome }}
+          reactions: 'eyes'
+
+  basic-tests:
+    needs: scanners
+    name: Create cross-platform build
+    runs-on: ${{ matrix.os }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE: ${{ inputs.RELEASE }}
+      CLIENT: ${{ inputs.CLIENT }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Cache Go modules (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (macOS)
+        if: matrix.os == 'macos-latest' 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: 1.19
+
+      - name: Install MSYS2 & libgit2 (Windows)
+        shell: cmd
+        run: .\build.bat all
+        if: matrix.os == 'windows-latest'
+
+      - name: Install libgit2 (Linux/macOS)
+        run: make libgit2
+        if: matrix.os != 'windows-latest'
+ 
+      - name: Test core pkg
+        run: go test "-tags=static,gitenabled" -v ./...
+
+      - name: Test httphandler pkg
+        run: cd httphandler && go test "-tags=static,gitenabled" -v ./...
+
+      - name: Build
+        env:
+          RELEASE: ${{ inputs.RELEASE }}
+          CLIENT: ${{ inputs.CLIENT }}
+          CGO_ENABLED: 1
+        run: python3 --version && python3 build.py
+
+      - name: Smoke Testing (Windows / MacOS)
+        env:
+          RELEASE: ${{ inputs.RELEASE }} 
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape-${{ matrix.os }}
+        if: matrix.os != 'ubuntu-20.04'
+
+      - name: Smoke Testing (Linux)
+        env:
+          RELEASE: ${{ inputs.RELEASE }} 
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/ubuntu-latest/kubescape-ubuntu-latest
+        if: matrix.os == 'ubuntu-20.04'      
+
+      - name: golangci-lint
+        if: matrix.os == 'ubuntu-20.04'      
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout 10m --build-tags=static
+          only-new-issues: true

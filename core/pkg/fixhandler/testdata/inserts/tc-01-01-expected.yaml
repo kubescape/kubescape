@@ -1,0 +1,14 @@
+# Fix to Apply:
+# "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+
+spec:
+  containers:
+  - name: nginx_container
+    image: nginx
+    securityContext:
+      allowPrivilegeEscalation: false

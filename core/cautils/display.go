@@ -7,6 +7,7 @@ import (
 	spinnerpkg "github.com/briandowns/spinner"
 	"github.com/fatih/color"
 	"github.com/mattn/go-isatty"
+	"github.com/schollz/progressbar/v3"
 )
 
 var FailureDisplay = color.New(color.Bold, color.FgHiRed).FprintfFunc()
@@ -38,4 +39,29 @@ func StopSpinner() {
 		return
 	}
 	spinner.Stop()
+}
+
+type ProgressHandler struct {
+	title string
+	pb    *progressbar.ProgressBar
+}
+
+func NewProgressHandler(title string) *ProgressHandler {
+	return &ProgressHandler{title: title}
+}
+
+func (p *ProgressHandler) Start(allSteps int) {
+	if isatty.IsTerminal(os.Stderr.Fd()) {
+		p.pb = progressbar.Default(int64(allSteps), p.title)
+	} else {
+		p.pb = progressbar.DefaultSilent(int64(allSteps), p.title)
+	}
+}
+
+func (p *ProgressHandler) ProgressJob(step int, message string) {
+	p.pb.Add(step)
+	p.pb.Describe(message)
+}
+
+func (p *ProgressHandler) Stop() {
 }

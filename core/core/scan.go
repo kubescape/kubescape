@@ -163,7 +163,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ========================= opa testing =====================
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
-	if err := reportResults.ProcessRulesListenner(); err != nil {
+	if err := reportResults.ProcessRulesListenner(cautils.NewProgressHandler("")); err != nil {
 		// TODO - do something
 		return resultsHandling, fmt.Errorf("%w", err)
 	}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kubescape/go-logger"
+	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"

@@ -58,6 +58,7 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 	// NOTE: this assumes that only the first path contains either a valid control descriptor or a framework descriptor
 	filePath := lp.filePath()
 	buf, err := os.ReadFile(filePath)
+
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +160,7 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 			continue
 		}
 
-		if contains(frameworkNames, framework.Name) {
+		if framework.Name == "" || contains(frameworkNames, framework.Name) {
 			continue
 		}
 

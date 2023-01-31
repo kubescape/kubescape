@@ -1,18 +1,21 @@
 package submit
 
 import (
+	"fmt"
+
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
-var submitCmdExamples = `
+var submitCmdExamples = fmt.Sprintf(`
 # Submit Kubescape scan results file
-kubescape submit results
+%[1]s submit results
 
 # Submit exceptions file to Kubescape SaaS
-kubescape submit exceptions
-`
+%[1]s submit exceptions
+`, cautils.ExecName())
 
 func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
 	var submitInfo metav1.Submit

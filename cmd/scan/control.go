@@ -18,28 +18,28 @@ import (
 )
 
 var (
-	controlExample = `
+	controlExample = fmt.Sprintf(`
   # Scan the 'privileged container' control
-  kubescape scan control "privileged container"
+  %[1]s scan control "privileged container"
 	
   # Scan list of controls separated with a comma
-  kubescape scan control "privileged container","HostPath mount"
+  %[1]s scan control "privileged container","HostPath mount"
   
   # Scan list of controls using the control ID separated with a comma
-  kubescape scan control C-0058,C-0057
+  %[1]s scan control C-0058,C-0057
   
-  Run 'kubescape list controls' for the list of supported controls
+  Run '%[1]s list controls' for the list of supported controls
   
   Control documentation:
   https://hub.armosec.io/docs/controls
-`
+`, cautils.ExecName())
 )
 
 // controlCmd represents the control command
 func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	return &cobra.Command{
 		Use:     "control <control names list>/<control ids list>",
-		Short:   "The controls you wish to use. Run 'kubescape list controls' for the list of supported controls",
+		Short:   fmt.Sprintf("The controls you wish to use. Run '%[1]s list controls' for the list of supported controls", cautils.ExecName()),
 		Example: controlExample,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
@@ -67,7 +67,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 
 			if len(args) == 0 {
 				scanInfo.ScanAll = true
-			} else { // expected control or list of control sepparated by ","
+			} else { // expected control or list of control separated by ","
 
 				// Read controls from input args
 				scanInfo.SetPolicyIdentifiers(strings.Split(args[0], ","), apisv1.KindControl)

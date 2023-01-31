@@ -1,0 +1,2 @@
+# Keep CRLF newlines in appropriate test files to have reproducible tests
+core/pkg/fixhandler/testdata/inserts/*-crlf-newlines.yaml text eol=crlf

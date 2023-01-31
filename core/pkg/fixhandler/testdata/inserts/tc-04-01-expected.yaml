@@ -1,0 +1,57 @@
+# Fixes to Apply:
+# 1) select(di==0).spec.template.spec.securityContext.allowPrivilegeEscalation = false
+# 2) select(di==0).spec.template.spec.containers[0].securityContext.capabilities.drop += ["NET_RAW"]
+# 3) select(di==0).spec.template.spec.containers[0].securityContext.seccompProfile.type = RuntimeDefault
+# 4) select(di==0).spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation |= false
+# 5) select(di==0).spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem |= true
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: multiple_inserts
+spec:
+  selector:
+    matchLabels:
+      app: example_4
+  template:
+    metadata:
+      labels:
+        app: example_4
+    spec:
+      serviceAccountName: default
+      terminationGracePeriodSeconds: 5
+      containers:
+      - name: example_4
+        image: nginx
+        ports:
+        - containerPort: 3000
+        env:
+        - name: PORT
+          value: "3000"
+        resources:
+          requests:
+            cpu: 200m
+            memory: 180Mi
+          limits:
+            cpu: 300m
+            memory: 300Mi
+        readinessProbe:
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:3000"]
+        livenessProbe:
+          initialDelaySeconds: 20
+          periodSeconds: 15
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:3000"]
+        securityContext:
+          capabilities:
+            drop:
+              - NET_RAW
+          seccompProfile:
+            type: RuntimeDefault
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+      securityContext:
+        allowPrivilegeEscalation: false

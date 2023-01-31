@@ -1,9 +1,15 @@
 package opaprocessor
 
 import (
+	"fmt"
+
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/open-policy-agent/opa/ast"
+	"github.com/open-policy-agent/opa/rego"
+	"github.com/open-policy-agent/opa/topdown/builtins"
+	"github.com/open-policy-agent/opa/types"
 )
 
 // ConvertFrameworksToPolicies convert list of frameworks to list of policies
@@ -42,4 +48,35 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 		}
 	}
 
+}
+
+var cosignVerifySignatureDeclaration = &rego.Function{
+	Name:    "cosign.verify",
+	Decl:    types.NewFunction(types.Args(types.S, types.A), types.B),
+	Memoize: true,
+}
+var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.Term) (*ast.Term, error) {
+	aStr, err := builtins.StringOperand(a.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+	bStr, err := builtins.StringOperand(b.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+	result, _ := verify(string(aStr), string(bStr))
+	return ast.BooleanTerm(result), nil
+}
+
+var cosignHasSignatureDeclaration = &rego.Function{
+	Name:    "cosign.has_signature",
+	Decl:    types.NewFunction(types.Args(types.S), types.B),
+	Memoize: true,
+}
+var cosignHasSignatureDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
+	aStr, err := builtins.StringOperand(a.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+	return ast.BooleanTerm(has_signature(string(aStr))), nil
 }
