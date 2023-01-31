@@ -12,7 +12,7 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/go-logger v0.0.6
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.225-0.20230112094523-c4de54bfb0b6
+	github.com/kubescape/opa-utils v0.0.227
 	github.com/stretchr/testify v1.8.0
 	k8s.io/utils v0.0.0-20221128185143-99ec85e7a448
 )
@@ -39,22 +39,24 @@ require (
 	github.com/acomagu/bufpipe v1.0.3 // indirect
 	github.com/agnivade/levenshtein v1.1.1 // indirect
 	github.com/alecthomas/participle/v2 v2.0.0-beta.5 // indirect
-	github.com/armosec/armoapi-go v0.0.144-0.20230112093215-2fa222e274c6 // indirect
+	github.com/armosec/armoapi-go v0.0.151 // indirect
 	github.com/armosec/utils-k8s-go v0.0.12 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/aws/aws-sdk-go v1.44.51 // indirect
-	github.com/aws/aws-sdk-go-v2 v1.16.7 // indirect
+	github.com/aws/aws-sdk-go-v2 v1.17.3 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.15.13 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.12.8 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.12.8 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.14 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.4.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.1.27 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.4.21 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/ini v1.3.15 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ecr v1.18.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/eks v1.21.4 // indirect
+	github.com/aws/aws-sdk-go-v2/service/iam v1.19.0 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.9.8 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.11.11 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.16.9 // indirect
-	github.com/aws/smithy-go v1.12.0 // indirect
+	github.com/aws/smithy-go v1.13.5 // indirect
 	github.com/boombuler/barcode v1.0.1 // indirect
 	github.com/briandowns/spinner v1.18.1 // indirect
 	github.com/cloudflare/circl v1.1.0 // indirect
@@ -113,7 +115,7 @@ require (
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/kubescape/go-git-url v0.0.21 // indirect
-	github.com/kubescape/k8s-interface v0.0.94-0.20221228202834-4b64f2440950 // indirect
+	github.com/kubescape/k8s-interface v0.0.99 // indirect
 	github.com/kubescape/rbac-utils v0.0.19 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/libgit2/git2go/v33 v33.0.9 // indirect
@@ -163,7 +165,8 @@ require (
 	go.uber.org/multierr v1.6.0 // indirect
 	go.uber.org/zap v1.22.0 // indirect
 	golang.org/x/crypto v0.3.0 // indirect
-	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4 // indirect
+	golang.org/x/exp v0.0.0-20230116083435-1de6713980de // indirect
+	golang.org/x/mod v0.6.0 // indirect
 	golang.org/x/net v0.3.1-0.20221206200815-1e63c2f08a10 // indirect
 	golang.org/x/oauth2 v0.0.0-20220630143837-2104d58473e0 // indirect
 	golang.org/x/sys v0.3.0 // indirect
