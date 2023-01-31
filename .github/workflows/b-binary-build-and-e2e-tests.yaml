@@ -1,0 +1,276 @@
+name: b-binary-build-and-e2e-tests
+on:
+  workflow_call:
+    inputs:
+      COMPONENT_NAME:
+        required: true
+        type: string
+      RELEASE:
+        required: true
+        type: string
+      CLIENT:
+        required: true
+        type: string
+      GO_VERSION:
+        type: string
+        default: "1.19"
+      GO111MODULE:
+        required: true
+        type: string
+      CGO_ENABLED:
+        type: number
+        default: 1
+      BINARY_TESTS:
+        type: string
+        default: '[
+                    "scan_nsa",                                                                                            
+                    "scan_mitre",                                                                                          
+                    "scan_with_exceptions",                                                                                
+                    "scan_repository",                                                                                     
+                    "scan_local_file",                                                                                     
+                    "scan_local_glob_files",                                                                               
+                    "scan_local_list_of_files",                                                                            
+                    "scan_nsa_and_submit_to_backend",                                                                      
+                    "scan_mitre_and_submit_to_backend",                                                                    
+                    "scan_local_repository_and_submit_to_backend",                                                         
+                    "scan_repository_from_url_and_submit_to_backend",                                                      
+                    "scan_with_exception_to_backend",                                                                      
+                    "scan_with_custom_framework",                                                                                                                                                                
+                    "scan_customer_configuration",                                                                         
+                    "host_scanner"
+                  ]'
+
+jobs:
+
+  check-secret:
+    name: secret-validator
+    runs-on: ubuntu-latest
+    outputs:
+      is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
+    steps:
+      - name: check if the necessary secrets are set in github secrets
+        id: check-secret-set
+        env:
+            CUSTOMER: ${{ secrets.CUSTOMER }}
+            USERNAME: ${{ secrets.USERNAME }}
+            PASSWORD: ${{ secrets.PASSWORD }}
+            CLIENT_ID: ${{ secrets.CLIENT_ID_PROD }}
+            SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
+            REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+            REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+            echo "is-secret-set=${{ env.CUSTOMER != '' && 
+                                    env.USERNAME != '' &&
+                                    env.PASSWORD != '' &&
+                                    env.CLIENT_ID != '' &&
+                                    env.SECRET_KEY != '' &&
+                                    env.REGISTRY_USERNAME != '' &&
+                                    env.REGISTRY_PASSWORD != ''
+                                  }}" >> $GITHUB_OUTPUT
+
+
+  binary-build:
+    needs: [check-secret]
+    if: needs.check-secret.outputs.is-secret-set == 'true'
+    name: Create cross-platform build
+    outputs:
+      TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}    
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-20.04, macos-latest, windows-latest]
+    steps:
+
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Cache Go modules (Linux)
+        if: matrix.os == 'ubuntu-20.04' 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (macOS)
+        if: matrix.os == 'macos-latest' 
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/Library/Caches/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Cache Go modules (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\go-build
+            ~\go\pkg\mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - uses: actions/setup-go@v3
+        name: Installing go
+        with:
+          go-version: ${{ inputs.GO_VERSION }}
+          cache: true
+
+      - name: Install MSYS2 & libgit2 (Windows)
+        shell: cmd
+        run: .\build.bat all
+        if: matrix.os == 'windows-latest'
+
+      - name: Install libgit2 (Linux/macOS)
+        run: make libgit2
+        if: matrix.os != 'windows-latest'
+ 
+      - name: Test core pkg
+        run: go test "-tags=static,gitenabled" -v ./...
+
+      - name: Test httphandler pkg
+        run: cd httphandler && go test "-tags=static,gitenabled" -v ./...
+
+      - name: Build
+        env:
+          RELEASE: ${{ inputs.RELEASE }}
+          CLIENT: ${{ inputs.CLIENT }}
+          CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
+        run: python3 --version && python3 build.py
+
+      - name: Smoke Testing (Windows / MacOS)
+        env:
+          RELEASE: ${{ inputs.RELEASE }} 
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape-${{ matrix.os }}
+        if: matrix.os != 'ubuntu-20.04'
+
+      - name: Smoke Testing (Linux)
+        env:
+          RELEASE: ${{ inputs.RELEASE }} 
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/ubuntu-latest/kubescape-ubuntu-latest
+        if: matrix.os == 'ubuntu-20.04'      
+
+      - name: golangci-lint
+        if: matrix.os == 'ubuntu-20.04'      
+        continue-on-error: true
+        uses: golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout 10m --build-tags=static
+          only-new-issues: true
+
+      - id: export_tests_to_env
+        name: set test name
+        run: |
+          echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
+        env:
+          input: ${{ inputs.BINARY_TESTS }}
+
+      - uses: actions/upload-artifact@v3.1.1
+        name: Upload artifact (Linux)
+        if: matrix.os == 'ubuntu-20.04'
+        with:
+          name: kubescape-ubuntu-latest
+          path: build/ubuntu-latest/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v3.1.1
+        name: Upload artifact (MacOS, Win)
+        if: matrix.os != 'ubuntu-20.04'
+        with:
+          name: kubescape-${{ matrix.os }}
+          path: build/${{ matrix.os }}/
+          if-no-files-found: error
+
+  run-tests:
+    strategy:
+      fail-fast: false    
+      matrix:
+        TEST: ${{ fromJson(needs.binary-build.outputs.TEST_NAMES) }}
+    needs: binary-build
+    runs-on: ubuntu-20.04 # This cannot change
+    steps:
+
+      - uses: actions/download-artifact@v3.0.2
+        id: download-artifact
+        with:
+          name: kubescape-ubuntu-latest
+          path: "~"
+
+      - run: ls -laR
+
+      - name: chmod +x
+        run: chmod +x ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
+
+      - name: Checkout systests repo
+        uses: actions/checkout@v3
+        with:
+          repository: armosec/system-tests
+          path: .
+          
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.8.13'
+          cache: 'pip'
+
+      - name: create env
+        run: ./create_env.sh
+
+      - name: Generate uuid
+        id: uuid
+        run: | 
+          echo "RANDOM_UUID=$(uuidgen)" >> $GITHUB_OUTPUT
+
+      - name: Create k8s Kind Cluster
+        id: kind-cluster-install
+        uses: helm/kind-action@v1.3.0
+        with:
+          cluster_name: ${{ steps.uuid.outputs.RANDOM_UUID }}
+
+      - name: run-tests
+        env:
+          CUSTOMER: ${{ secrets.CUSTOMER }}
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          CLIENT_ID: ${{ secrets.CLIENT_ID_PROD }}
+          SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+
+        run: |
+          echo "Test history:"
+          echo " ${{ matrix.TEST }} " >/tmp/testhistory
+          cat /tmp/testhistory
+          source systests_python_env/bin/activate
+
+          python3 systest-cli.py             \
+            -t ${{ matrix.TEST }}            \
+            -b production                    \
+            -c CyberArmorTests               \
+            --duration 3                     \
+            --logger DEBUG                   \
+            --kwargs kubescape=${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
+          
+          deactivate
+          
+      - name: Test Report
+        uses: mikepenz/action-junit-report@v3.6.1
+        if: always() # always run even if the previous step fails
+        with:
+          report_paths: '**/results_xml_format/**.xml'
+          commit: ${{github.event.workflow_run.head_sha}}
+
+          
