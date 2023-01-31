@@ -37,7 +37,7 @@ var (
 )
 
 // controlCmd represents the control command
-func getControlCmd(ctx context.Context, ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
+func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	return &cobra.Command{
 		Use:     "control <control names list>/<control ids list>",
 		Short:   fmt.Sprintf("The controls you wish to use. Run '%[1]s list controls' for the list of supported controls", cautils.ExecName()),
@@ -97,20 +97,21 @@ func getControlCmd(ctx context.Context, ks meta.IKubescape, scanInfo *cautils.Sc
 				return err
 			}
 
+			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)
 			if err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+				logger.L().Fatal(err.Error())
 			}
 			if err := results.HandleResults(ctx); err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+				logger.L().Fatal(err.Error())
 			}
 			if !scanInfo.VerboseMode {
 				cautils.SimpleDisplay(os.Stderr, "%s  Run with '--verbose'/'-v' flag for detailed resources view\n\n", emoji.Detective)
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
-				logger.L().Ctx(ctx).Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
+				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
-			enforceSeverityThresholds(ctx, results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
+			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 
 			return nil
 		},

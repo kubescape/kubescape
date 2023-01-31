@@ -43,7 +43,7 @@ var (
 	ErrUnknownSeverity = errors.New("unknown severity")
 )
 
-func getFrameworkCmd(ctx context.Context, ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
+func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 
 	return &cobra.Command{
 		Use:     "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
@@ -104,22 +104,23 @@ func getFrameworkCmd(ctx context.Context, ks meta.IKubescape, scanInfo *cautils.
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
+			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)
 			if err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+				logger.L().Fatal(err.Error())
 			}
 
 			if err = results.HandleResults(ctx); err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+				logger.L().Fatal(err.Error())
 			}
 			if !scanInfo.VerboseMode {
 				cautils.SimpleDisplay(os.Stderr, "Run with '--verbose'/'-v' flag for detailed resources view\n\n")
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
-				logger.L().Ctx(ctx).Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
+				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
 
-			enforceSeverityThresholds(ctx, results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
+			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 			return nil
 		},
 	}
@@ -169,7 +170,7 @@ func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger)
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
 //
 // The function forces the application to terminate with an exit code 1 if at least one control failed control that exceeds the set severity threshold
-func enforceSeverityThresholds(ctx context.Context, severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo, onExceed func(*cautils.ScanInfo, helpers.ILogger)) {
+func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo, onExceed func(*cautils.ScanInfo, helpers.ILogger)) {
 	// If a severity threshold is not set, we don’t need to enforce it
 	if scanInfo.FailThresholdSeverity == "" {
 		return
@@ -178,7 +179,7 @@ func enforceSeverityThresholds(ctx context.Context, severityCounters reportsumma
 	if val, err := countersExceedSeverityThreshold(severityCounters, scanInfo); val && err == nil {
 		onExceed(scanInfo, logger.L())
 	} else if err != nil {
-		logger.L().Ctx(ctx).Fatal(err.Error())
+		logger.L().Fatal(err.Error())
 	}
 }
 

@@ -29,7 +29,7 @@ var (
 `, cautils.ExecName())
 )
 
-func GetListCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
+func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	var listPolicies = v1.ListPolicies{}
 
 	listCmd := &cobra.Command{
@@ -56,8 +56,8 @@ func GetListCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 
 			listPolicies.Target = args[0]
 
-			if err := ks.List(ctx, &listPolicies); err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+			if err := ks.List(context.TODO(), &listPolicies); err != nil {
+				logger.L().Fatal(err.Error())
 			}
 			return nil
 		},

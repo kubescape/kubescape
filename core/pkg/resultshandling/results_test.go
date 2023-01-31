@@ -12,7 +12,7 @@ import (
 
 type DummyReporter struct{}
 
-func (dr *DummyReporter) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
+func (dr *DummyReporter) Submit(_ context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	return nil
 }
 func (dr *DummyReporter) SetCustomerGUID(customerGUID string) {}
@@ -25,8 +25,8 @@ type SpyPrinter struct {
 	ScoreCalls       int
 }
 
-func (sp *SpyPrinter) SetWriter(ctx context.Context, outputFile string) {}
-func (sp *SpyPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (sp *SpyPrinter) SetWriter(_ context.Context, outputFile string) {}
+func (sp *SpyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
 	sp.ActionPrintCalls += 1
 }
 func (sp *SpyPrinter) Score(score float32) {

@@ -9,14 +9,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func getDeleteCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
+func getDeleteCmd(ks meta.IKubescape) *cobra.Command {
 	return &cobra.Command{
 		Use:   "delete",
 		Short: "Delete cached configurations",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := ks.DeleteCachedConfig(ctx, &v1.DeleteConfig{}); err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+			if err := ks.DeleteCachedConfig(context.TODO(), &v1.DeleteConfig{}); err != nil {
+				logger.L().Fatal(err.Error())
 			}
 		},
 	}

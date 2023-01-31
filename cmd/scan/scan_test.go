@@ -165,7 +165,7 @@ func Test_enforceSeverityThresholds(t *testing.T) {
 					got = true
 				}
 
-				enforceSeverityThresholds(context.TODO(), severityCounters, scanInfo, onExceed)
+				enforceSeverityThresholds(severityCounters, scanInfo, onExceed)
 
 				if got != want {
 					t.Errorf("got: %v, want %v", got, want)

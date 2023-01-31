@@ -42,7 +42,7 @@ var (
 `, cautils.ExecName())
 )
 
-func GetDownloadCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
+func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	var downloadInfo = v1.DownloadInfo{}
 
 	downloadCmd := &cobra.Command{
@@ -75,8 +75,8 @@ func GetDownloadCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 				downloadInfo.Identifier = args[1]
 
 			}
-			if err := ks.Download(ctx, &downloadInfo); err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+			if err := ks.Download(context.TODO(), &downloadInfo); err != nil {
+				logger.L().Fatal(err.Error())
 			}
 			return nil
 		},

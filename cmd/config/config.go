@@ -1,8 +1,6 @@
 package config
 
 import (
-	"context"
-
 	"fmt"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -36,7 +34,7 @@ var (
 `, cautils.ExecName())
 )
 
-func GetConfigCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
+func GetConfigCmd(ks meta.IKubescape) *cobra.Command {
 
 	// configCmd represents the config command
 	configCmd := &cobra.Command{
@@ -45,9 +43,9 @@ func GetConfigCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 		Example: configExample,
 	}
 
-	configCmd.AddCommand(getDeleteCmd(ctx, ks))
-	configCmd.AddCommand(getSetCmd(ctx, ks))
-	configCmd.AddCommand(getViewCmd(ctx, ks))
+	configCmd.AddCommand(getDeleteCmd(ks))
+	configCmd.AddCommand(getSetCmd(ks))
+	configCmd.AddCommand(getViewCmd(ks))
 
 	return configCmd
 }

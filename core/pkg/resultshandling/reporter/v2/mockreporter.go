@@ -20,7 +20,7 @@ func NewReportMock(query, message string) *ReportMock {
 		message: message,
 	}
 }
-func (reportMock *ReportMock) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
+func (reportMock *ReportMock) Submit(_ context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	return nil
 }
 

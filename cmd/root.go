@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -41,12 +40,12 @@ var ksExamples = fmt.Sprintf(`
   %[1]s config view
 `, cautils.ExecName())
 
-func NewDefaultKubescapeCommand(ctx context.Context) *cobra.Command {
+func NewDefaultKubescapeCommand() *cobra.Command {
 	ks := core.NewKubescape()
-	return getRootCmd(ctx, ks)
+	return getRootCmd(ks)
 }
 
-func getRootCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
+func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:     "kubescape",
@@ -81,21 +80,21 @@ func getRootCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
 	// Supported commands
-	rootCmd.AddCommand(scan.GetScanCommand(ctx, ks))
-	rootCmd.AddCommand(download.GetDownloadCmd(ctx, ks))
-	rootCmd.AddCommand(delete.GetDeleteCmd(ctx, ks))
-	rootCmd.AddCommand(list.GetListCmd(ctx, ks))
-	rootCmd.AddCommand(submit.GetSubmitCmd(ctx, ks))
-	rootCmd.AddCommand(completion.GetCompletionCmd(ctx))
-	rootCmd.AddCommand(version.GetVersionCmd(ctx))
-	rootCmd.AddCommand(config.GetConfigCmd(ctx, ks))
-	rootCmd.AddCommand(update.GetUpdateCmd(ctx))
-	rootCmd.AddCommand(fix.GetFixCmd(ctx, ks))
+	rootCmd.AddCommand(scan.GetScanCommand(ks))
+	rootCmd.AddCommand(download.GetDownloadCmd(ks))
+	rootCmd.AddCommand(delete.GetDeleteCmd(ks))
+	rootCmd.AddCommand(list.GetListCmd(ks))
+	rootCmd.AddCommand(submit.GetSubmitCmd(ks))
+	rootCmd.AddCommand(completion.GetCompletionCmd())
+	rootCmd.AddCommand(version.GetVersionCmd())
+	rootCmd.AddCommand(config.GetConfigCmd(ks))
+	rootCmd.AddCommand(update.GetUpdateCmd())
+	rootCmd.AddCommand(fix.GetFixCmd(ks))
 
 	return rootCmd
 }
 
-func Execute(ctx context.Context) error {
-	ks := NewDefaultKubescapeCommand(ctx)
+func Execute() error {
+	ks := NewDefaultKubescapeCommand()
 	return ks.Execute()
 }

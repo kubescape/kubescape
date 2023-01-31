@@ -104,7 +104,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		)
 }
 
-func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (sp *SARIFPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
 		panic(err)

@@ -30,7 +30,7 @@ var (
 )
 
 // getRBACCmd represents the RBAC command
-func getRBACCmd(ctx context.Context, ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
+func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 	return &cobra.Command{
 		Use:        "rbac",
 		Deprecated: "This command is deprecated and will not be supported after 1/Jan/2023. Please use the 'scan' command instead.",
@@ -48,7 +48,7 @@ func getRBACCmd(ctx context.Context, ks meta.IKubescape, submitInfo *v1.Submit) 
 			// get config
 			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", "", k8s)
 			if err := clusterConfig.SetTenant(); err != nil {
-				logger.L().Ctx(ctx).Error("failed setting account ID", helpers.Error(err))
+				logger.L().Error("failed setting account ID", helpers.Error(err))
 			}
 
 			if clusterConfig.GetAccountID() == "" {
@@ -67,8 +67,8 @@ func getRBACCmd(ctx context.Context, ks meta.IKubescape, submitInfo *v1.Submit) 
 				Reporter:      r,
 			}
 
-			if err := ks.Submit(ctx, submitInterfaces); err != nil {
-				logger.L().Ctx(ctx).Fatal(err.Error())
+			if err := ks.Submit(context.TODO(), submitInterfaces); err != nil {
+				logger.L().Fatal(err.Error())
 			}
 			return nil
 		},

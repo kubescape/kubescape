@@ -41,7 +41,7 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 	}
 }
 
-func (pp *PrettyPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
 	fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
 
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())

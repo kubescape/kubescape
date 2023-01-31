@@ -1,8 +1,6 @@
 package delete
 
 import (
-	"context"
-
 	"fmt"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -19,7 +17,7 @@ var deleteExceptionsExamples = fmt.Sprintf(`
   %[1]s delete exceptions "first exception;second exception;third exception"
 `, cautils.ExecName())
 
-func GetDeleteCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
+func GetDeleteCmd(ks meta.IKubescape) *cobra.Command {
 	var deleteInfo v1.Delete
 
 	var deleteCmd = &cobra.Command{
@@ -33,7 +31,7 @@ func GetDeleteCmd(ctx context.Context, ks meta.IKubescape) *cobra.Command {
 	deleteCmd.PersistentFlags().StringVarP(&deleteInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
 	deleteCmd.PersistentFlags().StringVarP(&deleteInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 
-	deleteCmd.AddCommand(getExceptionsCmd(ctx, ks, &deleteInfo))
+	deleteCmd.AddCommand(getExceptionsCmd(ks, &deleteInfo))
 
 	return deleteCmd
 }
