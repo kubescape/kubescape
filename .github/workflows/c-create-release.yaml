@@ -1,0 +1,64 @@
+name: c-create_release
+on:
+  workflow_call:
+    inputs:
+      RELEASE_NAME:
+        description: 'Release name'
+        required: true
+        type: string
+      TAG:
+        description: 'Tag name'
+        required: true
+        type: string
+      DRAFT:
+        description: 'Create draft release'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+
+  create-release:
+    name: create-release
+    runs-on: ubuntu-latest
+    # permissions:
+    #   contents: write    
+    steps:
+      - uses: actions/download-artifact@v3.0.2
+        id: download-artifact
+        with:
+          path: .
+
+      - run: ls -laR
+
+      - name: artifacts rename
+        run: |
+
+          MAC_OS=macos-latest
+          UBUNTU_OS=ubuntu-latest
+          WINDOWS_OS=windows-latest
+
+          mv ./kubescape-$MAC_OS/kubescape-$MAC_OS ./kubescape-$MAC_OS/kubescape-$MAC_OS-${{ inputs.TAG }}
+          mv ./kubescape-$MAC_OS/kubescape-$MAC_OS.sha256 ./kubescape-$MAC_OS/kubescape-$MAC_OS-${{ inputs.TAG }}.sha256
+
+          mv ./kubescape-$UBUNTU_OS/kubescape-$UBUNTU_OS ./kubescape-$UBUNTU_OS/kubescape-$UBUNTU_OS-${{ inputs.TAG }}
+          mv ./kubescape-$UBUNTU_OS/kubescape-$UBUNTU_OS.sha256 ./kubescape-$UBUNTU_OS/kubescape-$UBUNTU_OS-${{ inputs.TAG }}.sha256
+
+          mv ./kubescape-$WINDOWS_OS/kubescape-$WINDOWS_OS ./kubescape-$WINDOWS_OS/kubescape-$WINDOWS_OS-${{ inputs.TAG }}
+          mv ./kubescape-$WINDOWS_OS/kubescape-$WINDOWS_OS.sha256 ./kubescape-$WINDOWS_OS/kubescape-$WINDOWS_OS-${{ inputs.TAG }}.sha256
+
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          name: ${{ inputs.RELEASE_NAME }}
+          tag_name: ${{ inputs.TAG }}
+          body: ${{ github.event.pull_request.body }}
+          draft: ${{ inputs.DRAFT }}
+          fail_on_unmatched_files: true
+          prerelease: false
+          files: |
+            ./kubescape-ubuntu-latest/*
+            ./kubescape-macos-latest/*
+            ./kubescape-windows-latest/*
+            
