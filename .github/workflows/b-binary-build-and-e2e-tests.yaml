@@ -210,8 +210,6 @@ jobs:
           name: kubescape-ubuntu-latest
           path: "~"
 
-      - run: ls -laR
-
       - name: chmod +x
         run: chmod +x ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
 
