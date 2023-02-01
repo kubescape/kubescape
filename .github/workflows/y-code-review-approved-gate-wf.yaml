@@ -1,0 +1,26 @@
+name: y-code-review-approved-gate-wf
+on:
+  pull_request_review:
+    types: [submitted]
+    branches:
+      - 'master'
+      - 'main'
+    paths-ignore:
+      - '**.yaml'
+      - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
+
+
+jobs:
+  trigger-gate:
+    if: ${{ github.event.review.state == 'approved' && 
+            (github.event.pull_request.base.ref == 'master' || github.event.pull_request.base.ref == 'main') }} ## triggers only if code review approved an
+    runs-on: ubuntu-latest
+    steps:
+      - name: trigger workflow_run
+        run: echo "trigger workflow_run -> code-review-approved-gate-wf"
