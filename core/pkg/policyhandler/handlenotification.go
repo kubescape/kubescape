@@ -65,7 +65,7 @@ func (policyHandler *PolicyHandler) getResources(policyIdentifier []cautils.Poli
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators)
+	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(opaSessionObj, &policyIdentifier[0].Designators, scanInfo)
 	if err != nil {
 		return err
 	}
