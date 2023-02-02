@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -15,6 +16,7 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+	"go.opentelemetry.io/otel"
 
 	"github.com/google/uuid"
 
@@ -35,7 +37,7 @@ func getTenantConfig(credentials *cautils.Credentials, clusterName string, custo
 	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
 }
 
-func getExceptionsGetter(useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
+func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
 	if useExceptions != "" {
 		// load exceptions from file
 		return getter.NewLoadPolicy([]string{useExceptions})
@@ -49,7 +51,7 @@ func getExceptionsGetter(useExceptions string, accountID string, downloadRelease
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
-		logger.L().Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
 		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
 	}
 	return downloadReleasedPolicy
@@ -63,7 +65,9 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanningContext cautils.ScanningContext) reporter.IReport {
+func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanningContext cautils.ScanningContext) reporter.IReport {
+	ctx, span := otel.Tracer("").Start(ctx, "getReporter")
+	defer span.End()
 	if submit {
 		submitData := reporterv2.SubmitContextScan
 		if scanningContext != cautils.ContextCluster {
@@ -83,17 +87,19 @@ func getReporter(tenantConfig cautils.ITenantConfig, reportID string, submit, fw
 	return reporterv2.NewReportMock("", message)
 }
 
-func getResourceHandler(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
+func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
+	ctx, span := otel.Tracer("").Start(ctx, "getResourceHandler")
+	defer span.End()
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
 		// scanInfo.HostSensor.SetBool(false)
-		return resourcehandler.NewFileResourceHandler(scanInfo.InputPatterns, registryAdaptors)
+		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, registryAdaptors)
 	}
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
 	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors)
 }
 
-func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
+func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
 		return &hostsensorutils.HostSensorHandlerMock{}
 	}
@@ -102,12 +108,12 @@ func getHostSensorHandler(scanInfo *cautils.ScanInfo, k8s *k8sinterface.Kubernet
 	// we need to determined which controls needs host scanner
 	if scanInfo.HostSensorEnabled.Get() == nil && hasHostSensorControls {
 		scanInfo.HostSensorEnabled.SetBool(false) // default - do not run host scanner
-		logger.L().Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using the --enable-host-scan flag")
+		logger.L().Ctx(ctx).Warning("Kubernetes cluster nodes scanning is disabled. This is required to collect valuable data for certain controls. You can enable it using the --enable-host-scan flag")
 	}
 	if hostSensorVal := scanInfo.HostSensorEnabled.Get(); hostSensorVal != nil && *hostSensorVal {
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
-			logger.L().Warning(fmt.Sprintf("failed to create host scanner: %s", err.Error()))
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create host scanner: %s", err.Error()))
 			return &hostsensorutils.HostSensorHandlerMock{}
 		}
 		return hostSensorHandler
@@ -189,7 +195,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(loadPoliciesFromFile []string, tenantEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, tenantEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
@@ -200,12 +206,12 @@ func getPolicyGetter(loadPoliciesFromFile []string, tenantEmail string, framewor
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
-	return getDownloadReleasedPolicy(downloadReleasedPolicy)
+	return getDownloadReleasedPolicy(ctx, downloadReleasedPolicy)
 
 }
 
 // setConfigInputsGetter sets the config input getter - local file/github release/Kubescape Cloud API
-func getConfigInputsGetter(ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
+func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
 	}
@@ -217,14 +223,14 @@ func getConfigInputsGetter(ControlsInputs string, accountID string, downloadRele
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull config inputs, fallback to BE
-		logger.L().Warning("failed to get config inputs from github release, this may affect the scanning results", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to get config inputs from github release, this may affect the scanning results", helpers.Error(err))
 	}
 	return downloadReleasedPolicy
 }
 
-func getDownloadReleasedPolicy(downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull policy, fallback to cache
-		logger.L().Warning("failed to get policies from github release, loading policies from cache", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to get policies from github release, loading policies from cache", helpers.Error(err))
 		return getter.NewLoadPolicy(getDefaultFrameworksPaths())
 	} else {
 		return downloadReleasedPolicy
@@ -247,7 +253,7 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	return getter.NativeFrameworks
 }
 
-func getAttackTracksGetter(attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
+func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IAttackTracksGetter {
 	if len(attackTracks) > 0 {
 		return getter.NewLoadPolicy([]string{attackTracks})
 	}
@@ -260,18 +266,18 @@ func getAttackTracksGetter(attackTracks, accountID string, downloadReleasedPolic
 	}
 
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
-		logger.L().Warning("failed to get attack tracks from github release, loading attack tracks from cache", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to get attack tracks from github release, loading attack tracks from cache", helpers.Error(err))
 		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalAttackTracksFilename)})
 	}
 	return downloadReleasedPolicy
 }
 
 // getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
-func getUIPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
+func getUIPrinter(ctx context.Context, verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
 	p := printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
 
 	// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
-	p.SetWriter(os.Stdout.Name())
+	p.SetWriter(ctx, os.Stdout.Name())
 
 	return p
 }

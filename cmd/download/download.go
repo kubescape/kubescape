@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -41,7 +42,7 @@ var (
 `, cautils.ExecName())
 )
 
-func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
+func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	var downloadInfo = v1.DownloadInfo{}
 
 	downloadCmd := &cobra.Command{
@@ -74,7 +75,7 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				downloadInfo.Identifier = args[1]
 
 			}
-			if err := ks.Download(&downloadInfo); err != nil {
+			if err := ks.Download(context.TODO(), &downloadInfo); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

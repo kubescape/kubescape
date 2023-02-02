@@ -1,6 +1,7 @@
 package resultshandling
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -67,23 +68,23 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 }
 
 // HandleResults handles all necessary actions for the scan results
-func (rh *ResultsHandler) HandleResults() error {
+func (rh *ResultsHandler) HandleResults(ctx context.Context) error {
 	// Display scan results in the UI first to give immediate value.
 	// First we output the results and then the score, so the
 	// score - a summary of the results—can always be seen at the end
 	// of output
-	rh.uiPrinter.ActionPrint(rh.scanData)
+	rh.uiPrinter.ActionPrint(ctx, rh.scanData)
 	rh.uiPrinter.Score(rh.GetRiskScore())
 
 	// Then print to output files
 	for _, printer := range rh.printerObjs {
-		printer.ActionPrint(rh.scanData)
+		printer.ActionPrint(ctx, rh.scanData)
 		printer.Score(rh.GetRiskScore())
 	}
 
 	// We should submit only after printing results, so a user can see
 	// results at all times, even if submission fails
-	if err := rh.reporterObj.Submit(rh.scanData); err != nil {
+	if err := rh.reporterObj.Submit(ctx, rh.scanData); err != nil {
 		return err
 	}
 	rh.reporterObj.DisplayReportURL()
@@ -92,7 +93,7 @@ func (rh *ResultsHandler) HandleResults() error {
 }
 
 // NewPrinter returns a new printer for a given format and configuration options
-func NewPrinter(printFormat, formatVersion string, verboseMode bool, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
+func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseMode, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
 
 	switch printFormat {
 	case printer.JsonFormat:
@@ -100,7 +101,7 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, attackTree 
 		case "v2":
 			return printerv2.NewJsonPrinter()
 		default:
-			logger.L().Warning("Deprecated format version", helpers.String("run", "--format-version=v2"), helpers.String("This will not be supported after", "1/Jan/2023"))
+			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"), helpers.String("This will not be supported after", "1/Jan/2023"))
 			return printerv1.NewJsonPrinter()
 		}
 	case printer.JunitResultFormat:
@@ -115,7 +116,7 @@ func NewPrinter(printFormat, formatVersion string, verboseMode bool, attackTree 
 		return printerv2.NewSARIFPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
-			logger.L().Error(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
+			logger.L().Ctx(ctx).Error(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
 	}

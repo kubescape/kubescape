@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 	}
 }
 
-func (pp *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
 	fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
 
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
@@ -65,12 +66,12 @@ func (pp *PrettyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	pp.printAttackTracks(opaSessionObj)
 }
 
-func (pp *PrettyPrinter) SetWriter(outputFile string) {
+func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 	// PrettyPrinter should accept Stdout at least by its full name (path)
 	// and follow the common behavior of outputting to a default filename
 	// otherwise
 	if outputFile == os.Stdout.Name() {
-		pp.writer = printer.GetWriter("")
+		pp.writer = printer.GetWriter(ctx, "")
 		return
 	}
 
@@ -81,7 +82,7 @@ func (pp *PrettyPrinter) SetWriter(outputFile string) {
 		outputFile = outputFile + prettyPrinterOutputExt
 	}
 
-	pp.writer = printer.GetWriter(outputFile)
+	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (pp *PrettyPrinter) Score(score float32) {

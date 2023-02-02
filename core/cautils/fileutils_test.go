@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(onlineBoutiquePath(), "")
+	workloads := LoadResourcesFromFiles(context.TODO(), onlineBoutiquePath(), "")
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -44,7 +45,7 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads, sourceToChartName := LoadResourcesFromHelmCharts(helmChartPath())
+	sourceToWorkloads, sourceToChartName := LoadResourcesFromHelmCharts(context.TODO(), helmChartPath())
 	assert.Equal(t, 6, len(sourceToWorkloads))
 
 	for file, workloads := range sourceToWorkloads {

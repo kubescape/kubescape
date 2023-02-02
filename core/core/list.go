@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -13,13 +14,13 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-var listFunc = map[string]func(*metav1.ListPolicies) ([]string, error){
+var listFunc = map[string]func(context.Context, *metav1.ListPolicies) ([]string, error){
 	"controls":   listControls,
 	"frameworks": listFrameworks,
 	"exceptions": listExceptions,
 }
 
-var listFormatFunc = map[string]func(string, []string){
+var listFormatFunc = map[string]func(context.Context, string, []string){
 	"pretty-print": prettyPrintListFormat,
 	"json":         jsonListFormat,
 }
@@ -31,16 +32,16 @@ func ListSupportActions() []string {
 	}
 	return commands
 }
-func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
+func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies) error {
 	if policyListerFunc, ok := listFunc[listPolicies.Target]; ok {
-		policies, err := policyListerFunc(listPolicies)
+		policies, err := policyListerFunc(ctx, listPolicies)
 		if err != nil {
 			return err
 		}
 		sort.Strings(policies)
 
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
-			listFormatFunction(listPolicies.Target, policies)
+			listFormatFunction(ctx, listPolicies.Target, policies)
 		} else {
 			return fmt.Errorf("Invalid format \"%s\", Supported formats: 'pretty-print'/'json' ", listPolicies.Format)
 		}
@@ -50,26 +51,26 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 	return fmt.Errorf("unknown command to download")
 }
 
-func listFrameworks(listPolicies *metav1.ListPolicies) ([]string, error) {
+func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi()) // change k8sinterface
-	policyGetter := getPolicyGetter(nil, tenant.GetTenantEmail(), true, nil)
+	policyGetter := getPolicyGetter(ctx, nil, tenant.GetTenantEmail(), true, nil)
 
 	return listFrameworksNames(policyGetter), nil
 }
 
-func listControls(listPolicies *metav1.ListPolicies) ([]string, error) {
+func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
 	tenant := getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi()) // change k8sinterface
 
-	policyGetter := getPolicyGetter(nil, tenant.GetTenantEmail(), false, nil)
+	policyGetter := getPolicyGetter(ctx, nil, tenant.GetTenantEmail(), false, nil)
 	return policyGetter.ListControls()
 }
 
-func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
+func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
 	// load tenant metav1
 	tenant := getTenantConfig(&listPolicies.Credentials, "", "", getKubernetesApi())
 
 	var exceptionsNames []string
-	ksCloudAPI := getExceptionsGetter("", tenant.GetAccountID(), nil)
+	ksCloudAPI := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil)
 	exceptions, err := ksCloudAPI.GetExceptions("")
 	if err != nil {
 		return exceptionsNames, err
@@ -80,15 +81,15 @@ func listExceptions(listPolicies *metav1.ListPolicies) ([]string, error) {
 	return exceptionsNames, nil
 }
 
-func prettyPrintListFormat(targetPolicy string, policies []string) {
+func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []string) {
 	if targetPolicy == "controls" {
-		prettyPrintControls(policies)
+		prettyPrintControls(ctx, policies)
 		return
 	}
 
 	header := fmt.Sprintf("Supported %s", targetPolicy)
 
-	policyTable := tablewriter.NewWriter(printer.GetWriter(""))
+	policyTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
 	policyTable.SetAutoWrapText(true)
 	policyTable.SetHeader([]string{header})
 	policyTable.SetHeaderLine(true)
@@ -103,14 +104,14 @@ func prettyPrintListFormat(targetPolicy string, policies []string) {
 	policyTable.Render()
 }
 
-func jsonListFormat(targetPolicy string, policies []string) {
+func jsonListFormat(_ context.Context, _ string, policies []string) {
 	j, _ := json.MarshalIndent(policies, "", "  ")
 
 	fmt.Printf("%s\n", j)
 }
 
-func prettyPrintControls(policies []string) {
-	controlsTable := tablewriter.NewWriter(printer.GetWriter(""))
+func prettyPrintControls(ctx context.Context, policies []string) {
+	controlsTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
 	controlsTable.SetAutoWrapText(true)
 	controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
 	controlsTable.SetHeaderLine(true)
