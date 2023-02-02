@@ -29,6 +29,8 @@ jobs:
         with:
           path: .
 
+      - run: ls -laR
+
       - name: artifacts rename
         run: |
 
