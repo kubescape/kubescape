@@ -36,14 +36,14 @@ jobs:
           UBUNTU_OS=ubuntu-latest
           WINDOWS_OS=windows-latest
 
-          mv ./build/kubescape-$MAC_OS ./build/kubescape-$MAC_OS-${{ inputs.TAG }}
-          mv ./build/kubescape-$MAC_OS.sha256 ./build/kubescape-$MAC_OS-${{ inputs.TAG }}.sha256
+          mv ./kubescape/kubescape-$MAC_OS ./kubescape/kubescape-$MAC_OS-${{ inputs.TAG }}
+          mv ./kubescape/kubescape-$MAC_OS.sha256 ./kubescape/kubescape-$MAC_OS-${{ inputs.TAG }}.sha256
 
-          mv ./build/kubescape-$UBUNTU_OS ./build/kubescape-$UBUNTU_OS-${{ inputs.TAG }}
-          mv ./build/kubescape-$UBUNTU_OS.sha256 ./build/kubescape-$UBUNTU_OS-${{ inputs.TAG }}.sha256
+          mv ./kubescape/kubescape-$UBUNTU_OS ./kubescape/kubescape-$UBUNTU_OS-${{ inputs.TAG }}
+          mv ./kubescape/kubescape-$UBUNTU_OS.sha256 ./kubescape/kubescape-$UBUNTU_OS-${{ inputs.TAG }}.sha256
 
-          mv ./build/kubescape-$WINDOWS_OS ./build/kubescape-$WINDOWS_OS-${{ inputs.TAG }}
-          mv ./build/kubescape-$WINDOWS_OS.sha256 ./build/kubescape-$WINDOWS_OS-${{ inputs.TAG }}.sha256
+          mv ./kubescape/kubescape-$WINDOWS_OS ./kubescape/kubescape-$WINDOWS_OS-${{ inputs.TAG }}
+          mv ./kubescape/kubescape-$WINDOWS_OS.sha256 ./kubescape/kubescape-$WINDOWS_OS-${{ inputs.TAG }}.sha256
 
         # run: |
 
