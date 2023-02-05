@@ -245,27 +245,27 @@ type Metrics struct {
 }
 
 func (mrs *mRiskScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
-	mrs.resourcesCountExcluded = resources.Excluded()
+	mrs.resourcesCountExcluded = 0
 	mrs.resourcesCountFailed = resources.Failed()
 	mrs.resourcesCountPassed = resources.Passed()
-	mrs.controlsCountExcluded = controls.Excluded()
+	mrs.controlsCountExcluded = 0
 	mrs.controlsCountFailed = controls.Failed()
 	mrs.controlsCountPassed = controls.Passed()
 	mrs.controlsCountSkipped = controls.Skipped()
 }
 
 func (mfrs *mFrameworkRiskScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
-	mfrs.resourcesCountExcluded = resources.Excluded()
+	mfrs.resourcesCountExcluded = 0
 	mfrs.resourcesCountFailed = resources.Failed()
 	mfrs.resourcesCountPassed = resources.Passed()
-	mfrs.controlsCountExcluded = controls.Excluded()
+	mfrs.controlsCountExcluded = 0
 	mfrs.controlsCountFailed = controls.Failed()
 	mfrs.controlsCountPassed = controls.Passed()
 	mfrs.controlsCountSkipped = controls.Skipped()
 }
 
 func (mcrs *mControlRiskScore) set(resources reportsummary.ICounters) {
-	mcrs.resourcesCountExcluded = resources.Excluded()
+	mcrs.resourcesCountExcluded = 0
 	mcrs.resourcesCountFailed = resources.Failed()
 	mcrs.resourcesCountPassed = resources.Passed()
 }

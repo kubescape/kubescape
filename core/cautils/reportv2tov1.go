@@ -74,7 +74,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 					rulev1 := rulesv1[rulev2.GetName()]
 					status := rulev2.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}})
 
-					if status.IsFailed() || status.IsExcluded() {
+					if status.IsFailed() {
 
 						// rule response
 						ruleResponse := reporthandling.RuleResponse{}

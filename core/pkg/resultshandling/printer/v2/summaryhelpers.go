@@ -80,7 +80,6 @@ func listResultSummary(controlSummary reportsummary.IControlSummary, allResource
 	workloadsSummary := []WorkloadSummary{}
 
 	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Failed(), apis.StatusFailed)...)
-	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Excluded(), apis.StatusExcluded)...)
 	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Passed(), apis.StatusPassed)...)
 
 	return workloadsSummary

@@ -105,7 +105,7 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 func (pp *PdfPrinter) printHeader(m pdf.Maroto) {
 	// Retrieve current time (we need it for the report timestamp).
 	t := time.Now()
-	// Enconde PNG into Base64 to embed it into the pdf.
+	// Encode PNG into Base64 to embed it into the pdf.
 	kubescapeLogoEnc := b64.StdEncoding.EncodeToString(kubescapeLogo)
 
 	m.SetPageMargins(10, 15, 10)
@@ -208,7 +208,7 @@ func (pp *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *reportsumma
 			})
 		})
 		m.Col(2, func() {
-			m.Text(fmt.Sprintf("%d", summaryDetails.NumberOfResources().Excluded()), props.Text{
+			m.Text(fmt.Sprintf("%d", 0), props.Text{
 				Align:  consts.Left,
 				Size:   8.0,
 				Style:  consts.Bold,

@@ -41,7 +41,7 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 		row[columnName] = controlSummary.GetName()
 	}
 	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
-	row[columnCounterExclude] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Excluded())
+	row[columnCounterExclude] = fmt.Sprintf("%d", 0)
 	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
 	row[columnRiskScore] = getRiskScoreColumn(controlSummary, infoToPrintInfo)
 
