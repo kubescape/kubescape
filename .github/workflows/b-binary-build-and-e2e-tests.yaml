@@ -70,8 +70,6 @@ jobs:
 
 
   binary-build:
-    needs: [check-secret]
-    if: needs.check-secret.outputs.is-secret-set == 'true'
     name: Create cross-platform build
     outputs:
       TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}    
@@ -153,14 +151,14 @@ jobs:
         env:
           RELEASE: ${{ inputs.RELEASE }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape-${{ matrix.os }}
+        run: python3 smoke_testing/init.py ${PWD}/build/kubescape-${{ matrix.os }}
         if: matrix.os != 'ubuntu-20.04'
 
       - name: Smoke Testing (Linux)
         env:
           RELEASE: ${{ inputs.RELEASE }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py ${PWD}/build/ubuntu-latest/kubescape-ubuntu-latest
+        run: python3 smoke_testing/init.py ${PWD}/build/kubescape-ubuntu-latest
         if: matrix.os == 'ubuntu-20.04'      
 
       - name: golangci-lint
@@ -184,7 +182,7 @@ jobs:
         if: matrix.os == 'ubuntu-20.04'
         with:
           name: kubescape-ubuntu-latest
-          path: build/ubuntu-latest/
+          path: build/
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v3.1.1
@@ -192,7 +190,7 @@ jobs:
         if: matrix.os != 'ubuntu-20.04'
         with:
           name: kubescape-${{ matrix.os }}
-          path: build/${{ matrix.os }}/
+          path: build/
           if-no-files-found: error
 
   run-tests:
@@ -200,8 +198,9 @@ jobs:
       fail-fast: false    
       matrix:
         TEST: ${{ fromJson(needs.binary-build.outputs.TEST_NAMES) }}
-    needs: binary-build
-    runs-on: ubuntu-20.04 # This cannot change
+    needs: [check-secret, binary-build]
+    if: needs.check-secret.outputs.is-secret-set == 'true'
+    runs-on: ubuntu-latest # This cannot change
     steps:
 
       - uses: actions/download-artifact@v3.0.2
@@ -213,7 +212,7 @@ jobs:
       - run: ls -laR
 
       - name: chmod +x
-        run: chmod +x ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
+        run: chmod +x -R ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
 
       - name: Checkout systests repo
         uses: actions/checkout@v3
