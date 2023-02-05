@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,20 +24,20 @@ const (
 )
 
 type IPrinter interface {
-	ActionPrint(opaSessionObj *cautils.OPASessionObj)
-	SetWriter(outputFile string)
+	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj)
+	SetWriter(ctx context.Context, outputFile string)
 	Score(score float32)
 }
 
-func GetWriter(outputFile string) *os.File {
+func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err != nil {
-			logger.L().Error(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
+			logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
 		f, err := os.Create(outputFile)
 		if err != nil {
-			logger.L().Error(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
+			logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout
 		}
 		return f

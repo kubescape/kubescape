@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"testing"
 
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -10,7 +11,7 @@ import (
 func TestSetContextMetadata(t *testing.T) {
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
-		setContextMetadata(&ctx, "")
+		setContextMetadata(context.TODO(), &ctx, "")
 
 		assert.NotNil(t, ctx.ClusterContextMetadata)
 		assert.Nil(t, ctx.DirectoryContextMetadata)

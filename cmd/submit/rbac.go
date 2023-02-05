@@ -1,6 +1,7 @@
 package submit
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -66,7 +67,7 @@ func getRBACCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 				Reporter:      r,
 			}
 
-			if err := ks.Submit(submitInterfaces); err != nil {
+			if err := ks.Submit(context.TODO(), submitInterfaces); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

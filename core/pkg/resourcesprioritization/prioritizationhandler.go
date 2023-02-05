@@ -1,6 +1,7 @@
 package resourcesprioritization
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
@@ -19,7 +20,7 @@ type ResourcesPrioritizationHandler struct {
 	buildResourcesMap      bool
 }
 
-func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
+func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
 	handler := &ResourcesPrioritizationHandler{
 		attackTracks:           make([]v1alpha1.IAttackTrack, 0),
 		resourceToAttackTracks: make(map[string]v1alpha1.IAttackTrack),
@@ -47,7 +48,7 @@ func NewResourcesPrioritizationHandler(attackTracksGetter getter.IAttackTracksGe
 	// Store attack tracks in cache
 	cache := getter.GetDefaultPath(cautils.LocalAttackTracksFilename)
 	if err := getter.SaveInFile(tracks, cache); err != nil {
-		logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 	}
 
 	return handler, nil

@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,7 +32,7 @@ const (
 )
 
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -47,7 +48,7 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 		if err == nil {
 			wls, errs := chart.GetWorkloadsWithDefaultValues()
 			if len(errs) > 0 {
-				logger.L().Error(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
+				logger.L().Ctx(ctx).Error(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
 
@@ -63,7 +64,7 @@ func LoadResourcesFromHelmCharts(basePath string) (map[string][]workloadinterfac
 
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
 // generate yaml files using "Kustomize" & renders a map of workloads from those yaml files
-func LoadResourcesFromKustomizeDirectory(basePath string) (map[string][]workloadinterface.IMetadata, string) {
+func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, string) {
 	isKustomizeDirectory := IsKustomizeDirectory(basePath)
 	isKustomizeFile := IsKustomizeFile(basePath)
 	if ok := isKustomizeDirectory || isKustomizeFile; !ok {
@@ -87,7 +88,7 @@ func LoadResourcesFromKustomizeDirectory(basePath string) (map[string][]workload
 	kustomizeDirectoryName := GetKustomizeDirectoryName(newBasePath)
 
 	if len(errs) > 0 {
-		logger.L().Error(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
+		logger.L().Ctx(ctx).Error(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
 	}
 
 	for k, v := range wls {
@@ -96,10 +97,10 @@ func LoadResourcesFromKustomizeDirectory(basePath string) (map[string][]workload
 	return sourceToWorkloads, kustomizeDirectoryName
 }
 
-func LoadResourcesFromFiles(input, rootPath string) map[string][]workloadinterface.IMetadata {
+func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
-		logger.L().Error(fmt.Sprintf("%v", errs))
+		logger.L().Ctx(ctx).Error(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
 		return nil
@@ -107,7 +108,7 @@ func LoadResourcesFromFiles(input, rootPath string) map[string][]workloadinterfa
 
 	workloads, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
-		logger.L().Error(fmt.Sprintf("%v", errs))
+		logger.L().Ctx(ctx).Error(fmt.Sprintf("%v", errs))
 	}
 
 	return workloads

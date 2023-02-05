@@ -1,6 +1,8 @@
 package config
 
 import (
+	"context"
+
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
@@ -13,7 +15,7 @@ func getDeleteCmd(ks meta.IKubescape) *cobra.Command {
 		Short: "Delete cached configurations",
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
-			if err := ks.DeleteCachedConfig(&v1.DeleteConfig{}); err != nil {
+			if err := ks.DeleteCachedConfig(context.TODO(), &v1.DeleteConfig{}); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 		},

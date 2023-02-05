@@ -1,6 +1,7 @@
 package fix
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -35,7 +36,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 			}
 			fixInfo.ReportFile = args[0]
 
-			return ks.Fix(&fixInfo)
+			return ks.Fix(context.TODO(), &fixInfo)
 		},
 	}
 

@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -47,7 +48,7 @@ func NewHTTPHandler() *HTTPHandler {
 // ============================================== STATUS ========================================================
 // Status API
 func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
-	defer handler.recover(w, "")
+	defer handler.recover(r.Context(), w, "")
 
 	if r.Method != http.MethodGet {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -92,7 +93,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	// generate id
 	scanID := uuid.NewString()
 
-	defer handler.recover(w, scanID)
+	defer handler.recover(r.Context(), w, scanID)
 
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -105,6 +106,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, err, "")
 		return
 	}
+	scanRequestParams.ctx = r.Context()
 
 	handler.state.setBusy(scanID)
 
@@ -150,7 +152,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 	response := utilsmetav1.Response{}
 	w.Header().Set("Content-Type", "application/json")
 
-	defer handler.recover(w, "")
+	defer handler.recover(r.Context(), w, "")
 
 	defer r.Body.Close()
 
@@ -228,11 +230,11 @@ func (handler *HTTPHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-func (handler *HTTPHandler) recover(w http.ResponseWriter, scanID string) {
+func (handler *HTTPHandler) recover(ctx context.Context, w http.ResponseWriter, scanID string) {
 	response := utilsmetav1.Response{}
 	if err := recover(); err != nil {
 		handler.state.setNotBusy(scanID)
-		logger.L().Error("recover", helpers.Error(fmt.Errorf("%v", err)))
+		logger.L().Ctx(ctx).Error("recover", helpers.Error(fmt.Errorf("%v", err)))
 		w.WriteHeader(http.StatusInternalServerError)
 		response.Response = fmt.Sprintf("%v", err)
 		response.Type = utilsapisv1.ErrorScanResponseType
