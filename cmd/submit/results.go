@@ -1,6 +1,7 @@
 package submit
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,7 +83,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 				Reporter:      r,
 			}
 
-			if err := ks.Submit(submitInterfaces); err != nil {
+			if err := ks.Submit(context.TODO(), submitInterfaces); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

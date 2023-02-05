@@ -14,8 +14,8 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
-
 	"github.com/open-policy-agent/opa/storage"
+	"go.opentelemetry.io/otel"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
@@ -48,20 +48,20 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		regoDependenciesData: regoDependenciesData,
 	}
 }
-func (opap *OPAProcessor) ProcessRulesListenner(progressListener IJobProgressNotificationClient) error {
+func (opap *OPAProcessor) ProcessRulesListenner(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 
 	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
 	// process
-	if err := opap.Process(opap.OPASessionObj.AllPolicies, progressListener); err != nil {
-		logger.L().Error(err.Error())
+	if err := opap.Process(ctx, opap.OPASessionObj.AllPolicies, progressListener); err != nil {
+		logger.L().Ctx(ctx).Error(err.Error())
 		// Return error?
 	}
 
 	// edit results
-	opap.updateResults()
+	opap.updateResults(ctx)
 
 	//TODO: review this location
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
@@ -70,7 +70,9 @@ func (opap *OPAProcessor) ProcessRulesListenner(progressListener IJobProgressNot
 	return nil
 }
 
-func (opap *OPAProcessor) Process(policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
+func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
+	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
+	defer span.End()
 	opap.loggerStartScanning()
 
 	if progressListener != nil {
@@ -85,9 +87,9 @@ func (opap *OPAProcessor) Process(policies *cautils.Policies, progressListener I
 
 		control := toPin
 
-		resourcesAssociatedControl, err := opap.processControl(&control)
+		resourcesAssociatedControl, err := opap.processControl(ctx, &control)
 		if err != nil {
-			logger.L().Error(err.Error())
+			logger.L().Ctx(ctx).Error(err.Error())
 		}
 
 		if len(resourcesAssociatedControl) == 0 {
@@ -130,16 +132,16 @@ func (opap *OPAProcessor) loggerDoneScanning() {
 	}
 }
 
-func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
+func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
 	var errs error
 
 	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
 
 	// ruleResults := make(map[string][]resourcesresults.ResourceAssociatedRule)
 	for i := range control.Rules {
-		resourceAssociatedRule, err := opap.processRule(&control.Rules[i], control.FixedInput)
+		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
-			logger.L().Error(err.Error())
+			logger.L().Ctx(ctx).Error(err.Error())
 			continue
 		}
 
@@ -165,7 +167,7 @@ func (opap *OPAProcessor) processControl(control *reporthandling.Control) (map[s
 	return resourcesAssociatedControl, errs
 }
 
-func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
+func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 
 	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(rule.ConfigInputs) // get store
 	dataControlInputs := map[string]string{"cloudProvider": opap.OPASessionObj.Report.ClusterCloudProvider}
@@ -190,7 +192,7 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 
 	resources := map[string]*resourcesresults.ResourceAssociatedRule{}
 	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
-	enumeratedData, err := opap.enumerateData(rule, inputRawResources)
+	enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources)
 	if err != nil {
 		return nil, err
 	}
@@ -204,10 +206,10 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 		opap.AllResources[inputResources[i].GetID()] = inputResources[i]
 	}
 
-	ruleResponses, err := opap.runOPAOnSingleRule(rule, inputRawResources, ruleData, RuleRegoDependenciesData)
+	ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, RuleRegoDependenciesData)
 	if err != nil {
 		// TODO - Handle error
-		logger.L().Error(err.Error())
+		logger.L().Ctx(ctx).Error(err.Error())
 	} else {
 		// ruleResponse to ruleResult
 		for i := range ruleResponses {
@@ -236,19 +238,19 @@ func (opap *OPAProcessor) processRule(rule *reporthandling.PolicyRule, fixedCont
 	return resources, err
 }
 
-func (opap *OPAProcessor) runOPAOnSingleRule(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
-		return opap.runRegoOnK8s(rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+		return opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
 	default:
 		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
 }
 
-func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
 
 	// compile modules
-	modules, err := getRuleDependencies()
+	modules, err := getRuleDependencies(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
 	}
@@ -269,7 +271,7 @@ func (opap *OPAProcessor) runRegoOnK8s(rule *reporthandling.PolicyRule, k8sObjec
 	// Eval
 	results, err := opap.regoEval(k8sObjects, compiled, &store)
 	if err != nil {
-		logger.L().Error(err.Error())
+		logger.L().Ctx(ctx).Error(err.Error())
 	}
 
 	return results, nil
@@ -298,7 +300,7 @@ func (opap *OPAProcessor) regoEval(inputObj []map[string]interface{}, compiledRe
 	return results, nil
 }
 
-func (opap *OPAProcessor) enumerateData(rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) ([]map[string]interface{}, error) {
+func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}) ([]map[string]interface{}, error) {
 
 	if ruleEnumeratorData(rule) == "" {
 		return k8sObjects, nil
@@ -309,7 +311,7 @@ func (opap *OPAProcessor) enumerateData(rule *reporthandling.PolicyRule, k8sObje
 	RuleRegoDependenciesData := resources.RegoDependenciesData{DataControlInputs: dataControlInputs,
 		PostureControlInputs: postureControlInputs}
 
-	ruleResponse, err := opap.runOPAOnSingleRule(rule, k8sObjects, ruleEnumeratorData, RuleRegoDependenciesData)
+	ruleResponse, err := opap.runOPAOnSingleRule(ctx, rule, k8sObjects, ruleEnumeratorData, RuleRegoDependenciesData)
 	if err != nil {
 		return nil, err
 	}

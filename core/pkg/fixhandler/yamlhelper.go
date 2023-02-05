@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"container/list"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -111,10 +112,10 @@ func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (
 	return fmt.Sprintf(`%v`, buf.String()), nil
 }
 
-func getContent(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) string {
+func getContent(ctx context.Context, parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) string {
 	content, err := enocodeIntoYaml(parentNode, nodeList, tracker)
 	if err != nil {
-		logger.L().Fatal("Cannot Encode into YAML")
+		logger.L().Ctx(ctx).Fatal("Cannot Encode into YAML")
 	}
 
 	indentationSpaces := parentNode.Column - 1
@@ -274,7 +275,7 @@ func isEmptyLineOrComment(lineContent string) bool {
 	return false
 }
 
-func readDocuments(reader io.Reader, decoder yqlib.Decoder) (*list.List, error) {
+func readDocuments(ctx context.Context, reader io.Reader, decoder yqlib.Decoder) (*list.List, error) {
 	err := decoder.Init(reader)
 	if err != nil {
 		return nil, fmt.Errorf("Error Initializing the decoder, %w", err)
@@ -289,7 +290,7 @@ func readDocuments(reader io.Reader, decoder yqlib.Decoder) (*list.List, error) 
 		if errors.Is(errorReading, io.EOF) {
 			switch reader := reader.(type) {
 			case *os.File:
-				safelyCloseFile(reader)
+				safelyCloseFile(ctx, reader)
 			}
 			return inputList, nil
 		} else if errorReading != nil {
@@ -305,21 +306,21 @@ func readDocuments(reader io.Reader, decoder yqlib.Decoder) (*list.List, error) 
 	}
 }
 
-func safelyCloseFile(file *os.File) {
+func safelyCloseFile(ctx context.Context, file *os.File) {
 	err := file.Close()
 	if err != nil {
-		logger.L().Error("Error Closing File")
+		logger.L().Ctx(ctx).Error("Error Closing File")
 	}
 }
 
 // Remove the entire line and replace it with the sequence node in fixed info. This way,
 // the original formatting is lost.
-func replaceSingleLineSequence(fixInfoMetadata *fixInfoMetadata, line int) (int, int) {
+func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMetadata, line int) (int, int) {
 	originalListTracker := getFirstNodeInLine(fixInfoMetadata.originalList, line)
 	fixedListTracker := getFirstNodeInLine(fixInfoMetadata.fixedList, line)
 
 	currentDFSNode := (*fixInfoMetadata.fixedList)[fixedListTracker]
-	contentToInsert := getContent(currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
+	contentToInsert := getContent(ctx, currentDFSNode.parent, fixInfoMetadata.fixedList, fixedListTracker)
 
 	// Remove the Single line
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{

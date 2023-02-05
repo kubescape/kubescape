@@ -45,7 +45,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -104,9 +104,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		logger.L().Info("Requesting Host scanner data")
 		cautils.StartSpinner()
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
-			infoMap, err := k8sHandler.collectHostResources(allResources, ksResourceMap)
+			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
 			if err != nil {
-				logger.L().Warning("failed to collect host scanner resources", helpers.Error(err))
+				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
 				cautils.SetInfoMapForResources(err.Error(), hostResources, sessionObj.InfoMap)
 			} else if k8sHandler.hostSensorHandler == nil {
 				// using hostSensor mock
@@ -124,19 +124,19 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 	}
 
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
-		logger.L().Warning("failed to collect rbac resources", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to collect rbac resources", helpers.Error(err))
 	}
 
 	cloudResources := cautils.MapCloudResources(ksResourceMap)
 
-	setMapNamespaceToNumOfResources(allResources, sessionObj)
+	setMapNamespaceToNumOfResources(ctx, allResources, sessionObj)
 
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
 		provider, err := getCloudProviderDescription(allResources, ksResourceMap)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-			logger.L().Warning("failed to collect cloud data", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to collect cloud data", helpers.Error(err))
 		}
 		if provider != "" {
 			if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
@@ -147,7 +147,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(sessionObj *cautils.OPASessio
 		// api server info resource
 		err = k8sHandler.collectAPIServerInfoResource(allResources, ksResourceMap)
 		if err != nil {
-			logger.L().Warning("failed to collect api server info resource", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to collect api server info resource", helpers.Error(err))
 		}
 	}
 
@@ -166,17 +166,17 @@ func (k8sHandler *K8sResourceHandler) collectAPIServerInfoResource(allResources 
 	return nil
 }
 
-func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo() *version.Info {
+func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo(ctx context.Context) *version.Info {
 	clusterAPIServerInfo, err := k8sHandler.k8s.DiscoveryClient.ServerVersion()
 	if err != nil {
-		logger.L().Error("failed to discover API server information", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to discover API server information", helpers.Error(err))
 		return nil
 	}
 	return clusterAPIServerInfo
 }
 
 // set  namespaceToNumOfResources map in report
-func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
+func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, sessionObj *cautils.OPASessionObj) {
 
 	mapNamespaceToNumberOfResources := make(map[string]int)
 	for _, resource := range allResources {
@@ -192,7 +192,7 @@ func setMapNamespaceToNumOfResources(allResources map[string]workloadinterface.I
 					}
 				}
 			} else {
-				logger.L().Warning(fmt.Sprintf("failed to get owner references. Resource %s will not be counted", obj.GetName()), helpers.Error(err))
+				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to get owner references. Resource %s will not be counted", obj.GetName()), helpers.Error(err))
 			}
 		}
 	}
@@ -276,9 +276,9 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 	return workloads
 }
 
-func (k8sHandler *K8sResourceHandler) collectHostResources(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (map[string]apis.StatusInfo, error) {
+func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (map[string]apis.StatusInfo, error) {
 	logger.L().Debug("Collecting host scanner resources")
-	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources()
+	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources(ctx)
 	if err != nil {
 		return nil, err
 	}

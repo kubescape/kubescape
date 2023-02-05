@@ -1,6 +1,7 @@
 package hostsensorutils
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -69,7 +70,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 	return hsh, nil
 }
 
-func (hsh *HostSensorHandler) Init() error {
+func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 	// deploy the YAML
 	// store namespace + port
 	// store pod names
@@ -79,19 +80,19 @@ func (hsh *HostSensorHandler) Init() error {
 
 	cautils.StartSpinner()
 
-	if err := hsh.applyYAML(); err != nil {
+	if err := hsh.applyYAML(ctx); err != nil {
 		cautils.StopSpinner()
 		return fmt.Errorf("failed to apply host scanner YAML, reason: %v", err)
 	}
-	hsh.populatePodNamesToNodeNames()
+	hsh.populatePodNamesToNodeNames(ctx)
 	if err := hsh.checkPodForEachNode(); err != nil {
-		logger.L().Error("failed to validate host-sensor pods status", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to validate host-sensor pods status", helpers.Error(err))
 	}
 	cautils.StopSpinner()
 	return nil
 }
 
-func (hsh *HostSensorHandler) applyYAML() error {
+func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 	workloads, err := cautils.ReadFile([]byte(hostSensorYAML), cautils.YAML_FILE_FORMAT)
 	if err != nil {
 		return fmt.Errorf("failed to read YAML files, reason: %v", err)
@@ -121,7 +122,7 @@ func (hsh *HostSensorHandler) applyYAML() error {
 			containers, err := w.GetContainers()
 			if err != nil {
 				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-					logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+					logger.L().Ctx(ctx).Warning("failed to tear down namespace", helpers.Error(erra))
 				}
 				return fmt.Errorf("container not found in DaemonSet: %v", err)
 			}
@@ -146,7 +147,7 @@ func (hsh *HostSensorHandler) applyYAML() error {
 		}
 		if e != nil {
 			if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-				logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+				logger.L().Ctx(ctx).Warning("failed to tear down namespace", helpers.Error(erra))
 			}
 			return fmt.Errorf("failed to create/update YAML, reason: %v", e)
 		}
@@ -156,14 +157,14 @@ func (hsh *HostSensorHandler) applyYAML() error {
 			b, err := json.Marshal(newWorkload.GetObject())
 			if err != nil {
 				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-					logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+					logger.L().Ctx(ctx).Warning("failed to tear down namespace", helpers.Error(erra))
 				}
 				return fmt.Errorf("failed to Marshal YAML of DaemonSet, reason: %v", err)
 			}
 			var ds appsv1.DaemonSet
 			if err := json.Unmarshal(b, &ds); err != nil {
 				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-					logger.L().Warning("failed to tear down namespace", helpers.Error(erra))
+					logger.L().Ctx(ctx).Warning("failed to tear down namespace", helpers.Error(erra))
 				}
 				return fmt.Errorf("failed to Unmarshal YAML of DaemonSet, reason: %v", err)
 			}
@@ -200,7 +201,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 }
 
 // initiating routine to keep pod list updated
-func (hsh *HostSensorHandler) populatePodNamesToNodeNames() {
+func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
 
 	go func() {
 		var watchRes watch.Interface
@@ -210,7 +211,7 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames() {
 			LabelSelector: fmt.Sprintf("name=%s", hsh.DaemonSet.Spec.Template.Labels["name"]),
 		})
 		if err != nil {
-			logger.L().Error("failed to watch over daemonset pods - are we missing watch pods permissions?", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("failed to watch over daemonset pods - are we missing watch pods permissions?", helpers.Error(err))
 		}
 		if watchRes == nil {
 			return
@@ -220,12 +221,12 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames() {
 			if !ok {
 				continue
 			}
-			go hsh.updatePodInListAtomic(eve.Type, pod)
+			go hsh.updatePodInListAtomic(ctx, eve.Type, pod)
 		}
 	}()
 }
 
-func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, podObj *corev1.Pod) {
+func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventType watch.EventType, podObj *corev1.Pod) {
 	hsh.podListLock.Lock()
 	defer hsh.podListLock.Unlock()
 
@@ -246,7 +247,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(eventType watch.EventType, p
 					len(podObj.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchFields[0].Values) > 0 {
 					nodeName = podObj.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchFields[0].Values[0]
 				}
-				logger.L().Warning("One host-sensor pod is unable to schedule on node. We will fail to collect the data from this node",
+				logger.L().Ctx(ctx).Warning("One host-sensor pod is unable to schedule on node. We will fail to collect the data from this node",
 					helpers.String("message", podObj.Status.Conditions[0].Message),
 					helpers.String("nodeName", nodeName),
 					helpers.String("podName", podObj.ObjectMeta.Name))

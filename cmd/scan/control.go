@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -96,11 +97,12 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				return err
 			}
 
-			results, err := ks.Scan(scanInfo)
+			ctx := context.TODO()
+			results, err := ks.Scan(ctx, scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			if err := results.HandleResults(); err != nil {
+			if err := results.HandleResults(ctx); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			if !scanInfo.VerboseMode {

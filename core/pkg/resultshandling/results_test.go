@@ -1,6 +1,7 @@
 package resultshandling
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -11,19 +12,21 @@ import (
 
 type DummyReporter struct{}
 
-func (dr *DummyReporter) Submit(opaSessionObj *cautils.OPASessionObj) error { return nil }
-func (dr *DummyReporter) SetCustomerGUID(customerGUID string)               {}
-func (dr *DummyReporter) SetClusterName(clusterName string)                 {}
-func (dr *DummyReporter) DisplayReportURL()                                 {}
-func (dr *DummyReporter) GetURL() string                                    { return "" }
+func (dr *DummyReporter) Submit(_ context.Context, opaSessionObj *cautils.OPASessionObj) error {
+	return nil
+}
+func (dr *DummyReporter) SetCustomerGUID(customerGUID string) {}
+func (dr *DummyReporter) SetClusterName(clusterName string)   {}
+func (dr *DummyReporter) DisplayReportURL()                   {}
+func (dr *DummyReporter) GetURL() string                      { return "" }
 
 type SpyPrinter struct {
 	ActionPrintCalls int
 	ScoreCalls       int
 }
 
-func (sp *SpyPrinter) SetWriter(outputFile string) {}
-func (sp *SpyPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (sp *SpyPrinter) SetWriter(_ context.Context, outputFile string) {}
+func (sp *SpyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
 	sp.ActionPrintCalls += 1
 }
 func (sp *SpyPrinter) Score(score float32) {
@@ -45,7 +48,7 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
-	rh.HandleResults()
+	rh.HandleResults(context.TODO())
 
 	want := 1
 	got := uiPrinter.ActionPrintCalls
@@ -69,7 +72,7 @@ func TestResultsHandlerHandleResultsPrintsScoreToUI(t *testing.T) {
 	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
-	rh.HandleResults()
+	rh.HandleResults(context.TODO())
 
 	want := 1
 	got := uiPrinter.ScoreCalls
