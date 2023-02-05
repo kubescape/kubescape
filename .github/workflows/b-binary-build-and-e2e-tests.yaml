@@ -142,7 +142,7 @@ jobs:
 
       - name: Build
         env:
-          RELEASE: ${{ inputs.RELEASE }}
+          RELEASE: "" # ${{ inputs.RELEASE }}
           CLIENT: ${{ inputs.CLIENT }}
           CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
         run: python3 --version && python3 build.py
