@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"context"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -36,7 +38,7 @@ type OPASessionObj struct {
 	OmitRawResources      bool                               // omit raw resources from output
 }
 
-func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {
+func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {
 	return &OPASessionObj{
 		Report:                &reporthandlingv2.PostureReport{},
 		Policies:              frameworks,
@@ -48,7 +50,7 @@ func NewOPASessionObj(frameworks []reporthandling.Framework, k8sResources *K8SRe
 		ResourceToControlsMap: make(map[string][]string),
 		ResourceSource:        make(map[string]reporthandling.Source),
 		SessionID:             scanInfo.ScanID,
-		Metadata:              scanInfoToScanMetadata(scanInfo),
+		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
 		OmitRawResources:      scanInfo.OmitRawResources,
 	}
 }

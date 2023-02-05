@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -22,8 +23,8 @@ func NewPrometheusPrinter(verboseMode bool) *PrometheusPrinter {
 	}
 }
 
-func (p *PrometheusPrinter) SetWriter(outputFile string) {
-	p.writer = printer.GetWriter(outputFile)
+func (p *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
+	p.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (p *PrometheusPrinter) Score(score float32) {
@@ -86,12 +87,12 @@ func (p *PrometheusPrinter) printReports(allResources map[string]workloadinterfa
 	return nil
 }
 
-func (p *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (p *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
 	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	err := p.printReports(opaSessionObj.AllResources, report.FrameworkReports)
 	if err != nil {
-		logger.L().Fatal(err.Error())
+		logger.L().Ctx(ctx).Fatal(err.Error())
 	} else {
 		printer.LogOutputFile(p.writer.Name())
 	}

@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -104,6 +105,7 @@ type scanRequestParams struct {
 	scanInfo        *cautils.ScanInfo // request as received from api
 	scanQueryParams *ScanQueryParams  // request as received from api
 	scanID          string            // generated scan ID
+	ctx             context.Context
 }
 
 // swagger:parameters triggerScan

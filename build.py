@@ -3,8 +3,15 @@ import sys
 import hashlib
 import platform
 import subprocess
+import tarfile
 
 BASE_GETTER_CONST = "github.com/kubescape/kubescape/v2/core/cautils/getter"
+
+platformSuffixes = {
+    "Windows": "windows-latest",
+    "Linux": "ubuntu-latest",
+    "Darwin": "macos-latest",
+}
 
 def check_status(status, msg):
     if status != 0:
@@ -14,20 +21,18 @@ def check_status(status, msg):
 
 def get_build_dir():
     current_platform = platform.system()
-    build_dir = ""
 
-    if current_platform == "Windows": build_dir = "windows-latest"
-    elif current_platform == "Linux": build_dir = "ubuntu-latest"
-    elif current_platform == "Darwin": build_dir = "macos-latest"
-    else: raise OSError("Platform %s is not supported!" % (current_platform))
+    if current_platform not in platformSuffixes: raise OSError("Platform %s is not supported!" % (current_platform))
 
-    return os.path.join("build", build_dir)
+    return os.path.join("build", platformSuffixes[current_platform])
 
 
 def get_package_name():
-    package_name = "kubescape"
+    current_platform = platform.system()
 
-    return package_name
+    if current_platform not in platformSuffixes: raise OSError("Platform %s is not supported!" % (current_platform))
+
+    return "kubescape-" + platformSuffixes[current_platform]
 
 
 def main():
@@ -46,6 +51,7 @@ def main():
 
     ks_file = os.path.join(build_dir, package_name)
     hash_file = ks_file + ".sha256"
+    tar_file = ks_file + ".tar.gz"
 
     if not os.path.isdir(build_dir):
         os.makedirs(build_dir)
@@ -72,6 +78,9 @@ def main():
             hash = sha256.hexdigest()
             print("kubescape hash: {}, file: {}".format(hash, hash_file))
             kube_sha.write(sha256.hexdigest())
+
+    with tarfile.open(tar_file, 'w:gz') as archive:
+        archive.add(ks_file, "kubescape")
 
     print("Build Done")
 

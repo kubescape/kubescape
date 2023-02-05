@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -24,8 +25,8 @@ func NewPrometheusPrinter(verboseMode bool) *PrometheusPrinter {
 	}
 }
 
-func (pp *PrometheusPrinter) SetWriter(outputFile string) {
-	pp.writer = printer.GetWriter(outputFile)
+func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
+	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
@@ -44,12 +45,12 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	return m
 }
 
-func (pp *PrometheusPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
 
 	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
-		logger.L().Error("failed to write results", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
 	} else {
 		printer.LogOutputFile(pp.writer.Name())
 	}

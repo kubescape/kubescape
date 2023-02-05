@@ -1,6 +1,7 @@
 package hostsensorutils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -81,7 +82,7 @@ func (hsh *HostSensorHandler) ForwardToPod(podName, path string) ([]byte, error)
 // The function produces a worker-pool with a fixed number of workers.
 // For each node the request is pushed to the jobs channel, the worker sends the request and pushes the result to the result channel.
 // When all workers have finished, the function returns a list of results
-func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string) ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(ctx context.Context, path, requestKind string) ([]hostsensor.HostSensorDataEnvelope, error) {
 	podList, err := hsh.getPodList()
 	if err != nil {
 		return nil, fmt.Errorf("failed to sendAllPodsHTTPGETRequest: %v", err)
@@ -94,7 +95,7 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(path, requestKind string
 
 	hsh.workerPool.hostSensorApplyJobs(podList, path, requestKind)
 	hsh.workerPool.hostSensorGetResults(&res)
-	hsh.workerPool.createWorkerPool(hsh, &wg)
+	hsh.workerPool.createWorkerPool(ctx, hsh, &wg)
 	hsh.workerPool.waitForDone(&wg)
 
 	return res, nil
@@ -125,51 +126,51 @@ func (hsh *HostSensorHandler) GetVersion() (string, error) {
 }
 
 // return list of LinuxKernelVariables
-func (hsh *HostSensorHandler) GetKernelVariables() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKernelVariables(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/LinuxKernelVariables", LinuxKernelVariables)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/LinuxKernelVariables", LinuxKernelVariables)
 }
 
 // return list of OpenPortsList
-func (hsh *HostSensorHandler) GetOpenPortsList() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetOpenPortsList(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/openedPorts", OpenPortsList)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/openedPorts", OpenPortsList)
 }
 
 // return list of LinuxSecurityHardeningStatus
-func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetLinuxSecurityHardeningStatus(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/linuxSecurityHardening", LinuxSecurityHardeningStatus)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/linuxSecurityHardening", LinuxSecurityHardeningStatus)
 }
 
 // return list of KubeletInfo
-func (hsh *HostSensorHandler) GetKubeletInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKubeletInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/kubeletInfo", KubeletInfo)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeletInfo", KubeletInfo)
 }
 
 // return list of kubeProxyInfo
-func (hsh *HostSensorHandler) GetKubeProxyInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKubeProxyInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/kubeProxyInfo", KubeProxyInfo)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeProxyInfo", KubeProxyInfo)
 }
 
 // return list of controlPlaneInfo
-func (hsh *HostSensorHandler) GetControlPlaneInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetControlPlaneInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/controlPlaneInfo", ControlPlaneInfo)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/controlPlaneInfo", ControlPlaneInfo)
 }
 
 // return list of cloudProviderInfo
-func (hsh *HostSensorHandler) GetCloudProviderInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetCloudProviderInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/cloudProviderInfo", CloudProviderInfo)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/cloudProviderInfo", CloudProviderInfo)
 }
 
 // return list of KubeletCommandLine
-func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKubeletCommandLine(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	resps, err := hsh.sendAllPodsHTTPGETRequest("/kubeletCommandLine", KubeletCommandLine)
+	resps, err := hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeletCommandLine", KubeletCommandLine)
 	if err != nil {
 		return resps, err
 	}
@@ -188,31 +189,31 @@ func (hsh *HostSensorHandler) GetKubeletCommandLine() ([]hostsensor.HostSensorDa
 }
 
 // return list of CNIInfo
-func (hsh *HostSensorHandler) GetCNIInfo() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetCNIInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/CNIInfo", CNIInfo)
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/CNIInfo", CNIInfo)
 }
 
 // return list of kernelVersion
-func (hsh *HostSensorHandler) GetKernelVersion() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKernelVersion(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/kernelVersion", "KernelVersion")
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/kernelVersion", "KernelVersion")
 }
 
 // return list of osRelease
-func (hsh *HostSensorHandler) GetOsReleaseFile() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetOsReleaseFile(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest("/osRelease", "OsReleaseFile")
+	return hsh.sendAllPodsHTTPGETRequest(ctx, "/osRelease", "OsReleaseFile")
 }
 
 // return list of kubeletConfigurations
-func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSensorDataEnvelope, error) {
+func (hsh *HostSensorHandler) GetKubeletConfigurations(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest("/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
+	res, err := hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
 	for resIdx := range res {
 		jsonBytes, ery := yaml.YAMLToJSON(res[resIdx].Data)
 		if ery != nil {
-			logger.L().Error("failed to convert kubelet configurations from yaml to json", helpers.Error(ery))
+			logger.L().Ctx(ctx).Error("failed to convert kubelet configurations from yaml to json", helpers.Error(ery))
 			continue
 		}
 		res[resIdx].SetData(jsonBytes)
@@ -220,7 +221,7 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations() ([]hostsensor.HostSenso
 	return res, err
 }
 
-func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
+func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	res := make([]hostsensor.HostSensorDataEnvelope, 0)
 	infoMap := make(map[string]apis.StatusInfo)
 	if hsh.DaemonSet == nil {
@@ -231,7 +232,7 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 	logger.L().Debug("Accessing host scanner")
 	version, err := hsh.GetVersion()
 	if err != nil {
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(version) > 0 {
 		logger.L().Info("Host scanner version : " + version)
@@ -239,104 +240,104 @@ func (hsh *HostSensorHandler) CollectResources() ([]hostsensor.HostSensorDataEnv
 		logger.L().Info("Unknown host scanner version")
 	}
 	//
-	kcData, err = hsh.GetKubeletConfigurations()
+	kcData, err = hsh.GetKubeletConfigurations(ctx)
 	if err != nil {
 		addInfoToMap(KubeletConfiguration, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 	//
-	kcData, err = hsh.GetKubeletCommandLine()
+	kcData, err = hsh.GetKubeletCommandLine(ctx)
 	if err != nil {
 		addInfoToMap(KubeletCommandLine, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 	//
-	kcData, err = hsh.GetOsReleaseFile()
+	kcData, err = hsh.GetOsReleaseFile(ctx)
 	if err != nil {
 		addInfoToMap(OsReleaseFile, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 	//
-	kcData, err = hsh.GetKernelVersion()
+	kcData, err = hsh.GetKernelVersion(ctx)
 	if err != nil {
 		addInfoToMap(KernelVersion, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 	//
-	kcData, err = hsh.GetLinuxSecurityHardeningStatus()
+	kcData, err = hsh.GetLinuxSecurityHardeningStatus(ctx)
 	if err != nil {
 		addInfoToMap(LinuxSecurityHardeningStatus, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 	//
-	kcData, err = hsh.GetOpenPortsList()
+	kcData, err = hsh.GetOpenPortsList(ctx)
 	if err != nil {
 		addInfoToMap(OpenPortsList, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 	// GetKernelVariables
-	kcData, err = hsh.GetKernelVariables()
+	kcData, err = hsh.GetKernelVariables(ctx)
 	if err != nil {
 		addInfoToMap(LinuxKernelVariables, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 
 	// GetKubeletInfo
-	kcData, err = hsh.GetKubeletInfo()
+	kcData, err = hsh.GetKubeletInfo(ctx)
 	if err != nil {
 		addInfoToMap(KubeletInfo, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 
 	// GetKubeProxyInfo
-	kcData, err = hsh.GetKubeProxyInfo()
+	kcData, err = hsh.GetKubeProxyInfo(ctx)
 	if err != nil {
 		addInfoToMap(KubeProxyInfo, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 
 	// GetControlPlaneInfo
-	kcData, err = hsh.GetControlPlaneInfo()
+	kcData, err = hsh.GetControlPlaneInfo(ctx)
 	if err != nil {
 		addInfoToMap(ControlPlaneInfo, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 
 	// GetCloudProviderInfo
-	kcData, err = hsh.GetCloudProviderInfo()
+	kcData, err = hsh.GetCloudProviderInfo(ctx)
 	if err != nil {
 		addInfoToMap(CloudProviderInfo, infoMap, err)
-		logger.L().Warning(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)

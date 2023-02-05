@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"reflect"
 	"testing"
 
@@ -17,7 +18,7 @@ func Test_getUIPrinter(t *testing.T) {
 	wantVerboseMode := scanInfo.VerboseMode
 	wantViewType := cautils.ViewTypes(scanInfo.View)
 
-	got := getUIPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View))
+	got := getUIPrinter(context.TODO(), scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View))
 
 	gotValue := reflect.ValueOf(got).Elem()
 	gotFormatVersion := gotValue.FieldByName("formatVersion").String()

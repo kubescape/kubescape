@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -119,7 +120,7 @@ func (h *FixHandler) getPathFromRawResource(obj map[string]interface{}) string {
 	return ""
 }
 
-func (h *FixHandler) PrepareResourcesToFix() []ResourceFixInfo {
+func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInfo {
 	resourceIdToResource := h.buildResourcesMap()
 
 	resourcesToFix := make([]ResourceFixInfo, 0)
@@ -141,13 +142,13 @@ func (h *FixHandler) PrepareResourcesToFix() []ResourceFixInfo {
 
 		relativePath, documentIndex, err := h.getFilePathAndIndex(resourcePath)
 		if err != nil {
-			logger.L().Error("Skipping invalid resource path: " + resourcePath)
+			logger.L().Ctx(ctx).Error("Skipping invalid resource path: " + resourcePath)
 			continue
 		}
 
 		absolutePath := path.Join(h.localBasePath, relativePath)
 		if _, err := os.Stat(absolutePath); err != nil {
-			logger.L().Error("Skipping missing file: " + absolutePath)
+			logger.L().Ctx(ctx).Error("Skipping missing file: " + absolutePath)
 			continue
 		}
 
@@ -193,7 +194,7 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 	logger.L().Info(sb.String())
 }
 
-func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []error) {
+func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []ResourceFixInfo) (int, []error) {
 	updatedFiles := make(map[string]bool)
 	errors := make([]error, 0)
 
@@ -207,7 +208,7 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 			continue
 		}
 
-		fixedYamlString, err := h.ApplyFixToContent(fileAsString, yamlExpression)
+		fixedYamlString, err := h.ApplyFixToContent(ctx, fileAsString, yamlExpression)
 
 		if err != nil {
 			errors = append(errors, fmt.Errorf("Failed to fix file %s: %w ", filepath, err))
@@ -219,7 +220,7 @@ func (h *FixHandler) ApplyChanges(resourcesToFix []ResourceFixInfo) (int, []erro
 		err = writeFixesToFile(filepath, fixedYamlString)
 
 		if err != nil {
-			logger.L().Error(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
+			logger.L().Ctx(ctx).Error(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
 			errors = append(errors, err)
 		}
 	}
@@ -241,7 +242,7 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) ApplyFixToContent(yamlAsString, yamlExpression string) (fixedString string, err error) {
+func (h *FixHandler) ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
 	newline := determineNewlineSeparator(yamlAsString)
 
 	yamlLines := strings.Split(yamlAsString, newline)
@@ -252,13 +253,13 @@ func (h *FixHandler) ApplyFixToContent(yamlAsString, yamlExpression string) (fix
 		return "", err
 	}
 
-	fixedRootNodes, err := getFixedNodes(yamlAsString, yamlExpression)
+	fixedRootNodes, err := getFixedNodes(ctx, yamlAsString, yamlExpression)
 
 	if err != nil {
 		return "", err
 	}
 
-	fileFixInfo := getFixInfo(originalRootNodes, fixedRootNodes)
+	fileFixInfo := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
 
 	fixedYamlLines := getFixedYamlLines(yamlLines, fileFixInfo, newline)
 

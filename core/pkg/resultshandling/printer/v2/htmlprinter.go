@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	_ "embed"
 	"html/template"
 	"os"
@@ -38,17 +39,17 @@ func NewHtmlPrinter() *HtmlPrinter {
 	return &HtmlPrinter{}
 }
 
-func (hp *HtmlPrinter) SetWriter(outputFile string) {
+func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	if strings.TrimSpace(outputFile) == "" {
 		outputFile = htmlOutputFile
 	}
 	if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
 		outputFile = outputFile + htmlOutputExt
 	}
-	hp.writer = printer.GetWriter(outputFile)
+	hp.writer = printer.GetWriter(ctx, outputFile)
 }
 
-func (hp *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0
@@ -106,7 +107,7 @@ func (hp *HtmlPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	reportingCtx := HTMLReportingCtx{opaSessionObj, resourceTableView}
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
-		logger.L().Error("failed to render template", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
 	} else {
 		printer.LogOutputFile(hp.writer.Name())
 	}
