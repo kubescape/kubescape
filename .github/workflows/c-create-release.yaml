@@ -31,19 +31,21 @@ jobs:
 
       - name: artifacts rename
         run: |
+          pwd
+          ls -laR
 
           MAC_OS=macos-latest
           UBUNTU_OS=ubuntu-latest
           WINDOWS_OS=windows-latest
 
-          mv ./kubescape/kubescape-$MAC_OS ./kubescape/kubescape-$MAC_OS-${{ inputs.TAG }}
-          mv ./kubescape/kubescape-$MAC_OS.sha256 ./kubescape/kubescape-$MAC_OS-${{ inputs.TAG }}.sha256
+          mv ./kubescape-$MAC_OS ./kubescape-$MAC_OS-${{ inputs.TAG }}
+          mv ./kubescape-$MAC_OS.sha256 ./-$MAC_OS-${{ inputs.TAG }}.sha256
 
-          mv ./kubescape/kubescape-$UBUNTU_OS ./kubescape/kubescape-$UBUNTU_OS-${{ inputs.TAG }}
-          mv ./kubescape/kubescape-$UBUNTU_OS.sha256 ./kubescape/kubescape-$UBUNTU_OS-${{ inputs.TAG }}.sha256
+          mv ./kubescape-$UBUNTU_OS ./kubescape/kubescape-$UBUNTU_OS-${{ inputs.TAG }}
+          mv ./kubescape-$UBUNTU_OS.sha256 ./kubescape-$UBUNTU_OS-${{ inputs.TAG }}.sha256
 
-          mv ./kubescape/kubescape-$WINDOWS_OS ./kubescape/kubescape-$WINDOWS_OS-${{ inputs.TAG }}
-          mv ./kubescape/kubescape-$WINDOWS_OS.sha256 ./kubescape/kubescape-$WINDOWS_OS-${{ inputs.TAG }}.sha256
+          mv ./kubescape-$WINDOWS_OS ./kubescape/kubescape-$WINDOWS_OS-${{ inputs.TAG }}
+          mv ./kubescape-$WINDOWS_OS.sha256 ./kubescape-$WINDOWS_OS-${{ inputs.TAG }}.sha256
 
         # run: |
 
@@ -70,10 +72,8 @@ jobs:
           draft: ${{ inputs.DRAFT }}
           fail_on_unmatched_files: true
           prerelease: false
-          files: |
-            ./build/*
           # files: |
-          #   ./kubescape-ubuntu-latest/*
-          #   ./kubescape-macos-latest/*
-          #   ./kubescape-windows-latest/*
+          #   ./build/*
+          files: |
+            ./*
             
