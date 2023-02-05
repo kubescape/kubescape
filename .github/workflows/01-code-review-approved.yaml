@@ -32,7 +32,7 @@ jobs:
       CGO_ENABLED: 1
       GO111MODULE: ""
       GO_VERSION: "1.19"
-      RELEASE: ${{ github.ref_name}}
+      RELEASE: "" # ${{ github.ref_name}}
       CLIENT: test
     secrets: inherit
 
