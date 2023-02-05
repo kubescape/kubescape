@@ -574,6 +574,6 @@ func TestCloudResourceRequired(t *testing.T) {
 		"eks.amazonaws.com/v1/ListEntitiesForPolicies",
 		"eks.amazonaws.com/v1/ClusterDescribe"}
 
-	assert.True(t, cloudResourceRequired(cloudResources, "ClusterDescribe"))
+	assert.True(t, cloudResourceRequired(cloudResources, ClusterDescribe))
 	assert.False(t, cloudResourceRequired(cloudResources, "ListRolePolicies"))
 }

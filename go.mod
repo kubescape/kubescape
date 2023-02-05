@@ -17,8 +17,8 @@ require (
 	github.com/johnfercher/maroto v0.37.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.23
-	github.com/kubescape/k8s-interface v0.0.98
 	github.com/kubescape/go-logger v0.0.8
+	github.com/kubescape/k8s-interface v0.0.98
 	github.com/kubescape/opa-utils v0.0.223
 	github.com/kubescape/rbac-utils v0.0.19
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -33,7 +33,7 @@ require (
 	github.com/stretchr/testify v1.8.1
 	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.11.2
-	golang.org/x/mod v0.6.0-dev.0.20220419223038-86c51ed26bb4
+	golang.org/x/mod v0.6.0
 	google.golang.org/api v0.103.0
 	google.golang.org/genproto v0.0.0-20230106154932-a12b697841d9
 	google.golang.org/protobuf v1.28.1
