@@ -344,7 +344,7 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 	}
 
 	// GetCNIInfo
-	kcData, err = hsh.GetCNIInfo()
+	kcData, err = hsh.GetCNIInfo(ctx)
 	if err != nil {
 		addInfoToMap(CNIInfo, infoMap, err)
 		logger.L().Warning(err.Error())
