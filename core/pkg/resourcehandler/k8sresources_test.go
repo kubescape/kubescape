@@ -567,3 +567,13 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 	assert.NotContains(t, sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources, "clusterrole")
 	assert.NotContains(t, sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources, "pod")
 }
+
+func TestCloudResourceRequired(t *testing.T) {
+	cloudResources := []string{"container.googleapis.com/v1/ClusterDescribe",
+		"eks.amazonaws.com/v1/DescribeRepositories",
+		"eks.amazonaws.com/v1/ListEntitiesForPolicies",
+		"eks.amazonaws.com/v1/ClusterDescribe"}
+
+	assert.True(t, cloudResourceRequired(cloudResources, ClusterDescribe))
+	assert.False(t, cloudResourceRequired(cloudResources, "ListRolePolicies"))
+}
