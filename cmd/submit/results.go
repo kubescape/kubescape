@@ -89,7 +89,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			return nil
 		},
 	}
-	resultsCmd.PersistentFlags().StringVar(&formatVersion, "format-version", "v1", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
+	resultsCmd.PersistentFlags().StringVar(&formatVersion, "format-version", "v2", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 
 	return resultsCmd
 }
