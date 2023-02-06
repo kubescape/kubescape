@@ -320,7 +320,7 @@ require (
 	go.etcd.io/etcd/server/v3 v3.6.0-alpha.0 // indirect
 	go.etcd.io/etcd/tests/v3 v3.6.0-alpha.0 // indirect
 	go.etcd.io/etcd/v3 v3.6.0-alpha.0 // indirect
-	go.mongodb.org/mongo-driver v1.10.0 // indirect
+	go.mongodb.org/mongo-driver v1.11.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.28.0 // indirect
 	go.opentelemetry.io/contrib/instrumentation/runtime v0.37.0 // indirect
