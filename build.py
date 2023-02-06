@@ -20,11 +20,7 @@ def check_status(status, msg):
 
 
 def get_build_dir():
-    # current_platform = platform.system()
-
-    # if current_platform not in platformSuffixes: raise OSError("Platform %s is not supported!" % (current_platform))
-
-    return "build" # os.path.join("build", platformSuffixes[current_platform])
+    return "build"
 
 
 def get_package_name():
