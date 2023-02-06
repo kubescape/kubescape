@@ -12,14 +12,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
 func NewOPAProcessorMock() *OPAProcessor {
 	return &OPAProcessor{}
 }
 func TestProcessResourcesResult(t *testing.T) {
-
 	// set k8s
 	k8sResources := make(cautils.K8SResources)
 
@@ -82,8 +80,8 @@ func TestProcessResourcesResult(t *testing.T) {
 
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
 	assert.Equal(t, 2, res.ListControlsIDs(nil).All().Len())
-	assert.Equal(t, 1, len(res.ListControlsIDs(nil).Passed()))
-	assert.False(t, res.GetStatus(nil).IsPassed())
+	assert.Equal(t, 2, len(res.ListControlsIDs(nil).Passed())) // previously 1 excluded, now count as passed
+	assert.True(t, res.GetStatus(nil).IsPassed())
 	assert.False(t, res.GetStatus(nil).IsFailed())
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
 

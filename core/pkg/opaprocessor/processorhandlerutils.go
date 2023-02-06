@@ -28,6 +28,16 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		removeData(opap.AllResources[i])
 	}
 
+	// An exception inherits part of its status from the control
+	const allocControlsHeuristic = 100
+	controls := make(map[string]reporthandling.Control, allocControlsHeuristic)
+	for _, framework := range opap.Policies {
+		for _, controlToPin := range framework.Controls {
+			control := controlToPin
+			controls[control.ControlID] = control
+		}
+	}
+
 	// set exceptions
 	for i := range opap.ResourcesResult {
 
@@ -39,7 +49,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 				resource,
 				opap.Exceptions,
 				cautils.ClusterName,
-				opap.AllPolicies.Controls, // exceptions are evaluated only on failed controls
+				controls, // update status depending on action required
 			)
 		}
 
