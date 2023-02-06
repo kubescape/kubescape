@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -8,13 +9,12 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
-
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
@@ -112,7 +112,7 @@ type ScanInfo struct {
 	View                  string             // Display all of the input resources and not only failed resources
 	Format                string             // Format results (table, json, junit ...)
 	Output                string             // Store results in an output file, Output file name
-	FormatVersion         string             // Output object can be differnet between versions, this is for testing and backward compatibility
+	FormatVersion         string             // Output object can be different between versions, this is for testing and backward compatibility
 	CustomClusterName     string             // Set the custom name of the cluster
 	ExcludedNamespaces    string             // used for host scanner namespace
 	IncludeNamespaces     string             //
@@ -141,16 +141,16 @@ type Getters struct {
 	AttackTracksGetter   getter.IAttackTracksGetter
 }
 
-func (scanInfo *ScanInfo) Init() {
+func (scanInfo *ScanInfo) Init(ctx context.Context) {
 	scanInfo.setUseFrom()
-	scanInfo.setUseArtifactsFrom()
+	scanInfo.setUseArtifactsFrom(ctx)
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
 
 }
 
-func (scanInfo *ScanInfo) setUseArtifactsFrom() {
+func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 	if scanInfo.UseArtifactsFrom == "" {
 		return
 	}
@@ -164,7 +164,7 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom() {
 	// set frameworks files
 	files, err := os.ReadDir(scanInfo.UseArtifactsFrom)
 	if err != nil {
-		logger.L().Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
+		logger.L().Ctx(ctx).Fatal("failed to read files from directory", helpers.String("dir", scanInfo.UseArtifactsFrom), helpers.Error(err))
 	}
 	framework := &reporthandling.Framework{}
 	for _, f := range files {
@@ -223,7 +223,7 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 	return false
 }
 
-func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
+func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
 	metadata.ScanMetadata.Format = scanInfo.Format
@@ -277,7 +277,7 @@ func scanInfoToScanMetadata(scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 
 	}
 
-	setContextMetadata(&metadata.ContextMetadata, inputFiles)
+	setContextMetadata(ctx, &metadata.ContextMetadata, inputFiles)
 
 	return metadata
 }
@@ -321,7 +321,7 @@ func GetScanningContext(input string) ScanningContext {
 	//  dir/glob
 	return ContextDir
 }
-func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input string) {
+func setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata, input string) {
 	switch GetScanningContext(input) {
 	case ContextCluster:
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
@@ -331,7 +331,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		// url
 		context, err := metadataGitURL(input)
 		if err != nil {
-			logger.L().Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
 		}
 		contextMetadata.RepoContextMetadata = context
 	case ContextDir:
@@ -348,7 +348,7 @@ func setContextMetadata(contextMetadata *reporthandlingv2.ContextMetadata, input
 		// local
 		context, err := metadataGitLocal(input)
 		if err != nil {
-			logger.L().Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
 		}
 		contextMetadata.RepoContextMetadata = context
 	}

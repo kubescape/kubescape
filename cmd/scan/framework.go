@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -103,12 +104,13 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
-			results, err := ks.Scan(scanInfo)
+			ctx := context.TODO()
+			results, err := ks.Scan(ctx, scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
 
-			if err = results.HandleResults(); err != nil {
+			if err = results.HandleResults(ctx); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			if !scanInfo.VerboseMode {
@@ -161,14 +163,14 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 }
 
 // terminateOnExceedingSeverity terminates the application on exceeding severity
-func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l logger.ILogger) {
+func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
 	l.Fatal("result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
 }
 
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
 //
 // The function forces the application to terminate with an exit code 1 if at least one control failed control that exceeds the set severity threshold
-func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo, onExceed func(*cautils.ScanInfo, logger.ILogger)) {
+func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo, onExceed func(*cautils.ScanInfo, helpers.ILogger)) {
 	// If a severity threshold is not set, we don’t need to enforce it
 	if scanInfo.FailThresholdSeverity == "" {
 		return

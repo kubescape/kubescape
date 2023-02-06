@@ -25,13 +25,13 @@ RUN rm -rf git2go && make libgit2
 # build kubescape server
 WORKDIR /work/httphandler
 RUN python build.py
-RUN ls -ltr build/ubuntu-latest
+RUN ls -ltr build/
 
 # build kubescape cmd
 WORKDIR /work
 RUN python build.py
 
-RUN /work/build/ubuntu-latest/kubescape-ubuntu-latest download artifacts -o /work/artifacts
+RUN /work/build/kubescape-ubuntu-latest download artifacts -o /work/artifacts
 
 FROM alpine:3.16.2
 
@@ -45,7 +45,7 @@ USER ks
 
 WORKDIR /home/ks
 
-COPY --from=builder /work/httphandler/build/ubuntu-latest/kubescape /usr/bin/ksserver
-COPY --from=builder /work/build/ubuntu-latest/kubescape-ubuntu-latest /usr/bin/kubescape
+COPY --from=builder /work/httphandler/build/kubescape-ubuntu-latest /usr/bin/ksserver
+COPY --from=builder /work/build/kubescape-ubuntu-latest /usr/bin/kubescape
 
 ENTRYPOINT ["ksserver"]

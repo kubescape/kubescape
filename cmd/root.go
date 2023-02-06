@@ -81,7 +81,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 	// Supported commands
 	rootCmd.AddCommand(scan.GetScanCommand(ks))
-	rootCmd.AddCommand(download.GeDownloadCmd(ks))
+	rootCmd.AddCommand(download.GetDownloadCmd(ks))
 	rootCmd.AddCommand(delete.GetDeleteCmd(ks))
 	rootCmd.AddCommand(list.GetListCmd(ks))
 	rootCmd.AddCommand(submit.GetSubmitCmd(ks))

@@ -66,7 +66,7 @@ jobs:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
       - name: Comment results to PR
-        continue-on-error: true # Warninig: This might break opening PRs from forks
+        continue-on-error: true # Warning: This might break opening PRs from forks
         uses: peter-evans/create-or-update-comment@v2.1.0
         with:
           issue-number:  ${{ github.event.pull_request.number }}
@@ -157,14 +157,14 @@ jobs:
         env:
           RELEASE: ${{ inputs.RELEASE }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py ${PWD}/build/${{ matrix.os }}/kubescape-${{ matrix.os }}
+        run: python3 smoke_testing/init.py ${PWD}/build/kubescape-${{ matrix.os }}
         if: matrix.os != 'ubuntu-20.04'
 
       - name: Smoke Testing (Linux)
         env:
           RELEASE: ${{ inputs.RELEASE }} 
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py ${PWD}/build/ubuntu-latest/kubescape-ubuntu-latest
+        run: python3 smoke_testing/init.py ${PWD}/build/kubescape-ubuntu-latest
         if: matrix.os == 'ubuntu-20.04'      
 
       - name: golangci-lint

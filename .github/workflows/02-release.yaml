@@ -26,7 +26,7 @@ jobs:
       CGO_ENABLED: 1
       GO111MODULE: ""
       GO_VERSION: "1.19"
-      RELEASE: ${{ github.ref_name}}
+      RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
       CLIENT: release
     secrets: inherit
 
@@ -41,17 +41,17 @@ jobs:
       DRAFT: false
     secrets: inherit    
 
-  publish-krew-plugin:
-    name: Publish Krew plugin
-    runs-on: ubuntu-latest
-    if: "${{ github.repository_owner }} == kubescape"
-    needs: create-release
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: recursive
-      - name: Update new version in krew-index
-        uses: rajatjindal/krew-release-bot@v0.0.43
+  # publish-krew-plugin:
+  #   name: Publish Krew plugin
+  #   runs-on: ubuntu-latest
+  #   if: "${{ github.repository_owner }} == kubescape"
+  #   needs: create-release
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #       with:
+  #         submodules: recursive
+  #     - name: Update new version in krew-index
+  #       uses: rajatjindal/krew-release-bot@v0.0.43
 
   publish-image:
     permissions:

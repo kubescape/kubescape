@@ -3,8 +3,15 @@ import sys
 import hashlib
 import platform
 import subprocess
+import tarfile
 
 BASE_GETTER_CONST = "github.com/kubescape/kubescape/v2/core/cautils/getter"
+
+platformSuffixes = {
+    "Windows": "windows-latest",
+    "Linux": "ubuntu-latest",
+    "Darwin": "macos-latest",
+}
 
 def check_status(status, msg):
     if status != 0:
@@ -13,20 +20,15 @@ def check_status(status, msg):
 
 
 def get_build_dir():
-    current_platform = platform.system()
-    build_dir = ""
+    return "build"
 
-    if current_platform == "Windows": build_dir = "windows-latest"
-    elif current_platform == "Linux": build_dir = "ubuntu-latest"
-    elif current_platform == "Darwin": build_dir = "macos-latest"
-    else: raise OSError("Platform %s is not supported!" % (current_platform))
-
-    return os.path.join("build", build_dir)
 
 def get_package_name():
-    package_name = "kubescape"
-    # TODO: if platform.system() == "Windows": packageName += ".exe" - we should find all places were we access the windows executable before changing the extension 
-    return package_name
+    current_platform = platform.system()
+
+    if current_platform not in platformSuffixes: raise OSError("Platform %s is not supported!" % (current_platform))
+
+    return "kubescape-" + platformSuffixes[current_platform]
 
 
 def main():
@@ -39,12 +41,13 @@ def main():
 
     client_var = "github.com/kubescape/kubescape/v2/core/cautils.Client"
     client_name = os.getenv("CLIENT")
-    
+
     # Create build directory
     build_dir = get_build_dir()
 
     ks_file = os.path.join(build_dir, package_name)
     hash_file = ks_file + ".sha256"
+    tar_file = ks_file + ".tar.gz"
 
     if not os.path.isdir(build_dir):
         os.makedirs(build_dir)
@@ -55,15 +58,15 @@ def main():
         ldflags += " -X {}={}".format(build_url, release_version)
     if client_name:
         ldflags += " -X {}={}".format(client_var, client_name)
- 
-    build_command = ["go", "build", "-buildmode=pie", "-tags=static", "-o", ks_file, "-ldflags" ,ldflags]
+
+    build_command = ["go", "build", "-buildmode=pie", "-tags=static,gitenabled", "-o", ks_file, "-ldflags" ,ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))
 
     status = subprocess.call(build_command)
     check_status(status, "Failed to build kubescape")
-    
+
     sha256 = hashlib.sha256()
     with open(ks_file, "rb") as kube:
         sha256.update(kube.read())
@@ -72,8 +75,11 @@ def main():
             print("kubescape hash: {}, file: {}".format(hash, hash_file))
             kube_sha.write(sha256.hexdigest())
 
+    with tarfile.open(tar_file, 'w:gz') as archive:
+        archive.add(ks_file, "kubescape")
+
     print("Build Done")
- 
- 
+
+
 if __name__ == "__main__":
     main()

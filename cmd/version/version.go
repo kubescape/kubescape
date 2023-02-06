@@ -1,6 +1,7 @@
 package version
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -14,8 +15,9 @@ func GetVersionCmd() *cobra.Command {
 		Short: "Get current version",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			v := cautils.NewIVersionCheckHandler()
-			v.CheckLatestVersion(cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", "version"))
+			ctx := context.TODO()
+			v := cautils.NewIVersionCheckHandler(ctx)
+			v.CheckLatestVersion(ctx, cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", "version"))
 			fmt.Fprintf(os.Stdout,
 				"Your current version is: %s [git enabled in build: %t]\n",
 				cautils.BuildNumber,

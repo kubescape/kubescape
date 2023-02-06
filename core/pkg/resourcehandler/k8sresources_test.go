@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"context"
 	_ "embed"
 	"encoding/json"
 	"reflect"
@@ -555,7 +556,7 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 	}
 
 	sessionObj := cautils.NewOPASessionObjMock()
-	setMapNamespaceToNumOfResources(allResources, sessionObj)
+	setMapNamespaceToNumOfResources(context.TODO(), allResources, sessionObj)
 	expected := map[string]int{
 		"kube-system": 1,
 		"armo-system": 3,
@@ -565,4 +566,14 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 	assert.NotContains(t, sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources, "replicaset")
 	assert.NotContains(t, sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources, "clusterrole")
 	assert.NotContains(t, sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources, "pod")
+}
+
+func TestCloudResourceRequired(t *testing.T) {
+	cloudResources := []string{"container.googleapis.com/v1/ClusterDescribe",
+		"eks.amazonaws.com/v1/DescribeRepositories",
+		"eks.amazonaws.com/v1/ListEntitiesForPolicies",
+		"eks.amazonaws.com/v1/ClusterDescribe"}
+
+	assert.True(t, cloudResourceRequired(cloudResources, ClusterDescribe))
+	assert.False(t, cloudResourceRequired(cloudResources, "ListRolePolicies"))
 }

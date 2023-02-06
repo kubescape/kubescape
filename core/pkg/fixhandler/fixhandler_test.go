@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -188,7 +189,7 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 
 			h, _ := NewFixHandlerMock()
 
-			got, _ := h.ApplyFixToContent(string(input), expression)
+			got, _ := h.ApplyFixToContent(context.TODO(), string(input), expression)
 
 			assert.Equalf(
 				t, want, got,

@@ -1,6 +1,7 @@
 package submit
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -82,13 +83,13 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 				Reporter:      r,
 			}
 
-			if err := ks.Submit(submitInterfaces); err != nil {
+			if err := ks.Submit(context.TODO(), submitInterfaces); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil
 		},
 	}
-	resultsCmd.PersistentFlags().StringVar(&formatVersion, "format-version", "v1", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
+	resultsCmd.PersistentFlags().StringVar(&formatVersion, "format-version", "v2", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 
 	return resultsCmd
 }

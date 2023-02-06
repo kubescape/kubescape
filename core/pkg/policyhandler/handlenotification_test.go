@@ -28,7 +28,6 @@ var (
 	kubeConfigMock string
 )
 
-
 func getKubeConfigMock() *clientcmdapi.Config {
 	kubeConfig := clientcmdapi.Config{}
 	if err := json.Unmarshal([]byte(kubeConfigMock), &kubeConfig); err != nil {
@@ -250,13 +249,12 @@ func Test_getResources(t *testing.T) {
 	policyIdentifier := []cautils.PolicyIdentifier{{}}
 
 	assert.NotPanics(t, func() {
-		policyHandler.getResources(policyIdentifier, objSession, &cautils.ScanInfo{})
+		policyHandler.getResources(context.TODO(), policyIdentifier, objSession)
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
-		policyHandler.getResources(policyIdentifier, objSession, &cautils.ScanInfo{})
+		policyHandler.getResources(context.TODO(), policyIdentifier, objSession)
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }
-

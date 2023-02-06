@@ -1,6 +1,7 @@
 package reporter
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"go.opentelemetry.io/otel"
 )
 
 const MAX_REPORT_SIZE = 2097152 // 2 MB
@@ -53,14 +55,15 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string, su
 	}
 }
 
-func (report *ReportEventReceiver) Submit(opaSessionObj *cautils.OPASessionObj) error {
-
+func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
+	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
+	defer span.End()
 	if report.customerGUID == "" {
-		logger.L().Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
+		logger.L().Ctx(ctx).Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
 		return nil
 	}
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
-		logger.L().Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
+		logger.L().Ctx(ctx).Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
 
@@ -268,7 +271,7 @@ func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
 	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
 		switch report.submitContext {
 		case SubmitContextScan:
-			urlObj.Path = fmt.Sprintf("config-scanning/%s", report.clusterName)
+			urlObj.Path = fmt.Sprintf("compliance/%s", report.clusterName)
 		case SubmitContextRBAC:
 			urlObj.Path = "rbac-visualizer"
 		case SubmitContextRepository:

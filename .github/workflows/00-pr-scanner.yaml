@@ -28,6 +28,6 @@ jobs:
       pull-requests: write
     uses: ./.github/workflows/a-pr-scanner.yaml
     with:
-      RELEASE: ${{ github.ref_name}}
+      RELEASE: ""
       CLIENT: test
     secrets: inherit
