@@ -29,25 +29,6 @@ jobs:
         with:
           path: .
 
-      - name: artifacts rename
-        env:
-          MAC_OS: macos-latest
-          UBUNTU_OS: ubuntu-latest
-          WINDOWS_OS: windows-latest
-        run: |
-
-          mv ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }} ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}-${{ inputs.TAG }}
-          mv ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.sha256 ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}-${{ inputs.TAG }}.sha256
-          mv ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.tar.gz ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}-${{ inputs.TAG }}.tar.gz
-
-          mv ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }} ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}-${{ inputs.TAG }}
-          mv ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.sha256 ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}-${{ inputs.TAG }}.sha256
-          mv ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.tar.gz ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}-${{ inputs.TAG }}.tar.gz
-
-          mv ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }} ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}-${{ inputs.TAG }}
-          mv ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.sha256 ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}-${{ inputs.TAG }}.sha256
-          mv ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.tar.gz ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}-${{ inputs.TAG }}.tar.gz
-
       - name: Release
         uses: softprops/action-gh-release@v1
         env:
@@ -63,14 +44,14 @@ jobs:
           fail_on_unmatched_files: true
           prerelease: false
           files: |
-            ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}-${{ inputs.TAG }}
-            ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}-${{ inputs.TAG }}.sha256
-            ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}-${{ inputs.TAG }}.tar.gz
-            ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}-${{ inputs.TAG }}
-            ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}-${{ inputs.TAG }}.sha256
-            ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}-${{ inputs.TAG }}.tar.gz
-            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}-${{ inputs.TAG }}
-            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}-${{ inputs.TAG }}.sha256
-            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}-${{ inputs.TAG }}.tar.gz
+            ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}
+            ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.sha256
+            ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.tar.gz
+            ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}
+            ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.sha256
+            ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.tar.gz
+            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}
+            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.sha256
+            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.tar.gz
  
             
