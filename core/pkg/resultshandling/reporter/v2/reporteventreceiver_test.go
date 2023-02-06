@@ -33,7 +33,7 @@ func TestReportEventReceiver_addPathURL(t *testing.T) {
 			want: &url.URL{
 				Scheme: "https",
 				Host:   "localhost:8080",
-				Path:   "config-scanning/test",
+				Path:   "compliance/test",
 			},
 		},
 	}
@@ -59,7 +59,7 @@ func TestGetURL(t *testing.T) {
 			"",
 			SubmitContextScan,
 		)
-		assert.Equal(t, "https://cloud.armosec.io/config-scanning/test?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+		assert.Equal(t, "https://cloud.armosec.io/compliance/test?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
 	}
 
 	// Test rbac submit and registered url
