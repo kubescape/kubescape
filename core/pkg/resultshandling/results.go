@@ -98,11 +98,11 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 	switch printFormat {
 	case printer.JsonFormat:
 		switch formatVersion {
-		case "v2":
-			return printerv2.NewJsonPrinter()
-		default:
-			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"), helpers.String("This will not be supported after", "1/Jan/2023"))
+		case "v1":
+			logger.L().Ctx(ctx).Warning("Deprecated format version", helpers.String("run", "--format-version=v2"))
 			return printerv1.NewJsonPrinter()
+		default:
+			return printerv2.NewJsonPrinter()
 		}
 	case printer.JunitResultFormat:
 		return printerv2.NewJunitPrinter(verboseMode)
