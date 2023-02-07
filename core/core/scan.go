@@ -76,10 +76,6 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 		logger.L().Ctx(ctxHostScanner).Error("failed to init host scanner", helpers.Error(err))
 		hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
 	}
-	// excluding hostsensor namespace
-	if len(scanInfo.IncludeNamespaces) == 0 && hostSensorHandler.GetNamespace() != "" {
-		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.GetNamespace())
-	}
 	spanHostScanner.End()
 
 	// ================== setup registry adaptors ======================================
