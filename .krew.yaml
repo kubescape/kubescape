@@ -20,17 +20,17 @@ spec:
       matchLabels:
         os: darwin
         arch: amd64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-macos-latest" .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-macos-latest.tar.gz" .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: linux
         arch: amd64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-ubuntu-latest" .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-ubuntu-latest.tar.gz" .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: windows
         arch: amd64
-    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-windows-latest" .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-windows-latest.tar.gz" .TagName }}
     bin: kubescape
