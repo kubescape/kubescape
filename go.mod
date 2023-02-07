@@ -19,7 +19,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.23
 	github.com/kubescape/go-logger v0.0.8
 	github.com/kubescape/k8s-interface v0.0.99
-	github.com/kubescape/opa-utils v0.0.231
+	github.com/kubescape/opa-utils v0.0.235
 	github.com/kubescape/rbac-utils v0.0.19
 	github.com/kubescape/regolibrary v1.0.250
 	github.com/libgit2/git2go/v33 v33.0.9
