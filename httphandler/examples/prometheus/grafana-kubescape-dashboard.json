@@ -331,7 +331,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "description": "Number of Resources that failed/passed or excluded",
+        "description": "Number of Resources that failed/passed or skipped",
         "fieldConfig": {
           "defaults": {
             "color": {
@@ -412,10 +412,10 @@
             },
             "editorMode": "code",
             "exemplar": false,
-            "expr": "sum(kubescape_control_count_resources_exclude)",
+            "expr": "sum(kubescape_control_count_resources_skipped)",
             "hide": false,
             "instant": false,
-            "legendFormat": "exclude",
+            "legendFormat": "skipped",
             "range": true,
             "refId": "B"
           }
@@ -428,7 +428,7 @@
           "type": "prometheus",
           "uid": "prometheus"
         },
-        "description": "Number of controls that failed/passed or excluded\n",
+        "description": "Number of controls that failed/passed or skipped\n",
         "fieldConfig": {
           "defaults": {
             "color": {
@@ -497,10 +497,10 @@
             },
             "editorMode": "code",
             "exemplar": false,
-            "expr": "kubescape_cluster_count_control_exclude",
+            "expr": "kubescape_cluster_count_control_skipped",
             "hide": false,
             "instant": false,
-            "legendFormat": "exclude",
+            "legendFormat": "skipped",
             "range": true,
             "refId": "B"
           },

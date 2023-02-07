@@ -89,12 +89,14 @@ func DeploymentWorkloadMock(replicas int) workloadinterface.IMetadata {
 }
 
 func ResourceAssociatedControlMock(controlID string, status apis.ScanningStatus) resourcesresults.ResourceAssociatedControl {
-	return resourcesresults.ResourceAssociatedControl{
+	control := resourcesresults.ResourceAssociatedControl{
 		ControlID: controlID,
 		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
 			{Name: "Test", Status: status},
 		},
 	}
+	control.SetStatus(reporthandling.Control{})
+	return control
 }
 
 func TestNewResourcesPrioritizationHandler(t *testing.T) {
