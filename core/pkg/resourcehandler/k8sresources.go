@@ -111,9 +111,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources
 	if len(hostResources) > 0 {
-		logger.L().Info("Requesting Host scanner data")
-		cautils.StartSpinner()
 		if sessionObj.Metadata.ScanMetadata.HostScanner {
+			logger.L().Info("Requesting Host scanner data")
+			cautils.StartSpinner()
 			infoMap, err := k8sHandler.collectHostResources(ctx, allResources, ksResourceMap)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("failed to collect host scanner resources", helpers.Error(err))
@@ -146,7 +146,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-			logger.L().Ctx(ctx).Warning("failed to collect cloud data", helpers.Error(err))
+			logger.L().Debug("failed to collect cloud data", helpers.Error(err))
 		}
 	}
 
