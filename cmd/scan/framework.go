@@ -15,6 +15,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/meta"
 
 	"github.com/spf13/cobra"
@@ -72,6 +73,9 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			}
 			scanInfo.FrameworkScan = true
 
+			// We do not scan all frameworks by default when triggering scan from the CLI
+			scanInfo.ScanAll = false
+
 			var frameworks []string
 
 			if len(args) == 0 { // scan all frameworks
@@ -81,11 +85,12 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				frameworks = strings.Split(args[0], ",")
 				if cautils.StringInSlice(frameworks, "all") != cautils.ValueNotFound {
 					scanInfo.ScanAll = true
-					frameworks = []string{}
+					frameworks = getter.NativeFrameworks
 				}
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
 						scanInfo.InputPatterns = args[1:]
+						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 					} else { // store stdin to file - do NOT move to separate function !!
 						tempFile, err := os.CreateTemp(".", "tmp-kubescape*.yaml")
 						if err != nil {
