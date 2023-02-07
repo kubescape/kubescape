@@ -1,25 +1,28 @@
 package policyhandler
 
 import (
+	"context"
 	"fmt"
 	"strings"
-
-	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"go.opentelemetry.io/otel"
 )
 
-func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.PolicyIdentifier, policiesAndResources *cautils.OPASessionObj) error {
+func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, policiesAndResources *cautils.OPASessionObj) error {
+	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getPolicies")
+	defer span.End()
 	logger.L().Info("Downloading/Loading policy definitions")
 
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
-	policies, err := policyHandler.getScanPolicies(policyIdentifier)
+	policies, err := policyHandler.getScanPolicies(ctx, policyIdentifier)
 	if err != nil {
 		return err
 	}
@@ -34,7 +37,7 @@ func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.Polic
 	if err == nil {
 		policiesAndResources.Exceptions = exceptionPolicies
 	} else {
-		logger.L().Error("failed to load exceptions", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to load exceptions", helpers.Error(err))
 	}
 
 	// get account configuration
@@ -42,7 +45,7 @@ func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.Polic
 	if err == nil {
 		policiesAndResources.RegoInputData.PostureControlInputs = controlsInputs
 	} else {
-		logger.L().Error(err.Error())
+		logger.L().Ctx(ctx).Error(err.Error())
 	}
 	cautils.StopSpinner()
 
@@ -50,7 +53,7 @@ func (policyHandler *PolicyHandler) getPolicies(policyIdentifier []cautils.Polic
 	return nil
 }
 
-func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.PolicyIdentifier) ([]reporthandling.Framework, error) {
+func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) ([]reporthandling.Framework, error) {
 	frameworks := []reporthandling.Framework{}
 
 	switch getScanKind(policyIdentifier) {
@@ -67,7 +70,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 				frameworks = append(frameworks, *receivedFramework)
 				cache := getter.GetDefaultPath(rule.Identifier + ".json")
 				if err := getter.SaveInFile(receivedFramework, cache); err != nil {
-					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
+					logger.L().Ctx(ctx).Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 				}
 			}
 		}
@@ -85,7 +88,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(policyIdentifier []cautils.P
 
 				cache := getter.GetDefaultPath(policy.Identifier + ".json")
 				if err := getter.SaveInFile(receivedControl, cache); err != nil {
-					logger.L().Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
+					logger.L().Ctx(ctx).Warning("failed to cache file", helpers.String("file", cache), helpers.Error(err))
 				}
 			}
 		}

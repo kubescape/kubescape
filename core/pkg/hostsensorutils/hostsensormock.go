@@ -1,6 +1,8 @@
 package hostsensorutils
 
 import (
+	"context"
+
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -8,7 +10,7 @@ import (
 type HostSensorHandlerMock struct {
 }
 
-func (hshm *HostSensorHandlerMock) Init() error {
+func (hshm *HostSensorHandlerMock) Init(_ context.Context) error {
 	return nil
 }
 
@@ -16,7 +18,7 @@ func (hshm *HostSensorHandlerMock) TearDown() error {
 	return nil
 }
 
-func (hshm *HostSensorHandlerMock) CollectResources() ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
+func (hshm *HostSensorHandlerMock) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	return []hostsensor.HostSensorDataEnvelope{}, nil, nil
 }
 

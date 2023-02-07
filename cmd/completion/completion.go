@@ -1,23 +1,23 @@
 package completion
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/spf13/cobra"
 )
 
-var completionCmdExamples = `
-
+var completionCmdExamples = fmt.Sprintf(`
   # Enable BASH shell autocompletion
-  $ source <(kubescape completion bash)
-  $ echo 'source <(kubescape completion bash)' >> ~/.bashrc
+  $ source <(%[1]s completion bash)
+  $ echo 'source <(%[1]s completion bash)' >> ~/.bashrc
 
   # Enable ZSH shell autocompletion
   $ source <(kubectl completion zsh)
   $ echo 'source <(kubectl completion zsh)' >> "${fpath[1]}/_kubectl"
-
-`
+`, cautils.ExecName())
 
 func GetCompletionCmd() *cobra.Command {
 	completionCmd := &cobra.Command{

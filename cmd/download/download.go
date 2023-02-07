@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -14,34 +15,34 @@ import (
 )
 
 var (
-	downloadExample = `
+	downloadExample = fmt.Sprintf(`
   # Download all artifacts and save them in the default path (~/.kubescape)
-  kubescape download artifacts
+  %[1]s download artifacts
   
   # Download all artifacts and save them in /tmp path
-  kubescape download artifacts --output /tmp
+  %[1]s download artifacts --output /tmp
   
-  # Download the NSA framework. Run 'kubescape list frameworks' for all frameworks names
-  kubescape download framework nsa
+  # Download the NSA framework. Run '%[1]s list frameworks' for all frameworks names
+  %[1]s download framework nsa
 
-  # Download the "C-0001" control. Run 'kubescape list controls --id' for all controls ids
-  kubescape download control "C-0001"
+  # Download the "C-0001" control. Run '%[1]s list controls --id' for all controls ids
+  %[1]s download control "C-0001"
 
-  # Download the "C-0001" control. Run 'kubescape list controls --id' for all controls ids
-  kubescape download control C-0001
+  # Download the "C-0001" control. Run '%[1]s list controls --id' for all controls ids
+  %[1]s download control C-0001
 
   # Download the configured exceptions
-  kubescape download exceptions 
+  %[1]s download exceptions 
 
   # Download the configured controls-inputs 
-  kubescape download controls-inputs 
+  %[1]s download controls-inputs 
 
   # Download the attack tracks
-  kubescape download attack-tracks
-`
+  %[1]s download attack-tracks
+`, cautils.ExecName())
 )
 
-func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
+func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	var downloadInfo = v1.DownloadInfo{}
 
 	downloadCmd := &cobra.Command{
@@ -74,7 +75,7 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				downloadInfo.Identifier = args[1]
 
 			}
-			if err := ks.Download(&downloadInfo); err != nil {
+			if err := ks.Download(context.TODO(), &downloadInfo); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

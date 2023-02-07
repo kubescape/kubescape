@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
@@ -13,7 +14,7 @@ import (
 func getExceptionsCmd(ks meta.IKubescape, deleteInfo *v1.Delete) *cobra.Command {
 	return &cobra.Command{
 		Use:     "exceptions <exception name>",
-		Short:   "Delete exceptions from Kubescape SaaS version. Run 'kubescape list exceptions' for all exceptions names",
+		Short:   fmt.Sprintf("Delete exceptions from Kubescape SaaS version. Run '%[1]s list exceptions' for all exceptions names", cautils.ExecName()),
 		Example: deleteExceptionsExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {

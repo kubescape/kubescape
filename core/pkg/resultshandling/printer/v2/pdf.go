@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	_ "embed"
 	b64 "encoding/base64"
 	"fmt"
@@ -39,7 +40,7 @@ func NewPdfPrinter() *PdfPrinter {
 	return &PdfPrinter{}
 }
 
-func (pp *PdfPrinter) SetWriter(outputFile string) {
+func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
 	// Ensure to have an available output file, otherwise create it.
 	if strings.TrimSpace(outputFile) == "" {
 		outputFile = pdfOutputFile
@@ -48,7 +49,7 @@ func (pp *PdfPrinter) SetWriter(outputFile string) {
 	if filepath.Ext(strings.TrimSpace(outputFile)) != pdfOutputExt {
 		outputFile = outputFile + pdfOutputExt
 	}
-	pp.writer = printer.GetWriter(outputFile)
+	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (pp *PdfPrinter) Score(score float32) {
@@ -75,7 +76,7 @@ func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.Summ
 
 }
 
-func (pp *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
+func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
@@ -89,12 +90,12 @@ func (pp *PdfPrinter) ActionPrint(opaSessionObj *cautils.OPASessionObj) {
 	// Extrat output buffer.
 	outBuff, err := m.Output()
 	if err != nil {
-		logger.L().Error("failed to generate pdf format", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to generate pdf format", helpers.Error(err))
 		return
 	}
 
 	if _, err := pp.writer.Write(outBuff.Bytes()); err != nil {
-		logger.L().Error("failed to write results", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
 	} else {
 		printer.LogOutputFile(pp.writer.Name())
 	}

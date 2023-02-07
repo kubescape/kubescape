@@ -1,6 +1,7 @@
 package opaprocessor
 
 import (
+	"context"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -38,7 +39,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj.AllResources[deployment.GetID()] = deployment
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())
-	opap.Process(policies)
+	opap.Process(context.TODO(), policies, nil)
 
 	assert.Equal(t, 1, len(opaSessionObj.ResourcesResult))
 	res := opaSessionObj.ResourcesResult[deployment.GetID()]
@@ -49,7 +50,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	assert.False(t, res.GetStatus(nil).IsPassed())
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
 
-	opap.updateResults()
+	opap.updateResults(context.TODO())
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
 	assert.Equal(t, 2, res.ListControlsIDs(nil).All().Len())
 	assert.Equal(t, 2, res.ListControlsIDs(nil).All().Len())
@@ -80,7 +81,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	assert.True(t, summaryDetails.GetStatus().IsFailed())
 
 	opaSessionObj.Exceptions = []armotypes.PostureExceptionPolicy{*mocks.MockExceptionAllKinds(&armotypes.PosturePolicy{FrameworkName: frameworks[0].Name})}
-	opap.updateResults()
+	opap.updateResults(context.TODO())
 
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
 	assert.Equal(t, 2, res.ListControlsIDs(nil).All().Len())

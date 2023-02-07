@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,7 +23,7 @@ type FileResourceHandler struct {
 	registryAdaptors *RegistryAdaptors
 }
 
-func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAdaptors) *FileResourceHandler {
+func NewFileResourceHandler(_ context.Context, inputPatterns []string, registryAdaptors *RegistryAdaptors) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
 		inputPatterns:    inputPatterns,
@@ -30,7 +31,7 @@ func NewFileResourceHandler(inputPatterns []string, registryAdaptors *RegistryAd
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 
 	//
 	// build resources map
@@ -47,7 +48,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	cautils.StartSpinner()
 
 	for path := range fileHandler.inputPatterns {
-		workloadIDToSource, workloads, err := getResourcesFromPath(fileHandler.inputPatterns[path])
+		workloadIDToSource, workloads, err := getResourcesFromPath(ctx, fileHandler.inputPatterns[path])
 		if err != nil {
 			return nil, allResources, nil, err
 		}
@@ -78,7 +79,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 
 	// Should Kubescape scan image related controls when scanning local files?
 	// if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
-	// 	logger.L().Warning("failed to collect images vulnerabilities", helpers.Error(err))
+	// 	logger.L().Ctx(ctx).Warning("failed to collect images vulnerabilities", helpers.Error(err))
 	// }
 
 	cautils.StopSpinner()
@@ -87,8 +88,7 @@ func (fileHandler *FileResourceHandler) GetResources(sessionObj *cautils.OPASess
 	return k8sResources, allResources, ksResources, nil
 }
 
-func getResourcesFromPath(path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
-
+func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	workloads := []workloadinterface.IMetadata{}
 
@@ -116,7 +116,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	}
 
 	// load resource from local file system
-	sourceToWorkloads := cautils.LoadResourcesFromFiles(path, repoRoot)
+	sourceToWorkloads := cautils.LoadResourcesFromFiles(ctx, path, repoRoot)
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool
@@ -142,7 +142,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 		if gitRepo != nil {
 			commitInfo, err := gitRepo.GetFileLastCommit(source)
 			if err != nil && !warnIssued {
-				logger.L().Warning("git scan skipped", helpers.Error(err))
+				logger.L().Ctx(ctx).Warning("git scan skipped", helpers.Error(err))
 				warnIssued = true // croak only once
 			}
 
@@ -173,7 +173,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	}
 
 	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(path)
+	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(ctx, path)
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChartName := helmSourceToChartName[source]
@@ -214,7 +214,7 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	}
 
 	// Load resources from Kustomize directory
-	kustomizeSourceToWorkloads, kustomizeDirectoryName := cautils.LoadResourcesFromKustomizeDirectory(path)
+	kustomizeSourceToWorkloads, kustomizeDirectoryName := cautils.LoadResourcesFromKustomizeDirectory(ctx, path)
 
 	// update workloads and workloadIDToSource with workloads from Kustomize Directory
 	for source, ws := range kustomizeSourceToWorkloads {
@@ -254,6 +254,6 @@ func getResourcesFromPath(path string) (map[string]reporthandling.Source, []work
 	return workloadIDToSource, workloads, nil
 }
 
-func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo() *version.Info {
+func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo(_ context.Context) *version.Info {
 	return nil
 }

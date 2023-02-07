@@ -1,6 +1,7 @@
 package hostsensorutils
 
 import (
+	"context"
 	"sync"
 
 	logger "github.com/kubescape/go-logger"
@@ -42,22 +43,22 @@ func (wp *workerPool) init(noOfPods ...int) {
 }
 
 // The worker takes a job out of the chan, executes the request, and pushes the result to the results chan
-func (wp *workerPool) hostSensorWorker(hsh *HostSensorHandler, wg *sync.WaitGroup) {
+func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
 	defer wg.Done()
 	for job := range wp.jobs {
 		hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
 		if err != nil {
-			logger.L().Error("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
+			logger.L().Ctx(ctx).Error("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
 		} else {
 			wp.results <- hostSensorDataEnvelope
 		}
 	}
 }
 
-func (wp *workerPool) createWorkerPool(hsh *HostSensorHandler, wg *sync.WaitGroup) {
+func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
 	for i := 0; i < noOfWorkers; i++ {
 		wg.Add(1)
-		go wp.hostSensorWorker(hsh, wg)
+		go wp.hostSensorWorker(ctx, hsh, wg)
 	}
 }
 

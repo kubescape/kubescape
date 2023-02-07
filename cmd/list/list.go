@@ -1,6 +1,7 @@
 package list
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -13,19 +14,19 @@ import (
 )
 
 var (
-	listExample = `
+	listExample = fmt.Sprintf(`
   # List default supported frameworks names
-  kubescape list frameworks
+  %[1]s list frameworks
   
   # List all supported frameworks names
-  kubescape list frameworks --account <account id>
+  %[1]s list frameworks --account <account id>
 	
   # List all supported controls names with ids
-  kubescape list controls
+  %[1]s list controls
   
   Control documentation:
   https://hub.armosec.io/docs/controls
-`
+`, cautils.ExecName())
 )
 
 func GetListCmd(ks meta.IKubescape) *cobra.Command {
@@ -55,7 +56,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 
 			listPolicies.Target = args[0]
 
-			if err := ks.List(&listPolicies); err != nil {
+			if err := ks.List(context.TODO(), &listPolicies); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil
@@ -65,7 +66,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 	listCmd.PersistentFlags().StringVarP(&listPolicies.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
 	listCmd.PersistentFlags().StringVarP(&listPolicies.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-print'/'json'")
-	listCmd.PersistentFlags().MarkDeprecated("id", "Control ID's are included in list outpus")
+	listCmd.PersistentFlags().MarkDeprecated("id", "Control ID's are included in list outputs")
 
 	return listCmd
 }

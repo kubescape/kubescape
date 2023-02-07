@@ -1,7 +1,8 @@
 package scan
 
 import (
-	logger "github.com/kubescape/go-logger"
+	"context"
+
 	"github.com/kubescape/go-logger/helpers"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -160,7 +161,7 @@ func Test_enforceSeverityThresholds(t *testing.T) {
 				want := tc.Want
 
 				got := false
-				onExceed := func(*cautils.ScanInfo, logger.ILogger) {
+				onExceed := func(*cautils.ScanInfo, helpers.ILogger) {
 					got = true
 				}
 
@@ -193,6 +194,7 @@ func (l *spyLogger) GetLevel() string                                { return ""
 func (l *spyLogger) SetWriter(w *os.File)                            {}
 func (l *spyLogger) GetWriter() *os.File                             { return &os.File{} }
 func (l *spyLogger) LoggerName() string                              { return "" }
+func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger           { return l }
 
 func (l *spyLogger) Fatal(msg string, details ...helpers.IDetails) {
 	firstDetail := details[0]

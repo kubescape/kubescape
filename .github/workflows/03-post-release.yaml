@@ -1,14 +1,14 @@
-name: create release digests
+name: 03-create_release_digests
 
 on:
   release:
-    types: [ published]
+    types: [ published ]
     branches:
     - 'master'
     - 'main'
   
 jobs:
-  once:
+  create_release_digests:
     name: Creating digests
     runs-on: ubuntu-latest
     steps:

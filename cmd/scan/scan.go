@@ -10,25 +10,24 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var scanCmdExamples = `
+var scanCmdExamples = fmt.Sprintf(`
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
   # Scan current cluster with all frameworks
-  kubescape scan --enable-host-scan --verbose
+  %[1]s scan --enable-host-scan --verbose
 
   # Scan kubernetes YAML manifest files
-  kubescape scan .
+  %[1]s scan .
 
   # Scan and save the results in the JSON format
-  kubescape scan --format json --output results.json --format-version=v2
+  %[1]s scan --format json --output results.json --format-version=v2
 
   # Display all resources
-  kubescape scan --verbose
+  %[1]s scan --verbose
 
   # Scan different clusters from the kubectl context 
-  kubescape scan --kube-context <kubernetes context>
-  
-`
+  %[1]s scan --kube-context <kubernetes context>
+`, cautils.ExecName())
 
 func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
@@ -87,7 +86,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load local policy object from default path. If not used will download latest")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host scanner DaemonSet. Use this flag cautiously")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v1", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.FormatVersion, "format-version", "v2", "Output object can be different between versions, this is for maintaining backward and forward compatibility. Supported:'v1'/'v2'")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.CustomClusterName, "cluster-name", "", "Set the custom name of the cluster. Not same as the kube-context flag")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Submit the scan results to Kubescape SaaS where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.OmitRawResources, "omit-raw-resources", "", false, "Omit raw resources from the output. By default the raw resources are included in the output")

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"fmt"
 
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
@@ -42,8 +43,8 @@ func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 	return nil
 }
 
-func (ks *Kubescape) DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error {
+func (ks *Kubescape) DeleteCachedConfig(ctx context.Context, deleteConfig *metav1.DeleteConfig) error {
 
 	tenant := getTenantConfig(nil, "", "", getKubernetesApi()) // change k8sinterface
-	return tenant.DeleteCachedConfig()
+	return tenant.DeleteCachedConfig(ctx)
 }
