@@ -17,7 +17,6 @@ import (
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // executeScan execute the scan request passed in the channel
@@ -53,8 +52,6 @@ func (handler *HTTPHandler) executeScan() {
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
-	span := trace.SpanFromContext(ctx)
-	logger.L().Info("span Matthias", helpers.String("span", fmt.Sprintf("%#v", span)))
 	ks := core.NewKubescape()
 	result, err := ks.Scan(ctx, scanInfo)
 	if err != nil {
