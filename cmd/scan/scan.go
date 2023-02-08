@@ -3,9 +3,11 @@ package scan
 import (
 	"flag"
 	"fmt"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	"github.com/spf13/cobra"
 )
@@ -41,7 +43,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				if args[0] != "framework" && args[0] != "control" {
-					scanInfo.ScanAll = true
 					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{"all"}, args...))
 				}
 			}
@@ -50,8 +51,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			if len(args) == 0 {
-				scanInfo.ScanAll = true
-				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{"all"})
+				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{strings.Join(getter.NativeFrameworks, ",")})
 			}
 			return nil
 		},
