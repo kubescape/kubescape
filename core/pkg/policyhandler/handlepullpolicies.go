@@ -59,6 +59,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyI
 	switch getScanKind(policyIdentifier) {
 	case apisv1.KindFramework: // Download frameworks
 		for _, rule := range policyIdentifier {
+			logger.L().Debug("Downloading framework", helpers.String("framework", rule.Identifier))
 			receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(rule.Identifier)
 			if err != nil {
 				return frameworks, policyDownloadError(err)
@@ -79,6 +80,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyI
 		var receivedControl *reporthandling.Control
 		var err error
 		for _, policy := range policyIdentifier {
+			logger.L().Debug("Downloading control", helpers.String("control", policy.Identifier))
 			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(policy.Identifier)
 			if err != nil {
 				return frameworks, policyDownloadError(err)

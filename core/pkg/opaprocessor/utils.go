@@ -3,6 +3,8 @@ package opaprocessor
 import (
 	"fmt"
 
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -64,7 +66,11 @@ var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.T
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
-	result, _ := verify(string(aStr), string(bStr))
+	result, err := verify(string(aStr), string(bStr))
+	if err != nil {
+		// Do not change this log from debug level. We might find a lot of images without signature
+		logger.L().Debug("failed to verify signature", helpers.String("image", string(aStr)), helpers.String("key", string(bStr)), helpers.Error(err))
+	}
 	return ast.BooleanTerm(result), nil
 }
 
