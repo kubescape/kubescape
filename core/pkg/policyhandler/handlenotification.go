@@ -137,7 +137,7 @@ func getCloudMetadata(opaSessionObj *cautils.OPASessionObj, config *clientcmdapi
 // check if the server is AKS. e.g. https://XXX.XX.XXX.azmk8s.io:443
 func isAKS(config *clientcmdapi.Config) bool {
 	const serverIdentifierAKS = "azmk8s.io"
-	if cluster, ok := config.Clusters[config.CurrentContext]; ok {
+	if cluster, ok := config.Clusters[k8sinterface.GetContextName()]; ok {
 		return strings.Contains(cluster.Server, serverIdentifierAKS)
 	}
 	return false
@@ -145,7 +145,7 @@ func isAKS(config *clientcmdapi.Config) bool {
 
 // check if the server is EKS. e.g. arn:aws:eks:eu-west-1:xxx:cluster/xxxx
 func isEKS(config *clientcmdapi.Config) bool {
-	if context, ok := config.Contexts[config.CurrentContext]; ok {
+	if context, ok := config.Contexts[k8sinterface.GetContextName()]; ok {
 		return strings.Contains(context.Cluster, cloudsupportv1.EKS)
 	}
 	return false
@@ -153,7 +153,7 @@ func isEKS(config *clientcmdapi.Config) bool {
 
 // check if the server is GKE. e.g. gke_xxx-xx-0000_us-central1-c_xxxx-1
 func isGKE(config *clientcmdapi.Config) bool {
-	if context, ok := config.Contexts[config.CurrentContext]; ok {
+	if context, ok := config.Contexts[k8sinterface.GetContextName()]; ok {
 		return strings.Contains(context.Cluster, cloudsupportv1.GKE)
 	}
 	return false

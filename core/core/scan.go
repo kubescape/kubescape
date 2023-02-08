@@ -47,7 +47,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== setup tenant object ======================================
 	ctxTenant, spanTenant := otel.Tracer("").Start(ctx, "setup tenant")
-	tenantConfig := getTenantConfig(&scanInfo.Credentials, scanInfo.KubeContext, scanInfo.CustomClusterName, k8s)
+	tenantConfig := getTenantConfig(&scanInfo.Credentials, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)

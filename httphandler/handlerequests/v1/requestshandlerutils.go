@@ -11,6 +11,7 @@ import (
 	"github.com/armosec/utils-go/boolutils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/core"
@@ -131,6 +132,9 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
 
+	// Set default KubeContext from scanInfo input
+	k8sinterface.SetClusterContextName(scanInfo.KubeContext)
+
 	return scanInfo
 }
 
@@ -149,6 +153,8 @@ func defaultScanInfo() *cautils.ScanInfo {
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
+	scanInfo.KubeContext = envToString("KS_CONTEXT", "") // publish results to Kubescape SaaS
+
 	return scanInfo
 }
 
