@@ -1,7 +1,11 @@
 package getter
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +19,9 @@ func TestReleasedPolicy(t *testing.T) {
 
 	t.Run("should initialize objects", func(t *testing.T) {
 		t.Parallel()
+
+		// acquire from github or from local fixture
+		hydrateReleasedPolicyFromMock(t, p)
 
 		require.NoError(t, p.SetRegoObjects())
 
@@ -127,4 +134,37 @@ func min(a, b int) int {
 	}
 
 	return a
+}
+
+func hydrateReleasedPolicyFromMock(t testing.TB, p *DownloadReleasedPolicy) {
+	regoFile := testRegoFile("policy")
+
+	if _, err := os.Stat(regoFile); errors.Is(err, fs.ErrNotExist) {
+		// retrieve fixture from latest released policy from github.
+		//
+		// NOTE: to update the mock, just delete the testdata/policy.json file and run the tests again.
+		t.Logf("updating fixture file %q from github", regoFile)
+
+		require.NoError(t, p.SetRegoObjects())
+		require.NotNil(t, p.gs)
+
+		require.NoError(t,
+			SaveInFile(p.gs, regoFile),
+		)
+
+		return
+	}
+
+	// we have a mock fixture: load this rather than calling github
+	t.Logf("populating rego policy from fixture file %q", regoFile)
+	buf, err := os.ReadFile(regoFile)
+	require.NoError(t, err)
+
+	require.NoError(t,
+		json.Unmarshal(buf, p.gs),
+	)
+}
+
+func testRegoFile(framework string) string {
+	return filepath.Join(currentDir(), "testdata", fmt.Sprintf("%s.json", framework))
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -386,7 +387,7 @@ func TestLoadPolicy(t *testing.T) {
 }
 
 func testFrameworkFile(framework string) string {
-	return filepath.Join(".", "testdata", fmt.Sprintf("%s.json", framework))
+	return filepath.Join(currentDir(), "testdata", fmt.Sprintf("%s.json", framework))
 }
 
 func writeTempJSONControlInputs(t testing.TB) (string, map[string][]string) {
@@ -406,4 +407,10 @@ func writeTempJSONControlInputs(t testing.TB) (string, map[string][]string) {
 	require.NoError(t, os.WriteFile(fileName, buf, 0600))
 
 	return fileName, mock
+}
+
+func currentDir() string {
+	_, filename, _, _ := runtime.Caller(1)
+
+	return filepath.Dir(filename)
 }
