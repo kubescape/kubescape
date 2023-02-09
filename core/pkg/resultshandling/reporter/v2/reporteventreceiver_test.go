@@ -2,16 +2,18 @@ package reporter
 
 import (
 	"context"
+	"errors"
 	"math/rand"
-	"net/url"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/prettylogger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -19,190 +21,6 @@ import (
 
 // mxStdio serializes the capture of os.Stderr or os.Stdout
 var mxStdio sync.Mutex
-
-func TestReportEventReceiver_addPathURL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		report *ReportEventReceiver
-		urlObj *url.URL
-		want   *url.URL
-		name   string
-	}{
-		{
-			name: "URL for submitted data",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme:   "https",
-				Host:     "localhost:8080",
-				Path:     "compliance/test",
-				RawQuery: "",
-			},
-		},
-		{
-			name: "URL for first scan",
-			report: &ReportEventReceiver{
-				clusterName:   "test",
-				customerGUID:  "FFFF",
-				token:         "XXXX",
-				reportID:      "1234",
-				submitContext: SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme:   "https",
-				Host:     "localhost:8080",
-				Path:     "account/sign-up",
-				RawQuery: "customerGUID=FFFF&invitationToken=XXXX&utm_medium=createaccount&utm_source=ARMOgithub",
-			},
-		},
-		{
-			name: "add rbac path",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextRBAC,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "rbac-visualizer",
-			},
-		},
-		{
-			name: "add repository path",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextRepository,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "repository-scanning/1234",
-			},
-		},
-		{
-			name: "add default path",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContext("invalid"),
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "dashboard",
-			},
-		},
-		{
-			name: "path when no email and no token",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "",
-				customerAdminEMail: "",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "compliance/test",
-			},
-		},
-		{
-			name: "path when email and no token",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "compliance/test",
-			},
-		},
-		{
-			name: "path when no email and token",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XYZ",
-				customerAdminEMail: "",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme:   "https",
-				Host:     "localhost:8080",
-				Path:     "account/sign-up",
-				RawQuery: "customerGUID=FFFF&invitationToken=XYZ&utm_medium=createaccount&utm_source=ARMOgithub",
-			},
-		},
-	}
-	for _, toPin := range tests {
-		tc := toPin
-
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			tc.report.addPathURL(tc.urlObj)
-			require.Equal(t, tc.want.String(), tc.urlObj.String())
-		})
-	}
-}
 
 func TestGetURL(t *testing.T) {
 	t.Parallel()
@@ -325,7 +143,8 @@ func TestDisplayReportURL(t *testing.T) {
 			"",
 			SubmitContextScan,
 		)
-		reporter.generateMessage()
+
+		reporter.posted = true
 
 		capture, clean := captureStderr(t)
 		defer clean()
@@ -380,7 +199,7 @@ func TestPrepareReport(t *testing.T) {
 					},
 				}
 
-				reporter.prepareReport(opaSessionObj)
+				reporter.sendChunkedReport(opaSessionObj)
 
 				got := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
 				require.Equalf(t, want, got,
@@ -407,8 +226,8 @@ func TestSubmit(t *testing.T) {
 			SubmitContextScan,
 		)
 
+		setTestKSCloudClient(reporter, srv)
 		opaSession := mockOPASessionObj(t)
-		reporter.httpClient = hijackedClient(t, srv) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
 
 		require.NoError(t,
 			reporter.Submit(ctx, opaSession),
@@ -425,8 +244,8 @@ func TestSubmit(t *testing.T) {
 			SubmitContextScan,
 		)
 
+		setTestKSCloudClient(reporter, srv)
 		opaSession := mockOPASessionObj(t)
-		reporter.httpClient = hijackedClient(t, srv)
 
 		capture, clean := captureStderr(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
@@ -450,6 +269,8 @@ func TestSubmit(t *testing.T) {
 
 		assert.Contains(t, string(buf), "failed to publish result")
 		assert.Contains(t, string(buf), "Unknown acc")
+
+		require.False(t, reporter.posted)
 	})
 
 	t.Run("should warn when no cluster name", func(t *testing.T) {
@@ -462,10 +283,9 @@ func TestSubmit(t *testing.T) {
 			SubmitContextScan,
 		)
 
+		setTestKSCloudClient(reporter, srv)
 		opaSession := mockOPASessionObj(t)
 		opaSession.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
-
-		reporter.httpClient = hijackedClient(t, srv)
 
 		capture, clean := captureStderr(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
@@ -489,6 +309,82 @@ func TestSubmit(t *testing.T) {
 
 		assert.Contains(t, string(buf), "failed to publish result")
 		assert.Contains(t, string(buf), "cluster name")
+
+		require.False(t, reporter.posted)
+	})
+
+	t.Run("should submit paginated report", func(t *testing.T) {
+		reporter := NewReportEventReceiver(
+			&cautils.ConfigObj{
+				AccountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
+				Token:       "",
+				ClusterName: "test",
+			},
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+		)
+		reporter.maxReportSize = 2 * 1024
+		setTestKSCloudClient(reporter, srv)
+		opaSession := mockOPASessionObj(t, withGrowMock(200))
+
+		require.NoError(t,
+			reporter.Submit(ctx, opaSession),
+		)
+		const expectedMinPostedPages = 2
+		require.Greater(t, reporter.postedCount, expectedMinPostedPages)
+	})
+}
+
+func TestSubmitWithAuth(t *testing.T) {
+	ctx := context.Background()
+	srv := mockAPIServer(t, withAPIAuth(true)) // mock server will assert that an Authorization header is hydrated
+	t.Cleanup(srv.Close)
+
+	t.Run("should submit simple report with the tenant's auth token", func(t *testing.T) {
+		reporter := NewReportEventReceiver(
+			&cautils.ConfigObj{
+				AccountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
+				Token:       "",
+				ClusterName: "test",
+			},
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+		)
+		reporter.SetInvitationToken("auth-token")
+		setTestKSCloudClient(reporter, srv)
+		opaSession := mockOPASessionObj(t)
+
+		require.NoError(t,
+			reporter.Submit(ctx, opaSession),
+		)
+	})
+}
+
+func TestSubmitWithError(t *testing.T) {
+	ctx := context.Background()
+	apiErr := errors.New("test error")
+	srv := mockAPIServer(t, withAPIError(apiErr)) // mock server will error on every call
+	t.Cleanup(srv.Close)
+
+	t.Run("should error on submit simple report", func(t *testing.T) {
+		reporter := NewReportEventReceiver(
+			&cautils.ConfigObj{
+				AccountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
+				Token:       "",
+				ClusterName: "test",
+			},
+			"cbabd56f-bac6-416a-836b-b815ef347647",
+			SubmitContextScan,
+		)
+		reporter.SetInvitationToken("auth-token")
+		setTestKSCloudClient(reporter, srv)
+		opaSession := mockOPASessionObj(t)
+
+		err := reporter.Submit(ctx, opaSession)
+		require.Error(t, err)
+
+		assert.Contains(t, err.Error(), "500 Internal Server Error")
+		assert.Contains(t, err.Error(), apiErr.Error())
 	})
 }
 
@@ -512,7 +408,7 @@ func TestSetters(t *testing.T) {
 		guid := pickString()
 		reporter.SetCustomerGUID(guid)
 
-		require.Equal(t, guid, reporter.customerGUID)
+		require.Equal(t, guid, reporter.GetAccountID())
 	})
 
 	t.Run("should set cluster name", func(t *testing.T) {
@@ -528,6 +424,22 @@ func TestSetters(t *testing.T) {
 
 		require.Equal(t, "-x-y-z", reporter.clusterName)
 	})
+}
+
+// setTestKSCloudClient overrides the inner KSCloudAPI client to point to a mock HTTP server.
+func setTestKSCloudClient(reporter *ReportEventReceiver, srv *testServer) {
+	guid := reporter.GetAccountID()
+	invitationToken := reporter.GetInvitationToken()
+
+	reporter.KSCloudAPI = getter.NewKSCloudAPICustomized(srv.Root(), srv.Root(),
+		getter.WithHTTPClient(srv.Client()),
+		getter.WithTimeout(500*time.Millisecond),
+		getter.WithTrace(os.Getenv("DEBUG_TEST") != ""),
+		getter.WithReportURL(srv.Root()),
+		getter.WithFrontendURL(srv.Root()),
+	)
+	reporter.SetAccountID(guid)
+	reporter.SetInvitationToken(invitationToken)
 }
 
 func captureStderr(t testing.TB) (*os.File, func()) {

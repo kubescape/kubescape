@@ -12,11 +12,13 @@ import (
 
 var _ reporter.IReport = &ReportMock{}
 
+// ReportMock implements a noop reporter.IReport interface.
 type ReportMock struct {
 	query   string
 	message string
 }
 
+// NewReportMock builds a mock ReportMock to stub a reporter.IReport.
 func NewReportMock(query, message string) *ReportMock {
 	return &ReportMock{
 		query:   query,

@@ -2,10 +2,7 @@ package reporter
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -22,78 +19,143 @@ import (
 	"go.opentelemetry.io/otel"
 )
 
-const MAX_REPORT_SIZE = 2097152 // 2 MB
-
-type SubmitContext string
-
-const (
-	SubmitContextScan       SubmitContext = "scan"
-	SubmitContextRBAC       SubmitContext = "rbac"
-	SubmitContextRepository SubmitContext = "repository"
-)
+const maxReportSize = 2 * 1024 * 1024
 
 var _ reporter.IReport = &ReportEventReceiver{}
 
-type ReportEventReceiver struct {
-	httpClient         *http.Client
-	clusterName        string
-	customerGUID       string
-	eventReceiverURL   *url.URL
-	token              string
-	customerAdminEMail string
-	message            string
-	reportID           string
-	submitContext      SubmitContext
-}
+type (
+	// ReportEventReceiver posts a posture report to the KS Cloud SaaS.
+	//
+	// Large reports are paginated in chunks of about 2MB.
+	ReportEventReceiver struct {
+		*getter.KSCloudAPI
 
+		clusterName        string
+		customerAdminEMail string
+		reportID           string
+		submitContext      SubmitContext
+		posted             bool
+		bytesCount         int
+		postedCount        int
+		maxReportSize      int
+	}
+
+	// results used to iteratively construct the chunked report
+	results struct {
+		reportObj            *reporthandlingv2.PostureReport
+		allResources         map[string]workloadinterface.IMetadata
+		resourcesSource      map[string]reporthandling.Source
+		results              map[string]resourcesresults.Result
+		prioritizedResources map[string]prioritization.PrioritizedResource
+	}
+)
+
+// NewReportEventReceiver builds an IReport-capable object to send reports for a given submit context (scan, rbac, repository).
 func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string, submitContext SubmitContext) *ReportEventReceiver {
-	return &ReportEventReceiver{
-		httpClient:         &http.Client{},
+	report := &ReportEventReceiver{
+		KSCloudAPI:         getter.GetKSCloudAPIConnector(),
 		clusterName:        tenantConfig.ClusterName,
-		customerGUID:       tenantConfig.AccountID,
-		token:              tenantConfig.Token,
 		customerAdminEMail: tenantConfig.CustomerAdminEMail,
 		reportID:           reportID,
 		submitContext:      submitContext,
-	}
-}
-
-func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
-	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
-	defer span.End()
-	if report.customerGUID == "" {
-		logger.L().Ctx(ctx).Error("failed to publish results. Reason: Unknown account ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
-		return nil
-	}
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
-		logger.L().Ctx(ctx).Error("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
-		return nil
+		maxReportSize:      maxReportSize,
 	}
 
-	if err := report.prepareReport(opaSessionObj); err != nil {
-		return fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.GetURL(), err.Error())
-	}
+	report.SetAccountID(tenantConfig.AccountID)
+	report.SetInvitationToken(tenantConfig.Token)
 
-	report.generateMessage()
-	logger.L().Debug("", helpers.String("account ID", report.customerGUID))
-
-	return nil
+	return report
 }
 
 func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
-	report.customerGUID = customerGUID
+	report.SetAccountID(customerGUID)
 }
 
 func (report *ReportEventReceiver) SetClusterName(clusterName string) {
 	report.clusterName = cautils.AdoptClusterName(clusterName) // clean cluster name
 }
 
-func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
+// DisplayReportURL indicates the URL of the report on the SaaS UI.
+//
+// This message is displayed only if the report has been posted.
+func (report *ReportEventReceiver) DisplayReportURL() {
+	if !report.posted {
+		return
+	}
+
+	// print if logger level is lower than warning (debug/info)
+	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
+		return
+	}
+
+	cautils.InfoTextDisplay(
+		os.Stderr,
+		fmt.Sprintf("\n\n%s\n\n", report.generateMessage()),
+	)
+}
+
+// GetURL yields the URL to view the posted reports for the context of this report generation.
+func (report *ReportEventReceiver) GetURL() string {
+	if report.customerAdminEMail == "" && report.GetInvitationToken() != "" {
+		return report.ViewSignURL()
+	}
+
+	switch report.submitContext {
+	case SubmitContextScan:
+		return report.ViewScanURL(report.clusterName)
+	case SubmitContextRBAC:
+		return report.ViewRBACURL()
+	case SubmitContextRepository:
+		return report.ViewReportURL(report.reportID)
+	default:
+		return report.ViewDashboardURL()
+	}
+}
+
+// Submit to the SaaS a posture report produced by the session.
+func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
+	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
+	defer span.End()
+
+	if err := report.requiredToSubmit(opaSessionObj); err != nil {
+		logger.L().Ctx(ctx).Error(err.Error())
+
+		return nil
+	} else {
+		logger.L().Ctx(ctx).Debug("submit report",
+			helpers.String("account ID", report.GetAccountID()),
+			helpers.String("submitContext", report.submitContext.String()),
+		)
+	}
+
+	if err := report.sendChunkedReport(opaSessionObj); err != nil {
+		return errSubmit(report.GetURL(), err)
+	}
+
+	report.posted = true
+
+	return nil
+}
+
+func (report *ReportEventReceiver) requiredToSubmit(opaSessionObj *cautils.OPASessionObj) error {
+	if guid := report.GetAccountID(); guid == "" {
+		return ErrRequireAccountID
+	}
+
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
+		return ErrRequireClusterName
+	}
+
+	return nil
+}
+
+func (report *ReportEventReceiver) sendChunkedReport(opaSessionObj *cautils.OPASessionObj) error {
 	// The backend for Kubescape expects scanning targets to be either
-	// Clusters or Files, not other types we support (GitLocal, Directory
-	// etc). So, to submit a compatible report to the backend, we have to
+	// Clusters or Files, not other types we support (GitLocal, Directory, etc.).
+	// To submit a compatible report to the backend, we have to
 	// override the scanning target, submit the report and then restore the
 	// original value.
+
 	originalScanningTarget := opaSessionObj.Metadata.ScanMetadata.ScanningTarget
 
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget != reporthandlingv2.Cluster {
@@ -103,189 +165,159 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 		}()
 	}
 
-	report.initEventReceiverURL()
-	host := hostToString(report.eventReceiverURL, report.reportID)
-
 	cautils.StartSpinner()
+	defer cautils.StopSpinner()
 
-	// send resources
-	err := report.sendResources(host, opaSessionObj)
+	postureReport := report.newPostureReport(opaSessionObj)
 
-	cautils.StopSpinner()
-	return err
-}
+	res := results{
+		reportObj:            postureReport,
+		allResources:         opaSessionObj.AllResources,
+		resourcesSource:      opaSessionObj.ResourceSource,
+		results:              opaSessionObj.ResourcesResult,
+		prioritizedResources: opaSessionObj.ResourcesPrioritized,
+	}
 
-func (report *ReportEventReceiver) GetURL() string {
-	u := url.URL{}
-	u.Host = getter.GetKSCloudAPIConnector().GetCloudUIURL()
-
-	parseHost(&u)
-	report.addPathURL(&u)
-
-	return u.String()
-
-}
-func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cautils.OPASessionObj) error {
-	splittedPostureReport := report.setSubReport(opaSessionObj)
-
-	counter := 0
-	reportCounter := 0
-
-	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
+	// send chunks with resources first
+	if err := report.sendResources(res); err != nil {
 		return err
 	}
 
-	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter, host); err != nil {
+	// send chunks of raw resources, prioritized resources and results
+	if err := report.sendResults(res); err != nil {
 		return err
 	}
 
-	return report.sendReport(host, splittedPostureReport, reportCounter, true)
+	// send remainder
+	return report.sendReport(postureReport, true)
 }
 
-func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int, host string) error {
-	for _, v := range results {
-		// set result.RawResource
+func (report *ReportEventReceiver) sendResources(in results) error {
+	for resourceID, v := range in.allResources {
+		resource := reporthandling.NewResourceIMetadata(v)
+		if source, ok := in.resourcesSource[resourceID]; ok {
+			resource.SetSource(&source)
+		}
+
+		r, err := json.Marshal(resource)
+		if err != nil {
+			return errMarshal(resourceID, err)
+		}
+
+		if report.bytesCount+len(r) >= report.maxReportSize && len(in.reportObj.Resources) > 0 {
+			// send a report page
+			if err := report.sendReport(in.reportObj, false); err != nil {
+				return err
+			}
+
+			// delete already posted resources
+			in.reportObj.Resources = []reporthandling.Resource{}
+			in.reportObj.Results = []resourcesresults.Result{}
+
+			// reset counter
+			report.bytesCount = 0
+		}
+
+		report.bytesCount += len(r)
+		in.reportObj.Resources = append(in.reportObj.Resources, *resource)
+	}
+
+	return nil
+}
+
+func (report *ReportEventReceiver) sendResults(in results) error {
+	for _, v := range in.results {
 		resourceID := v.GetResourceID()
-		if _, ok := allResources[resourceID]; !ok {
+		if _, ok := in.allResources[resourceID]; !ok {
+			// ignore unregistered resources
 			continue
 		}
-		resource := reporthandling.NewResourceIMetadata(allResources[resourceID])
-		if r, ok := resourcesSource[resourceID]; ok {
-			resource.SetSource(&r)
+
+		// set raw resource
+		resource := reporthandling.NewResourceIMetadata(in.allResources[resourceID])
+		if source, ok := in.resourcesSource[resourceID]; ok {
+			resource.SetSource(&source)
 		}
 		v.RawResource = resource
 
-		// set result.PrioritizedResource
-		if results, ok := prioritizedResources[resourceID]; ok {
+		// set prioritized resource
+		if results, ok := in.prioritizedResources[resourceID]; ok {
 			v.PrioritizedResource = &results
 		}
 
 		r, err := json.Marshal(v)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
+			return errMarshal(resourceID, err)
 		}
 
-		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
-
-			// send report
-			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
+		if report.bytesCount+len(r) >= report.maxReportSize && len(in.reportObj.Results) > 0 {
+			// send a report page
+			if err := report.sendReport(in.reportObj, false); err != nil {
 				return err
 			}
-			*reportCounter++
 
-			// delete results
-			reportObj.Results = []resourcesresults.Result{}
-			reportObj.Resources = []reporthandling.Resource{}
+			// delete the already posted results
+			in.reportObj.Results = []resourcesresults.Result{}
+			in.reportObj.Resources = []reporthandling.Resource{}
 
-			// restart counter
-			*counter = 0
+			// reset counter
+			report.bytesCount = 0
 		}
 
-		*counter += len(r)
-		reportObj.Results = append(reportObj.Results, v)
+		report.bytesCount += len(r)
+		in.reportObj.Results = append(in.reportObj.Results, v)
 	}
+
 	return nil
 }
 
-func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
-	for resourceID, v := range allResources {
-		/*
-
-			// process only resources which have no result because these resources will be sent on the result object
-			if _, hasResult := results[resourceID]; hasResult {
-				continue
-			}
-
-		*/
-
-		resource := reporthandling.NewResourceIMetadata(v)
-		if r, ok := resourcesSource[resourceID]; ok {
-			resource.SetSource(&r)
-		}
-		r, err := json.Marshal(resource)
-		if err != nil {
-			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", resourceID, err)
-		}
-
-		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
-
-			// send report
-			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
-				return err
-			}
-			*reportCounter++
-
-			// delete resources
-			reportObj.Resources = []reporthandling.Resource{}
-			reportObj.Results = []resourcesresults.Result{}
-
-			// restart counter
-			*counter = 0
-		}
-
-		*counter += len(r)
-		reportObj.Resources = append(reportObj.Resources, *resource)
-	}
-	return nil
-}
-func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+// sendReport posts a paginated report.
+func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.PostureReport, isLastReport bool) error {
 	postureReport.PaginationInfo = apis.PaginationMarks{
-		ReportNumber: counter,
+		ReportNumber: report.postedCount,
 		IsLastReport: isLastReport,
 	}
-	reqBody, err := json.Marshal(postureReport)
-	if err != nil {
-		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
-	}
-	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
-	if err != nil {
-		return fmt.Errorf("%s, %v:%s", host, err, msg)
-	}
-	return err
+	report.postedCount++
+
+	return report.SubmitReport(postureReport)
 }
 
-func (report *ReportEventReceiver) generateMessage() {
-	report.message = ""
+func (report *ReportEventReceiver) generateMessage() string {
+	const (
+		sep     = "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~"
+		heading = "<< WOW! Now you can see the scan results on the web >>"
+		indent  = "   "
+	)
 
-	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-	report.message = sep
-	report.message += "   << WOW! Now you can see the scan results on the web >>\n\n"
-	report.message += fmt.Sprintf("   %s\n", report.GetURL())
-	report.message += sep
-
+	return fmt.Sprintf(
+		"%s\n%s%s\n\n%s%s\n%s\n",
+		sep,
+		indent,
+		heading,
+		indent,
+		report.GetURL(),
+		sep,
+	)
 }
 
-func (report *ReportEventReceiver) DisplayReportURL() {
-
-	// print if logger level is lower than warning (debug/info)
-	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
-		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+// newPostureReport prepares a posture report for uploading.
+func (report *ReportEventReceiver) newPostureReport(opaSessionObj *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
+	reportObj := &reporthandlingv2.PostureReport{
+		CustomerGUID:         report.GetAccountID(),
+		ClusterName:          report.clusterName,
+		ReportID:             report.reportID,
+		ReportGenerationTime: opaSessionObj.Report.ReportGenerationTime,
+		SummaryDetails:       opaSessionObj.Report.SummaryDetails,
+		Attributes:           opaSessionObj.Report.Attributes,
+		ClusterAPIServerInfo: opaSessionObj.Report.ClusterAPIServerInfo,
 	}
-}
 
-func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
-	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
-		switch report.submitContext {
-		case SubmitContextScan:
-			urlObj.Path = fmt.Sprintf("compliance/%s", report.clusterName)
-		case SubmitContextRBAC:
-			urlObj.Path = "rbac-visualizer"
-		case SubmitContextRepository:
-			urlObj.Path = fmt.Sprintf("repository-scanning/%s", report.reportID)
-		default:
-			urlObj.Path = "dashboard"
+	if opaSessionObj.Metadata != nil {
+		reportObj.Metadata = *opaSessionObj.Metadata
+		if opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
+			reportObj.ClusterCloudProvider = opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider // DEPRECATED - left here as a fallback
 		}
-		return
 	}
-	urlObj.Path = "account/sign-up"
 
-	q := urlObj.Query()
-	q.Add("invitationToken", report.token)
-	q.Add("customerGUID", report.customerGUID)
-
-	// Adding utm parameters
-	q.Add("utm_source", "ARMOgithub")
-	q.Add("utm_medium", "createaccount")
-	urlObj.RawQuery = q.Encode()
-
+	return reportObj
 }
