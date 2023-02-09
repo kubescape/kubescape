@@ -104,7 +104,7 @@ func Test_getCloudMetadata(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.args.kubeConfig.CurrentContext = tt.args.context
+			k8sinterface.SetClusterContextName(tt.args.context)
 			got := getCloudMetadata(tt.args.opaSessionObj, tt.args.kubeConfig)
 			if got == nil {
 				t.Errorf("getCloudMetadata() = %v, want %v", got, tt.want.Provider())
@@ -140,7 +140,7 @@ func Test_isGKE(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			// set context
-			tt.args.config.CurrentContext = tt.args.context
+			k8sinterface.SetClusterContextName(tt.args.context)
 			if got := isGKE(tt.args.config); got != tt.want {
 				t.Errorf("isGKE() = %v, want %v", got, tt.want)
 			}
@@ -171,7 +171,7 @@ func Test_isEKS(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			// set context
-			tt.args.config.CurrentContext = tt.args.context
+			k8sinterface.SetClusterContextName(tt.args.context)
 			if got := isEKS(tt.args.config); got != tt.want {
 				t.Errorf("isEKS() = %v, want %v", got, tt.want)
 			}
@@ -202,7 +202,7 @@ func Test_isAKS(t *testing.T) {
 
 		t.Run(tt.name, func(t *testing.T) {
 			// set context
-			tt.args.config.CurrentContext = tt.args.context
+			k8sinterface.SetClusterContextName(tt.args.context)
 			if got := isAKS(tt.args.config); got != tt.want {
 				t.Errorf("isAKS() = %v, want %v", got, tt.want)
 			}
