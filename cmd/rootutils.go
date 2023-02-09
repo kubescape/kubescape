@@ -85,6 +85,11 @@ func initEnvironment() {
 		if len(urlSlices) >= 4 {
 			ksAuthURL = urlSlices[3]
 		}
-		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPICustomized(ksEventReceiverURL, ksBackendURL, ksFrontendURL, ksAuthURL))
+
+		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPICustomized(
+			ksBackendURL, ksAuthURL,
+			getter.WithReportURL(ksEventReceiverURL),
+			getter.WithFrontendURL(ksFrontendURL),
+		))
 	}
 }

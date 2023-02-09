@@ -1,6 +1,7 @@
 package getter
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
@@ -64,5 +65,33 @@ func TestSaveInFile(t *testing.T) {
 		}
 		target := filepath.Join(dir, "error.json")
 		require.Error(t, SaveInFile(badPolicy, target))
+	})
+}
+
+func TestHttpMethods(t *testing.T) {
+	client := http.DefaultClient
+	hdrs := map[string]string{"key": "value"}
+
+	srv := mockAPIServer(t)
+	t.Cleanup(srv.Close)
+
+	t.Run("HttpGetter should GET", func(t *testing.T) {
+		resp, err := HttpGetter(client, srv.URL(pathTestGet), hdrs)
+		require.NoError(t, err)
+		require.EqualValues(t, "body-get", resp)
+	})
+
+	t.Run("HttpPost should POST", func(t *testing.T) {
+		body := []byte("body-post")
+
+		resp, err := HttpPost(client, srv.URL(pathTestPost), hdrs, body)
+		require.NoError(t, err)
+		require.EqualValues(t, string(body), resp)
+	})
+
+	t.Run("HttpDelete should DELETE", func(t *testing.T) {
+		resp, err := HttpDelete(client, srv.URL(pathTestDelete), hdrs)
+		require.NoError(t, err)
+		require.EqualValues(t, "body-delete", resp)
 	})
 }

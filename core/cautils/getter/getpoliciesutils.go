@@ -10,19 +10,23 @@ import (
 	"strings"
 )
 
+// GetDefaultPath returns a location under the local dot files for kubescape.
+//
+// This is typically located under $HOME/.kubescape
 func GetDefaultPath(name string) string {
 	return filepath.Join(DefaultLocalStore, name)
 }
 
-func SaveInFile(policy interface{}, pathStr string) error {
-	encodedData, err := json.MarshalIndent(policy, "", "  ")
+// SaveInFile serializes any object as a JSON file.
+func SaveInFile(object interface{}, targetFile string) error {
+	encodedData, err := json.MarshalIndent(object, "", "  ")
 	if err != nil {
 		return err
 	}
-	err = os.WriteFile(pathStr, encodedData, 0644) //nolint:gosec
+	err = os.WriteFile(targetFile, encodedData, 0644) //nolint:gosec
 	if err != nil {
 		if os.IsNotExist(err) {
-			pathDir := filepath.Dir(pathStr)
+			pathDir := filepath.Dir(targetFile)
 			// pathDir could contain subdirectories
 			if erm := os.MkdirAll(pathDir, 0755); erm != nil {
 				return erm
@@ -31,7 +35,7 @@ func SaveInFile(policy interface{}, pathStr string) error {
 			return err
 
 		}
-		err = os.WriteFile(pathStr, encodedData, 0644) //nolint:gosec
+		err = os.WriteFile(targetFile, encodedData, 0644) //nolint:gosec
 		if err != nil {
 			return err
 		}
@@ -39,6 +43,9 @@ func SaveInFile(policy interface{}, pathStr string) error {
 	return nil
 }
 
+// HttpDelete provides a low-level capability to send a HTTP DELETE request and serialize the response as a string.
+//
+// Deprecated: use methods of the KSCloudAPI client instead.
 func HttpDelete(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
 
 	req, err := http.NewRequest("DELETE", fullURL, nil)
@@ -58,8 +65,10 @@ func HttpDelete(httpClient *http.Client, fullURL string, headers map[string]stri
 	return respStr, nil
 }
 
+// HttpGetter provides a low-level capability to send a HTTP GET request and serialize the response as a string.
+//
+// Deprecated: use methods of the KSCloudAPI client instead.
 func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]string) (string, error) {
-
 	req, err := http.NewRequest("GET", fullURL, nil)
 	if err != nil {
 		return "", err
@@ -77,8 +86,10 @@ func HttpGetter(httpClient *http.Client, fullURL string, headers map[string]stri
 	return respStr, nil
 }
 
+// HttpPost provides a low-level capability to send a HTTP POST request and serialize the response as a string.
+//
+// Deprecated: use methods of the KSCloudAPI client instead.
 func HttpPost(httpClient *http.Client, fullURL string, headers map[string]string, body []byte) (string, error) {
-
 	req, err := http.NewRequest("POST", fullURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
@@ -103,7 +114,7 @@ func setHeaders(req *http.Request, headers map[string]string) {
 	}
 }
 
-// HTTPRespToString parses the body as string and checks the HTTP status code, it closes the body reader at the end
+// httpRespToString parses the body as string and checks the HTTP status code, it closes the body reader at the end
 func httpRespToString(resp *http.Response) (string, error) {
 	if resp == nil || resp.Body == nil {
 		return "", nil
@@ -113,6 +124,7 @@ func httpRespToString(resp *http.Response) (string, error) {
 	if resp.ContentLength > 0 {
 		strBuilder.Grow(int(resp.ContentLength))
 	}
+
 	_, err := io.Copy(&strBuilder, resp.Body)
 	respStr := strBuilder.String()
 	if err != nil {
