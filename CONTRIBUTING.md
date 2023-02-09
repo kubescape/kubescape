@@ -59,6 +59,36 @@ curl -Ls https://gist.githubusercontent.com/dixudx/7d7edea35b4d91e1a2a8fbf41d095
 chmod +x .git/hooks/prepare-commit-msg
 ```
 
+### Use semantic commit messages (optional)
+
+When contributing, you could consider using [conventional commits](https://www.conventionalcommits.org/en/v1.0.0/), in order to improve logs readability and help us to automatically generate `CHANGELOG`s.
+
+Format: `<type>(<scope>): <subject>`
+
+`<scope>` is optional
+
+#### Example
+
+```
+feat(cmd): add kubectl plugin
+^--^ ^-^   ^----------------^
+|    |     |
+|    |     +-> subject: summary in present tense.
+|    |
+|    +-------> scope: point of interest
+|
++-------> type: chore, docs, feat, fix, refactor, style, or test.
+```
+
+More Examples:
+* `feat`: new feature for the user, not a new feature for build script
+* `fix`: bug fix for the user, not a fix to a build script
+* `docs`: changes to the documentation
+* `style`: formatting, missing semi colons, etc; no production code change
+* `refactor`: refactoring production code, eg. renaming a variable
+* `test`: adding missing tests, refactoring tests; no production code change
+* `chore`: updating grunt tasks etc; no production code change
+
 ## Fixing a commit where the DCO failed
 
 Check out [this guide](https://github.com/src-d/guide/blob/master/developer-community/fix-DCO.md).
