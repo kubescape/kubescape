@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 
@@ -221,6 +222,17 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations(ctx context.Context) ([]h
 	return res, err
 }
 
+// hasCloudProviderInfo iterate over the []hostsensor.HostSensorDataEnvelope list to find info about cloud provider.
+// If information are found, ther return true. Return false otherwise.
+func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
+	for index, _ := range cpi {
+		if !reflect.DeepEqual(cpi[index].GetData(), json.RawMessage("{}\n")) {
+			return true
+		}
+	}
+	return false
+}
+
 func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	res := make([]hostsensor.HostSensorDataEnvelope, 0)
 	infoMap := make(map[string]apis.StatusInfo)
@@ -323,24 +335,27 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		res = append(res, kcData...)
 	}
 
-	// GetControlPlaneInfo
-	kcData, err = hsh.GetControlPlaneInfo(ctx)
-	if err != nil {
-		addInfoToMap(ControlPlaneInfo, infoMap, err)
-		logger.L().Ctx(ctx).Warning(err.Error())
-	}
-	if len(kcData) > 0 {
-		res = append(res, kcData...)
-	}
-
 	// GetCloudProviderInfo
 	kcData, err = hsh.GetCloudProviderInfo(ctx)
+	isCloudProvider := hasCloudProviderInfo(kcData)
 	if err != nil {
 		addInfoToMap(CloudProviderInfo, infoMap, err)
 		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
+	}
+
+	// GetControlPlaneInfo
+	if !isCloudProvider { // we retrieve control plane info only if we are not using a cloud provider
+		kcData, err = hsh.GetControlPlaneInfo(ctx)
+		if err != nil {
+			addInfoToMap(ControlPlaneInfo, infoMap, err)
+			logger.L().Ctx(ctx).Warning(err.Error())
+		}
+		if len(kcData) > 0 {
+			res = append(res, kcData...)
+		}
 	}
 
 	// GetCNIInfo
