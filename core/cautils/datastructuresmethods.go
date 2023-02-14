@@ -5,6 +5,7 @@ import (
 
 	"github.com/armosec/utils-go/boolutils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 func NewPolicies() *Policies {
@@ -29,7 +30,16 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 			if len(compatibleRules) > 0 {
 				frameworks[i].Controls[j].Rules = compatibleRules
 				policies.Controls[frameworks[i].Controls[j].ControlID] = frameworks[i].Controls[j]
+			} else { // if the control type is manual review, add it to the list of controls
+				actionRequiredStr := frameworks[i].Controls[j].GetActionRequiredAttribute()
+				if actionRequiredStr == "" {
+					continue
+				}
+				if actionRequiredStr == string(apis.SubStatusManualReview) {
+					policies.Controls[frameworks[i].Controls[j].ControlID] = frameworks[i].Controls[j]
+				}
 			}
+
 		}
 
 	}

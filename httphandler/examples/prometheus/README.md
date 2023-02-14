@@ -39,8 +39,8 @@ kubescape_cluster_riskScore{} <risk score>
 # Number of resources that failed 
 kubescape_cluster_count_resources_failed{} <counter>
 
-# Number of resources that where excluded
-kubescape_cluster_count_resources_excluded{} <counter>
+# Number of resources that where skipped
+kubescape_cluster_count_resources_skipped{} <counter>
 
 # Number of resources that passed
 kubescape_cluster_count_resources_passed{} <counter>
@@ -51,8 +51,8 @@ kubescape_cluster_count_resources_passed{} <counter>
 # Number of controls that failed 
 kubescape_cluster_count_controls_failed{} <counter>
 
-# Number of controls that where excluded 
-kubescape_cluster_count_controls_excluded{} <counter>
+# Number of controls that where skipped 
+kubescape_cluster_count_controls_skipped{} <counter>
 
 # Number of controls that passed
 kubescape_cluster_count_controls_passed{} <counter>
@@ -71,8 +71,8 @@ kubescape_framework_riskScore{name="<framework name>"} <risk score>
 # Number of resources that failed 
 kubescape_framework_count_resources_failed{} <counter>
 
-# Number of resources that where excluded
-kubescape_framework_count_resources_excluded{} <counter>
+# Number of resources that where skipped
+kubescape_framework_count_resources_skipped{} <counter>
 
 # Number of resources that passed
 kubescape_framework_count_resources_passed{} <counter>
@@ -83,8 +83,8 @@ kubescape_framework_count_resources_passed{} <counter>
 # Number of controls that failed 
 kubescape_framework_count_controls_failed{name="<framework name>"} <counter>
 
-# Number of controls that where excluded 
-kubescape_framework_count_controls_excluded{name="<framework name>"} <counter>
+# Number of controls that where skipped 
+kubescape_framework_count_controls_skipped{name="<framework name>"} <counter>
 
 # Number of controls that passed
 kubescape_framework_count_controls_passed{name="<framework name>"} <counter>
@@ -104,8 +104,8 @@ kubescape_control_riskScore{name="<control name>",url="<docs url>",severity="<co
 # Number of resources that failed 
 kubescape_control_count_resources_failed{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
 
-# Number of resources that where excluded
-kubescape_control_count_resources_excluded{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
+# Number of resources that where skipped
+kubescape_control_count_resources_skipped{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
 
 # Number of resources that passed
 kubescape_control_count_resources_passed{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>

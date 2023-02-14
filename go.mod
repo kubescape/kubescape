@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	cloud.google.com/go/containeranalysis v0.6.0
-	github.com/armosec/armoapi-go v0.0.119
+	github.com/armosec/armoapi-go v0.0.151
 	github.com/armosec/utils-go v0.0.12
 	github.com/armosec/utils-k8s-go v0.0.12
 	github.com/briandowns/spinner v1.18.1
@@ -12,14 +12,14 @@ require (
 	github.com/fatih/color v1.13.0
 	github.com/francoispqt/gojay v1.2.13
 	github.com/go-git/go-git/v5 v5.5.2
-	github.com/google/go-containerregistry v0.11.0
+	github.com/google/go-containerregistry v0.13.0
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.37.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.23
 	github.com/kubescape/go-logger v0.0.8
-	github.com/kubescape/k8s-interface v0.0.98
-	github.com/kubescape/opa-utils v0.0.223
+	github.com/kubescape/k8s-interface v0.0.99
+	github.com/kubescape/opa-utils v0.0.235
 	github.com/kubescape/rbac-utils v0.0.19
 	github.com/kubescape/regolibrary v1.0.250
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -131,7 +131,7 @@ require (
 	github.com/cncf/udpa/go v0.0.0-20210930031921-04548b0d99d4 // indirect
 	github.com/cncf/xds/go v0.0.0-20211130200136-a8f946100490 // indirect
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be // indirect
-	github.com/containerd/stargz-snapshotter/estargz v0.12.0 // indirect
+	github.com/containerd/stargz-snapshotter/estargz v0.12.1 // indirect
 	github.com/coreos/go-oidc v2.2.1+incompatible // indirect
 	github.com/coreos/go-oidc/v3 v3.4.0 // indirect
 	github.com/coreos/go-semver v0.3.0 // indirect
@@ -213,7 +213,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jedisct1/go-minisign v0.0.0-20211028175153-1c139d1cc84b // indirect
-	github.com/jhump/protoreflect v1.14.0 // indirect
+	github.com/jhump/protoreflect v1.13.0 // indirect
 	github.com/jinzhu/copier v0.3.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	github.com/jonboulle/clockwork v0.3.0 // indirect
@@ -223,7 +223,7 @@ require (
 	github.com/klauspost/compress v1.15.11 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
-	github.com/letsencrypt/boulder v0.0.0-20221109233200-85aa52084eaf // indirect
+	github.com/letsencrypt/boulder v0.0.0-20220929215747-76583552c2be // indirect
 	github.com/magiconair/properties v1.8.6 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
@@ -252,7 +252,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/pquerna/cachecontrol v0.1.0 // indirect
 	github.com/prometheus/client_golang v1.13.0 // indirect
-	github.com/prometheus/client_model v0.3.0 // indirect
+	github.com/prometheus/client_model v0.2.0 // indirect
 	github.com/prometheus/common v0.37.0 // indirect
 	github.com/prometheus/procfs v0.8.0 // indirect
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
@@ -333,15 +333,15 @@ require (
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
-	golang.org/x/crypto v0.5.0 // indirect
+	golang.org/x/crypto v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20230116083435-1de6713980de // indirect
 	golang.org/x/net v0.5.0 // indirect
-	golang.org/x/oauth2 v0.4.0 // indirect
+	golang.org/x/oauth2 v0.3.0 // indirect
 	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.4.0 // indirect
 	golang.org/x/term v0.4.0 // indirect
 	golang.org/x/text v0.6.0 // indirect
-	golang.org/x/time v0.2.0 // indirect
+	golang.org/x/time v0.0.0-20220922220347-f3bd1da661af // indirect
 	golang.org/x/tools v0.2.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gonum.org/v1/gonum v0.9.1 // indirect

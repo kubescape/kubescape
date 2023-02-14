@@ -3,7 +3,6 @@ package cautils
 import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
-	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -72,9 +71,9 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 					}
 
 					rulev1 := rulesv1[rulev2.GetName()]
-					status := rulev2.GetStatus(&helpersv1.Filters{FrameworkNames: []string{frameworkName}})
+					status := rulev2.GetStatus(nil)
 
-					if status.IsFailed() || status.IsExcluded() {
+					if status.IsFailed() {
 
 						// rule response
 						ruleResponse := reporthandling.RuleResponse{}

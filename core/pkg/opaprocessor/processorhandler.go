@@ -159,6 +159,9 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 				if ruleResponse != nil {
 					controlResult.ResourceAssociatedRules = append(controlResult.ResourceAssociatedRules, *ruleResponse)
 				}
+				if control, ok := opap.AllPolicies.Controls[control.ControlID]; ok {
+					controlResult.SetStatus(control)
+				}
 				resourcesAssociatedControl[resourceID] = controlResult
 			}
 		}
@@ -220,7 +223,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 					ruleResult = r
 				}
 
-				ruleResult.Status = apis.StatusFailed
+				ruleResult.SetStatus(apis.StatusFailed, nil)
 				for j := range ruleResponses[i].FailedPaths {
 					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: ruleResponses[i].FailedPaths[j]})
 				}
