@@ -323,27 +323,24 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		res = append(res, kcData...)
 	}
 
-	// GetCloudProviderInfo
-	kcData, err = hsh.GetCloudProviderInfo(ctx)
-	isCloudProvider := (kcData != nil)
+	// GetControlPlaneInfo
+	kcData, err = hsh.GetControlPlaneInfo(ctx)
 	if err != nil {
-		addInfoToMap(CloudProviderInfo, infoMap, err)
+		addInfoToMap(ControlPlaneInfo, infoMap, err)
 		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	if len(kcData) > 0 {
 		res = append(res, kcData...)
 	}
 
-	// GetControlPlaneInfo
-	if !isCloudProvider { // we retrieve control plane info only if we are not using a cloud provider
-		kcData, err = hsh.GetControlPlaneInfo(ctx)
-		if err != nil {
-			addInfoToMap(ControlPlaneInfo, infoMap, err)
-			logger.L().Ctx(ctx).Warning(err.Error())
-		}
-		if len(kcData) > 0 {
-			res = append(res, kcData...)
-		}
+	// GetCloudProviderInfo
+	kcData, err = hsh.GetCloudProviderInfo(ctx)
+	if err != nil {
+		addInfoToMap(CloudProviderInfo, infoMap, err)
+		logger.L().Ctx(ctx).Warning(err.Error())
+	}
+	if len(kcData) > 0 {
+		res = append(res, kcData...)
 	}
 
 	// GetCNIInfo
