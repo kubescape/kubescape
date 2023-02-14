@@ -18,29 +18,29 @@ import (
 // nolint
 type VerifyCommand struct {
 	options.RegistryOptions
-	CheckClaims                  bool
-	KeyRef                       string
-	CertRef                      string
+	Annotations                  sigs.AnnotationsMap
+	CertChain                    string
 	CertEmail                    string
+	CertOidcProvider             string
 	CertIdentity                 string
 	CertOidcIssuer               string
 	CertGithubWorkflowTrigger    string
 	CertGithubWorkflowSha        string
 	CertGithubWorkflowName       string
-	CertGithubWorkflowRepository string
+	KeyRef                       string
 	CertGithubWorkflowRef        string
-	CertChain                    string
-	CertOidcProvider             string
-	EnforceSCT                   bool
-	Sk                           bool
+	SignatureRef                 string
+	CertRef                      string
+	CertGithubWorkflowRepository string
+	Attachment                   string
 	Slot                         string
 	Output                       string
 	RekorURL                     string
-	Attachment                   string
-	Annotations                  sigs.AnnotationsMap
-	SignatureRef                 string
 	HashAlgorithm                crypto.Hash
+	Sk                           bool
+	CheckClaims                  bool
 	LocalImage                   bool
+	EnforceSCT                   bool
 }
 
 // Exec runs the verification command

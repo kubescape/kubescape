@@ -47,7 +47,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== setup tenant object ======================================
 	ctxTenant, spanTenant := otel.Tracer("").Start(ctx, "setup tenant")
-	tenantConfig := getTenantConfig(&scanInfo.Credentials, scanInfo.KubeContext, scanInfo.CustomClusterName, k8s)
+	tenantConfig := getTenantConfig(&scanInfo.Credentials, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -75,10 +75,6 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	if err := hostSensorHandler.Init(ctxHostScanner); err != nil {
 		logger.L().Ctx(ctxHostScanner).Error("failed to init host scanner", helpers.Error(err))
 		hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
-	}
-	// excluding hostsensor namespace
-	if len(scanInfo.IncludeNamespaces) == 0 && hostSensorHandler.GetNamespace() != "" {
-		scanInfo.ExcludedNamespaces = fmt.Sprintf("%s,%s", scanInfo.ExcludedNamespaces, hostSensorHandler.GetNamespace())
 	}
 	spanHostScanner.End()
 

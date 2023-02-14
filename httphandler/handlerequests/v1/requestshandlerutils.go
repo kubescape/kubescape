@@ -11,13 +11,13 @@ import (
 	"github.com/armosec/utils-go/boolutils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/core"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // executeScan execute the scan request passed in the channel
@@ -53,8 +53,6 @@ func (handler *HTTPHandler) executeScan() {
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
-	span := trace.SpanFromContext(ctx)
-	logger.L().Info("span Matthias", helpers.String("span", fmt.Sprintf("%#v", span)))
 	ks := core.NewKubescape()
 	result, err := ks.Scan(ctx, scanInfo)
 	if err != nil {
@@ -134,6 +132,9 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
 
+	// Set default KubeContext from scanInfo input
+	k8sinterface.SetClusterContextName(scanInfo.KubeContext)
+
 	return scanInfo
 }
 
@@ -152,6 +153,8 @@ func defaultScanInfo() *cautils.ScanInfo {
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
+	scanInfo.KubeContext = envToString("KS_CONTEXT", "") // publish results to Kubescape SaaS
+
 	return scanInfo
 }
 

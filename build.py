@@ -77,6 +77,7 @@ def main():
 
     with tarfile.open(tar_file, 'w:gz') as archive:
         archive.add(ks_file, "kubescape")
+        archive.add(ks_file, "LICENSE")
 
     print("Build Done")
 

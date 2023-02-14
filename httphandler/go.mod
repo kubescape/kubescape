@@ -11,6 +11,7 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/go-logger v0.0.8
+	github.com/kubescape/k8s-interface v0.0.99
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
 	github.com/kubescape/opa-utils v0.0.235
 	github.com/stretchr/testify v1.8.1
@@ -19,7 +20,7 @@ require (
 )
 
 require (
-	go.opentelemetry.io/otel/trace v1.12.0
+	go.opentelemetry.io/otel/trace v1.12.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
@@ -215,7 +216,6 @@ require (
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/klauspost/compress v1.15.11 // indirect
 	github.com/kubescape/go-git-url v0.0.23 // indirect
-	github.com/kubescape/k8s-interface v0.0.99 // indirect
 	github.com/kubescape/rbac-utils v0.0.19 // indirect
 	github.com/kubescape/regolibrary v1.0.250 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect

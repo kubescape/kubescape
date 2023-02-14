@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-var NativeFrameworks = []string{"nsa", "mitre", "armobest", "devopsbest"}
+var NativeFrameworks = []string{"allcontrols", "nsa", "mitre"}
 
 func (api *KSCloudAPI) getFrameworkURL(frameworkName string) string {
 	u := url.URL{}
