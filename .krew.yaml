@@ -3,18 +3,12 @@ kind: Plugin
 metadata:
   name: kubescape
 spec:
-  homepage: https://kubescape.io/
-  shortDescription: An open-source Kubernetes security platform for your IDE, CI/CD pipelines, and clusters
+  homepage: https://github.com/kubescape/kubescape/
+  shortDescription: Scan resources and cluster configs against security frameworks.
   version: {{ .TagName }}
   description: |
-    Kubescape is an open-source Kubernetes security platform.
-    It includes risk analysis, security compliance, and misconfiguration scanning.
-    Targeted at the DevSecOps practitioner or platform engineer,
-    it offers an easy-to-use CLI interface, flexible output formats, and automated scanning capabilities.
-    It saves Kubernetes users and admins precious time, effort, and resources.
-    
-    Kubescape was created by [ARMO](https://www.armosec.io/?utm_source=github&utm_medium=repository)
-    and is a [Cloud Native Computing Foundation (CNCF) sandbox project](https://www.cncf.io/sandbox-projects/).
+    It includes risk analysis, security compliance, and misconfiguration scanning
+    with an easy-to-use CLI interface, flexible output formats, and automated scanning capabilities.
   platforms:
   - selector:
       matchLabels:
