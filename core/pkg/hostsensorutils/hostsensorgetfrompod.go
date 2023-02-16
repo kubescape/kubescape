@@ -225,7 +225,7 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations(ctx context.Context) ([]h
 // hasCloudProviderInfo iterate over the []hostsensor.HostSensorDataEnvelope list to find info about cloud provider.
 // If information are found, ther return true. Return false otherwise.
 func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
-	for index, _ := range cpi {
+	for index := range cpi {
 		if !reflect.DeepEqual(cpi[index].GetData(), json.RawMessage("{}\n")) {
 			return true
 		}
