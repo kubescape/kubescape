@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 )
@@ -23,7 +22,7 @@ func SaveInFile(policy interface{}, pathStr string) error {
 	err = os.WriteFile(pathStr, encodedData, 0644) //nolint:gosec
 	if err != nil {
 		if os.IsNotExist(err) {
-			pathDir := path.Dir(pathStr)
+			pathDir := filepath.Dir(pathStr)
 			// pathDir could contain subdirectories
 			if erm := os.MkdirAll(pathDir, 0755); erm != nil {
 				return erm

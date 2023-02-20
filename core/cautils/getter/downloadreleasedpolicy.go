@@ -106,19 +106,6 @@ func (drp *DownloadReleasedPolicy) SetRegoObjects() error {
 	return drp.gs.SetRegoObjects()
 }
 
-func isNativeFramework(framework string) bool {
-	return contains(NativeFrameworks, framework)
-}
-
-func contains(s []string, str string) bool {
-	for _, v := range s {
-		if strings.EqualFold(v, str) {
-			return true
-		}
-	}
-	return false
-}
-
 func (drp *DownloadReleasedPolicy) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
 	exceptions, err := drp.gs.GetSystemPostureExceptionPolicies()
 	if err != nil {
