@@ -72,14 +72,13 @@
     <img class="logo" src="https://raw.githubusercontent.com/kubescape/kubescape/master/core/pkg/resultshandling/printer/v2/pdf/logo.png">
     <h1>Kubescape Scan Report</h1>
     {{ with .OPASessionObj.Report.SummaryDetails }}
-    <h2>By Controls</h2>
-    <h3>Summary</h3>
+    </br>
+    <h2>Summary:</h2>
     <table>
       <thead>
         <tr>
           <th>All</th>
           <th>Failed</th>
-          <th>Excluded</th>
           <th>Skipped</th>
         </tr>
       </thead>
@@ -87,19 +86,18 @@
         <tr>
           <td>{{ .NumberOfControls.All }}</td>
           <td>{{ .NumberOfControls.Failed }}</td>
-          <td>{{ .NumberOfControls.Excluded }}</td>
           <td>{{ .NumberOfControls.Skipped }}</td>
         </tr>
       </tbody>
     </table>
-    <h3>Details</h3>
+    </br>
+    <h2>Details</h2>
     <table>
       <thead>
       <tr>
         <th class="controlSeverityCell">Severity</th>
         <th class="controlNameCell">Control Name</th>
         <th class="controlRiskCell">Failed Resources</th>
-        <th class="controlRiskCell">Excluded Resources</th>
         <th class="controlRiskCell">All Resources</th>
         <th class="controlRiskCell">Risk Score, %</th>
       </tr>
@@ -110,9 +108,8 @@
         <tr>
           <td class="controlSeverityCell">{{ controlSeverityToString $control.ScoreFactor }}</td>
           <td class="controlNameCell">{{ $control.Name }}</td>
-          <td class="controlRiskCell numericCell">{{ $control.ResourceCounters.FailedResources }}</td>
-          <td class="controlRiskCell numericCell">{{ $control.ResourceCounters.ExcludedResources }}</td>
-          <td class="controlRiskCell numericCell">{{ sum $control.ResourceCounters.ExcludedResources $control.ResourceCounters.FailedResources $control.ResourceCounters.PassedResources }}</td>
+          <td class="controlRiskCell numericCell">{{ $control.StatusCounters.FailedResources }}</td>
+          <td class="controlRiskCell numericCell">{{ sum $control.StatusCounters.SkippedResources $control.StatusCounters.FailedResources $control.StatusCounters.PassedResources }}</td>
           <td class="controlRiskCell numericCell">{{ float32ToInt $control.Score }}</td>
         </tr>
       </tr>
@@ -120,7 +117,9 @@
       <tbody>
     </table>
     {{ end }}
-    <h2>By Resource</h2>
+    </br>
+    <h2>Failed Resources:</h2>
+    </br>
     {{ $sortedResourceTableView := sortByNamespace .ResourceTableView }}
     {{ range $sortedResourceTableView }}
     <h3>Name: {{ .Resource.GetName }}</h3>

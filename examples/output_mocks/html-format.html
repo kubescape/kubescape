@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html lang="en-US">
+  <head>
+    <meta charset="UTF-8">
+    <title>Kubescape Scan Report</title>
+  </head>
+  <style>
+  :root {
+    --cell-padding-vertical: 0.25em;
+    --cell-padding-horizontal: 0.25em;
+    --font-family-sans: system-ui, -apple-system, sans-serif;
+  }
+  body {
+    max-width: 60em;
+    margin: auto;
+    font-family: var(--font-family-sans);
+  }
+  table {
+    width: 100%;
+    border-top: 0.1em solid black;
+    border-bottom: 0.1em solid black;
+    border-collapse: collapse;
+    table-layout: fixed;
+  }
+  th {
+    text-align: left;
+  }
+  td, th {
+    padding-top: var(--cell-padding-vertical);
+    padding-bottom: var(--cell-padding-vertical);
+    padding-right: var(--cell-padding-horizontal);
+    vertical-align: top;
+  }
+  td > p {
+    margin: 0;
+    word-break: break-all;
+    hyphens: auto;
+  }
+  thead {
+    border-bottom: 0.01em solid black;
+  }
+  .numericCell {
+    text-align: right;
+  }
+  .controlSeverityCell {
+    width: 10%;
+  }
+  .controlNameCell {
+    width: 50%;
+  }
+  .controlRiskCell {
+    width: 10%;
+  }
+  .resourceSeverityCell {
+    width: 10%;
+  }
+  .resourceNameCell {
+    width: 30%;
+  }
+  .resourceURLCell {
+    width: 10%;
+  }
+  .resourceRemediationCell {
+    width: 50%;
+  }
+  .logo {
+    width: 25%;
+    float: right;
+  }
+  </style>
+  <body>
+    <img class="logo" src="https://raw.githubusercontent.com/kubescape/kubescape/master/core/pkg/resultshandling/printer/v2/pdf/logo.png">
+    <h1>Kubescape Scan Report</h1>
+    
+    </br>
+    <h2>Summary</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>All</th>
+          <th>Failed</th>
+          <th>Skipped</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>65</td>
+          <td>23</td>
+          <td>10</td>
+        </tr>
+      </tbody>
+    </table>
+    </br>
+    <h2>Details</h2>
+    <table>
+      <thead>
+      <tr>
+        <th class="controlSeverityCell">Severity</th>
+        <th class="controlNameCell">Control Name</th>
+        <th class="controlRiskCell">Failed Resources</th>
+        <th class="controlRiskCell">All Resources</th>
+        <th class="controlRiskCell">Risk Score, %</th>
+      </tr>
+      </thead>
+      <tbody>
+      
+      
+        <tr>
+          <td class="controlSeverityCell">Critical</td>
+          <td class="controlNameCell">API server insecure port is enabled</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Critical</td>
+          <td class="controlNameCell">CVE-2022-39328-grafana-auth-bypass</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Critical</td>
+          <td class="controlNameCell">Disable anonymous access to Kubelet service</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Critical</td>
+          <td class="controlNameCell">Enforce Kubelet client TLS authentication</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Applications credentials in configuration files</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">43</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">CVE-2022-23648-containerd-fs-escape</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">CVE-2022-47633-kyverno-signature-bypass</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Forbidden Container Registries</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Host PID/IPC privileges</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">HostNetwork access</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">HostPath mount</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Insecure capabilities</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Instance Metadata API</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">List Kubernetes secrets</td>
+          <td class="controlRiskCell numericCell">3</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">4</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Privileged container</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">RBAC enabled</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Resource limits</td>
+          <td class="controlRiskCell numericCell">7</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">44</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Resources CPU limit and request</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Resources memory limit and request</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Workloads with Critical vulnerabilities exposed to external traffic</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Workloads with RCE vulnerabilities exposed to external traffic</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">High</td>
+          <td class="controlNameCell">Writable hostPath mount</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Access container service account</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">46</td>
+          <td class="controlRiskCell numericCell">2</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Allow privilege escalation</td>
+          <td class="controlRiskCell numericCell">4</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">30</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Audit logs enabled</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">100</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Automatic mapping of service account</td>
+          <td class="controlRiskCell numericCell">4</td>
+          <td class="controlRiskCell numericCell">62</td>
+          <td class="controlRiskCell numericCell">10</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">CVE-2021-25741 - Using symlink for arbitrary host file system access.</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">CVE-2022-0185-linux-kernel-container-escape</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">CVE-2022-0492-cgroups-container-escape</td>
+          <td class="controlRiskCell numericCell">4</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">30</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">CVE-2022-24348-argocddirtraversal</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Cluster internal networking</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">5</td>
+          <td class="controlRiskCell numericCell">20</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Cluster-admin binding</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Configured liveness probe</td>
+          <td class="controlRiskCell numericCell">7</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">44</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Container hostPort</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Containers mounting Docker socket</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">CoreDNS poisoning</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">1</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Data Destruction</td>
+          <td class="controlRiskCell numericCell">2</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">3</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Delete Kubernetes events</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Exec into container</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Exposed sensitive interfaces</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Images from allowed registry</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Ingress and Egress blocked</td>
+          <td class="controlRiskCell numericCell">7</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">44</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Linux hardening</td>
+          <td class="controlRiskCell numericCell">7</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">44</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Malicious admission controller (mutating)</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Mount service principal</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">No impersonation</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Non-root containers</td>
+          <td class="controlRiskCell numericCell">4</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">30</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Portforwarding privileges</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">74</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Secret/ETCD encryption enabled</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">100</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Sudo in container entrypoint</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Medium</td>
+          <td class="controlNameCell">Workloads with excessive amount of vulnerabilities</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Access Kubernetes dashboard</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">93</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Configured readiness probe</td>
+          <td class="controlRiskCell numericCell">7</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">44</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Image pull policy on latest tag</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Immutable container filesystem</td>
+          <td class="controlRiskCell numericCell">4</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">30</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">K8s common labels usage</td>
+          <td class="controlRiskCell numericCell">5</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">34</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Kubernetes CronJob</td>
+          <td class="controlRiskCell numericCell">5</td>
+          <td class="controlRiskCell numericCell">5</td>
+          <td class="controlRiskCell numericCell">100</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Label usage for resources</td>
+          <td class="controlRiskCell numericCell">3</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">14</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Malicious admission controller (validating)</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Naked PODs</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">31</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Network mapping</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">5</td>
+          <td class="controlRiskCell numericCell">20</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">PSP enabled</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">100</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">Pods in default namespace</td>
+          <td class="controlRiskCell numericCell">2</td>
+          <td class="controlRiskCell numericCell">19</td>
+          <td class="controlRiskCell numericCell">20</td>
+        </tr>
+      </tr>
+      
+        <tr>
+          <td class="controlSeverityCell">Low</td>
+          <td class="controlNameCell">SSH server running inside container</td>
+          <td class="controlRiskCell numericCell">0</td>
+          <td class="controlRiskCell numericCell">1</td>
+          <td class="controlRiskCell numericCell">0</td>
+        </tr>
+      </tr>
+      
+      <tbody>
+    </table>
+    
+    </br>
+    <h2>Failed Resources</h2>
+    </br>
+    
+    
+    <h3>Name: kubescape</h3>
+      <p>ApiVersion: v1</p>
+      <p>Kind: Namespace</p>
+      <p>Name: kubescape</p>
+      <p>Namespace: </p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Network mapping</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0049">C-0049</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Cluster internal networking</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0054">C-0054</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: nginx-1</h3>
+      <p>ApiVersion: apps/v1</p>
+      <p>Kind: Deployment</p>
+      <p>Name: nginx-1</p>
+      <p>Namespace: default</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Allow privilege escalation</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">CVE-2022-0492-cgroups-container-escape</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0086">C-0086</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.securityContext.runAsNonRoot=true</p>  <p>spec.template.spec.securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Ingress and Egress blocked</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">Resource limits</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Configured readiness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Non-root containers</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Automatic mapping of service account</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.automountServiceAccountToken=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Linux hardening</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Configured liveness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">K8s common labels usage</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Pods in default namespace</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0061">C-0061</a></td>
+          <td class="resourceRemediationCell"> <p>metadata.namespace</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Immutable container filesystem</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: kubescape-sneeffer-service-account</h3>
+      <p>ApiVersion: </p>
+      <p>Kind: ServiceAccount</p>
+      <p>Name: kubescape-sneeffer-service-account</p>
+      <p>Namespace: default</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Access container service account</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0053">C-0053</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: kubescape-sneeffer-service-account</h3>
+      <p>ApiVersion: v1</p>
+      <p>Kind: ServiceAccount</p>
+      <p>Name: kubescape-sneeffer-service-account</p>
+      <p>Namespace: default</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Automatic mapping of service account</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceRemediationCell"> <p>automountServiceAccountToken=false</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: nginx</h3>
+      <p>ApiVersion: apps/v1</p>
+      <p>Kind: Deployment</p>
+      <p>Name: nginx</p>
+      <p>Namespace: default</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Allow privilege escalation</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">CVE-2022-0492-cgroups-container-escape</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0086">C-0086</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.securityContext.runAsNonRoot=true</p>  <p>spec.template.spec.securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Ingress and Egress blocked</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">Resource limits</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Configured readiness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Non-root containers</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Automatic mapping of service account</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.automountServiceAccountToken=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Linux hardening</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Configured liveness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">K8s common labels usage</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Pods in default namespace</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0061">C-0061</a></td>
+          <td class="resourceRemediationCell"> <p>metadata.namespace</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Immutable container filesystem</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: kube-apiserver-dwertent</h3>
+      <p>ApiVersion: v1</p>
+      <p>Kind: Pod</p>
+      <p>Name: kube-apiserver-dwertent</p>
+      <p>Namespace: kube-system</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Audit logs enabled</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0067">C-0067</a></td>
+          <td class="resourceRemediationCell"> <p>spec.containers[0].command</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">PSP enabled</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0068">C-0068</a></td>
+          <td class="resourceRemediationCell"> <p>spec.containers[0].command[5]</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Secret/ETCD encryption enabled</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0066">C-0066</a></td>
+          <td class="resourceRemediationCell"> <p>spec.containers[0].command</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: kubescape-sa</h3>
+      <p>ApiVersion: </p>
+      <p>Kind: ServiceAccount</p>
+      <p>Name: kubescape-sa</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Data Destruction</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0007">C-0007</a></td>
+          <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[1].resources[1]</p>  <p>relatedObjects[1].rules[1].verbs[0]</p>  <p>relatedObjects[1].rules[1].apiGroups[0]</p>  <p>relatedObjects[1].rules[1].apiGroups[1]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">List Kubernetes secrets</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0015">C-0015</a></td>
+          <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[0].resources[0]</p>  <p>relatedObjects[1].rules[0].verbs[0]</p>  <p>relatedObjects[1].rules[0].verbs[1]</p>  <p>relatedObjects[1].rules[0].verbs[3]</p>  <p>relatedObjects[1].rules[0].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: default</h3>
+      <p>ApiVersion: v1</p>
+      <p>Kind: ServiceAccount</p>
+      <p>Name: default</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Automatic mapping of service account</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceRemediationCell"> <p>automountServiceAccountToken=false</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: kubescape-registry-scan-1809488850697420828</h3>
+      <p>ApiVersion: batch/v1</p>
+      <p>Kind: CronJob</p>
+      <p>Name: kubescape-registry-scan-1809488850697420828</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Ingress and Egress blocked</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">Resource limits</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Configured readiness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Kubernetes CronJob</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Label usage for resources</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0076">C-0076</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Linux hardening</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Configured liveness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">K8s common labels usage</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: kubescape-scheduler</h3>
+      <p>ApiVersion: batch/v1</p>
+      <p>Kind: CronJob</p>
+      <p>Name: kubescape-scheduler</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Allow privilege escalation</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">CVE-2022-0492-cgroups-container-escape</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0086">C-0086</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.securityContext.runAsNonRoot=true</p>  <p>spec.jobTemplate.spec.template.spec.securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Ingress and Egress blocked</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">Resource limits</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Configured readiness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Kubernetes CronJob</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Non-root containers</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Linux hardening</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Configured liveness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Immutable container filesystem</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: ks-sa</h3>
+      <p>ApiVersion: </p>
+      <p>Kind: ServiceAccount</p>
+      <p>Name: ks-sa</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Data Destruction</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0007">C-0007</a></td>
+          <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[1].resources[0]</p>  <p>relatedObjects[1].rules[1].verbs[0]</p>  <p>relatedObjects[1].rules[1].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p>  <p>relatedObjects[1].rules[2].resources[1]</p>  <p>relatedObjects[1].rules[2].verbs[0]</p>  <p>relatedObjects[1].rules[2].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">CoreDNS poisoning</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0037">C-0037</a></td>
+          <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[2].resources[0]</p>  <p>relatedObjects[1].rules[2].verbs[0]</p>  <p>relatedObjects[1].rules[2].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">List Kubernetes secrets</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0015">C-0015</a></td>
+          <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[0].resources[0]</p>  <p>relatedObjects[1].rules[0].verbs[0]</p>  <p>relatedObjects[1].rules[0].verbs[1]</p>  <p>relatedObjects[1].rules[0].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p>  <p>relatedObjects[1].rules[2].resources[1]</p>  <p>relatedObjects[1].rules[2].verbs[0]</p>  <p>relatedObjects[1].rules[2].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: ks-scheduled-scan-armobest-1968464821027741247</h3>
+      <p>ApiVersion: batch/v1</p>
+      <p>Kind: CronJob</p>
+      <p>Name: ks-scheduled-scan-armobest-1968464821027741247</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Ingress and Egress blocked</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">Resource limits</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Configured readiness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Kubernetes CronJob</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Label usage for resources</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0076">C-0076</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Linux hardening</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Configured liveness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">K8s common labels usage</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: ks-scheduled-scan-cis-v1-23-t1-0-1-70343785476262573</h3>
+      <p>ApiVersion: batch/v1</p>
+      <p>Kind: CronJob</p>
+      <p>Name: ks-scheduled-scan-cis-v1-23-t1-0-1-70343785476262573</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Ingress and Egress blocked</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">Resource limits</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Configured readiness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Kubernetes CronJob</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Label usage for resources</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0076">C-0076</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Linux hardening</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Configured liveness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">K8s common labels usage</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: ks-sa</h3>
+      <p>ApiVersion: </p>
+      <p>Kind: ServiceAccount</p>
+      <p>Name: ks-sa</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">List Kubernetes secrets</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0015">C-0015</a></td>
+          <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[0].resources[0]</p>  <p>relatedObjects[1].rules[0].verbs[0]</p>  <p>relatedObjects[1].rules[0].verbs[1]</p>  <p>relatedObjects[1].rules[0].verbs[2]</p>  <p>relatedObjects[1].rules[0].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+    <h3>Name: kubevuln-scheduler</h3>
+      <p>ApiVersion: batch/v1</p>
+      <p>Kind: CronJob</p>
+      <p>Name: kubevuln-scheduler</p>
+      <p>Namespace: kubescape</p>
+      <table>
+        <thead>
+        <tr>
+          <th class="resourceSeverityCell">Severity</th>
+          <th class="resourceNameCell">Name</th>
+          <th class="resourceURLCell">Docs</th>
+          <th class="resourceRemediationCell">Assistant Remediation</th>
+        </tr>
+        </thead>
+        <tbody>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Allow privilege escalation</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">CVE-2022-0492-cgroups-container-escape</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0086">C-0086</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.securityContext.runAsNonRoot=true</p>  <p>spec.jobTemplate.spec.template.spec.securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Ingress and Egress blocked</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">High</td>
+          <td class="resourceNameCell">Resource limits</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Configured readiness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Kubernetes CronJob</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceRemediationCell"></td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Non-root containers</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Linux hardening</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Medium</td>
+          <td class="resourceNameCell">Configured liveness probe</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
+        </tr>
+        
+        <tr>
+          <td class="resourceSeverityCell">Low</td>
+          <td class="resourceNameCell">Immutable container filesystem</td>
+          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
+        </tr>
+        
+        </tbody>
+      </table>
+    </div>
+    
+  </body>
+</html>
