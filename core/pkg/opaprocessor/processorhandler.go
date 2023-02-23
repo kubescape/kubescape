@@ -74,6 +74,9 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
 	defer span.End()
 	opap.loggerStartScanning()
+	defer opap.loggerDoneScanning()
+	cautils.StartSpinner()
+	defer cautils.StopSpinner()
 
 	if progressListener != nil {
 		progressListener.Start(len(policies.Controls))
@@ -108,8 +111,6 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	}
 
 	opap.Report.ReportGenerationTime = time.Now().UTC()
-
-	opap.loggerDoneScanning()
 
 	return nil
 }

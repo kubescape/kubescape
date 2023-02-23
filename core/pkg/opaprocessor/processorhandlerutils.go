@@ -7,9 +7,11 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	resources "github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
 )
@@ -23,19 +25,27 @@ import (
 func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.updateResults")
 	defer span.End()
+
 	// remove data from all objects
 	for i := range opap.AllResources {
 		removeData(opap.AllResources[i])
 	}
 
+	processor := exceptions.NewProcessor()
+
 	// set exceptions
 	for i := range opap.ResourcesResult {
-
 		t := opap.ResourcesResult[i]
 
-		// first set exceptions
+		// first set exceptions (reuse the same exceptions processor)
 		if resource, ok := opap.AllResources[i]; ok {
-			t.SetExceptions(resource, opap.Exceptions, cautils.ClusterName, opap.AllPolicies.Controls)
+			t.SetExceptions(
+				resource,
+				opap.Exceptions,
+				cautils.ClusterName,
+				opap.AllPolicies.Controls, // update status depending on action required
+				resourcesresults.WithExceptionsProcessor(processor),
+			)
 		}
 
 		// summarize the resources

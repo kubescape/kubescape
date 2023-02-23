@@ -7,15 +7,15 @@ import (
 )
 
 func Test_has_signature(t *testing.T) {
-	
+
 	tests := []struct {
 		name string
-		img string
+		img  string
 		want bool
 	}{
 		{
 			name: "valid signature",
-			img: "quay.io/kubescape/gateway",
+			img:  "quay.io/kubescape/gateway",
 			want: true,
 		},
 	}
