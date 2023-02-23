@@ -23,7 +23,8 @@ import (
 
 var (
 	//go:embed hostsensor.yaml
-	hostSensorYAML string
+	hostSensorYAML      string
+	namespaceWasPresent bool
 )
 
 const PortName string = "scanner"
@@ -92,6 +93,29 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 	return nil
 }
 
+// checkNamespaceWasPresent check if the given namespace was already present on kubernetes and in "Active" state.
+// Return true in case it find the namespace on the list, false otherwise.
+// In case we have some error with the kubernetes APIs, it returns an error.
+func (hsh *HostSensorHandler) checkNamespaceWasPresent(namespace string) bool {
+	ns, err := hsh.k8sObj.KubernetesClient.
+		CoreV1().
+		Namespaces().
+		Get(hsh.k8sObj.Context, namespace, metav1.GetOptions{})
+	if err != nil {
+		return false
+	}
+	// check also if it is in "Active" state.
+	if ns.Status.Phase != corev1.NamespaceActive {
+		return false
+	}
+	return true
+}
+
+// namespaceWasPresent return the namespaceWasPresent variable value.
+func (hsh *HostSensorHandler) namespaceWasPresent() bool {
+	return namespaceWasPresent
+}
+
 func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 	workloads, err := cautils.ReadFile([]byte(hostSensorYAML), cautils.YAML_FILE_FORMAT)
 	if err != nil {
@@ -106,6 +130,8 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 			break
 		}
 	}
+	// check if namespace was already present on kubernetes
+	namespaceWasPresent = hsh.checkNamespaceWasPresent(namespaceName)
 
 	// Update workload data before applying
 	for i := range workloads {
@@ -264,7 +290,11 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventTy
 }
 
 func (hsh *HostSensorHandler) tearDownNamespace(namespace string) error {
-
+	// if namespace was already present on kubernetes (before installing host-scanner),
+	// then we shouldn't delete it.
+	if hsh.namespaceWasPresent() {
+		return nil
+	}
 	if err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Delete(hsh.k8sObj.Context, namespace, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor namespace: %v", err)
 	}
@@ -273,9 +303,11 @@ func (hsh *HostSensorHandler) tearDownNamespace(namespace string) error {
 
 func (hsh *HostSensorHandler) TearDown() error {
 	namespace := hsh.GetNamespace()
+	// delete DaemonSet
 	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.GetNamespace()).Delete(hsh.k8sObj.Context, hsh.DaemonSet.Name, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
 	}
+	// delete Namespace
 	if err := hsh.tearDownNamespace(namespace); err != nil {
 		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
 	}
