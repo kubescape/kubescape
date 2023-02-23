@@ -46,6 +46,9 @@ jobs:
     runs-on: ubuntu-latest
     if: "${{ github.repository_owner }} == kubescape"
     needs: create-release
+    env:
+      # overriding the GITHUB_REF so the action can extract the right tag -> https://github.com/rajatjindal/krew-release-bot/blob/v0.0.43/pkg/cicd/github/actions.go#L25
+      GITHUB_REF: refs/tags/${{ needs.retag.outputs.NEW_TAG }} 
     steps:
       - uses: actions/checkout@v3
         with:
