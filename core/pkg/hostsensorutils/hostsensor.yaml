@@ -38,9 +38,6 @@ spec:
       containers:
       - name: host-sensor
         image: quay.io/kubescape/host-scanner:v1.0.45
-        env:
-        - name: OTEL_COLLECTOR_SVC
-          value: "otel-collector.kubescape:4317"
         securityContext:
           allowPrivilegeEscalation: true
           privileged: true
