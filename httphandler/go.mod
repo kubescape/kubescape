@@ -10,10 +10,10 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
-	github.com/kubescape/go-logger v0.0.8
+	github.com/kubescape/go-logger v0.0.9
 	github.com/kubescape/k8s-interface v0.0.99
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.235
+	github.com/kubescape/opa-utils v0.0.237
 	github.com/stretchr/testify v1.8.1
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
 	k8s.io/utils v0.0.0-20221128185143-99ec85e7a448
