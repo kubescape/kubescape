@@ -24,6 +24,8 @@ const (
 	prettyPrinterOutputExt  = ".txt"
 )
 
+var _ printer.IPrinter = &PrettyPrinter{}
+
 type PrettyPrinter struct {
 	writer          *os.File
 	formatVersion   string

@@ -14,6 +14,8 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
+var _ printer.IPrinter = &PrometheusPrinter{}
+
 type PrometheusPrinter struct {
 	writer      *os.File
 	verboseMode bool

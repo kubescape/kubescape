@@ -26,6 +26,8 @@ const (
 //go:embed html/report.gohtml
 var reportTemplate string
 
+var _ printer.IPrinter = &HtmlPrinter{}
+
 type HTMLReportingCtx struct {
 	OPASessionObj     *cautils.OPASessionObj
 	ResourceTableView ResourceTableView

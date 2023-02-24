@@ -51,6 +51,8 @@ func scoreFactorToSARIFSeverityLevel(score float32) sarifSeverityLevel {
 	return sarifSeverityLevelNote
 }
 
+var _ printer.IPrinter = &SARIFPrinter{}
+
 // SARIFPrinter is a printer that emits the report in the SARIF format
 type SARIFPrinter struct {
 	// outputFile is the name of the output file
