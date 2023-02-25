@@ -13,6 +13,7 @@ require (
 	github.com/francoispqt/gojay v1.2.13
 	github.com/go-git/go-git/v5 v5.5.2
 	github.com/google/uuid v1.3.0
+	github.com/gorilla/websocket v1.5.0
 	github.com/johnfercher/maroto v0.37.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.23

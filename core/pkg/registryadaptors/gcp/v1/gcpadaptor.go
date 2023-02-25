@@ -89,3 +89,8 @@ func (GCPAdaptor *GCPAdaptor) GetImagesScanStatus(imageIDs []registryvulnerabili
 	// TODO
 	return []registryvulnerabilities.ContainerImageScanStatus{}, nil
 }
+
+func (GCPAdaptor *GCPAdaptor) DownloadImageScanResults() (registryvulnerabilities.ImageCVEreport, error) {
+	// TODO
+	return registryvulnerabilities.ImageCVEreport{}, nil
+}

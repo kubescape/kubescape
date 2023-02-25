@@ -86,6 +86,8 @@ func GeDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
+	downloadCmd.AddCommand(getImagesCmd(ks, &downloadInfo))
+
 	return downloadCmd
 }
 

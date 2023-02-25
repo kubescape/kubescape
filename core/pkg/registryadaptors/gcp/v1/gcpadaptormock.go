@@ -104,6 +104,11 @@ func (GCPAdaptorMock *GCPAdaptorMock) GetImagesScanStatus(imageIDs []registryvul
 	return []registryvulnerabilities.ContainerImageScanStatus{}, nil
 }
 
+func (GCPAdaptorMock *GCPAdaptorMock) DownloadImageScanResults() (registryvulnerabilities.ImageCVEreport, error) {
+	// TODO
+	return registryvulnerabilities.ImageCVEreport{}, nil
+}
+
 //==============================================================================================================================
 //==============================================================================================================================
 //==============================================================================================================================

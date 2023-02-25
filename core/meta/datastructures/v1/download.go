@@ -7,5 +7,6 @@ type DownloadInfo struct {
 	FileName    string // can be empty
 	Target      string // type of artifact to download
 	Identifier  string // identifier of artifact to download
+	Format      string // display format, can be empty
 	Credentials cautils.Credentials
 }

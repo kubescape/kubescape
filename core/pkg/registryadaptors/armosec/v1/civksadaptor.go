@@ -85,6 +85,47 @@ func (ksCivAdaptor *KSCivAdaptor) GetImageVulnerability(imageID *registryvulnera
 	return &resultImageVulnerabilityReport, nil
 }
 
+func (ksCivAdaptor *KSCivAdaptor) DownloadImageScanResults() (registryvulnerabilities.ImageCVEreport, error) {
+
+	logger.L().Info("Downloading image vulnerabilities from Kubescape SaaS ...")
+
+	filter := []map[string]string{{"isLastScan": "1"}}
+	request := V2ListRequest{InnerFilters: filter, OrderBy: "timestamp:desc,wlid:asc,name:asc,severity:asc"}
+	requestBody, _ := json.Marshal(request)
+
+	requestUrl := fmt.Sprintf("wss://%s/ws/v1/vulnerability/scanResultsDetails?customerGUID=%s", ksCivAdaptor.ksCloudAPI.GetCloudAPIURL(), ksCivAdaptor.ksCloudAPI.GetAccountID())
+	resp, err := ksCivAdaptor.ksCloudAPI.WebSocketConnect(requestUrl, requestBody)
+
+	if err != nil {
+		return nil, err
+	}
+
+	logger.L().Info("Building the results ...")
+	imageCVEreport := registryvulnerabilities.ImageCVEreport{}
+
+	for _, value := range resp {
+
+		scanDetailsResult := struct {
+			Total struct {
+				Value    int    `json:"value"`
+				Relation string `json:"relation"`
+			} `json:"total"`
+			TotalChunks int                                          `json:"totalChunks"`
+			ChunkNum    int                                          `json:"chunkNum"`
+			Response    []registryvulnerabilities.ImageVulnerability `json:"response"`
+		}{}
+
+		err = json.Unmarshal([]byte(value), &scanDetailsResult)
+		if err != nil {
+			return nil, err
+		}
+
+		responseToImageVulnMap(scanDetailsResult.Response, imageCVEreport)
+	}
+
+	return imageCVEreport, nil
+}
+
 func (ksCivAdaptor *KSCivAdaptor) DescribeAdaptor() string {
 	return "armo image vulnerabilities scanner, docs: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities"
 }

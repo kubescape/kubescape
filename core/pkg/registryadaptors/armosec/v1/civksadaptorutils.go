@@ -66,3 +66,23 @@ func responseObjectToVulnerabilities(vulnerabilitiesList containerscan.Vulnerabi
 	}
 	return vulnerabilities
 }
+
+// build image vulerabilities report mapped to the imageID
+func responseToImageVulnMap(vulnerabilitiesList []registryvulnerabilities.ImageVulnerability, imageCVEreport registryvulnerabilities.ImageCVEreport) {
+
+	for _, vulnerabilityEntry := range vulnerabilitiesList {
+
+		imageReport := registryvulnerabilities.ImageReport{
+			WLID: vulnerabilityEntry.WLID,
+			Attribute: registryvulnerabilities.Attribute{
+				Cluster:       vulnerabilityEntry.Designators.Attributes.Cluster,
+				ContainerName: vulnerabilityEntry.Designators.Attributes.ContainerName,
+				Kind:          vulnerabilityEntry.Designators.Attributes.Kind,
+				Name:          vulnerabilityEntry.Designators.Attributes.Name,
+				Namespace:     vulnerabilityEntry.Designators.Attributes.Namespace,
+			},
+			ImageTag: vulnerabilityEntry.ImageTag,
+		}
+		imageCVEreport[imageReport] = append(imageCVEreport[imageReport], vulnerabilityEntry)
+	}
+}

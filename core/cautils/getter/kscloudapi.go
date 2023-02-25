@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/gorilla/websocket"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 )
@@ -107,6 +108,41 @@ func newKSCloudAPI() *KSCloudAPI {
 		httpClient: &http.Client{Timeout: time.Duration(61) * time.Second},
 		loggedIn:   false,
 	}
+}
+
+func (api *KSCloudAPI) WebSocketConnect(fullURL string, body []byte) (map[int][]byte, error) {
+
+	recvData := map[int][]byte{}
+	chunkNum := 0
+
+	// connect to ws
+	headerOptions := http.Header{}
+	headerOptions.Set("Cookie", fmt.Sprintf("auth=%s", api.authCookie))
+	c, _, err := websocket.DefaultDialer.Dial(fullURL, headerOptions)
+	if err != nil {
+		return recvData, err
+	}
+	defer c.Close()
+
+	// write to ws
+	err = c.WriteMessage(websocket.TextMessage, body)
+	if err != nil {
+		return recvData, err
+	}
+
+	// read from ws
+	for {
+		_, message, err := c.ReadMessage()
+
+		if fmt.Sprint(err) == "websocket: close 1000 (normal)" {
+			return recvData, nil
+		} else if err != nil {
+			return recvData, err
+		}
+		recvData[chunkNum] = message
+		chunkNum++
+	}
+
 }
 
 func (api *KSCloudAPI) Post(fullURL string, headers map[string]string, body []byte) (string, error) {

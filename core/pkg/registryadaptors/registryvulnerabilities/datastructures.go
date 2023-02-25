@@ -60,10 +60,44 @@ type Vulnerability struct {
 	FixAvailable             bool        `json:",omitempty"`
 }
 
+type Attribute struct {
+	Cluster       string `json:"cluster"`
+	ContainerName string `json:"containerName"`
+	Kind          string `json:"kind"`
+	Name          string `json:"name"`
+	Namespace     string `json:"namespace"`
+}
+
+type Designator struct {
+	Attributes Attribute `json:"attributes"`
+}
+
+type ImageVulnerability struct {
+	Name               string     `json:"name"`
+	WLID               string     `json:"wlid"`
+	Timestamp          int64      `json:"timestamp"`
+	Severity           string     `json:"severity"`
+	ImageTag           string     `json:"imageTag"`
+	Designators        Designator `json:"designators"`
+	RelatedPackageName string     `json:"packageName"`
+	PackageVersion     string     `json:"packageVersion"`
+	Link               string     `json:"link"`
+	Description        string     `json:"description"`
+	Fixes              []FixedIn  `json:"fixedIn"`
+}
+
 type ContainerImageVulnerabilityReport struct {
 	ImageID         ContainerImageIdentifier
 	Vulnerabilities []Vulnerability
 }
+
+type ImageReport struct {
+	WLID      string    `json:"WLID"`
+	Attribute Attribute `json:"attribute"`
+	ImageTag  string    `json:"imageTag"`
+}
+
+type ImageCVEreport map[ImageReport][]ImageVulnerability
 
 type ContainerImageInformation struct {
 	ImageID ContainerImageIdentifier

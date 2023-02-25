@@ -60,6 +60,11 @@ func (armoCivAdaptorMock *ArmoCivAdaptorMock) GetImagesScanStatus(imageIDs []reg
 	return []registryvulnerabilities.ContainerImageScanStatus{}, nil
 }
 
+func (ArmoCivAdaptorMock *ArmoCivAdaptorMock) DownloadImageScanResults() (registryvulnerabilities.ImageCVEreport, error) {
+	// TODO
+	return registryvulnerabilities.ImageCVEreport{}, nil
+}
+
 //==============================================================================================================================
 //==============================================================================================================================
 //==============================================================================================================================

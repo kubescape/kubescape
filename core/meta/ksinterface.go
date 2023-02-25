@@ -13,6 +13,7 @@ type IKubescape interface {
 	// policies
 	List(listPolicies *metav1.ListPolicies) error     // TODO - return list response
 	Download(downloadInfo *metav1.DownloadInfo) error // TODO - return downloaded policies
+	DownloadImages(downloadInfo *metav1.DownloadInfo) error
 
 	// submit
 	Submit(submitInterfaces cliinterfaces.SubmitInterfaces) error            // TODO - func should receive object

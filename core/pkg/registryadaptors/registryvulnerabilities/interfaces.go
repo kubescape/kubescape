@@ -14,4 +14,6 @@ type IContainerImageVulnerabilityAdaptor interface {
 	GetImageVulnerability(imageID *ContainerImageIdentifier) (*ContainerImageVulnerabilityReport, error)
 
 	GetImagesInformation(imageIDs []ContainerImageIdentifier) ([]ContainerImageInformation, error)
+
+	DownloadImageScanResults() (ImageCVEreport, error)
 }
