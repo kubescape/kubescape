@@ -51,6 +51,9 @@ jobs:
         with:
           submodules: recursive
       - name: Update new version in krew-index
+        env:
+          # overriding the GITHUB_REF so the action can extract the right tag -> https://github.com/rajatjindal/krew-release-bot/blob/v0.0.43/pkg/cicd/github/actions.go#L25
+          GITHUB_REF: refs/tags/${{ needs.retag.outputs.NEW_TAG }} 
         uses: rajatjindal/krew-release-bot@v0.0.43
 
   publish-image:

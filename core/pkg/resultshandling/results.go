@@ -17,9 +17,9 @@ import (
 
 type ResultsHandler struct {
 	reporterObj reporter.IReport
-	printerObjs []printer.IPrinter
 	uiPrinter   printer.IPrinter
 	scanData    *cautils.OPASessionObj
+	printerObjs []printer.IPrinter
 }
 
 func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {

@@ -32,6 +32,8 @@ var (
 	kubescapeLogo []byte
 )
 
+var _ printer.IPrinter = &PdfPrinter{}
+
 type PdfPrinter struct {
 	writer *os.File
 }

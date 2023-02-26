@@ -23,10 +23,8 @@ const (
 	junitOutputExt  = ".xml"
 )
 
-/*
-riskScore
-status
-*/
+var _ printer.IPrinter = &JunitPrinter{}
+
 type JunitPrinter struct {
 	writer  *os.File
 	verbose bool

@@ -19,6 +19,8 @@ const (
 	jsonOutputExt  = ".json"
 )
 
+var _ printer.IPrinter = &JsonPrinter{}
+
 type JsonPrinter struct {
 	writer *os.File
 }
