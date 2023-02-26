@@ -18,6 +18,7 @@ func main() {
 		ctx = logger.InitOtel("kubescape",
 			os.Getenv(cautils.BuildNumber),
 			os.Getenv("ACCOUNT_ID"),
+			os.Getenv("CLUSTER_NAME"),
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
