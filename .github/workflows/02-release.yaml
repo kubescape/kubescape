@@ -1,23 +1,19 @@
 name: 02-create_release
-
 on:
   push:
     tags:
-    - 'v*.*.*-rc.*'
-
+      - 'v*.*.*-rc.*'
 jobs:
   retag:
     outputs:
       NEW_TAG: ${{ steps.tag-calculator.outputs.NEW_TAG }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
-
+      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
       - id: tag-calculator
         uses: ./.github/actions/tag-action
         with:
           SUB_STRING: "-rc"
-
   binary-build:
     needs: [retag]
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
@@ -29,40 +25,37 @@ jobs:
       RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
       CLIENT: release
     secrets: inherit
-
   create-release:
     permissions:
-      contents: write    
+      contents: write
     needs: [retag, binary-build]
     uses: ./.github/workflows/c-create-release.yaml
     with:
       RELEASE_NAME: "Release ${{ needs.retag.outputs.NEW_TAG }}"
       TAG: ${{ needs.retag.outputs.NEW_TAG }}
       DRAFT: false
-    secrets: inherit    
-
+    secrets: inherit
   publish-krew-plugin:
     name: Publish Krew plugin
     runs-on: ubuntu-latest
     if: "${{ github.repository_owner }} == kubescape"
     needs: create-release
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
         with:
           submodules: recursive
       - name: Update new version in krew-index
         env:
           # overriding the GITHUB_REF so the action can extract the right tag -> https://github.com/rajatjindal/krew-release-bot/blob/v0.0.43/pkg/cicd/github/actions.go#L25
-          GITHUB_REF: refs/tags/${{ needs.retag.outputs.NEW_TAG }} 
-        uses: rajatjindal/krew-release-bot@v0.0.43
-
+          GITHUB_REF: refs/tags/${{ needs.retag.outputs.NEW_TAG }}
+        uses: rajatjindal/krew-release-bot@92da038bbf995803124a8e50ebd438b2f37bbbb0 # ratchet:rajatjindal/krew-release-bot@v0.0.43
   publish-image:
     permissions:
       id-token: write
       packages: write
-      contents: read    
+      contents: read
     uses: ./.github/workflows/d-publish-image.yaml
-    needs: [ create-release, retag ]
+    needs: [create-release, retag]
     with:
       client: "image-release"
       image_name: "quay.io/${{ github.repository_owner }}/kubescape"
