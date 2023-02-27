@@ -45,7 +45,6 @@ spec:
           procMount: Unmasked
         ports:
           - name: scanner # Do not change port name
-            hostPort: 7888
             containerPort: 7888
             protocol: TCP
         resources:
@@ -72,6 +71,5 @@ spec:
           path: /
           type: Directory
         name: host-filesystem
-      hostNetwork: true
       hostPID: true
       hostIPC: true
