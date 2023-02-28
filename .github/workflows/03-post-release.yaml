@@ -1,19 +1,17 @@
 name: 03-create_release_digests
-
 on:
   release:
-    types: [ published ]
+    types: [published]
     branches:
-    - 'master'
-    - 'main'
-  
+      - 'master'
+      - 'main'
 jobs:
   create_release_digests:
     name: Creating digests
     runs-on: ubuntu-latest
     steps:
       - name: Digest
-        uses: MCJack123/ghaction-generate-release-hashes@v1
+        uses: MCJack123/ghaction-generate-release-hashes@c03f3111b39432dde3edebe401c5a8d1ffbbf917 # ratchet:MCJack123/ghaction-generate-release-hashes@v1
         with:
           hash-type: sha1
           file-name: kubescape-release-digests

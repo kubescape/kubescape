@@ -1,9 +1,8 @@
 name: 00-pr_scanner
-
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches: 
+    branches:
       - 'master'
       - 'main'
       - 'dev'
@@ -16,15 +15,12 @@ on:
       - 'docs/*'
       - 'build/*'
       - '.github/*'
-
 concurrency:
   group: ${{ github.head_ref }}
   cancel-in-progress: true
-
-  
 jobs:
   pr-scanner:
-    permissions: 
+    permissions:
       pull-requests: write
     uses: ./.github/workflows/a-pr-scanner.yaml
     with:

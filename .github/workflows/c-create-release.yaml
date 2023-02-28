@@ -15,22 +15,19 @@ on:
         required: false
         type: boolean
         default: false
-
 jobs:
-
   create-release:
     name: create-release
     runs-on: ubuntu-latest
     # permissions:
     #   contents: write    
     steps:
-      - uses: actions/download-artifact@v3.0.2
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # ratchet:actions/download-artifact@v3.0.2
         id: download-artifact
         with:
           path: .
-
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # ratchet:softprops/action-gh-release@v1
         env:
           MAC_OS: macos-latest
           UBUNTU_OS: ubuntu-latest
@@ -53,5 +50,3 @@ jobs:
             ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}
             ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.sha256
             ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.tar.gz
- 
-            
