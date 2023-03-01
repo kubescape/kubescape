@@ -37,9 +37,8 @@ func (reportMock *ReportMock) GetURL() string {
 	}
 
 	q := u.Query()
-	q.Add("utm_source", "GitHub")
-	q.Add("utm_medium", "CLI")
-	q.Add("utm_campaign", "Submit")
+	q.Add("utm_source", "ARMOgithub")
+	q.Add("utm_medium", "ARMOcli")
 
 	u.RawQuery = q.Encode()
 

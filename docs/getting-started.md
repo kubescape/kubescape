@@ -30,7 +30,7 @@ You will see output like this:
 
 ## Usage
 
-_Some documentation on using Kubescape is yet to move here from the [ARMO Platform docs](https://hub.armosec.io/docs?utm_source=github&utm_medium=repository)_.
+_Some documentation on using Kubescape is yet to move here from the [ARMO Platform docs](https://hub.armosec.io/docs?utm_source=ARMOgithub&utm_medium=ARMOcli)_.
 
 ### Examples
 
@@ -41,7 +41,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     ```
 
     > **Note**  
-    > [Read more about host scanning](https://hub.armosec.io/docs/host-sensor?utm_source=github&utm_medium=repository).
+    > [Read more about host scanning](https://hub.armosec.io/docs/host-sensor?utm_source=ARMOgithub&utm_medium=ARMOcli).
 
 * Scan a running Kubernetes cluster with the [NSA framework](https://www.nsa.gov/Press-Room/News-Highlights/Article/Article/2716980/nsa-cisa-release-kubernetes-hardening-guidance/):
 
@@ -55,7 +55,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     kubescape scan framework mitre
     ```
 
-* Scan for a specific control, using the control name or control ID. [See the list of controls](https://hub.armosec.io/docs/controls?utm_source=github&utm_medium=repository).
+* Scan for a specific control, using the control name or control ID. [See the list of controls](https://hub.armosec.io/docs/controls?utm_source=ARMOgithub&utm_medium=ARMOcli).
 
     ```sh
     kubescape scan control "Privileged container"
@@ -207,7 +207,7 @@ You can also download a single artifact, and scan with the `--use-from` flag:
 
 ### Scan periodically using Helm 
 
-We publish [a Helm chart](https://github.com/kubescape/helm-charts) for our in-cluster components. [Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster?utm_source=github&utm_medium=repository)
+We publish [a Helm chart](https://github.com/kubescape/helm-charts) for our in-cluster components. [Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster?utm_source=ARMOgithub&utm_medium=ARMOcli)
 
 ### VS Code Extension 
 

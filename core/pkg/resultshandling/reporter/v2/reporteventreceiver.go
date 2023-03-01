@@ -122,9 +122,8 @@ func (report *ReportEventReceiver) GetURL() string {
 	report.addPathURL(&u)
 
 	q := u.Query()
-	q.Add("utm_source", "GitHub")
-	q.Add("utm_medium", "CLI")
-	q.Add("utm_campaign", "Submit")
+	q.Add("utm_source", "ARMOgithub")
+	q.Add("utm_medium", "ARMOcli")
 
 	u.RawQuery = q.Encode()
 

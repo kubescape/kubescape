@@ -18,7 +18,7 @@ func TestReportMock_GetURL(t *testing.T) {
 			}{
 				query: "https://kubescape.io",
 			},
-			want: "https://kubescape.io?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub",
+			want: "https://kubescape.io?utm_medium=ARMOcli&utm_source=ARMOgithub",
 		},
 		{
 			name: "TestReportMock_GetURL_empty",
