@@ -27,6 +27,7 @@ var (
 		cloudapis.CloudProviderDescribeKind,
 		cloudapis.CloudProviderDescribeRepositoriesKind,
 		cloudapis.CloudProviderListEntitiesForPoliciesKind,
+		cloudapis.CloudProviderPolicyVersionKind,
 		string(cloudsupport.TypeApiServerInfo),
 	}
 )
