@@ -11,13 +11,13 @@ import (
 
 func TestReportEventReceiver_addPathURL(t *testing.T) {
 	tests := []struct {
-		name   string
 		report *ReportEventReceiver
 		urlObj *url.URL
 		want   *url.URL
+		name   string
 	}{
 		{
-			name: "add scan path",
+			name: "URL for submitted data",
 			report: &ReportEventReceiver{
 				clusterName:        "test",
 				customerGUID:       "FFFF",
@@ -31,9 +31,30 @@ func TestReportEventReceiver_addPathURL(t *testing.T) {
 				Host:   "localhost:8080",
 			},
 			want: &url.URL{
+				Scheme:   "https",
+				Host:     "localhost:8080",
+				Path:     "compliance/test",
+				RawQuery: "",
+			},
+		},
+		{
+			name: "URL for first scan",
+			report: &ReportEventReceiver{
+				clusterName:   "test",
+				customerGUID:  "FFFF",
+				token:         "XXXX",
+				reportID:      "1234",
+				submitContext: SubmitContextScan,
+			},
+			urlObj: &url.URL{
 				Scheme: "https",
 				Host:   "localhost:8080",
-				Path:   "compliance/test",
+			},
+			want: &url.URL{
+				Scheme:   "https",
+				Host:     "localhost:8080",
+				Path:     "account/sign-up",
+				RawQuery: "customerGUID=FFFF&invitationToken=XXXX&utm_medium=createaccount&utm_source=ARMOgithub",
 			},
 		},
 	}
@@ -59,7 +80,7 @@ func TestGetURL(t *testing.T) {
 			"",
 			SubmitContextScan,
 		)
-		assert.Equal(t, "https://cloud.armosec.io/compliance/test?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+		assert.Equal(t, "https://cloud.armosec.io/compliance/test", reporter.GetURL())
 	}
 
 	// Test rbac submit and registered url
@@ -74,7 +95,7 @@ func TestGetURL(t *testing.T) {
 			"",
 			SubmitContextRBAC,
 		)
-		assert.Equal(t, "https://cloud.armosec.io/rbac-visualizer?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+		assert.Equal(t, "https://cloud.armosec.io/rbac-visualizer", reporter.GetURL())
 	}
 
 	// Test repo submit and registered url
@@ -89,7 +110,7 @@ func TestGetURL(t *testing.T) {
 			"XXXX",
 			SubmitContextRepository,
 		)
-		assert.Equal(t, "https://cloud.armosec.io/repository-scanning/XXXX?utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+		assert.Equal(t, "https://cloud.armosec.io/repository-scanning/XXXX", reporter.GetURL())
 	}
 
 	// Test submit and NOT registered url
@@ -104,7 +125,7 @@ func TestGetURL(t *testing.T) {
 			"",
 			SubmitContextScan,
 		)
-		assert.Equal(t, "https://cloud.armosec.io/account/sign-up?customerGUID=1234&invitationToken=token&utm_campaign=Submit&utm_medium=CLI&utm_source=GitHub", reporter.GetURL())
+		assert.Equal(t, "https://cloud.armosec.io/account/sign-up?customerGUID=1234&invitationToken=token&utm_medium=createaccount&utm_source=ARMOgithub", reporter.GetURL())
 	}
 }
 
