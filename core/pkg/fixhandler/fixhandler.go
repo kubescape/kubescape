@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -36,7 +36,7 @@ func NewFixHandler(fixInfo *metav1.FixInfo) (*FixHandler, error) {
 		return nil, err
 	}
 	defer jsonFile.Close()
-	byteValue, _ := ioutil.ReadAll(jsonFile)
+	byteValue, _ := io.ReadAll(jsonFile)
 
 	var reportObj reporthandlingv2.PostureReport
 	if err = json.Unmarshal(byteValue, &reportObj); err != nil {
@@ -259,9 +259,9 @@ func (h *FixHandler) ApplyFixToContent(ctx context.Context, yamlAsString, yamlEx
 		return "", err
 	}
 
-	fileFixInfo := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
+	fixInfo := getFixInfo(ctx, originalRootNodes, fixedRootNodes)
 
-	fixedYamlLines := getFixedYamlLines(yamlLines, fileFixInfo, newline)
+	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
 
 	fixedString = getStringFromSlice(fixedYamlLines, newline)
 
@@ -270,7 +270,9 @@ func (h *FixHandler) ApplyFixToContent(ctx context.Context, yamlAsString, yamlEx
 
 func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) map[string]string {
 	fileYamlExpressions := make(map[string]string, 0)
-	for _, resourceToFix := range resourcesToFix {
+	for _, toPin := range resourcesToFix {
+		resourceToFix := toPin
+
 		singleExpression := reduceYamlExpressions(&resourceToFix)
 		resourceFilePath := resourceToFix.FilePath
 
@@ -339,7 +341,7 @@ func joinStrings(inputStrings ...string) string {
 }
 
 func getFileString(filepath string) (string, error) {
-	bytes, err := ioutil.ReadFile(filepath)
+	bytes, err := os.ReadFile(filepath)
 
 	if err != nil {
 		return "", fmt.Errorf("Error reading file %s", filepath)
@@ -349,7 +351,7 @@ func getFileString(filepath string) (string, error) {
 }
 
 func writeFixesToFile(filepath, content string) error {
-	err := ioutil.WriteFile(filepath, []byte(content), 0644)
+	err := os.WriteFile(filepath, []byte(content), 0644) //nolint:gosec
 
 	if err != nil {
 		return fmt.Errorf("Error writing fixes to file: %w", err)

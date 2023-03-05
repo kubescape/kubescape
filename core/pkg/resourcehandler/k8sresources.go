@@ -154,43 +154,49 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources, cloudResources []string) error {
-	var err error
 	clusterName := cautils.ClusterName
 	provider := cloudsupport.GetCloudProvider(clusterName)
 	if provider == "" {
 		return fmt.Errorf("failed to get cloud provider, cluster: %s", clusterName)
 	}
+
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
 	}
 	logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
-		if cloudResourceRequired(cloudResources, resourceKind) {
-			logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
-			wl, err := resourceGetter(clusterName, provider)
-			if err != nil {
-				if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
-					// Return error with useful info on how to configure credentials for getting cloud provider info
-					logger.L().Debug("failed to get cloud data", helpers.String("resourceKind", resourceKind), helpers.Error(err))
-					err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
-					cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
-				}
-			} else {
-				allResources[wl.GetID()] = wl
-				(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
-			}
+		if !cloudResourceRequired(cloudResources, resourceKind) {
+			continue
 		}
+
+		logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
+		wl, err := resourceGetter(clusterName, provider)
+		if err != nil {
+			if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
+				// Return error with useful info on how to configure credentials for getting cloud provider info
+				logger.L().Debug("failed to get cloud data", helpers.String("resourceKind", resourceKind), helpers.Error(err))
+				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
+				cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
+			}
+
+			continue
+		}
+
+		allResources[wl.GetID()] = wl
+		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
 
 	// get api server info resource
 	if cloudResourceRequired(cloudResources, string(cloudsupport.TypeApiServerInfo)) {
-		err = k8sHandler.collectAPIServerInfoResource(allResources, ksResourceMap)
-		if err != nil {
+		if err := k8sHandler.collectAPIServerInfoResource(allResources, ksResourceMap); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to collect api server info resource", helpers.Error(err))
+
+			return err
 		}
 	}
-	return err
+
+	return nil
 }
 
 func cloudResourceRequired(cloudResources []string, resource string) bool {

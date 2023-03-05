@@ -58,7 +58,7 @@ func withNewline(content, targetNewline string) string {
 	replaceNewlines := map[string]bool{
 		unixNewline:    true,
 		windowsNewline: true,
-		oldMacNewline:     true,
+		oldMacNewline:  true,
 	}
 	replaceNewlines[targetNewline] = false
 

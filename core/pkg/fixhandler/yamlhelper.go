@@ -74,9 +74,6 @@ func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
 			node.node.Line += differenceAtTop
 		}
 	}
-
-	return
-
 }
 
 func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {

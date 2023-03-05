@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -210,6 +208,7 @@ func Test_isAKS(t *testing.T) {
 	}
 }
 
+/* unused for now.
 type iResourceHandlerMock struct{}
 
 func (*iResourceHandlerMock) GetResources(*cautils.OPASessionObj, *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
@@ -218,6 +217,7 @@ func (*iResourceHandlerMock) GetResources(*cautils.OPASessionObj, *armotypes.Por
 func (*iResourceHandlerMock) GetClusterAPIServerInfo() *version.Info {
 	return nil
 }
+*/
 
 // https://github.com/kubescape/kubescape/pull/1004
 // Cluster named .*eks.* config without a cloudconfig panics whereas we just want to scan a file

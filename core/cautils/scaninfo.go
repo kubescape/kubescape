@@ -226,7 +226,7 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
-	metadata.ScanMetadata.Format = scanInfo.Format
+	metadata.ScanMetadata.Formats = []string{scanInfo.Format}
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit
 

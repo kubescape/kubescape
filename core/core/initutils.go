@@ -66,8 +66,9 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 }
 
 func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanningContext cautils.ScanningContext) reporter.IReport {
-	ctx, span := otel.Tracer("").Start(ctx, "getReporter")
+	_, span := otel.Tracer("").Start(ctx, "getReporter")
 	defer span.End()
+
 	if submit {
 		submitData := reporterv2.SubmitContextScan
 		if scanningContext != cautils.ContextCluster {
@@ -90,6 +91,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
 	ctx, span := otel.Tracer("").Start(ctx, "getResourceHandler")
 	defer span.End()
+
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
 		// scanInfo.HostSensor.SetBool(false)
 		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, registryAdaptors)
