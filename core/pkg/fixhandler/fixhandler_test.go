@@ -32,11 +32,6 @@ func NewFixHandlerMock() (*FixHandler, error) {
 	}, nil
 }
 
-func getTestdataPath() string {
-	currentDir, _ := os.Getwd()
-	return filepath.Join(currentDir, "testdata")
-}
-
 func getTestCases() []indentationTestCase {
 	indentationTestCases := []indentationTestCase{
 		// Insertion Scenarios
@@ -123,7 +118,7 @@ func getTestCases() []indentationTestCase {
 		},
 		{
 			"removes/tc-04-00-input.yaml",
-			`del(select(di==0).spec.containers[0].securityContext) | 
+			`del(select(di==0).spec.containers[0].securityContext) |
 			 del(select(di==1).spec.containers[1])`,
 			"removes/tc-04-01-expected.yaml",
 		},

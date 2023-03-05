@@ -23,7 +23,7 @@ import (
 //   - adds exceptions (and updates controls status)
 //   - summarizes results
 func (opap *OPAProcessor) updateResults(ctx context.Context) {
-	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.updateResults")
+	_, span := otel.Tracer("").Start(ctx, "OPAProcessor.updateResults")
 	defer span.End()
 
 	// remove data from all objects
@@ -150,10 +150,9 @@ func filterOutChildResources(objects []workloadinterface.IMetadata, match []repo
 	response := []workloadinterface.IMetadata{}
 	owners := []string{}
 	for m := range match {
-		for i := range match[m].Resources {
-			owners = append(owners, match[m].Resources[i])
-		}
+		owners = append(owners, match[m].Resources...)
 	}
+
 	for i := range objects {
 		if !k8sinterface.IsTypeWorkload(objects[i].GetObject()) {
 			response = append(response, objects[i])
@@ -167,8 +166,10 @@ func filterOutChildResources(objects []workloadinterface.IMetadata, match []repo
 			response = append(response, w)
 		}
 	}
+
 	return response
 }
+
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {

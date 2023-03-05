@@ -11,9 +11,11 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/fixhandler"
 )
 
-const NoChangesApplied = "No changes were applied."
-const NoResourcesToFix = "No issues to fix."
-const ConfirmationQuestion = "Would you like to apply the changes to the files above? [y|n]: "
+const (
+	noChangesApplied     = "No changes were applied."
+	noResourcesToFix     = "No issues to fix."
+	confirmationQuestion = "Would you like to apply the changes to the files above? [y|n]: "
+)
 
 func (ks *Kubescape) Fix(ctx context.Context, fixInfo *metav1.FixInfo) error {
 	logger.L().Info("Reading report file...")
@@ -25,19 +27,19 @@ func (ks *Kubescape) Fix(ctx context.Context, fixInfo *metav1.FixInfo) error {
 	resourcesToFix := handler.PrepareResourcesToFix(ctx)
 
 	if len(resourcesToFix) == 0 {
-		logger.L().Info(NoResourcesToFix)
+		logger.L().Info(noResourcesToFix)
 		return nil
 	}
 
 	handler.PrintExpectedChanges(resourcesToFix)
 
 	if fixInfo.DryRun {
-		logger.L().Info(NoChangesApplied)
+		logger.L().Info(noChangesApplied)
 		return nil
 	}
 
 	if !fixInfo.NoConfirm && !userConfirmed() {
-		logger.L().Info(NoChangesApplied)
+		logger.L().Info(noChangesApplied)
 		return nil
 	}
 
@@ -58,7 +60,7 @@ func userConfirmed() bool {
 	var input string
 
 	for {
-		fmt.Printf(ConfirmationQuestion)
+		fmt.Println(confirmationQuestion)
 		if _, err := fmt.Scanln(&input); err != nil {
 			continue
 		}
