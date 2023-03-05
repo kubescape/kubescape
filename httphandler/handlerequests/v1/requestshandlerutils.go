@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils/version"
 	"github.com/kubescape/kubescape/v2/core/core"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
@@ -62,8 +63,8 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	ks := core.NewKubescape()
 
 	spanScan.AddEvent("scanning metadata",
-		trace.WithAttributes(attribute.String("version", cautils.BuildNumber)),
-		trace.WithAttributes(attribute.String("build", cautils.Client)),
+		trace.WithAttributes(attribute.String("version", version.BuildNumber)),
+		trace.WithAttributes(attribute.String("build", version.Client)),
 		trace.WithAttributes(attribute.String("scanID", scanInfo.ScanID)),
 		trace.WithAttributes(attribute.Bool("scanAll", scanInfo.ScanAll)),
 		trace.WithAttributes(attribute.Bool("HostSensorEnabled", scanInfo.HostSensorEnabled.GetBool())),

@@ -35,10 +35,10 @@ def main():
 
     # Set some variables
     package_name = get_package_name()
-    build_url = "github.com/kubescape/kubescape/v2/core/cautils.BuildNumber"
+    build_url = "github.com/kubescape/kubescape/v2/core/cautils/version.BuildNumber"
     release_version = os.getenv("RELEASE")
 
-    client_var = "github.com/kubescape/kubescape/v2/core/cautils.Client"
+    client_var = "github.com/kubescape/kubescape/v2/core/cautils/version.Client"
     client_name = os.getenv("CLIENT")
 
     # Create build directory

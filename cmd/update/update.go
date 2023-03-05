@@ -11,6 +11,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/version"
 	"github.com/spf13/cobra"
 )
 
@@ -27,7 +28,7 @@ func GetUpdateCmd() *cobra.Command {
 		Example: updateCmdExamples,
 		RunE: func(_ *cobra.Command, args []string) error {
 			//Checking the user's version of kubescape to the latest release
-			if cautils.BuildNumber == cautils.LatestReleaseVersion {
+			if version.IsCurrentAtLatest() {
 				//your version == latest version
 				logger.L().Info(("You are in the latest version"))
 			} else {

@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils/version"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -247,7 +248,7 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Identifier)
 	}
 
-	metadata.ScanMetadata.KubescapeVersion = BuildNumber
+	metadata.ScanMetadata.KubescapeVersion = version.BuildNumber
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
 	metadata.ScanMetadata.HostScanner = scanInfo.HostSensorEnabled.GetBool()

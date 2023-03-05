@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/version"
 	"github.com/kubescape/kubescape/v2/core/pkg/score"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -59,7 +60,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
-	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
+	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, version.BuildNumber)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 

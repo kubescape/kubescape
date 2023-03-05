@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/cautils/version"
 	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v2/core/pkg/policyhandler"
@@ -66,8 +67,15 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== version testing ======================================
 
-	v := cautils.NewIVersionCheckHandler(ctx)
-	v.CheckLatestVersion(ctx, cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
+	v := version.NewIChecker(ctx)
+	_ = v.CheckLatestVersion(ctx,
+		version.WithFramework(
+			policyIdentifierIdentities(scanInfo.PolicyIdentifier),
+		),
+		version.WithTarget(
+			cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext()),
+		),
+	)
 
 	// ================== setup host scanner object ======================================
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
