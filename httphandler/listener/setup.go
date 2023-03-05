@@ -17,12 +17,16 @@ import (
 )
 
 const (
-	scanPath              = "/v1/scan"
-	statusPath            = "/v1/status"
-	resultsPath           = "/v1/results"
-	prometheusMetricsPath = "/v1/metrics"
-	livePath              = "/livez"
-	readyPath             = "/readyz"
+	// v1 paths
+	v1PathPrefix            = "/v1"
+	v1ScanPath              = "/scan"
+	v1StatusPath            = "/status"
+	v1ResultsPath           = "/results"
+	v1PrometheusMetricsPath = "/metrics"
+
+	// healtcheck paths
+	livePath  = "/livez"
+	readyPath = "/readyz"
 )
 
 // SetupHTTPListener set up listening http servers
@@ -40,23 +44,26 @@ func SetupHTTPListener() error {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
 	}
 
-	rtr := mux.NewRouter()
-	rtr.Use(otelmux.Middleware("kubescape-svc"))
-	// rtr.HandleFunc(opapolicy.PostureRestAPIPathV1, resthandler.RestAPIReceiveNotification)
-
-	// listen
 	httpHandler := handlerequestsv1.NewHTTPHandler()
 
-	rtr.HandleFunc(prometheusMetricsPath, httpHandler.Metrics)
-	rtr.HandleFunc(scanPath, httpHandler.Scan)
-	rtr.HandleFunc(statusPath, httpHandler.Status)
-	rtr.HandleFunc(resultsPath, httpHandler.Results)
+	// Setup the OpenAPI UI handler
+	openApiHandler := docs.NewOpenAPIUIHandler()
+
+	rtr := mux.NewRouter()
+
+	// non-monitored endpoints
 	rtr.HandleFunc(livePath, httpHandler.Live)
 	rtr.HandleFunc(readyPath, httpHandler.Ready)
+	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(openApiHandler)
 
-	// Setup the OpenAPI UI handler
-	handler := docs.NewOpenAPIUIHandler()
-	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(handler)
+	// OpenTelemetry middleware for monitored endpoints
+	otelMiddleware := otelmux.Middleware("kubescape-svc")
+	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
+	v1SubRouter.Use(otelMiddleware)
+	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics)
+	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan)
+	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
+	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.Results)
 
 	server.Handler = rtr
 
