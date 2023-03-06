@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -30,6 +31,8 @@ const (
 	SubmitContextRBAC       SubmitContext = "rbac"
 	SubmitContextRepository SubmitContext = "repository"
 )
+
+var _ reporter.IReport = &ReportEventReceiver{}
 
 type ReportEventReceiver struct {
 	httpClient         *http.Client
@@ -120,13 +123,6 @@ func (report *ReportEventReceiver) GetURL() string {
 
 	parseHost(&u)
 	report.addPathURL(&u)
-
-	q := u.Query()
-	q.Add("utm_source", "GitHub")
-	q.Add("utm_medium", "CLI")
-	q.Add("utm_campaign", "Submit")
-
-	u.RawQuery = q.Encode()
 
 	return u.String()
 
@@ -286,6 +282,10 @@ func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
 	q := urlObj.Query()
 	q.Add("invitationToken", report.token)
 	q.Add("customerGUID", report.customerGUID)
+
+	// Adding utm parameters
+	q.Add("utm_source", "ARMOgithub")
+	q.Add("utm_medium", "createaccount")
 	urlObj.RawQuery = q.Encode()
 
 }

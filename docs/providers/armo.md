@@ -1,6 +1,6 @@
 <img src="armo-powered-by-kubescape-logo-grey.svg" width="25%" height="25%" align="right">
 
-[ARMO Platform](https://cloud.armosec.io/account/sign-up) is an enterprise solution based on Kubescape. It’s a multi-cloud Kubernetes and CI/CD security platform with a single pane of glass including risk analysis, security compliance, misconfiguration, image vulnerability, repository and registry scanning, RBAC visualization, and more.
+[ARMO Platform](https://cloud.armosec.io/account/sign-up?utm_source=ARMOgithub&utm_medium=ARMOcli) is an enterprise solution based on Kubescape. It’s a multi-cloud Kubernetes and CI/CD security platform with a single pane of glass including risk analysis, security compliance, misconfiguration, image vulnerability, repository and registry scanning, RBAC visualization, and more.
 
 ## Connect Kubescape to ARMO Platform
 Step #1: Install Kubescape in your CLI
