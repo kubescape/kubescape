@@ -159,7 +159,17 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 					}
 				}
 			}
-
+			// Set OTEL_COLLECTOR_SVC
+			if otelHost, present := os.LookupEnv(cautils.OTEL_COLLECTOR_SVC); present {
+				workload := w.GetWorkload()
+				workload["spec"].(map[string]interface{})["template"].(map[string]interface{})["spec"].(map[string]interface{})["containers"].([]interface{})[0].(map[string]interface{})["env"] = []interface{}{
+					map[string]interface{}{
+						"name":  cautils.OTEL_COLLECTOR_SVC,
+						"value": otelHost,
+					},
+				}
+				w.SetWorkload(workload)
+			}
 		}
 
 		// Apply workload

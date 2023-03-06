@@ -14,7 +14,7 @@ import (
 func main() {
 	ctx := context.Background()
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
-	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
+	if otelHost, present := os.LookupEnv(cautils.OTEL_COLLECTOR_SVC); present {
 		ctx = logger.InitOtel("kubescape",
 			os.Getenv(cautils.BuildNumber),
 			os.Getenv("ACCOUNT_ID"),
