@@ -116,6 +116,7 @@ func TestHostSensorHandler(t *testing.T) {
 				WithPod(mockPod2()),
 				WithResponses(mockResponsesNoCloudProvider()),
 				WithErrorResponse(RestURL{"http", "pod1", "7888", "/version"}), // this endpoint will return an error from this pod
+				WithErrorResponse(RestURL{"http", "pod2", "7888", "/version"}), // this endpoint will return an error from this pod
 			)
 
 			h, err := NewHostSensorHandler(k8s, "")
@@ -133,6 +134,8 @@ func TestHostSensorHandler(t *testing.T) {
 			})
 
 			t.Run("should NOT be able to get version", func(t *testing.T) {
+				// NOTE: GetVersion might be successful if only one pod responds successfully.
+				// In order to ensure an error, we need ALL pods to error.
 				_, err := h.GetVersion()
 				require.Error(t, err)
 				require.Contains(t, err.Error(), "mock")
