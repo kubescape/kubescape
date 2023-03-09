@@ -32,6 +32,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		scanInfo: scanInfo,
 		scanID:   scanID,
 	}
+	scanParams.ctx = r.Context()
 
 	handler.scanResponseChan.set(scanID) // add scan to channel
 	defer handler.scanResponseChan.delete(scanID)
