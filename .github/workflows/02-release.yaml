@@ -35,20 +35,6 @@ jobs:
       TAG: ${{ needs.retag.outputs.NEW_TAG }}
       DRAFT: false
     secrets: inherit
-  publish-krew-plugin:
-    name: Publish Krew plugin
-    runs-on: ubuntu-latest
-    if: "${{ github.repository_owner }} == kubescape"
-    needs: create-release
-    steps:
-      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
-        with:
-          submodules: recursive
-      - name: Update new version in krew-index
-        env:
-          # overriding the GITHUB_REF so the action can extract the right tag -> https://github.com/rajatjindal/krew-release-bot/blob/v0.0.43/pkg/cicd/github/actions.go#L25
-          GITHUB_REF: refs/tags/${{ needs.retag.outputs.NEW_TAG }}
-        uses: rajatjindal/krew-release-bot@92da038bbf995803124a8e50ebd438b2f37bbbb0 # ratchet:rajatjindal/krew-release-bot@v0.0.43
   publish-image:
     permissions:
       id-token: write

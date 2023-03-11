@@ -27,4 +27,4 @@ spec:
         os: windows
         arch: amd64
     {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-windows-latest.tar.gz" .TagName }}
-    bin: kubescape
+    bin: kubescape.exe
