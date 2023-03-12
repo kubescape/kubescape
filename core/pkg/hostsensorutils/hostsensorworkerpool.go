@@ -14,7 +14,7 @@ const noOfWorkers int = 10
 type job struct {
 	podName     string
 	nodeName    string
-	requestKind string
+	requestKind scannerResource
 	path        string
 }
 
@@ -25,7 +25,7 @@ type workerPool struct {
 	noOfWorkers int
 }
 
-func NewWorkerPool() workerPool {
+func newWorkerPool() workerPool {
 	wp := workerPool{}
 	wp.noOfWorkers = noOfWorkers
 	wp.init()
@@ -80,7 +80,7 @@ func (wp *workerPool) hostSensorGetResults(result *[]hostsensor.HostSensorDataEn
 	}()
 }
 
-func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path, requestKind string) {
+func (wp *workerPool) hostSensorApplyJobs(podList map[string]string, path string, requestKind scannerResource) {
 	go func() {
 		for podName, nodeName := range podList {
 			thisJob := job{
