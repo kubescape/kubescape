@@ -48,9 +48,6 @@ def main():
     hash_file = ks_file + ".sha256"
     tar_file = ks_file + ".tar.gz"
 
-    if CURRENT_PLATFORM == "Windows":
-        ks_file += ".exe"
-
     if not os.path.isdir(build_dir):
         os.makedirs(build_dir)
 

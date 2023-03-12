@@ -54,6 +54,6 @@ jobs:
             ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}
             ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.sha256
             ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.exe
+            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}
             ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.sha256
             ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.tar.gz
