@@ -98,6 +98,8 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(ctx context.Context, pat
 }
 
 // GetVersion returns the version of the deployed host scanner.
+//
+// NOTE: we pick the version from the first responding pod.
 func (hsh *HostSensorHandler) GetVersion() (string, error) {
 	// loop over pods and port-forward it to each of them
 	podList := hsh.getPodList()
@@ -109,12 +111,12 @@ func (hsh *HostSensorHandler) GetVersion() (string, error) {
 		resBytes, err := hsh.HTTPGetToPod(job.podName, job.path)
 		if err != nil {
 			return "", err
+		} else {
+			version := strings.ReplaceAll(string(resBytes), "\"", "")
+			version = strings.ReplaceAll(version, "\n", "")
+
+			return version, nil
 		}
-
-		version := strings.ReplaceAll(string(resBytes), "\"", "")
-		version = strings.ReplaceAll(version, "\n", "")
-
-		return version, nil
 	}
 
 	return "", nil
