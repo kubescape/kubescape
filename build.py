@@ -6,6 +6,7 @@ import subprocess
 import tarfile
 
 BASE_GETTER_CONST = "github.com/kubescape/kubescape/v2/core/cautils/getter"
+CURRENT_PLATFORM = platform.system()
 
 platformSuffixes = {
     "Windows": "windows-latest",
@@ -24,11 +25,9 @@ def get_build_dir():
 
 
 def get_package_name():
-    current_platform = platform.system()
+    if CURRENT_PLATFORM not in platformSuffixes: raise OSError("Platform %s is not supported!" % (CURRENT_PLATFORM))
 
-    if current_platform not in platformSuffixes: raise OSError("Platform %s is not supported!" % (current_platform))
-
-    return "kubescape-" + platformSuffixes[current_platform]
+    return "kubescape-" + platformSuffixes[CURRENT_PLATFORM]
 
 
 def main():
@@ -76,7 +75,10 @@ def main():
             kube_sha.write(sha256.hexdigest())
 
     with tarfile.open(tar_file, 'w:gz') as archive:
-        archive.add(ks_file, "kubescape")
+        name = "kubescape"
+        if CURRENT_PLATFORM == "Windows":
+            name += ".exe"
+        archive.add(ks_file, name)
         archive.add("LICENSE", "LICENSE")
 
     print("Build Done")

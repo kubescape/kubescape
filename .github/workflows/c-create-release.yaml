@@ -20,12 +20,19 @@ jobs:
     name: create-release
     runs-on: ubuntu-latest
     # permissions:
-    #   contents: write    
+    #   contents: write
     steps:
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # ratchet:actions/download-artifact@v3.0.2
         id: download-artifact
         with:
           path: .
+      - name: Set release token
+        run: |
+          if [ "${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}" != "" ]; then
+            echo "TOKEN=${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}" >> $GITHUB_ENV;
+          else
+            echo "TOKEN=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV;
+          fi
       - name: Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # ratchet:softprops/action-gh-release@v1
         env:
@@ -33,7 +40,7 @@ jobs:
           UBUNTU_OS: ubuntu-latest
           WINDOWS_OS: windows-latest
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ env.TOKEN }}
           name: ${{ inputs.RELEASE_NAME }}
           tag_name: ${{ inputs.TAG }}
           body: ${{ github.event.pull_request.body }}
