@@ -35,6 +35,7 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 	cloudapis.CloudProviderDescribeKind:                cloudsupport.GetDescriptiveInfoFromCloudProvider,
 	cloudapis.CloudProviderDescribeRepositoriesKind:    cloudsupport.GetDescribeRepositoriesFromCloudProvider,
 	cloudapis.CloudProviderListEntitiesForPoliciesKind: cloudsupport.GetListEntitiesForPoliciesFromCloudProvider,
+	cloudapis.CloudProviderPolicyVersionKind:           cloudsupport.GetPolicyVersionFromCloudProvider,
 }
 
 type K8sResourceHandler struct {
@@ -136,7 +137,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	if err := k8sHandler.collectRbacResources(allResources); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to collect rbac resources", helpers.Error(err))
 	}
-
 	cloudResources := cautils.MapCloudResources(ksResourceMap)
 
 	setMapNamespaceToNumOfResources(ctx, allResources, sessionObj)
