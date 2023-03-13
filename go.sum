@@ -279,8 +279,8 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armon/go-radix v1.0.0 h1:F4z6KzEeeQIMeLFa97iZU6vupzoecKdU5TX24SNppXI=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
-github.com/armosec/armoapi-go v0.0.151 h1:vyoQVk1y8cb4DHlfRKyFqDtiB1G13w4o5aoG8+YUMq0=
-github.com/armosec/armoapi-go v0.0.151/go.mod h1:5MQAHYUFm1JrTSgb4+EglR5vNsrqUD0krh/5xWm2RdI=
+github.com/armosec/armoapi-go v0.0.169 h1:5X1rpKCwjG3UPTw6TLq2wSk14sfoyOqPDLb55bO7V9Y=
+github.com/armosec/armoapi-go v0.0.169/go.mod h1:xlW8dGq0vVzbuk+kDZqMQIkfU9P/iiiiDavoCIboqgI=
 github.com/armosec/utils-go v0.0.12 h1:NXkG/BhbSVAmTVXr0qqsK02CmxEiXuJyPmdTRcZ4jAo=
 github.com/armosec/utils-go v0.0.12/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
 github.com/armosec/utils-k8s-go v0.0.12 h1:u7kHSUp4PpvPP3hEaRXMbM0Vw23IyLhAzzE+2TW6Jkk=
@@ -1088,8 +1088,8 @@ github.com/kubescape/go-git-url v0.0.24 h1:+Ryb+bA+6Kx8dBHR7nnoK7ZFvtfWkwI4exYhk
 github.com/kubescape/go-git-url v0.0.24/go.mod h1:IbVT7Wsxlghsa+YxI5KOx4k9VQJaa3z0kTaQz5D3nKM=
 github.com/kubescape/go-logger v0.0.11 h1:oucpq2S7+DT7O+UclG5IrmHado/tj6+IkYf9czVk/aY=
 github.com/kubescape/go-logger v0.0.11/go.mod h1:yGiKBJ2lhq/kxzY/MVYDREL9fLV3RGD6gv+UFjslaew=
-github.com/kubescape/k8s-interface v0.0.99 h1:Bk7P694WkYPORW4c+ojpvCIQQ83Ku8durElNlvgM0Qg=
-github.com/kubescape/k8s-interface v0.0.99/go.mod h1:UO8puAwFZ3XVMlKWJj0GcdFJZI22Q7iwV+5FO6mw5FE=
+github.com/kubescape/k8s-interface v0.0.103 h1:k/pn1DU1dlEo7e59QqH4c6eI9F/m5nX6XJI8bzqZ/Wg=
+github.com/kubescape/k8s-interface v0.0.103/go.mod h1:McIx729bV395FOL3FWiv8vyT5V0F1TbcbTOCc+LS50A=
 github.com/kubescape/opa-utils v0.0.238 h1:i8uuMOi0T4Lj+svq3OlM056YFrKDt7zGAnxxqbFAnAI=
 github.com/kubescape/opa-utils v0.0.238/go.mod h1:eAZN82Zj4GgpcQlhMox0P6s8iL5YZnWrbX+/az3UWHI=
 github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnGnhMhJw=
@@ -1545,6 +1545,8 @@ github.com/stretchr/testify v1.7.2/go.mod h1:R6va5+xMeoiuVRoj+gSkQ7d3FALtqAAGI1F
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
 github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKsk=
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
+github.com/stripe/stripe-go/v74 v74.8.0 h1:0+3EfQSBhMg8SQ1+w+AP6Gxyko2crWbUG2uXbzYs8SU=
+github.com/stripe/stripe-go/v74 v74.8.0/go.mod h1:5PoXNp30AJ3tGq57ZcFuaMylzNi8KpwlrYAFmO1fHZw=
 github.com/subosito/gotenv v1.2.0/go.mod h1:N0PQaV/YGNqwC0u51sEeR/aUtSLEXKX9iv69rRypqCw=
 github.com/subosito/gotenv v1.4.1 h1:jyEFiXpy21Wm81FBN71l9VoMMV8H8jG+qIK3GCpY6Qs=
 github.com/subosito/gotenv v1.4.1/go.mod h1:ayKnFf/c6rvx/2iiLrJUk1e6plDbT3edrFNGqEflhK0=
