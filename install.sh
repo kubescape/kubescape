@@ -35,33 +35,23 @@ DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/${RELEASE}/kubesca
 
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
-# Checking if SUDO needed/exists 
-SUDO=
-if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ]; then
-    SUDO=sudo
-fi
-
-
 # Find install dir
-install_dir=/usr/local/bin #default
-for pdir in ${PATH//:/ }; do
-    edir="${pdir/#\~/$HOME}"
-    if [[ $edir == $HOME/* ]]; then
-        install_dir=$edir
-        mkdir -p $install_dir 2>/dev/null || true
-        SUDO=
-        break
-    fi
-done
+install_dir=/usr/local/bin # default if running as root
+if [ "$(id -u)" -ne 0 ]; then
+  install_dir=$BASE_DIR/bin # if not running as root, install to user dir
+  export PATH=$PATH:$BASE_DIR/bin
+fi
 
 # Create install dir if it does not exist
 if [ ! -d "$install_dir" ]; then
-  $SUDO mkdir -p $install_dir
+  mkdir -p $install_dir
 fi
 
-chmod +x $OUTPUT 2>/dev/null 
-$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true # clearning up old install
-$SUDO cp $OUTPUT $install_dir/$KUBESCAPE_EXEC 
+chmod +x $OUTPUT 2>/dev/null
+# clearning up old install
+rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+rm -f $BASE_DIR/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+cp $OUTPUT $install_dir/$KUBESCAPE_EXEC 
 rm -rf $OUTPUT
 
 echo
@@ -72,5 +62,10 @@ $KUBESCAPE_EXEC version
 echo
 
 echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan --enable-host-scan"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo -e "\nRemember to add the Kubescape CLI to your path with:"
+  echo -e "  export PATH=\$PATH:$BASE_DIR/bin"
+fi
 
 echo -e "\033[0m"
