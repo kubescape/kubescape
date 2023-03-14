@@ -148,7 +148,7 @@ jobs:
 
       - name: Test core pkg
         run: ${{ env.DOCKER_CMD }} go test "-tags=static,gitenabled" -v ./...
-        if: matrix.os != 'macos-latest' || matrix.arch != 'arm64'
+        if: matrix.arch != 'arm64'
 
       - name: Test httphandler pkg
         run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test "-tags=static,gitenabled" -v ./...'
