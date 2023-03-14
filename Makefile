@@ -13,7 +13,9 @@ libgit2:
 # build and install libgit2 for macOS m1
 libgit2arm64:
 	git submodule update --init --recursive
-	sed -i '' 's/cmake -D/cmake -DCMAKE_OSX_ARCHITECTURES="arm64" -D/' git2go/script/build-libgit2.sh
+	if [ "$(shell uname -s)" = "Darwin" ]; then \
+		sed -i '' 's/cmake -D/cmake -DCMAKE_OSX_ARCHITECTURES="arm64" -D/' git2go/script/build-libgit2.sh; \
+	fi
 	cd git2go; make install-static
 
 # go build tags
