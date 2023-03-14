@@ -61,10 +61,17 @@ jobs:
     name: Create cross-platform build
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GOARCH: ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-20.04, macos-latest, windows-latest]
+        arch: ["", arm64]
+        exclude:
+        - os: windows-latest
+          arch: arm64
+        - os: ubuntu-20.04
+          arch: arm64
     steps:
 
       - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
@@ -122,14 +129,16 @@ jobs:
         if: matrix.os == 'macos-latest'
 
       - name: Install libgit2 (Linux/macOS)
-        run: make libgit2
+        run: make libgit2${{ matrix.arch }}
         if: matrix.os != 'windows-latest'
 
       - name: Test core pkg
         run: go test "-tags=static,gitenabled" -v ./...
+        if: matrix.arch == ''
 
       - name: Test httphandler pkg
         run: cd httphandler && go test "-tags=static,gitenabled" -v ./...
+        if: matrix.arch == ''
 
       - name: Build
         env:
@@ -143,7 +152,7 @@ jobs:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/kubescape-${{ matrix.os }}
-        if: matrix.os != 'ubuntu-20.04'
+        if: matrix.os != 'ubuntu-20.04' && matrix.arch == ''
 
       - name: Smoke Testing (Linux)
         env:
@@ -165,7 +174,7 @@ jobs:
         name: Upload artifact (Linux)
         if: matrix.os == 'ubuntu-20.04'
         with:
-          name: kubescape-ubuntu-latest
+          name: kubescape${{ matrix.arch }}-ubuntu-latest
           path: build/
           if-no-files-found: error
 
@@ -173,7 +182,7 @@ jobs:
         name: Upload artifact (MacOS, Win)
         if: matrix.os != 'ubuntu-20.04'
         with:
-          name: kubescape-${{ matrix.os }}
+          name: kubescape${{ matrix.arch }}-${{ matrix.os }}
           path: build/
           if-no-files-found: error
 
