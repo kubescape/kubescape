@@ -48,9 +48,16 @@ if [ ! -d "$install_dir" ]; then
 fi
 
 chmod +x $OUTPUT 2>/dev/null
-# clearning up old install
-rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true
-rm -f $BASE_DIR/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+
+# cleaning up old install
+SUDO=
+if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ] && [ -f /usr/local/bin/$KUBESCAPE_EXEC ]; then
+    SUDO=sudo
+    echo -e "\n\033[33mOld installation as root found. We need the root access to uninstall the old kubescape CLI."
+fi
+$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+rm -f /home/${SUDO_USER:-$USER}/.kubescape/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+
 cp $OUTPUT $install_dir/$KUBESCAPE_EXEC 
 rm -rf $OUTPUT
 
