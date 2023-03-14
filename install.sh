@@ -53,12 +53,41 @@ chmod +x $OUTPUT 2>/dev/null
 SUDO=
 if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ] && [ -f /usr/local/bin/$KUBESCAPE_EXEC ]; then
     SUDO=sudo
-    echo -e "\n\033[33mOld installation as root found. We need the root access to uninstall the old kubescape CLI."
+    echo -e "\n\033[33mOld installation as root found, do you want to remove it? [\033[0my\033[33m/n]:"
+    read -n 1 -r
+    if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ "$REPLY" != "" ]]; then
+        echo -e "\n\033[0mSkipping old installation as root removal."
+    else
+        echo -e "\n\033[0mWe will need the root access to uninstall the old kubescape CLI."
+        if $SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null; then
+            echo -e "\033[32mRemoved old installation as root at /usr/local/bin/$KUBESCAPE_EXEC"
+        else
+            echo -e "\033[31mFailed to remove old installation as root at /usr/local/bin/$KUBESCAPE_EXEC, please remove it manually."
+        fi
+    fi
 fi
-$SUDO rm -f /usr/local/bin/$KUBESCAPE_EXEC 2>/dev/null || true
-rm -f /home/${SUDO_USER:-$USER}/.kubescape/bin/$KUBESCAPE_EXEC 2>/dev/null || true
 
-cp $OUTPUT $install_dir/$KUBESCAPE_EXEC 
+rm -f /home/${SUDO_USER:-$USER}/.kubescape/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+rm -f $BASE_DIR/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+
+# Old install location, clean all those things up
+for pdir in ${PATH//:/ }; do
+    edir="${pdir/#\~/$HOME}"
+    if [[ $edir == $HOME/* ]] && [[ -f $edir/$KUBESCAPE_EXEC ]]; then
+        echo -e "\n\033[33mOld installation found at $edir/, do you want to remove it? [\033[0my\033[33m/n]:"
+        read -n 1 -r
+        if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ "$REPLY" != "" ]]; then
+            continue
+        fi
+        if rm -f $edir/$KUBESCAPE_EXEC 2>/dev/null; then
+            echo -e "\n\033[32mRemoved old installation at $edir/$KUBESCAPE_EXEC"
+        else
+            echo -e "\n\033[31mFailed to remove old installation as root at $edir/$KUBESCAPE_EXEC, please remove it manually."
+        fi
+    fi
+done
+
+cp $OUTPUT $install_dir/$KUBESCAPE_EXEC
 rm -rf $OUTPUT
 
 echo
