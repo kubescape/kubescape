@@ -47,7 +47,7 @@ Add [`-s`](https://git-scm.com/docs/git-commit#Documentation/git-commit.txt--s) 
 
 ```git commit -s -m "Fix issue 64738"```
 
-This is tedious, and if you forget, you'll have to [amend your commit](#f)
+This is tedious, and if you forget, you'll have to [amend your commit](#fixing-a-commit-where-the-dco-failed).
 
 ### Configure a repository to always include sign off
 
