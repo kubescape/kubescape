@@ -58,7 +58,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}
-	if err := result.HandleResults(context.TODO()); err != nil {
+	if err := result.HandleResults(ctx); err != nil {
 		return nil, err
 	}
 	return result.GetResults(), nil
