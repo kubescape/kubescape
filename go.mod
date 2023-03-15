@@ -4,7 +4,7 @@ go 1.19
 
 require (
 	cloud.google.com/go/containeranalysis v0.6.0
-	github.com/armosec/armoapi-go v0.0.169
+	github.com/armosec/armoapi-go v0.0.173
 	github.com/armosec/utils-go v0.0.12
 	github.com/armosec/utils-k8s-go v0.0.12
 	github.com/briandowns/spinner v1.18.1
@@ -19,7 +19,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.24
 	github.com/kubescape/go-logger v0.0.11
 	github.com/kubescape/k8s-interface v0.0.103
-	github.com/kubescape/opa-utils v0.0.238
+	github.com/kubescape/opa-utils v0.0.242
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.250
 	github.com/libgit2/git2go/v33 v33.0.9
