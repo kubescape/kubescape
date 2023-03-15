@@ -122,8 +122,8 @@ jobs:
           sudo apt-get install -y binfmt-support qemu-user-static
           sudo docker run --platform linux/${{ matrix.arch }} -e RELEASE=${{ inputs.RELEASE }} \
           -e CLIENT=${{ inputs.CLIENT }} -e CGO_ENABLED=${{ inputs.CGO_ENABLED }} \
-          -e KUBESCAPE_SKIP_UPDATE_CHECK=true -v ${PWD}:/work -w /work \
-          -v ~/go/pkg/mod:/root/go/pkg/mod -v ~/.cache/go-build:/root/.cache/go-build \
+          -e KUBESCAPE_SKIP_UPDATE_CHECK=true -e GOARCH=${{ matrix.arch }} -v ${PWD}:/work \
+          -w /work -v ~/go/pkg/mod:/root/go/pkg/mod -v ~/.cache/go-build:/root/.cache/go-build \
           -d --name build golang:${{ inputs.GO_VERSION }}-bullseye sleep 21600
           sudo docker ps
           DOCKER_CMD="sudo docker exec build"
@@ -168,12 +168,19 @@ jobs:
         run: python3 smoke_testing/init.py ${PWD}/build/kubescape-${{ matrix.os }}
         if: matrix.os != 'ubuntu-20.04' && matrix.arch == ''
 
-      - name: Smoke Testing (Linux)
+      - name: Smoke Testing (Linux amd64)
         env:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ./build/kubescape-ubuntu-latest
-        if: matrix.os == 'ubuntu-20.04'
+        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ${PWD}/build/kubescape-ubuntu-latest
+        if: matrix.os == 'ubuntu-20.04' && matrix.arch == ''
+
+      - name: Smoke Testing (Linux ${{ matrix.arch }})
+        env:
+          RELEASE: ${{ inputs.RELEASE }}
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ./build/kubescape-${{ matrix.arch }}-ubuntu-latest
+        if: matrix.os == 'ubuntu-20.04' && matrix.arch != ''
 
       - name: golangci-lint
         if: matrix.os == 'ubuntu-20.04'
