@@ -19,6 +19,8 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/kubescape/opa-utils/resources"
 )
@@ -121,6 +123,18 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.Scan")
 	defer spanScan.End()
+
+	// scanInfo.FailThreshold
+	spanScan.AddEvent("getting previous container logs",
+		trace.WithAttributes(attribute.String("scanID", scanInfo.ScanID)),
+		trace.WithAttributes(attribute.Bool("scanAll", scanInfo.ScanAll)),
+		trace.WithAttributes(attribute.Bool("HostSensorEnabled", scanInfo.HostSensorEnabled.GetBool())),
+		trace.WithAttributes(attribute.String("excludedNamespaces", scanInfo.ExcludedNamespaces)),
+		trace.WithAttributes(attribute.String("includeNamespaces", scanInfo.IncludeNamespaces)),
+		trace.WithAttributes(attribute.String("hostSensorYamlPath", scanInfo.HostSensorYamlPath)),
+		trace.WithAttributes(attribute.String("kubeContext", scanInfo.KubeContext)),
+	)
+
 	logger.L().Info("Kubescape scanner starting")
 
 	// ===================== Initialization =====================
