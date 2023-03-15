@@ -43,7 +43,7 @@ func (ks *Kubescape) SubmitExceptions(ctx context.Context, credentials *cautils.
 	// load cached config
 	tenantConfig := getTenantConfig(credentials, "", "", getKubernetesApi())
 	if err := tenantConfig.SetTenant(); err != nil {
-		logger.L().Ctx(ctx).Error("failed setting account ID", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed setting account ID", helpers.Error(err))
 	}
 
 	// load exceptions from file

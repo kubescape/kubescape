@@ -37,7 +37,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	if err == nil {
 		policiesAndResources.Exceptions = exceptionPolicies
 	} else {
-		logger.L().Ctx(ctx).Error("failed to load exceptions", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to load exceptions", helpers.Error(err))
 	}
 
 	// get account configuration
@@ -45,7 +45,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	if err == nil {
 		policiesAndResources.RegoInputData.PostureControlInputs = controlsInputs
 	} else {
-		logger.L().Ctx(ctx).Error(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 	cautils.StopSpinner()
 

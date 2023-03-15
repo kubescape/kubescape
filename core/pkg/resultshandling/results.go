@@ -116,7 +116,7 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 		return printerv2.NewSARIFPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
-			logger.L().Ctx(ctx).Error(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
 	}

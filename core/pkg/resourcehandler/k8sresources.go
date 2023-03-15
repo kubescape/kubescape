@@ -223,7 +223,7 @@ func (k8sHandler *K8sResourceHandler) collectAPIServerInfoResource(allResources 
 func (k8sHandler *K8sResourceHandler) GetClusterAPIServerInfo(ctx context.Context) *version.Info {
 	clusterAPIServerInfo, err := k8sHandler.k8s.DiscoveryClient.ServerVersion()
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to discover API server information", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to discover API server information", helpers.Error(err))
 		return nil
 	}
 	return clusterAPIServerInfo

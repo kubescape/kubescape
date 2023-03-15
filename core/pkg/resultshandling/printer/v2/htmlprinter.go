@@ -110,9 +110,9 @@ func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	err := tpl.Execute(hp.writer, reportingCtx)
 	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to render template", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(hp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(hp.writer.Name())
 
 }
 

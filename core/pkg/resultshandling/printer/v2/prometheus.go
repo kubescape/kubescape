@@ -53,7 +53,7 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 
 	if _, err := pp.writer.Write([]byte(metrics.String())); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(pp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(pp.writer.Name())
 }

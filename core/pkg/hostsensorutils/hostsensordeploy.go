@@ -87,7 +87,7 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 	}
 	hsh.populatePodNamesToNodeNames(ctx)
 	if err := hsh.checkPodForEachNode(); err != nil {
-		logger.L().Ctx(ctx).Error("failed to validate host-sensor pods status", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning("failed to validate host-sensor pods status", helpers.Error(err))
 	}
 	cautils.StopSpinner()
 	return nil
@@ -237,9 +237,10 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
 			LabelSelector: fmt.Sprintf("name=%s", hsh.DaemonSet.Spec.Template.Labels["name"]),
 		})
 		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to watch over daemonset pods - are we missing watch pods permissions?", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("failed to watch over DaemonSet pods - are we missing watch pods permissions?", helpers.Error(err))
 		}
 		if watchRes == nil {
+			logger.L().Ctx(ctx).Error("failed to watch over DaemonSet pods, will not be able to get host-sensor data")
 			return
 		}
 		for eve := range watchRes.ResultChan() {

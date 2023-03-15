@@ -142,13 +142,13 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 
 		relativePath, documentIndex, err := h.getFilePathAndIndex(resourcePath)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("Skipping invalid resource path: " + resourcePath)
+			logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + resourcePath)
 			continue
 		}
 
 		absolutePath := path.Join(h.localBasePath, relativePath)
 		if _, err := os.Stat(absolutePath); err != nil {
-			logger.L().Ctx(ctx).Error("Skipping missing file: " + absolutePath)
+			logger.L().Ctx(ctx).Warning("Skipping missing file: " + absolutePath)
 			continue
 		}
 
@@ -220,7 +220,7 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 		err = writeFixesToFile(filepath, fixedYamlString)
 
 		if err != nil {
-			logger.L().Ctx(ctx).Error(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Failed to write fixes to file %s, %v", filepath, err.Error()))
 			errors = append(errors, err)
 		}
 	}

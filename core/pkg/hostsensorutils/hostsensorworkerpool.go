@@ -48,10 +48,10 @@ func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandl
 	for job := range wp.jobs {
 		hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
 		if err != nil {
-			logger.L().Ctx(ctx).Error("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
-		} else {
-			wp.results <- hostSensorDataEnvelope
+			logger.L().Ctx(ctx).Warning("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
+			continue
 		}
+		wp.results <- hostSensorDataEnvelope
 	}
 }
 

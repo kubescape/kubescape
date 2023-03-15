@@ -38,7 +38,7 @@ func (handler *HTTPHandler) executeScan() {
 				response.Response = err.Error()
 			}
 		} else {
-			logger.L().Success("done scanning", helpers.String("ID", scanReq.scanID))
+			logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
 			if scanReq.scanQueryParams.ReturnResults {
 				response.Type = utilsapisv1.ResultsV1ScanResponseType
 				response.Response = results

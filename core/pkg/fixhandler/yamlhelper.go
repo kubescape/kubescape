@@ -306,7 +306,7 @@ func readDocuments(ctx context.Context, reader io.Reader, decoder yqlib.Decoder)
 func safelyCloseFile(ctx context.Context, file *os.File) {
 	err := file.Close()
 	if err != nil {
-		logger.L().Ctx(ctx).Error("Error Closing File")
+		logger.L().Ctx(ctx).Warning("Error Closing File")
 	}
 }
 

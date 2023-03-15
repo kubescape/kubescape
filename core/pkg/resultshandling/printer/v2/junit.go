@@ -120,9 +120,9 @@ func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 
 	if _, err := jp.writer.Write(postureReportStr); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(jp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(jp.writer.Name())
 }
 
 func testsSuites(results *cautils.OPASessionObj) *JUnitTestSuites {
