@@ -18,6 +18,9 @@ import (
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // executeScan execute the scan request passed in the channel
@@ -38,7 +41,7 @@ func (handler *HTTPHandler) executeScan() {
 				response.Response = err.Error()
 			}
 		} else {
-			logger.L().Success("done scanning", helpers.String("ID", scanReq.scanID))
+			logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
 			if scanReq.scanQueryParams.ReturnResults {
 				response.Type = utilsapisv1.ResultsV1ScanResponseType
 				response.Response = results
@@ -53,12 +56,26 @@ func (handler *HTTPHandler) executeScan() {
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
+	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.scan")
+	defer spanScan.End()
+
 	ks := core.NewKubescape()
+
+	spanScan.AddEvent("scanning metadata",
+		trace.WithAttributes(attribute.String("scanID", scanInfo.ScanID)),
+		trace.WithAttributes(attribute.Bool("scanAll", scanInfo.ScanAll)),
+		trace.WithAttributes(attribute.Bool("HostSensorEnabled", scanInfo.HostSensorEnabled.GetBool())),
+		trace.WithAttributes(attribute.String("excludedNamespaces", scanInfo.ExcludedNamespaces)),
+		trace.WithAttributes(attribute.String("includeNamespaces", scanInfo.IncludeNamespaces)),
+		trace.WithAttributes(attribute.String("hostSensorYamlPath", scanInfo.HostSensorYamlPath)),
+		trace.WithAttributes(attribute.String("kubeContext", scanInfo.KubeContext)),
+	)
+
 	result, err := ks.Scan(ctx, scanInfo)
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}
-	if err := result.HandleResults(context.TODO()); err != nil {
+	if err := result.HandleResults(ctx); err != nil {
 		return nil, err
 	}
 	return result.GetResults(), nil

@@ -214,7 +214,7 @@ func (hsh *HostSensorHandler) GetKubeletConfigurations(ctx context.Context) ([]h
 	for resIdx := range res {
 		jsonBytes, ery := yaml.YAMLToJSON(res[resIdx].Data)
 		if ery != nil {
-			logger.L().Ctx(ctx).Error("failed to convert kubelet configurations from yaml to json", helpers.Error(ery))
+			logger.L().Ctx(ctx).Warning("failed to convert kubelet configurations from yaml to json", helpers.Error(ery))
 			continue
 		}
 		res[resIdx].SetData(jsonBytes)

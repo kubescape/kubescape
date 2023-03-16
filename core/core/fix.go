@@ -48,7 +48,7 @@ func (ks *Kubescape) Fix(ctx context.Context, fixInfo *metav1.FixInfo) error {
 
 	if len(errors) > 0 {
 		for _, err := range errors {
-			logger.L().Ctx(ctx).Error(err.Error())
+			logger.L().Ctx(ctx).Warning(err.Error())
 		}
 		return fmt.Errorf("Failed to fix some resources, check the logs for more details")
 	}

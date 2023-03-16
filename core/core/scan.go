@@ -33,7 +33,7 @@ type componentInterfaces struct {
 }
 
 func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInterfaces {
-	ctx, span := otel.Tracer("").Start(ctx, "getInterfaces")
+	ctx, span := otel.Tracer("").Start(ctx, "setup interfaces")
 	defer span.End()
 
 	// ================== setup k8s interface object ======================================
@@ -119,13 +119,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 }
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
-	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.Scan")
-	defer spanScan.End()
+	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
+
 	logger.L().Info("Kubescape scanner starting")
 
 	// ===================== Initialization =====================
-	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	scanInfo.Init(ctxInit) // initialize scan info
 
 	interfaces := getInterfaces(ctxInit, scanInfo)
 
@@ -137,10 +135,10 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.Getters.PolicyGetter = getPolicyGetter(ctx, scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
-	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(ctx, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
-	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(ctx, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
-	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(ctx, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
@@ -150,35 +148,37 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	// remove host scanner components
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Ctx(ctxInit).Error("failed to tear down host scanner", helpers.Error(err))
+			logger.L().Ctx(ctx).Error("failed to tear down host scanner", helpers.Error(err))
 		}
 	}()
 
 	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
-	spanInit.End()
 
 	// ===================== policies & resources =====================
-	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctx, "policies & resources")
+	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies & resources")
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
 	scanData, err := policyHandler.CollectResources(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
+		spanInit.End()
 		return resultsHandling, err
 	}
 	spanPolicies.End()
+	spanInit.End()
 
 	// ========================= opa testing =====================
 	ctxOpa, spanOpa := otel.Tracer("").Start(ctx, "opa testing")
+	defer spanOpa.End()
+
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
 	if err := reportResults.ProcessRulesListenner(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 		// TODO - do something
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
-	spanOpa.End()
 
 	// ======================== prioritization ===================
-	_, spanPrioritization := otel.Tracer("").Start(ctx, "prioritization")
-	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctx, scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
+	_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
+	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 	} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 		return resultsHandling, fmt.Errorf("%w", err)

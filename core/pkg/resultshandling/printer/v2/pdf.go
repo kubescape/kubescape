@@ -98,9 +98,9 @@ func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OP
 
 	if _, err := pp.writer.Write(outBuff.Bytes()); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(pp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(pp.writer.Name())
 }
 
 // printHeader prints the Kubescape logo and report date

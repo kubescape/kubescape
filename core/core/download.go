@@ -84,7 +84,7 @@ func downloadArtifacts(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 	}
 	for artifact := range artifacts {
 		if err := downloadArtifact(ctx, &metav1.DownloadInfo{Target: artifact, Path: downloadInfo.Path, FileName: fmt.Sprintf("%s.json", artifact)}, artifacts); err != nil {
-			logger.L().Ctx(ctx).Error("error downloading", helpers.String("artifact", artifact), helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("error downloading", helpers.String("artifact", artifact), helpers.Error(err))
 		}
 	}
 	return nil

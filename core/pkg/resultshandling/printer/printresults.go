@@ -32,12 +32,12 @@ type IPrinter interface {
 func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err != nil {
-			logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
 			return os.Stdout
 		}
 		f, err := os.Create(outputFile)
 		if err != nil {
-			logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
 			return os.Stdout
 		}
 		return f

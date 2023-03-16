@@ -62,11 +62,11 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
 	defer span.End()
 	if report.customerGUID == "" {
-		logger.L().Ctx(ctx).Warning("failed to publish results. Reason: Unknown accout ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
+		logger.L().Ctx(ctx).Error("failed to publish results. Reason: Unknown account ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
 		return nil
 	}
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
-		logger.L().Ctx(ctx).Warning("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
+		logger.L().Ctx(ctx).Error("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
 

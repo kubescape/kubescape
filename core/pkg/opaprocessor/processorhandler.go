@@ -56,8 +56,7 @@ func (opap *OPAProcessor) ProcessRulesListenner(ctx context.Context, progressLis
 
 	// process
 	if err := opap.Process(ctx, opap.OPASessionObj.AllPolicies, progressListener); err != nil {
-		logger.L().Ctx(ctx).Error(err.Error())
-		// Return error?
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 
 	// edit results
@@ -92,7 +91,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 
 		resourcesAssociatedControl, err := opap.processControl(ctx, &control)
 		if err != nil {
-			logger.L().Ctx(ctx).Error(err.Error())
+			logger.L().Ctx(ctx).Warning(err.Error())
 		}
 
 		if len(resourcesAssociatedControl) == 0 {
@@ -142,7 +141,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 	for i := range control.Rules {
 		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
-			logger.L().Ctx(ctx).Error(err.Error())
+			logger.L().Ctx(ctx).Warning(err.Error())
 			continue
 		}
 
@@ -212,34 +211,33 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 	ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, RuleRegoDependenciesData)
 	if err != nil {
-		// TODO - Handle error
-		logger.L().Ctx(ctx).Error(err.Error())
-	} else {
-		// ruleResponse to ruleResult
-		for i := range ruleResponses {
-			failedResources := objectsenvelopes.ListMapToMeta(ruleResponses[i].GetFailedResources())
-			for j := range failedResources {
-				ruleResult := &resourcesresults.ResourceAssociatedRule{}
-				if r, k := resources[failedResources[j].GetID()]; k {
-					ruleResult = r
-				}
+		return resources, err
+	}
 
-				ruleResult.SetStatus(apis.StatusFailed, nil)
-				for j := range ruleResponses[i].FailedPaths {
-					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: ruleResponses[i].FailedPaths[j]})
-				}
-				for j := range ruleResponses[i].FixPaths {
-					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: ruleResponses[i].FixPaths[j]})
-				}
-				if ruleResponses[i].FixCommand != "" {
-					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixCommand: ruleResponses[i].FixCommand})
-				}
-				resources[failedResources[j].GetID()] = ruleResult
+	// ruleResponse to ruleResult
+	for i := range ruleResponses {
+		failedResources := objectsenvelopes.ListMapToMeta(ruleResponses[i].GetFailedResources())
+		for j := range failedResources {
+			ruleResult := &resourcesresults.ResourceAssociatedRule{}
+			if r, k := resources[failedResources[j].GetID()]; k {
+				ruleResult = r
 			}
+
+			ruleResult.SetStatus(apis.StatusFailed, nil)
+			for j := range ruleResponses[i].FailedPaths {
+				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: ruleResponses[i].FailedPaths[j]})
+			}
+			for j := range ruleResponses[i].FixPaths {
+				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: ruleResponses[i].FixPaths[j]})
+			}
+			if ruleResponses[i].FixCommand != "" {
+				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixCommand: ruleResponses[i].FixCommand})
+			}
+			resources[failedResources[j].GetID()] = ruleResult
 		}
 	}
 
-	return resources, err
+	return resources, nil
 }
 
 func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
@@ -275,7 +273,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	// Eval
 	results, err := opap.regoEval(k8sObjects, compiled, &store)
 	if err != nil {
-		logger.L().Ctx(ctx).Error(err.Error())
+		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 
 	return results, nil

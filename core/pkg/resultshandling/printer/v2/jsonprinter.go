@@ -51,7 +51,7 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 
 	if _, err := jp.writer.Write(r); err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
-	} else {
-		printer.LogOutputFile(jp.writer.Name())
+		return
 	}
+	printer.LogOutputFile(jp.writer.Name())
 }

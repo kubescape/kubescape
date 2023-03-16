@@ -48,7 +48,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 		if err == nil {
 			wls, errs := chart.GetWorkloadsWithDefaultValues()
 			if len(errs) > 0 {
-				logger.L().Ctx(ctx).Error(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
+				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
 
@@ -88,7 +88,7 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	kustomizeDirectoryName := GetKustomizeDirectoryName(newBasePath)
 
 	if len(errs) > 0 {
-		logger.L().Ctx(ctx).Error(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
 	}
 
 	for k, v := range wls {
@@ -100,15 +100,16 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
-		logger.L().Ctx(ctx).Error(fmt.Sprintf("%v", errs))
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
+		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
 		return nil
 	}
 
 	workloads, errs := loadFiles(rootPath, files)
 	if len(errs) > 0 {
-		logger.L().Ctx(ctx).Error(fmt.Sprintf("%v", errs))
+		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
 	}
 
 	return workloads
