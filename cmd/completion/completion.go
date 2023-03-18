@@ -15,8 +15,8 @@ var completionCmdExamples = fmt.Sprintf(`
   $ echo 'source <(%[1]s completion bash)' >> ~/.bashrc
 
   # Enable ZSH shell autocompletion
-  $ source <(kubectl completion zsh)
-  $ echo 'source <(kubectl completion zsh)' >> "${fpath[1]}/_kubectl"
+  $ source <(%[1]s completion zsh)
+  $ echo 'source <(%[1]s completion zsh)' >> "${fpath[1]}/_%[1]s"
 `, cautils.ExecName())
 
 func GetCompletionCmd() *cobra.Command {
