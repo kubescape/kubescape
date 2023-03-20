@@ -256,7 +256,9 @@ func (report *ReportEventReceiver) generateMessage() {
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {
-	if report.message != "" {
+
+	// print if logger level is lower than warning (debug/info)
+	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
 		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 	}
 }
