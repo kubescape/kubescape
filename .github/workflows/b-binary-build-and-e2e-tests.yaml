@@ -73,7 +73,7 @@ jobs:
       matrix:
         os: [ubuntu-20.04, macos-latest, windows-latest]
     steps:
-    
+
       - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
         with:
           repository: ${{inputs.CHECKOUT_REPO}}
@@ -279,7 +279,7 @@ jobs:
             -c CyberArmorTests               \
             --duration 3                     \
             --logger DEBUG                   \
-            --kwargs ks_branch=latest
+            --kwargs ks_branch=release
 
           deactivate
 
