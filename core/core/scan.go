@@ -124,6 +124,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	logger.L().Info("Kubescape scanner starting")
 
 	// ===================== Initialization =====================
+	scanInfo.Init(ctxInit) // initialize scan info
 
 	interfaces := getInterfaces(ctxInit, scanInfo)
 
