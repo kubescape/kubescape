@@ -171,7 +171,7 @@ jobs:
       matrix:
         TEST: ${{ fromJson(needs.binary-build.outputs.TEST_NAMES) }}
     needs: [check-secret, binary-build]
-    if: ${{ needs.check-secret.outputs.is-secret-set == 'true' && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
+    if: ${{ (needs.check-secret.outputs.is-secret-set == 'true') && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
     runs-on: ubuntu-latest # This cannot change
     steps:
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # ratchet:actions/download-artifact@v3.0.2
