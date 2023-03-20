@@ -43,7 +43,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) > 0 {
 				if args[0] != "framework" && args[0] != "control" {
-					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{"all"}, args...))
+					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
 				}
 			}
 			return nil
