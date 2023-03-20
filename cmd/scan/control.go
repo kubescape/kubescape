@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 
-	"github.com/enescakir/emoji"
 	"github.com/spf13/cobra"
 )
 
@@ -106,7 +105,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				logger.L().Fatal(err.Error())
 			}
 			if !scanInfo.VerboseMode {
-				cautils.SimpleDisplay(os.Stderr, "%s  Run with '--verbose'/'-v' flag for detailed resources view\n\n", emoji.Detective)
+				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view")
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
