@@ -51,7 +51,7 @@ chmod +x $OUTPUT 2>/dev/null
 
 # cleaning up old install
 SUDO=
-if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ] && [ -f /usr/local/bin/$KUBESCAPE_EXEC ]; then
+if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ] && [ "$KUBESCAPE_EXEC" != "" ] && [ -f /usr/local/bin/$KUBESCAPE_EXEC ]; then
     SUDO=sudo
     echo -e "\n\033[33mOld installation as root found, do you want to remove it? [\033[0my\033[33m/n]:"
     read -n 1 -r
@@ -67,14 +67,20 @@ if [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ] && [ -f /usr/local/bin/$KUBESC
     fi
 fi
 
-rm -f /home/${SUDO_USER:-$USER}/.kubescape/bin/$KUBESCAPE_EXEC 2>/dev/null || true
-rm -f $BASE_DIR/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+if [ "$KUBESCAPE_EXEC" != "" ]; then
+    if [ "${SUDO_USER:-$USER}" != "" ]; then
+        rm -f /home/${SUDO_USER:-$USER}/.kubescape/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+    fi
+    if [ "$BASE_DIR" != "" ]; then
+        rm -f $BASE_DIR/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+    fi
+fi
 
 # Old install location, clean all those things up
 for pdir in ${PATH//:/ }; do
     edir="${pdir/#\~/$HOME}"
     if [[ $edir == $HOME/* ]] && [[ -f $edir/$KUBESCAPE_EXEC ]]; then
-        echo -e "\n\033[33mOld installation found at $edir/, do you want to remove it? [\033[0my\033[33m/n]:"
+        echo -e "\n\033[33mOld installation found at $edir/$KUBESCAPE_EXEC, do you want to remove it? [\033[0my\033[33m/n]:"
         read -n 1 -r
         if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ "$REPLY" != "" ]]; then
             continue
@@ -88,7 +94,7 @@ for pdir in ${PATH//:/ }; do
 done
 
 cp $OUTPUT $install_dir/$KUBESCAPE_EXEC
-rm -rf $OUTPUT
+rm -f $OUTPUT
 
 echo
 echo -e "\033[32mFinished Installation."
