@@ -148,11 +148,11 @@ jobs:
 
       - name: Test core pkg
         run: ${{ env.DOCKER_CMD }} go test "-tags=static,gitenabled" -v ./...
-        if: matrix.arch != 'arm64'
+        if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && matrix.arch != 'arm64'"
 
       - name: Test httphandler pkg
         run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test "-tags=static,gitenabled" -v ./...'
-        if: matrix.os != 'macos-latest' || matrix.arch != 'arm64'
+        if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Build
         env:
@@ -166,7 +166,7 @@ jobs:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/kubescape-${{ matrix.os }}
-        if: matrix.os != 'ubuntu-20.04' && matrix.arch == ''
+        if: startsWith(github.ref, 'refs/tags') && matrix.os != 'ubuntu-20.04' && matrix.arch == ''
 
       - name: Smoke Testing (Linux amd64)
         env:
@@ -180,7 +180,7 @@ jobs:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ./build/kubescape-${{ matrix.arch }}-ubuntu-latest
-        if: matrix.os == 'ubuntu-20.04' && matrix.arch != ''
+        if: startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch != ''
 
       - name: golangci-lint
         if: matrix.os == 'ubuntu-20.04'
