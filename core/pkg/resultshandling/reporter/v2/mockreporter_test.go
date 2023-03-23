@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -19,6 +18,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v2/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -184,7 +184,7 @@ type (
 
 // mockOPASessionObj builds an OPASessionObj from a JSON fixture.
 func mockOPASessionObj(t testing.TB) *cautils.OPASessionObj {
-	buf, err := os.ReadFile(filepath.Join(currentDir(), "testdata", "mock_opasessionobj.json"))
+	buf, err := os.ReadFile(filepath.Join(testutils.CurrentDir(), "testdata", "mock_opasessionobj.json"))
 	require.NoError(t, err)
 
 	var v mockableOPASessionObj
@@ -348,10 +348,4 @@ func hijackedClient(t testing.TB, srv *testServer) *http.Client {
 	return &http.Client{
 		Transport: newInterceptor(transport, mockURL.Host),
 	}
-}
-
-func currentDir() string {
-	_, filename, _, _ := runtime.Caller(1)
-
-	return filepath.Dir(filename)
 }

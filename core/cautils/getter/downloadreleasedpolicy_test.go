@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/kubescape/v2/internal/testutils"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 )
@@ -159,5 +160,5 @@ func hydrateReleasedPolicyFromMock(t testing.TB, p *DownloadReleasedPolicy) {
 }
 
 func testRegoFile(framework string) string {
-	return filepath.Join(currentDir(), "testdata", fmt.Sprintf("%s.json", framework))
+	return filepath.Join(testutils.CurrentDir(), "testdata", fmt.Sprintf("%s.json", framework))
 }
