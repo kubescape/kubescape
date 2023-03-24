@@ -5,10 +5,11 @@ while getopts v: option
 do
     case ${option} in
         v) RELEASE="download/${OPTARG}";;
+        *) ;;
     esac
 done
 
-if [ -z ${RELEASE} ]; then
+if [ -z "${RELEASE}" ]; then
     RELEASE="latest/download"
 fi
 
@@ -17,7 +18,6 @@ echo
 
 BASE_DIR=~/.kubescape
 KUBESCAPE_EXEC=kubescape
-KUBESCAPE_ZIP=kubescape.zip
 
 osName=$(uname -s)
 if [[ $osName == *"MINGW"* ]]; then
@@ -69,7 +69,7 @@ fi
 
 if [ "$KUBESCAPE_EXEC" != "" ]; then
     if [ "${SUDO_USER:-$USER}" != "" ]; then
-        rm -f /home/${SUDO_USER:-$USER}/.kubescape/bin/$KUBESCAPE_EXEC 2>/dev/null || true
+        rm -f /home/"${SUDO_USER:-$USER}"/.kubescape/bin/$KUBESCAPE_EXEC 2>/dev/null || true
     fi
     if [ "$BASE_DIR" != "" ]; then
         rm -f $BASE_DIR/bin/$KUBESCAPE_EXEC 2>/dev/null || true
@@ -85,7 +85,7 @@ for pdir in ${PATH//:/ }; do
         if [[ ! $REPLY =~ ^[Yy]$ ]] && [[ "$REPLY" != "" ]]; then
             continue
         fi
-        if rm -f $edir/$KUBESCAPE_EXEC 2>/dev/null; then
+        if rm -f "$edir"/$KUBESCAPE_EXEC 2>/dev/null; then
             echo -e "\n\033[32mRemoved old installation at $edir/$KUBESCAPE_EXEC"
         else
             echo -e "\n\033[31mFailed to remove old installation as root at $edir/$KUBESCAPE_EXEC, please remove it manually."
