@@ -29,6 +29,9 @@ var (
 
 const PortName string = "scanner"
 
+// HostSensorHandler is a client that interacts with a host-scanner component deployed on nodes.
+//
+// The API exposed by the host sensor is defined here: https://github.com/kubescape/host-scanner
 type HostSensorHandler struct {
 	HostSensorPort                int32
 	HostSensorPodNames            map[string]string //map from pod names to node names
@@ -42,10 +45,10 @@ type HostSensorHandler struct {
 }
 
 func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile string) (*HostSensorHandler, error) {
-
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
 	}
+
 	if hostSensorYAMLFile != "" {
 		d, err := loadHostSensorFromFile(hostSensorYAMLFile)
 		if err != nil {
@@ -53,6 +56,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 		}
 		hostSensorYAML = d
 	}
+
 	hsh := &HostSensorHandler{
 		k8sObj:                        k8sObj,
 		HostSensorPodNames:            map[string]string{},
@@ -60,7 +64,8 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 		gracePeriod:                   int64(15),
 		workerPool:                    NewWorkerPool(),
 	}
-	// Don't deploy on cluster with no nodes. Some cloud providers prevents termination of K8s objects for cluster with no nodes!!!
+
+	// Don't deploy on a cluster with no nodes. Some cloud providers prevent the termination of K8s objects for cluster with no nodes!!!
 	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
 		if err == nil {
 			err = fmt.Errorf("no nodes to scan")
@@ -71,6 +76,7 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 	return hsh, nil
 }
 
+// Init deploys the host-scanner and start watching the pods on the host.
 func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 	// deploy the YAML
 	// store namespace + port
@@ -80,16 +86,17 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 	logger.L().Debug("The host scanner is a DaemonSet that runs on each node in the cluster. The DaemonSet will be running in it's own namespace and will be deleted once the scan is completed. If you do not wish to install the host scanner, please run the scan without the --enable-host-scan flag.")
 
 	cautils.StartSpinner()
+	defer cautils.StopSpinner()
 
 	if err := hsh.applyYAML(ctx); err != nil {
-		cautils.StopSpinner()
 		return fmt.Errorf("failed to apply host scanner YAML, reason: %v", err)
 	}
+
 	hsh.populatePodNamesToNodeNames(ctx)
 	if err := hsh.checkPodForEachNode(); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to validate host-sensor pods status", helpers.Error(err))
 	}
-	cautils.StopSpinner()
+
 	return nil
 }
 
@@ -104,10 +111,12 @@ func (hsh *HostSensorHandler) checkNamespaceWasPresent(namespace string) bool {
 	if err != nil {
 		return false
 	}
+
 	// check also if it is in "Active" state.
 	if ns.Status.Phase != corev1.NamespaceActive {
 		return false
 	}
+
 	return true
 }
 
@@ -159,7 +168,6 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 					}
 				}
 			}
-
 		}
 
 		// Apply workload
@@ -197,6 +205,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 			hsh.DaemonSet = &ds
 		}
 	}
+
 	return nil
 }
 
@@ -207,6 +216,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 		if err != nil {
 			return fmt.Errorf("in checkPodsForEveryNode, failed to get nodes list: %v", nodesList)
 		}
+
 		hsh.podListLock.RLock()
 		podsNum := len(hsh.HostSensorPodNames)
 		unschedPodNum := len(hsh.HostSensorUnscheduledPodNames)
@@ -214,6 +224,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 		if len(nodesList.Items) <= podsNum+unschedPodNum {
 			break
 		}
+
 		if time.Now().After(deadline) {
 			hsh.podListLock.RLock()
 			podsMap := hsh.HostSensorPodNames
@@ -223,12 +234,12 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+
 	return nil
 }
 
 // initiating routine to keep pod list updated
 func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
-
 	go func() {
 		var watchRes watch.Interface
 		var err error
@@ -243,6 +254,7 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
 			logger.L().Ctx(ctx).Error("failed to watch over DaemonSet pods, will not be able to get host-sensor data")
 			return
 		}
+
 		for eve := range watchRes.ResultChan() {
 			pod, ok := eve.Object.(*corev1.Pod)
 			if !ok {
@@ -299,6 +311,7 @@ func (hsh *HostSensorHandler) tearDownNamespace(namespace string) error {
 	if err := hsh.k8sObj.KubernetesClient.CoreV1().Namespaces().Delete(hsh.k8sObj.Context, namespace, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor namespace: %v", err)
 	}
+
 	return nil
 }
 
