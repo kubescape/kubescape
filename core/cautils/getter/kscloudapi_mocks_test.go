@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/kubescape/kubescape/v2/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/stretchr/testify/require"
@@ -279,7 +280,7 @@ func mockLoginResponse() *feLoginResponse {
 }
 
 func mockPostureReport(t testing.TB, reportID, cluster string) *PostureReport {
-	fixture := filepath.Join(currentDir(), "testdata", "mock_posture_report.json")
+	fixture := filepath.Join(testutils.CurrentDir(), "testdata", "mock_posture_report.json")
 
 	buf, err := os.ReadFile(fixture)
 	require.NoError(t, err)

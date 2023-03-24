@@ -4,9 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
+	"github.com/kubescape/kubescape/v2/internal/testutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -190,7 +190,7 @@ func TestHostSensorHandler(t *testing.T) {
 	t.Run("with manifest from YAML file", func(t *testing.T) {
 		t.Run("should build host sensor", func(t *testing.T) {
 			k8s := NewKubernetesApiMock(WithNode(mockNode1()), WithPod(mockPod1()), WithPod(mockPod2()), WithResponses(mockResponses()))
-			h, err := NewHostSensorHandler(k8s, filepath.Join(currentDir(), "hostsensor.yaml"))
+			h, err := NewHostSensorHandler(k8s, filepath.Join(testutils.CurrentDir(), "hostsensor.yaml"))
 			require.NoError(t, err)
 			require.NotNil(t, h)
 
@@ -223,7 +223,7 @@ func TestHostSensorHandler(t *testing.T) {
 			})
 
 			k8s := NewKubernetesApiMock(WithNode(mockNode1()), WithPod(mockPod1()), WithPod(mockPod2()), WithResponses(mockResponses()))
-			_, err := NewHostSensorHandler(k8s, filepath.Join(currentDir(), invalid))
+			_, err := NewHostSensorHandler(k8s, filepath.Join(testutils.CurrentDir(), invalid))
 			require.Error(t, err)
 		})
 	})
@@ -240,10 +240,4 @@ func TestHostSensorHandler(t *testing.T) {
 	// * explicit TearDown()
 	//
 	// Notice that the package doesn't current pass tests with the race detector enabled.
-}
-
-func currentDir() string {
-	_, filename, _, _ := runtime.Caller(1)
-
-	return filepath.Dir(filename)
 }
