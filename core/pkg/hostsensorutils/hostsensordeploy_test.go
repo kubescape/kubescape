@@ -26,11 +26,11 @@ func TestHostSensorHandler(t *testing.T) {
 			t.Run("should initialize host sensor", func(t *testing.T) {
 				require.NoError(t, h.Init(ctx))
 
-				w, err := k8s.KubernetesClient.CoreV1().Pods(h.DaemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
+				w, err := k8s.KubernetesClient.CoreV1().Pods(h.daemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
 				require.NoError(t, err)
 				w.Stop()
 
-				require.Len(t, h.HostSensorPodNames, 2)
+				require.Len(t, h.hostSensorPodNames, 2)
 			})
 
 			t.Run("should return namespace", func(t *testing.T) {
@@ -46,10 +46,10 @@ func TestHostSensorHandler(t *testing.T) {
 
 				foundControl, foundProvider := false, false
 				for _, sensed := range envelope {
-					if sensed.Kind == ControlPlaneInfo {
+					if sensed.Kind == ControlPlaneInfo.String() {
 						foundControl = true
 					}
-					if sensed.Kind == CloudProviderInfo {
+					if sensed.Kind == CloudProviderInfo.String() {
 						foundProvider = hasCloudProviderInfo([]hostsensor.HostSensorDataEnvelope{sensed})
 					}
 				}
@@ -68,23 +68,22 @@ func TestHostSensorHandler(t *testing.T) {
 			t.Run("should initialize host sensor", func(t *testing.T) {
 				require.NoError(t, h.Init(ctx))
 
-				w, err := k8s.KubernetesClient.CoreV1().Pods(h.DaemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
+				w, err := k8s.KubernetesClient.CoreV1().Pods(h.daemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
 				require.NoError(t, err)
 				w.Stop()
 
-				require.Len(t, h.HostSensorPodNames, 2)
+				require.Len(t, h.hostSensorPodNames, 2)
 			})
 
 			t.Run("should get version", func(t *testing.T) {
-				version, err := h.GetVersion()
+				version, err := h.getVersion()
 				require.NoError(t, err)
 				require.Equal(t, "v1.0.45", version)
 			})
 
 			t.Run("ForwardToPod is a stub, not implemented", func(t *testing.T) {
-				// NOTE(fredbi): IMHO we should rather return some ErrNotImplemented sentinel error and make it explicit.
-				resp, err := h.ForwardToPod("pod1", "/version")
-				require.NoError(t, err)
+				resp, err := h.forwardToPod("pod1", "/version")
+				require.Contains(t, err.Error(), "not implemented")
 				require.Nil(t, resp)
 			})
 
@@ -97,10 +96,10 @@ func TestHostSensorHandler(t *testing.T) {
 
 				foundControl, foundProvider := false, false
 				for _, sensed := range envelope {
-					if sensed.Kind == ControlPlaneInfo {
+					if sensed.Kind == ControlPlaneInfo.String() {
 						foundControl = true
 					}
-					if sensed.Kind == CloudProviderInfo {
+					if sensed.Kind == CloudProviderInfo.String() {
 						foundProvider = hasCloudProviderInfo([]hostsensor.HostSensorDataEnvelope{sensed})
 					}
 				}
@@ -126,17 +125,17 @@ func TestHostSensorHandler(t *testing.T) {
 			t.Run("should initialize host sensor", func(t *testing.T) {
 				require.NoError(t, h.Init(ctx))
 
-				w, err := k8s.KubernetesClient.CoreV1().Pods(h.DaemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
+				w, err := k8s.KubernetesClient.CoreV1().Pods(h.daemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
 				require.NoError(t, err)
 				w.Stop()
 
-				require.Len(t, h.HostSensorPodNames, 2)
+				require.Len(t, h.hostSensorPodNames, 2)
 			})
 
 			t.Run("should NOT be able to get version", func(t *testing.T) {
 				// NOTE: GetVersion might be successful if only one pod responds successfully.
 				// In order to ensure an error, we need ALL pods to error.
-				_, err := h.GetVersion()
+				_, err := h.getVersion()
 				require.Error(t, err)
 				require.Contains(t, err.Error(), "mock")
 			})
@@ -157,11 +156,11 @@ func TestHostSensorHandler(t *testing.T) {
 			t.Run("should initialize host sensor", func(t *testing.T) {
 				require.NoError(t, h.Init(ctx))
 
-				w, err := k8s.KubernetesClient.CoreV1().Pods(h.DaemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
+				w, err := k8s.KubernetesClient.CoreV1().Pods(h.daemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
 				require.NoError(t, err)
 				w.Stop()
 
-				require.Len(t, h.HostSensorPodNames, 2)
+				require.Len(t, h.hostSensorPodNames, 2)
 			})
 
 			t.Run("should collect resources from pods, with some errors", func(t *testing.T) {
@@ -197,11 +196,11 @@ func TestHostSensorHandler(t *testing.T) {
 			t.Run("should initialize host sensor", func(t *testing.T) {
 				require.NoError(t, h.Init(ctx))
 
-				w, err := k8s.KubernetesClient.CoreV1().Pods(h.DaemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
+				w, err := k8s.KubernetesClient.CoreV1().Pods(h.daemonSet.Namespace).Watch(ctx, metav1.ListOptions{})
 				require.NoError(t, err)
 				w.Stop()
 
-				require.Len(t, h.HostSensorPodNames, 2)
+				require.Len(t, h.hostSensorPodNames, 2)
 			})
 		})
 	})

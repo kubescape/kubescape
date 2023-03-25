@@ -3,7 +3,6 @@ package hostsensorutils
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sync"
@@ -27,23 +26,23 @@ var (
 	namespaceWasPresent bool
 )
 
-const PortName string = "scanner"
+const portName string = "scanner"
 
 // HostSensorHandler is a client that interacts with a host-scanner component deployed on nodes.
 //
 // The API exposed by the host sensor is defined here: https://github.com/kubescape/host-scanner
 type HostSensorHandler struct {
-	HostSensorPort                int32
-	HostSensorPodNames            map[string]string //map from pod names to node names
-	HostSensorUnscheduledPodNames map[string]string //map from pod names to node names
-	IsReady                       <-chan bool       //readonly chan
+	hostSensorPort                int32
+	hostSensorPodNames            map[string]string //map from pod names to node names
+	hostSensorUnscheduledPodNames map[string]string //map from pod names to node names
 	k8sObj                        *k8sinterface.KubernetesApi
-	DaemonSet                     *appsv1.DaemonSet
+	daemonSet                     *appsv1.DaemonSet
 	podListLock                   sync.RWMutex
 	gracePeriod                   int64
 	workerPool                    workerPool
 }
 
+// NewHostSensorHandler builds a new http client to the host-scanner API.
 func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile string) (*HostSensorHandler, error) {
 	if k8sObj == nil {
 		return nil, fmt.Errorf("nil k8s interface received")
@@ -52,17 +51,17 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, hostSensorYAMLFile
 	if hostSensorYAMLFile != "" {
 		d, err := loadHostSensorFromFile(hostSensorYAMLFile)
 		if err != nil {
-			return nil, fmt.Errorf("failed to load host-scan yaml file, reason: %s", err.Error())
+			return nil, fmt.Errorf("failed to load host-scan yaml file, reason: %w", err)
 		}
 		hostSensorYAML = d
 	}
 
 	hsh := &HostSensorHandler{
 		k8sObj:                        k8sObj,
-		HostSensorPodNames:            map[string]string{},
-		HostSensorUnscheduledPodNames: map[string]string{},
+		hostSensorPodNames:            map[string]string{},
+		hostSensorUnscheduledPodNames: map[string]string{},
 		gracePeriod:                   int64(15),
-		workerPool:                    NewWorkerPool(),
+		workerPool:                    newWorkerPool(),
 	}
 
 	// Don't deploy on a cluster with no nodes. Some cloud providers prevent the termination of K8s objects for cluster with no nodes!!!
@@ -163,8 +162,8 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 			}
 			for j := range containers {
 				for k := range containers[j].Ports {
-					if containers[j].Ports[k].Name == PortName {
-						hsh.HostSensorPort = containers[j].Ports[k].ContainerPort
+					if containers[j].Ports[k].Name == portName {
+						hsh.hostSensorPort = containers[j].Ports[k].ContainerPort
 					}
 				}
 			}
@@ -202,7 +201,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 				}
 				return fmt.Errorf("failed to Unmarshal YAML of DaemonSet, reason: %v", err)
 			}
-			hsh.DaemonSet = &ds
+			hsh.daemonSet = &ds
 		}
 	}
 
@@ -218,8 +217,8 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 		}
 
 		hsh.podListLock.RLock()
-		podsNum := len(hsh.HostSensorPodNames)
-		unschedPodNum := len(hsh.HostSensorUnscheduledPodNames)
+		podsNum := len(hsh.hostSensorPodNames)
+		unschedPodNum := len(hsh.hostSensorUnscheduledPodNames)
 		hsh.podListLock.RUnlock()
 		if len(nodesList.Items) <= podsNum+unschedPodNum {
 			break
@@ -227,7 +226,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 
 		if time.Now().After(deadline) {
 			hsh.podListLock.RLock()
-			podsMap := hsh.HostSensorPodNames
+			podsMap := hsh.hostSensorPodNames
 			hsh.podListLock.RUnlock()
 			return fmt.Errorf("host-sensor pods number (%d) differ than nodes number (%d) after deadline exceeded. Kubescape will take data only from the pods below: %v",
 				podsNum, len(nodesList.Items), podsMap)
@@ -243,9 +242,9 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
 	go func() {
 		var watchRes watch.Interface
 		var err error
-		watchRes, err = hsh.k8sObj.KubernetesClient.CoreV1().Pods(hsh.DaemonSet.Namespace).Watch(hsh.k8sObj.Context, metav1.ListOptions{
+		watchRes, err = hsh.k8sObj.KubernetesClient.CoreV1().Pods(hsh.daemonSet.Namespace).Watch(hsh.k8sObj.Context, metav1.ListOptions{
 			Watch:         true,
-			LabelSelector: fmt.Sprintf("name=%s", hsh.DaemonSet.Spec.Template.Labels["name"]),
+			LabelSelector: fmt.Sprintf("name=%s", hsh.daemonSet.Spec.Template.Labels["name"]),
 		})
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("failed to watch over DaemonSet pods - are we missing watch pods permissions?", helpers.Error(err))
@@ -273,8 +272,8 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventTy
 	case watch.Added, watch.Modified:
 		if podObj.Status.Phase == corev1.PodRunning && len(podObj.Status.ContainerStatuses) > 0 &&
 			podObj.Status.ContainerStatuses[0].Ready {
-			hsh.HostSensorPodNames[podObj.ObjectMeta.Name] = podObj.Spec.NodeName
-			delete(hsh.HostSensorUnscheduledPodNames, podObj.ObjectMeta.Name)
+			hsh.hostSensorPodNames[podObj.ObjectMeta.Name] = podObj.Spec.NodeName
+			delete(hsh.hostSensorUnscheduledPodNames, podObj.ObjectMeta.Name)
 		} else {
 			if podObj.Status.Phase == corev1.PodPending && len(podObj.Status.Conditions) > 0 &&
 				podObj.Status.Conditions[0].Reason == corev1.PodReasonUnschedulable {
@@ -291,14 +290,14 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventTy
 					helpers.String("nodeName", nodeName),
 					helpers.String("podName", podObj.ObjectMeta.Name))
 				if nodeName != "" {
-					hsh.HostSensorUnscheduledPodNames[podObj.ObjectMeta.Name] = nodeName
+					hsh.hostSensorUnscheduledPodNames[podObj.ObjectMeta.Name] = nodeName
 				}
 			} else {
-				delete(hsh.HostSensorPodNames, podObj.ObjectMeta.Name)
+				delete(hsh.hostSensorPodNames, podObj.ObjectMeta.Name)
 			}
 		}
 	default:
-		delete(hsh.HostSensorPodNames, podObj.ObjectMeta.Name)
+		delete(hsh.hostSensorPodNames, podObj.ObjectMeta.Name)
 	}
 }
 
@@ -318,7 +317,7 @@ func (hsh *HostSensorHandler) tearDownNamespace(namespace string) error {
 func (hsh *HostSensorHandler) TearDown() error {
 	namespace := hsh.GetNamespace()
 	// delete DaemonSet
-	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.GetNamespace()).Delete(hsh.k8sObj.Context, hsh.DaemonSet.Name, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
+	if err := hsh.k8sObj.KubernetesClient.AppsV1().DaemonSets(hsh.GetNamespace()).Delete(hsh.k8sObj.Context, hsh.daemonSet.Name, metav1.DeleteOptions{GracePeriodSeconds: &hsh.gracePeriod}); err != nil {
 		return fmt.Errorf("failed to delete host-sensor daemonset: %v", err)
 	}
 	// delete Namespace
@@ -331,10 +330,10 @@ func (hsh *HostSensorHandler) TearDown() error {
 }
 
 func (hsh *HostSensorHandler) GetNamespace() string {
-	if hsh.DaemonSet == nil {
+	if hsh.daemonSet == nil {
 		return ""
 	}
-	return hsh.DaemonSet.Namespace
+	return hsh.daemonSet.Namespace
 }
 
 func loadHostSensorFromFile(hostSensorYAMLFile string) (string, error) {
