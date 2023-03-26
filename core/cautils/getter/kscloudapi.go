@@ -34,7 +34,7 @@ const (
 	pathAttackTracks    = "/api/v1/attackTracks"
 	pathFrameworks      = "/api/v1/armoFrameworks"
 	pathExceptions      = "/api/v1/armoPostureExceptions"
-	pathTenant          = "/api/v1/createTenant"
+	pathTenant          = "/api/v1/tenants/createTenant"
 	pathExceptionPolicy = "/api/v1/postureExceptionPolicy"
 	pathCustomerConfig  = "/api/v1/armoCustomerConfiguration"
 	pathLogin           = "/identity/resources/auth/v1/api-token"
