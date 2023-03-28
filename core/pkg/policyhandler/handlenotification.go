@@ -12,6 +12,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
+	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
 	"github.com/kubescape/k8s-interface/cloudsupport"
@@ -35,7 +36,7 @@ func NewPolicyHandler(resourceHandler resourcehandler.IResourceHandler) *PolicyH
 	}
 }
 
-func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
+func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.OPASessionObj, error) {
 	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
 
 	// validate notification
@@ -47,7 +48,7 @@ func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policy
 		return opaSessionObj, err
 	}
 
-	err := policyHandler.getResources(ctx, policyIdentifier, opaSessionObj)
+	err := policyHandler.getResources(ctx, policyIdentifier, opaSessionObj, progressListener)
 	if err != nil {
 		return opaSessionObj, err
 	}
@@ -59,7 +60,7 @@ func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policy
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj) error {
+func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) error {
 	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getResources")
 	defer span.End()
 	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo(ctx)
@@ -69,7 +70,7 @@ func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIden
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators)
+	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
 	if err != nil {
 		return err
 	}
