@@ -149,15 +149,7 @@ func NewLocalConfig(
 	}
 	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", lc.backendAPI.GetCloudAPIURL()), helpers.String("auth", lc.backendAPI.GetCloudAuthURL()), helpers.String("report", lc.backendAPI.GetCloudReportURL()), helpers.String("UI", lc.backendAPI.GetCloudUIURL()))
 
-	cloud := getter.GetKSCloudAPIConnector()
-	cloud.SetAccountID(lc.configObj.AccountID)
-	cloud.SetClientID(lc.configObj.ClientID)
-	cloud.SetSecretKey(lc.configObj.SecretKey)
-	cloud.SetCloudAuthURL(lc.backendAPI.GetCloudAuthURL())
-	cloud.SetCloudReportURL(lc.backendAPI.GetCloudReportURL())
-	cloud.SetCloudUIURL(lc.backendAPI.GetCloudUIURL())
-	cloud.SetCloudAPIURL(lc.backendAPI.GetCloudAPIURL())
-	getter.SetKSCloudAPIConnector(cloud)
+	initializeCloudAPI(lc)
 
 	return lc
 }
