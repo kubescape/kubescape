@@ -94,6 +94,9 @@ type ITenantConfig interface {
 // ============================ Local Config ============================================
 // ======================================================================================
 // Config when scanning YAML files or URL but not a Kubernetes cluster
+
+var _ ITenantConfig = &LocalConfig{}
+
 type LocalConfig struct {
 	backendAPI getter.IBackend
 	configObj  *ConfigObj
@@ -145,6 +148,16 @@ func NewLocalConfig(
 		lc.configObj.CloudUIURL = lc.backendAPI.GetCloudUIURL()
 	}
 	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", lc.backendAPI.GetCloudAPIURL()), helpers.String("auth", lc.backendAPI.GetCloudAuthURL()), helpers.String("report", lc.backendAPI.GetCloudReportURL()), helpers.String("UI", lc.backendAPI.GetCloudUIURL()))
+
+	cloud := getter.GetKSCloudAPIConnector()
+	cloud.SetAccountID(lc.configObj.AccountID)
+	cloud.SetClientID(lc.configObj.ClientID)
+	cloud.SetSecretKey(lc.configObj.SecretKey)
+	cloud.SetCloudAuthURL(lc.backendAPI.GetCloudAuthURL())
+	cloud.SetCloudReportURL(lc.backendAPI.GetCloudReportURL())
+	cloud.SetCloudUIURL(lc.backendAPI.GetCloudUIURL())
+	cloud.SetCloudAPIURL(lc.backendAPI.GetCloudAPIURL())
+	getter.SetKSCloudAPIConnector(cloud)
 
 	return lc
 }
@@ -220,6 +233,8 @@ KS_SECRET_KEY
 TODO - support:
 KS_CACHE // path to cached files
 */
+var _ ITenantConfig = &ClusterConfig{}
+
 type ClusterConfig struct {
 	backendAPI         getter.IBackend
 	k8s                *k8sinterface.KubernetesApi
@@ -287,6 +302,8 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		c.configObj.CloudUIURL = c.backendAPI.GetCloudUIURL()
 	}
 	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", c.backendAPI.GetCloudAPIURL()), helpers.String("auth", c.backendAPI.GetCloudAuthURL()), helpers.String("report", c.backendAPI.GetCloudReportURL()), helpers.String("UI", c.backendAPI.GetCloudUIURL()))
+
+	initializeCloudAPI(c)
 
 	return c
 }
@@ -621,4 +638,16 @@ func updateCloudURLs(configObj *ConfigObj) {
 		configObj.CloudUIURL = cloudURLs.CloudUIURL // override config CloudUIURL
 	}
 
+}
+
+func initializeCloudAPI(c ITenantConfig) {
+	cloud := getter.GetKSCloudAPIConnector()
+	cloud.SetAccountID(c.GetAccountID())
+	cloud.SetClientID(c.GetClientID())
+	cloud.SetSecretKey(c.GetSecretKey())
+	cloud.SetCloudAuthURL(c.GetCloudAuthURL())
+	cloud.SetCloudReportURL(c.GetCloudReportURL())
+	cloud.SetCloudUIURL(c.GetCloudUIURL())
+	cloud.SetCloudAPIURL(c.GetCloudAPIURL())
+	getter.SetKSCloudAPIConnector(cloud)
 }

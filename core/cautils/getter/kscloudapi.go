@@ -94,28 +94,24 @@ var (
 
 // KSCloudAPI allows to access the API of the Kubescape Cloud offering.
 type KSCloudAPI struct {
-	cloudAPIURL  string
-	cloudAuthURL string
-	accountID    string
-	clientID     string
-
-	secretKey       string
-	authCookie      *http.Cookie
-	feToken         feLoginResponse
-	invitationToken string
-	loggedIn        bool
-
-	// URLs schemes and hosts, pre-parsed to support http vs https schemes.
-	scheme       string
-	host         string
-	authscheme   string
-	authhost     string
-	uischeme     string
-	uihost       string
-	reportscheme string
-	reporthost   string
-
+	authCookie *http.Cookie
 	*ksCloudOptions
+	authhost        string
+	cloudAPIURL     string
+	secretKey       string
+	accountID       string
+	cloudAuthURL    string
+	invitationToken string
+	reporthost      string
+	scheme          string
+	host            string
+	authscheme      string
+	clientID        string
+	uischeme        string
+	uihost          string
+	reportscheme    string
+	feToken         feLoginResponse
+	loggedIn        bool
 }
 
 // SetKSCloudAPIConnector registers a global instance of the KS Cloud client.
