@@ -153,7 +153,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	// processes rules for all controls in parallel
 	for _, controlToPin := range policies.Controls {
 		if progressListener != nil {
-			progressListener.ProgressJob(1, fmt.Sprintf("Control %s", controlToPin.ControlID))
+			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlToPin.ControlID))
 		}
 
 		control := controlToPin

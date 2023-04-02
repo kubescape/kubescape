@@ -158,7 +158,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	// ===================== policies & resources =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies & resources")
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
-	scanData, err := policyHandler.CollectResources(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
+	scanData, err := policyHandler.CollectResources(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo, cautils.NewProgressHandler(""))
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
