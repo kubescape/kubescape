@@ -1,0 +1,34 @@
+name: 01-pr-merged
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches:
+      - 'master'
+      - 'main'
+    paths-ignore:
+      - '**.yaml'
+      - '**.md'
+      - '**.sh'
+      - 'website/*'
+      - 'examples/*'
+      - 'docs/*'
+      - 'build/*'
+      - '.github/*'
+      
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  binary-build:
+    if: ${{ github.event.pull_request.merged == true && contains( github.event.pull_request.labels.*.name, 'trigger-integration-test') && github.event.pull_request.base.ref == 'master' }} ## run only if labeled as "trigger-integration-test" and base branch is master
+    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
+    with:
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 1
+      GO111MODULE: ""
+      GO_VERSION: "1.19"
+      RELEASE: ""
+      CLIENT: test
+    secrets: inherit
