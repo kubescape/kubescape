@@ -20,7 +20,7 @@ runs:
         if [[ -z "${{ inputs.ORIGINAL_TAG }}" ]]; then
           echo "The value of ORIGINAL_TAG is ${{ inputs.ORIGINAL_TAG }}"
           echo "Setting the value of ORIGINAL_TAG to ${{ github.ref_name }}"
-          export ORIGINAL_TAG=${{ github.ref_name }}
+          echo ORIGINAL_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
         fi
       shell: bash
 
