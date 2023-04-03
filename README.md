@@ -65,7 +65,7 @@ It retrieves Kubernetes objects from the API server and runs a set of [Rego snip
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We are part of the Kubernetes community and are building more tests and controls as the ecosystem develops.
 
-We hold [community meetings](https://us02web.zoom.us/j/84020231442) on Zoom, on the first Tuesday of every month, at 14:00 GMT.
+We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, on the first Tuesday of every month, at 14:00 GMT. ([See that in your local time zone](https://time.is/compare/1400_in_GMT)).
 
 The Kubescape project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
