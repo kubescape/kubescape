@@ -14,7 +14,7 @@ type metricsName string
 const (
 	ksMetrics        metricsName = "kubescape"
 	metricsCluster   metricsName = "cluster"
-	metricsScore     metricsName = "riskScore"
+	metricsScore     metricsName = "ComplianceScore"
 	metricsCount     metricsName = "count"
 	metricsFailed    metricsName = "failed"
 	metricsSkipped   metricsName = "skipped"
@@ -27,10 +27,10 @@ const (
 )
 
 // ============================================ CLUSTER ============================================================
-func (mrs *mRiskScore) metrics() []string {
+func (mrs *mComplianceScore) metrics() []string {
 	/*
-		##### Overall risk score
-		kubescape_cluster_riskScore{} <risk score>
+		##### Overall compliance score
+		kubescape_cluster_ComplianceScore{} <compliance score>
 
 		###### Overall resources counters
 		kubescape_cluster_count_resources_failed{} <counter>
@@ -45,7 +45,7 @@ func (mrs *mRiskScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mrs.prefix(), metricsScore), mrs.labels(), mrs.riskScore))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mrs.prefix(), metricsScore), mrs.labels(), mrs.complianceScore))
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mrs.prefix(), metricsCount, metricsResources, metricsFailed), mrs.labels(), mrs.resourcesCountFailed))
@@ -59,20 +59,20 @@ func (mrs *mRiskScore) metrics() []string {
 
 	return m
 }
-func (mrs *mRiskScore) labels() string {
+func (mrs *mComplianceScore) labels() string {
 	return ""
 }
 
-func (mrs *mRiskScore) prefix() string {
+func (mrs *mComplianceScore) prefix() string {
 	return fmt.Sprintf("%s_%s", ksMetrics, metricsCluster)
 }
 
 // ============================================ CONTROL ============================================================
 
-func (mcrs *mControlRiskScore) metrics() []string {
+func (mcrs *mControlComplianceScore) metrics() []string {
 	/*
-		# Risk score
-		kubescape_control_riskScore{name="<control name>",url="<docs url>",severity="<control severity>"} <risk score>
+		# Compliance score
+		kubescape_control_complianceScore{name="<control name>",url="<docs url>",severity="<control severity>"} <compliance score>
 
 		# Resources counters
 		kubescape_control_count_resources_failed{name="<control name>",url="<docs url>",severity="<control severity>"} <counter>
@@ -82,7 +82,7 @@ func (mcrs *mControlRiskScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mcrs.prefix(), metricsScore), mcrs.labels(), mcrs.riskScore))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mcrs.prefix(), metricsScore), mcrs.labels(), mcrs.complianceScore))
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mcrs.prefix(), metricsCount, metricsResources, metricsFailed), mcrs.labels(), mcrs.resourcesCountFailed))
@@ -91,22 +91,22 @@ func (mcrs *mControlRiskScore) metrics() []string {
 
 	return m
 }
-func (mcrs *mControlRiskScore) labels() string {
+func (mcrs *mControlComplianceScore) labels() string {
 	r := fmt.Sprintf("name=\"%s\"", mcrs.controlName) + ","
 	r += fmt.Sprintf("severity=\"%s\"", mcrs.severity) + ","
 	r += fmt.Sprintf("link=\"%s\"", mcrs.link)
 	return r
 }
-func (mcrs *mControlRiskScore) prefix() string {
+func (mcrs *mControlComplianceScore) prefix() string {
 	return fmt.Sprintf("%s_%s", ksMetrics, metricsControl)
 }
 
 // ============================================ FRAMEWORK ============================================================
 
-func (mfrs *mFrameworkRiskScore) metrics() []string {
+func (mfrs *mFrameworkComplianceScore) metrics() []string {
 	/*
 		#### Frameworks metrics
-		kubescape_framework_riskScore{name="<framework name>"} <risk score>
+		kubescape_framework_complianceScore{name="<framework name>"} <compliance score>
 
 		###### Frameworks resources counters
 		kubescape_framework_count_resources_failed{} <counter>
@@ -122,7 +122,7 @@ func (mfrs *mFrameworkRiskScore) metrics() []string {
 
 	m := []string{}
 	// overall
-	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mfrs.prefix(), metricsScore), mfrs.labels(), mfrs.riskScore))
+	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s", mfrs.prefix(), metricsScore), mfrs.labels(), mfrs.complianceScore))
 
 	// resources
 	m = append(m, toRowInMetrics(fmt.Sprintf("%s_%s_%s_%s", mfrs.prefix(), metricsCount, metricsResources, metricsFailed), mfrs.labels(), mfrs.resourcesCountFailed))
@@ -136,11 +136,11 @@ func (mfrs *mFrameworkRiskScore) metrics() []string {
 
 	return m
 }
-func (mfrs *mFrameworkRiskScore) labels() string {
+func (mfrs *mFrameworkComplianceScore) labels() string {
 	r := fmt.Sprintf("name=\"%s\"", mfrs.frameworkName)
 	return r
 }
-func (mfrs *mFrameworkRiskScore) prefix() string {
+func (mfrs *mFrameworkComplianceScore) prefix() string {
 	return fmt.Sprintf("%s_%s", ksMetrics, metricsFramework)
 }
 
@@ -193,17 +193,17 @@ func (m *Metrics) String() string {
 	return r
 }
 
-type mRiskScore struct {
+type mComplianceScore struct {
 	resourcesCountPassed  int
 	resourcesCountFailed  int
 	resourcesCountSkipped int
 	controlsCountPassed   int
 	controlsCountFailed   int
 	controlsCountSkipped  int
-	riskScore             int
+	complianceScore       int
 }
 
-type mControlRiskScore struct {
+type mControlComplianceScore struct {
 	controlName           string
 	controlID             string
 	link                  string
@@ -212,10 +212,10 @@ type mControlRiskScore struct {
 	resourcesCountPassed  int
 	resourcesCountFailed  int
 	resourcesCountSkipped int
-	riskScore             int
+	complianceScore       int
 }
 
-type mFrameworkRiskScore struct {
+type mFrameworkComplianceScore struct {
 	frameworkName         string
 	resourcesCountPassed  int
 	resourcesCountFailed  int
@@ -223,7 +223,7 @@ type mFrameworkRiskScore struct {
 	controlsCountPassed   int
 	controlsCountFailed   int
 	controlsCountSkipped  int
-	riskScore             int
+	complianceScore       int
 }
 
 type mResources struct {
@@ -236,13 +236,13 @@ type mResources struct {
 	controlsCountSkipped int
 }
 type Metrics struct {
-	rs             mRiskScore
-	listFrameworks []mFrameworkRiskScore
-	listControls   []mControlRiskScore
+	rs             mComplianceScore
+	listFrameworks []mFrameworkComplianceScore
+	listControls   []mControlComplianceScore
 	listResources  []mResources
 }
 
-func (mrs *mRiskScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
+func (mrs *mComplianceScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
 	mrs.resourcesCountSkipped = resources.Skipped()
 	mrs.resourcesCountFailed = resources.Failed()
 	mrs.resourcesCountPassed = resources.Passed()
@@ -251,7 +251,7 @@ func (mrs *mRiskScore) set(resources reportsummary.ICounters, controls reportsum
 	mrs.controlsCountSkipped = controls.Skipped()
 }
 
-func (mfrs *mFrameworkRiskScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
+func (mfrs *mFrameworkComplianceScore) set(resources reportsummary.ICounters, controls reportsummary.ICounters) {
 	mfrs.resourcesCountSkipped = resources.Skipped()
 	mfrs.resourcesCountFailed = resources.Failed()
 	mfrs.resourcesCountPassed = resources.Passed()
@@ -260,32 +260,32 @@ func (mfrs *mFrameworkRiskScore) set(resources reportsummary.ICounters, controls
 	mfrs.controlsCountSkipped = controls.Skipped()
 }
 
-func (mcrs *mControlRiskScore) set(resources reportsummary.ICounters) {
+func (mcrs *mControlComplianceScore) set(resources reportsummary.ICounters) {
 	mcrs.resourcesCountSkipped = resources.Skipped()
 	mcrs.resourcesCountFailed = resources.Failed()
 	mcrs.resourcesCountPassed = resources.Passed()
 }
-func (m *Metrics) setRiskScores(summaryDetails *reportsummary.SummaryDetails) {
+func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetails) {
 	m.rs.set(summaryDetails.NumberOfResources(), summaryDetails.NumberOfControls())
-	m.rs.riskScore = cautils.Float32ToInt(summaryDetails.GetScore())
+	m.rs.complianceScore = cautils.Float32ToInt(summaryDetails.GetScore())
 
 	for _, fw := range summaryDetails.ListFrameworks() {
-		mfrs := mFrameworkRiskScore{
-			frameworkName: fw.GetName(),
-			riskScore:     cautils.Float32ToInt(fw.GetScore()),
+		mfrs := mFrameworkComplianceScore{
+			frameworkName:   fw.GetName(),
+			complianceScore: cautils.Float32ToInt(fw.GetComplianceScore()),
 		}
 		mfrs.set(fw.NumberOfResources(), fw.NumberOfControls())
 		m.listFrameworks = append(m.listFrameworks, mfrs)
 	}
 
 	for _, control := range summaryDetails.ListControls() {
-		mcrs := mControlRiskScore{
-			controlName: control.GetName(),
-			controlID:   control.GetID(),
-			riskScore:   cautils.Float32ToInt(control.GetScore()),
-			link:        cautils.GetControlLink(control.GetID()),
-			severity:    apis.ControlSeverityToString(control.GetScoreFactor()),
-			remediation: control.GetRemediation(),
+		mcrs := mControlComplianceScore{
+			controlName:     control.GetName(),
+			controlID:       control.GetID(),
+			complianceScore: cautils.Float32ToInt(control.GetScore()),
+			link:            cautils.GetControlLink(control.GetID()),
+			severity:        apis.ControlSeverityToString(control.GetScoreFactor()),
+			remediation:     control.GetRemediation(),
 		}
 		mcrs.set(control.NumberOfResources())
 		m.listControls = append(m.listControls, mcrs)

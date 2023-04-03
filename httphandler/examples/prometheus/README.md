@@ -24,14 +24,14 @@
 
 All kubescape related metrics begin with `kubescape`
 
-> `riskScore` is the output of an algorithm calculating the risk of the vulnerability. `0` indicates there is no risk and `100` indicates highest risk. 
+> `complianceScore` is how compliant you are, where `100` indicates complete compliance and `0` means you are not compliant at all. 
 
 #### Cluster scope metrics
 
-##### Overall risk score
+##### Overall compliance score
 ```
-# Overall riskScore of the scan
-kubescape_cluster_riskScore{} <risk score>
+# Overall complianceScore of the scan
+kubescape_cluster_complianceScore{} <compliance score>
 ```
 
 ###### Overall resources counters
@@ -60,9 +60,9 @@ kubescape_cluster_count_controls_passed{} <counter>
 
 #### Frameworks metrics
 
-##### Frameworks risk score
+##### Frameworks compliance score
 ```
-kubescape_framework_riskScore{name="<framework name>"} <risk score>
+kubescape_framework_complianceScore{name="<framework name>"} <compliance score>
 ```
 
 ###### Frameworks resources counters
@@ -92,10 +92,10 @@ kubescape_framework_count_controls_passed{name="<framework name>"} <counter>
 
 #### Controls metrics
 
-##### Controls risk score
+##### Controls compliance score
 
 ```
-kubescape_control_riskScore{name="<control name>",url="<docs url>",severity="<control severity>"} <risk score>
+kubescape_control_complianceScore{name="<control name>",url="<docs url>",severity="<control severity>"} <compliance score>
 ```
 
 ###### Controls resources counters

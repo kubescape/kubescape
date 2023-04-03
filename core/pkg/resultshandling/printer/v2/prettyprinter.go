@@ -206,7 +206,7 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	row[columnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
 	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
 	row[columnSeverity] = " "
-	row[columnRiskScore] = fmt.Sprintf("%.2f%s", summaryDetails.Score, "%")
+	row[columnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.Score, "%")
 
 	return row
 }
@@ -271,9 +271,9 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 		p := "FRAMEWORKS: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (risk: %.2f), ", frameworks[i].GetName(), frameworks[i].GetScore())
+			p += fmt.Sprintf("%s (compliance: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		}
-		p += fmt.Sprintf("%s (risk: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetScore())
+		p += fmt.Sprintf("%s (compliance: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		return p
 	}
 	return ""

@@ -55,7 +55,7 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
 }
 
 func (pp *PdfPrinter) Score(score float32) {
-	fmt.Fprintf(os.Stderr, "\nOverall risk-score (0- Excellent, 100- All failed): %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap []infoStars) {
 	emptyRowCounter := 1
