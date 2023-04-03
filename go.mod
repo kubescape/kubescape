@@ -5,8 +5,8 @@ go 1.19
 require (
 	cloud.google.com/go/containeranalysis v0.6.0
 	github.com/armosec/armoapi-go v0.0.173
-	github.com/armosec/utils-go v0.0.12
-	github.com/armosec/utils-k8s-go v0.0.12
+	github.com/armosec/utils-go v0.0.14
+	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/briandowns/spinner v1.18.1
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
@@ -18,7 +18,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.24
 	github.com/kubescape/go-logger v0.0.11
-	github.com/kubescape/k8s-interface v0.0.103
+	github.com/kubescape/k8s-interface v0.0.116
 	github.com/kubescape/opa-utils v0.0.243
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.250
@@ -65,6 +65,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.1.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.0.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization v1.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2 v2.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v2 v2.2.0 // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
