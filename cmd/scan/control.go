@@ -107,7 +107,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if !scanInfo.VerboseMode {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
-			if results.GetComplianceScore() > float32(scanInfo.FailThreshold) {
+			if results.GetComplianceScore() < float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan compliance score is below permitted threshold", helpers.String("compliance score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
 			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
