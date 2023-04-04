@@ -28,7 +28,7 @@ func (p *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
 }
 
 func (p *PrometheusPrinter) Score(score float32) {
-	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
+	fmt.Printf("\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
 func (p *PrometheusPrinter) printResources(allResources map[string]workloadinterface.IMetadata, resourcesIDs *reporthandling.ResourcesIDs, frameworkName, controlName string) {
