@@ -32,7 +32,7 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
-	fmt.Printf("\n# Overall risk-score (0- Excellent, 100- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
+	fmt.Printf("\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
 func (pp *PrometheusPrinter) generatePrometheusFormat(
@@ -41,7 +41,7 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	summaryDetails *reportsummary.SummaryDetails) *Metrics {
 
 	m := &Metrics{}
-	m.setRiskScores(summaryDetails)
+	m.setComplianceScores(summaryDetails)
 	// m.setResourcesCounters(resources, results)
 
 	return m
