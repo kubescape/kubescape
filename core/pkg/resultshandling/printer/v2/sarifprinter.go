@@ -260,7 +260,6 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 					if index >= len(delta)-1 || delta[index+1][0] == '=' {
 						addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
 					}
-					break
 				case '-':
 					num, _ := strconv.Atoi(seg[1:])
 					for num > len(file[endLine-1]) {
@@ -271,7 +270,6 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 					if index >= len(delta)-1 || delta[index+1][0] == '=' {
 						addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
 					}
-					break
 				case '=':
 					num, _ := strconv.Atoi(seg[1:])
 					for num > len(file[startLine-1]) {
@@ -282,7 +280,6 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 					endLine = startLine
 					endColumn = startColumn
 					text = ""
-					break
 				}
 			}
 		}
