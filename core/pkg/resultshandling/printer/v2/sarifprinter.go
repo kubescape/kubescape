@@ -210,6 +210,64 @@ func addFix(result *sarif.Result, filepath string, startLine int, startColumn in
 	)
 }
 
+func calculateMove(str string, file []string, endColumn int, endLine int) (int, int, bool) {
+	num, err := strconv.Atoi(str)
+	if err != nil {
+		logger.L().Debug("failed to get move from string "+str, helpers.Error(err))
+		return 0, 0, false
+	}
+	for num+endColumn-1 > len(file[endLine-1]) {
+		num -= len(file[endLine-1]) - endColumn + 2
+		endLine++
+		endColumn = 1
+	}
+	endColumn += num
+	return endLine, endColumn, true
+}
+
+func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Diff, result *sarif.Result, filepath string, fileAsString string) {
+	file := strings.Split(fileAsString, "\n")
+	text := ""
+	startLine := 1
+	startColumn := 1
+	endLine := 1
+	endColumn := 1
+
+	delta := strings.Split(dmp.DiffToDelta(diffs), "\t")
+	for index, seg := range delta {
+		switch seg[0] {
+		case '+':
+			var err error
+			text, err = url.QueryUnescape(seg[1:])
+			if err != nil {
+				logger.L().Debug("failed to unescape string", helpers.Error(err))
+				continue
+			}
+			if index >= len(delta)-1 || delta[index+1][0] == '=' {
+				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
+			}
+		case '-':
+			var ok bool
+			endLine, endColumn, ok = calculateMove(seg[1:], file, endColumn, endLine)
+			if !ok {
+				continue
+			}
+			if index >= len(delta)-1 || delta[index+1][0] == '=' {
+				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
+			}
+		case '=':
+			var ok bool
+			endLine, endColumn, ok = calculateMove(seg[1:], file, endColumn, endLine)
+			if !ok {
+				continue
+			}
+			startLine = endLine
+			startColumn = endColumn
+			text = ""
+		}
+	}
+}
+
 func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string) {
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
@@ -244,44 +302,7 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 
 			dmp := diffmatchpatch.New()
 			diffs := dmp.DiffMain(fileAsString, fixedYamlString, false)
-
-			file := strings.Split(fileAsString, "\n")
-			text := ""
-			startLine := 1
-			startColumn := 1
-			endLine := 1
-			endColumn := 1
-
-			delta := strings.Split(dmp.DiffToDelta(diffs), "\t")
-			for index, seg := range delta {
-				switch seg[0] {
-				case '+':
-					text, _ = url.QueryUnescape(seg[1:])
-					if index >= len(delta)-1 || delta[index+1][0] == '=' {
-						addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
-					}
-				case '-':
-					num, _ := strconv.Atoi(seg[1:])
-					for num > len(file[endLine-1]) {
-						num -= len(file[endLine-1]) + 1
-						endLine++
-					}
-					endColumn = num + 1
-					if index >= len(delta)-1 || delta[index+1][0] == '=' {
-						addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
-					}
-				case '=':
-					num, _ := strconv.Atoi(seg[1:])
-					for num > len(file[startLine-1]) {
-						num -= len(file[startLine-1]) + 1
-						startLine++
-					}
-					startColumn = num + 1
-					endLine = startLine
-					endColumn = startColumn
-					text = ""
-				}
-			}
+			collectDiffs(dmp, diffs, result, filepath, fileAsString)
 		}
 	}
 }
