@@ -41,7 +41,7 @@ func Test_collectDiffs(t *testing.T) {
 		text        []string
 	}{
 		{
-			"Collect Diffs should work for add, delete and equal",
+			"Collect diffs should work for fix object in sarif",
 
 			`apiVersion: v1
 kind: Pod
@@ -94,15 +94,15 @@ spec:
 			result := run.CreateResultForRule("0")
 			collectDiffs(dmp, diffs, result, "", testCase.fileString)
 			if len(result.Fixes) != testCase.fixesNum {
-				t.Errorf("wrong Number of fixes, got %d, want %d", len(result.Fixes), testCase.fixesNum)
+				t.Errorf("wrong number of fixes, got %d, want %d", len(result.Fixes), testCase.fixesNum)
 			}
 			for index, fix := range result.Fixes {
 				if len(fix.ArtifactChanges) != 1 {
-					t.Errorf("wrong Number of artifactChanges in fix %d, got %d, want %d", index, len(fix.ArtifactChanges), 1)
+					t.Errorf("wrong number of artifactChanges in fix %d, got %d, want %d", index, len(fix.ArtifactChanges), 1)
 				}
 				replacements := fix.ArtifactChanges[0].Replacements
 				if len(replacements) != 1 {
-					t.Errorf("wrong Number of replacements in fix %d, got %d, want %d", index, len(replacements), 1)
+					t.Errorf("wrong number of replacements in fix %d, got %d, want %d", index, len(replacements), 1)
 				}
 				startLine := *replacements[0].DeletedRegion.StartLine
 				startColumn := *replacements[0].DeletedRegion.StartColumn
@@ -110,11 +110,11 @@ spec:
 				endColumn := *replacements[0].DeletedRegion.EndColumn
 				location := testCase.region[index]
 				if location[0] != startLine || location[1] != startColumn || location[2] != endLine || location[3] != endColumn {
-					t.Errorf("wrong delete region in fix %d, got (%d, %d, %d, %d) want (%d, %d, %d, %d)",
+					t.Errorf("wrong deleted region in fix %d, got (%d, %d, %d, %d), want (%d, %d, %d, %d)",
 						index, startLine, startColumn, endLine, endColumn, location[0], location[1], location[2], location[3])
 				}
 				if testCase.text[index] != *replacements[0].InsertedContent.Text {
-					t.Errorf("wrong add text in fix %d, got (%s) want (%s)",
+					t.Errorf("wrong inserted text in fix %d, got (%s), want (%s)",
 						index, *replacements[0].InsertedContent.Text, testCase.text[index])
 				}
 			}
