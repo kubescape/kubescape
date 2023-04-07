@@ -319,7 +319,10 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 		return 0, false
 	}
 
-	docIndex, _ := strconv.Atoi(splittedPath[1])
+	docIndex, err := strconv.Atoi(splittedPath[1])
+	if err != nil {
+		return 0, false
+	}
 	return docIndex, true
 }
 
