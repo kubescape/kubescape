@@ -17,7 +17,14 @@ runs:
   using: "composite"
   steps:
     - run: |
-        SUB='-rc'
+        if [[ -z "${{ inputs.ORIGINAL_TAG }}" ]]; then
+          echo "The value of ORIGINAL_TAG is ${{ inputs.ORIGINAL_TAG }}"
+          echo "Setting the value of ORIGINAL_TAG to ${{ github.ref_name }}"
+          echo ORIGINAL_TAG=${{ github.ref_name }}" >> $GITHUB_ENV
+        fi
+      shell: bash
+
+    - run: |
         if [[ "${{ inputs.ORIGINAL_TAG }}" == *"${{ inputs.SUB_STRING }}"* ]]; then
             echo "Release candidate tag found."
         else
