@@ -7,8 +7,11 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_getUIPrinter(t *testing.T) {
@@ -104,4 +107,72 @@ func Test_getUIPrinter(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetSensorHandler(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	t.Run("should return mock sensor if not k8s interface is provided", func(t *testing.T) {
+		t.Parallel()
+
+		scanInfo := &cautils.ScanInfo{}
+		var k8s *k8sinterface.KubernetesApi
+
+		sensor := getHostSensorHandler(ctx, scanInfo, k8s)
+		require.NotNil(t, sensor)
+
+		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
+		require.True(t, isMock)
+	})
+
+	t.Run("should return mock sensor if the sensor is not enabled", func(t *testing.T) {
+		t.Parallel()
+
+		scanInfo := &cautils.ScanInfo{}
+		k8s := &k8sinterface.KubernetesApi{}
+
+		sensor := getHostSensorHandler(ctx, scanInfo, k8s)
+		require.NotNil(t, sensor)
+
+		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
+		require.True(t, isMock)
+	})
+
+	t.Run("should return mock sensor if the sensor is disabled", func(t *testing.T) {
+		t.Parallel()
+
+		falseFlag := cautils.NewBoolPtr(nil)
+		falseFlag.SetBool(false)
+		scanInfo := &cautils.ScanInfo{
+			HostSensorEnabled: falseFlag,
+		}
+		k8s := &k8sinterface.KubernetesApi{}
+
+		sensor := getHostSensorHandler(ctx, scanInfo, k8s)
+		require.NotNil(t, sensor)
+
+		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
+		require.True(t, isMock)
+	})
+
+	t.Run("should return mock sensor if the sensor is enabled, but can't deploy (nil)", func(t *testing.T) {
+		t.Parallel()
+
+		falseFlag := cautils.NewBoolPtr(nil)
+		falseFlag.SetBool(true)
+		scanInfo := &cautils.ScanInfo{
+			HostSensorEnabled: falseFlag,
+		}
+		var k8s *k8sinterface.KubernetesApi
+
+		sensor := getHostSensorHandler(ctx, scanInfo, k8s)
+		require.NotNil(t, sensor)
+
+		_, isMock := sensor.(*hostsensorutils.HostSensorHandlerMock)
+		require.True(t, isMock)
+	})
+
+	// TODO(fredbi): need to share the k8s client mock to test a happy path / deployment failure path
 }

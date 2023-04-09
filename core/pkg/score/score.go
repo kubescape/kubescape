@@ -29,7 +29,7 @@ const (
 
 func (su *ScoreWrapper) Calculate(reportVersion PostureReportVersion) error {
 	if reportVersion == EPostureReportV2 {
-		return su.scoreUtil.CalculatePostureReportV2(su.opaSessionObj.Report)
+		return su.scoreUtil.SetPostureReportComplianceScores(su.opaSessionObj.Report)
 	}
 
 	return fmt.Errorf("unsupported score calculator")

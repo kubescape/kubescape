@@ -12,12 +12,12 @@ import (
 )
 
 const (
-	columnSeverity      = iota
-	columnName          = iota
-	columnCounterFailed = iota
-	columnCounterAll    = iota
-	columnRiskScore     = iota
-	_rowLen             = iota
+	columnSeverity        = iota
+	columnName            = iota
+	columnCounterFailed   = iota
+	columnCounterAll      = iota
+	columnComplianceScore = iota
+	_rowLen               = iota
 )
 
 func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
@@ -36,7 +36,7 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	}
 	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
-	row[columnRiskScore] = getRiskScoreColumn(controlSummary, infoToPrintInfo)
+	row[columnComplianceScore] = getComplianceScoreColumn(controlSummary, infoToPrintInfo)
 
 	return row
 }
@@ -50,7 +50,7 @@ func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo
 	return ""
 }
 
-func getRiskScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
+func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
@@ -109,7 +109,7 @@ func getControlTableHeaders() []string {
 	headers[columnCounterFailed] = "FAILED RESOURCES"
 	headers[columnCounterAll] = "ALL RESOURCES"
 	headers[columnSeverity] = "SEVERITY"
-	headers[columnRiskScore] = "% RISK-SCORE"
+	headers[columnComplianceScore] = "% COMPLIANCE-SCORE"
 	return headers
 }
 
@@ -119,6 +119,6 @@ func getColumnsAlignments() []int {
 	alignments[columnCounterFailed] = tablewriter.ALIGN_CENTER
 	alignments[columnCounterAll] = tablewriter.ALIGN_CENTER
 	alignments[columnSeverity] = tablewriter.ALIGN_LEFT
-	alignments[columnRiskScore] = tablewriter.ALIGN_CENTER
+	alignments[columnComplianceScore] = tablewriter.ALIGN_CENTER
 	return alignments
 }

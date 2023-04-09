@@ -14,6 +14,12 @@ import (
 // =======================================================================================================================
 // ======================================== DownloadReleasedPolicy =======================================================
 // =======================================================================================================================
+var (
+	_ IPolicyGetter         = &DownloadReleasedPolicy{}
+	_ IExceptionsGetter     = &DownloadReleasedPolicy{}
+	_ IAttackTracksGetter   = &DownloadReleasedPolicy{}
+	_ IControlsInputsGetter = &DownloadReleasedPolicy{}
+)
 
 // Use gitregostore to get policies from github release
 type DownloadReleasedPolicy struct {

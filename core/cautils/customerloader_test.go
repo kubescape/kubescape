@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -267,4 +268,34 @@ func TestUpdateCloudURLs(t *testing.T) {
 	assert.NotEqual(t, co.CloudAPIURL, mockCloudAPIURL)
 	updateCloudURLs(co)
 	assert.Equal(t, co.CloudAPIURL, mockCloudAPIURL)
+}
+
+func Test_initializeCloudAPI(t *testing.T) {
+	type args struct {
+		c ITenantConfig
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "test",
+			args: args{
+				c: mockClusterConfig(),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			initializeCloudAPI(tt.args.c)
+			cloud := getter.GetKSCloudAPIConnector()
+			assert.Equal(t, tt.args.c.GetCloudAPIURL(), cloud.GetCloudAPIURL())
+			assert.Equal(t, tt.args.c.GetCloudAuthURL(), cloud.GetCloudAuthURL())
+			assert.Equal(t, tt.args.c.GetCloudUIURL(), cloud.GetCloudUIURL())
+			assert.Equal(t, tt.args.c.GetCloudReportURL(), cloud.GetCloudReportURL())
+			assert.Equal(t, tt.args.c.GetAccountID(), cloud.GetAccountID())
+			assert.Equal(t, tt.args.c.GetClientID(), cloud.GetClientID())
+			assert.Equal(t, tt.args.c.GetSecretKey(), cloud.GetSecretKey())
+		})
+	}
 }

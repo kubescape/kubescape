@@ -74,7 +74,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	hostSensorHandler := getHostSensorHandler(ctx, scanInfo, k8s)
 	if err := hostSensorHandler.Init(ctxHostScanner); err != nil {
 		logger.L().Ctx(ctxHostScanner).Error("failed to init host scanner", helpers.Error(err))
-		hostSensorHandler = &hostsensorutils.HostSensorHandlerMock{}
+		hostSensorHandler = hostsensorutils.NewHostSensorHandlerMock()
 	}
 	spanHostScanner.End()
 
@@ -124,6 +124,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	logger.L().Info("Kubescape scanner starting")
 
 	// ===================== Initialization =====================
+	scanInfo.Init(ctxInit) // initialize scan info
 
 	interfaces := getInterfaces(ctxInit, scanInfo)
 
@@ -157,7 +158,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	// ===================== policies & resources =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies & resources")
 	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
-	scanData, err := policyHandler.CollectResources(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
+	scanData, err := policyHandler.CollectResources(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo, cautils.NewProgressHandler(""))
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
@@ -171,7 +172,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
-	if err := reportResults.ProcessRulesListenner(ctxOpa, cautils.NewProgressHandler("")); err != nil {
+	if err := reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 		// TODO - do something
 		return resultsHandling, fmt.Errorf("%w", err)
 	}

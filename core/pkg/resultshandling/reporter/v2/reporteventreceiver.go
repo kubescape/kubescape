@@ -70,16 +70,14 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 		return nil
 	}
 
-	err := report.prepareReport(opaSessionObj)
-	if err == nil {
-		report.generateMessage()
-	} else {
-		err = fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.GetURL(), err.Error())
+	if err := report.prepareReport(opaSessionObj); err != nil {
+		return fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.GetURL(), err.Error())
 	}
 
+	report.generateMessage()
 	logger.L().Debug("", helpers.String("account ID", report.customerGUID))
 
-	return err
+	return nil
 }
 
 func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
@@ -258,7 +256,9 @@ func (report *ReportEventReceiver) generateMessage() {
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {
-	if report.message != "" {
+
+	// print if logger level is lower than warning (debug/info)
+	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
 		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 	}
 }

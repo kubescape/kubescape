@@ -5,8 +5,8 @@ go 1.19
 require (
 	cloud.google.com/go/containeranalysis v0.6.0
 	github.com/armosec/armoapi-go v0.0.173
-	github.com/armosec/utils-go v0.0.12
-	github.com/armosec/utils-k8s-go v0.0.12
+	github.com/armosec/utils-go v0.0.14
+	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/briandowns/spinner v1.18.1
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.13.0
@@ -18,8 +18,8 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.24
 	github.com/kubescape/go-logger v0.0.11
-	github.com/kubescape/k8s-interface v0.0.103
-	github.com/kubescape/opa-utils v0.0.242
+	github.com/kubescape/k8s-interface v0.0.116
+	github.com/kubescape/opa-utils v0.0.243
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.250
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -35,6 +35,7 @@ require (
 	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.11.2
 	golang.org/x/mod v0.6.0
+	golang.org/x/sync v0.1.0
 	google.golang.org/api v0.103.0
 	google.golang.org/genproto v0.0.0-20230106154932-a12b697841d9
 	google.golang.org/protobuf v1.28.1
@@ -64,6 +65,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/azcore v1.1.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.2.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/internal v1.0.0 // indirect
+	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization v1.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/authorization/armauthorization/v2 v2.0.0 // indirect
 	github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/containerservice/armcontainerservice/v2 v2.2.0 // indirect
 	github.com/Azure/go-autorest v14.2.0+incompatible // indirect
@@ -338,7 +340,6 @@ require (
 	golang.org/x/exp v0.0.0-20230116083435-1de6713980de // indirect
 	golang.org/x/net v0.5.0 // indirect
 	golang.org/x/oauth2 v0.3.0 // indirect
-	golang.org/x/sync v0.1.0 // indirect
 	golang.org/x/sys v0.4.0 // indirect
 	golang.org/x/term v0.4.0 // indirect
 	golang.org/x/text v0.6.0 // indirect

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kubescape/kubescape/v2/internal/testutils"
+	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 )
 
@@ -32,7 +34,7 @@ func TestReleasedPolicy(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, controlIDs)
 
-			sampleSize := min(len(controlIDs), 10)
+			sampleSize := int(min(int64(len(controlIDs)), 10))
 
 			for _, toPin := range controlIDs[:sampleSize] {
 				// Example of a returned "ID": `C-0154|Ensure_that_the_--client-cert-auth_argument_is_set_to_true|`
@@ -128,14 +130,6 @@ func TestReleasedPolicy(t *testing.T) {
 	})
 }
 
-func min(a, b int) int {
-	if a > b {
-		return b
-	}
-
-	return a
-}
-
 func hydrateReleasedPolicyFromMock(t testing.TB, p *DownloadReleasedPolicy) {
 	regoFile := testRegoFile("policy")
 
@@ -161,10 +155,10 @@ func hydrateReleasedPolicyFromMock(t testing.TB, p *DownloadReleasedPolicy) {
 	require.NoError(t, err)
 
 	require.NoError(t,
-		json.Unmarshal(buf, p.gs),
+		jsoniter.Unmarshal(buf, p.gs),
 	)
 }
 
 func testRegoFile(framework string) string {
-	return filepath.Join(currentDir(), "testdata", fmt.Sprintf("%s.json", framework))
+	return filepath.Join(testutils.CurrentDir(), "testdata", fmt.Sprintf("%s.json", framework))
 }

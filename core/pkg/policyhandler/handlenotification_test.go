@@ -249,12 +249,12 @@ func Test_getResources(t *testing.T) {
 	policyIdentifier := []cautils.PolicyIdentifier{{}}
 
 	assert.NotPanics(t, func() {
-		policyHandler.getResources(context.TODO(), policyIdentifier, objSession)
+		policyHandler.getResources(context.TODO(), policyIdentifier, objSession, cautils.NewProgressHandler(""))
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
-		policyHandler.getResources(context.TODO(), policyIdentifier, objSession)
+		policyHandler.getResources(context.TODO(), policyIdentifier, objSession, cautils.NewProgressHandler(""))
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }

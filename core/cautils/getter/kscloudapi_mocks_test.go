@@ -1,9 +1,16 @@
 package getter
 
 import (
+	"os"
+	"path/filepath"
+	"testing"
+
 	"github.com/armosec/armoapi-go/armotypes"
+	jsoniter "github.com/json-iterator/go"
+	"github.com/kubescape/kubescape/v2/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
+	"github.com/stretchr/testify/require"
 )
 
 func mockAttackTracks() []v1alpha1.AttackTrack {
@@ -263,11 +270,25 @@ func mockCustomerConfig(cluster, scope string) func() *armotypes.CustomerConfig 
 	}
 }
 
-func mockLoginResponse() *FeLoginResponse {
-	return &FeLoginResponse{
+func mockLoginResponse() *feLoginResponse {
+	return &feLoginResponse{
 		Token:        "access-token",
 		RefreshToken: "refresh-token",
 		Expires:      "expiry-time",
 		ExpiresIn:    123,
 	}
+}
+
+func mockPostureReport(t testing.TB, reportID, cluster string) *PostureReport {
+	fixture := filepath.Join(testutils.CurrentDir(), "testdata", "mock_posture_report.json")
+
+	buf, err := os.ReadFile(fixture)
+	require.NoError(t, err)
+
+	var report PostureReport
+	require.NoError(t,
+		jsoniter.Unmarshal(buf, &report),
+	)
+
+	return &report
 }

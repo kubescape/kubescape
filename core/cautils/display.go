@@ -6,6 +6,8 @@ import (
 
 	spinnerpkg "github.com/briandowns/spinner"
 	"github.com/fatih/color"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/mattn/go-isatty"
 	"github.com/schollz/progressbar/v3"
 )
@@ -22,6 +24,10 @@ var DescriptionDisplay = color.New(color.Faint, color.FgWhite).FprintfFunc()
 var spinner *spinnerpkg.Spinner
 
 func StartSpinner() {
+	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
+		return
+	}
+
 	if spinner != nil {
 		if !spinner.Active() {
 			spinner.Start()
@@ -42,8 +48,8 @@ func StopSpinner() {
 }
 
 type ProgressHandler struct {
-	title string
 	pb    *progressbar.ProgressBar
+	title string
 }
 
 func NewProgressHandler(title string) *ProgressHandler {
@@ -51,11 +57,11 @@ func NewProgressHandler(title string) *ProgressHandler {
 }
 
 func (p *ProgressHandler) Start(allSteps int) {
-	if isatty.IsTerminal(os.Stderr.Fd()) {
-		p.pb = progressbar.Default(int64(allSteps), p.title)
-	} else {
+	if !isatty.IsTerminal(os.Stderr.Fd()) || helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		p.pb = progressbar.DefaultSilent(int64(allSteps), p.title)
+		return
 	}
+	p.pb = progressbar.Default(int64(allSteps), p.title)
 }
 
 func (p *ProgressHandler) ProgressJob(step int, message string) {

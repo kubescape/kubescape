@@ -7,7 +7,13 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
+// HostSensorHandlerMock is a noop sensor when the host scanner is disabled.
 type HostSensorHandlerMock struct {
+}
+
+// NewHostSensorHandlerMock yields a dummy host sensor.
+func NewHostSensorHandlerMock() *HostSensorHandlerMock {
+	return &HostSensorHandlerMock{}
 }
 
 func (hshm *HostSensorHandlerMock) Init(_ context.Context) error {

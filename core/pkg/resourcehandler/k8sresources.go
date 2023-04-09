@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 
@@ -56,7 +57,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 
 	// get k8s resources
@@ -143,7 +144,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	// check that controls use cloud resources
 	if len(cloudResources) > 0 {
-		err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources)
+		err := k8sHandler.collectCloudResources(ctx, sessionObj, allResources, ksResourceMap, cloudResources, progressListener)
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			logger.L().Debug("failed to collect cloud data", helpers.Error(err))
@@ -153,7 +154,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	return k8sResourcesMap, allResources, ksResourceMap, nil
 }
 
-func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources, cloudResources []string) error {
+func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
 	clusterName := cautils.ClusterName
 	provider := cloudsupport.GetCloudProvider(clusterName)
 	if provider == "" {
@@ -165,7 +166,17 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 	}
 	logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
+	logger.L().Info("Downloading cloud resources")
+	// start progressbar during pull of cloud resources (this can take a while).
+	if progressListener != nil {
+		progressListener.Start(len(cloudResources))
+		defer progressListener.Stop()
+	}
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
+		// set way to progress
+		if progressListener != nil {
+			progressListener.ProgressJob(1, fmt.Sprintf("Cloud Resource: %s", resourceKind))
+		}
 		if !cloudResourceRequired(cloudResources, resourceKind) {
 			continue
 		}
@@ -186,6 +197,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		allResources[wl.GetID()] = wl
 		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
+	logger.L().Success("Downloaded cloud resources")
 
 	// get api server info resource
 	if cloudResourceRequired(cloudResources, string(cloudsupport.TypeApiServerInfo)) {
