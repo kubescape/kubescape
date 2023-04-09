@@ -20,7 +20,7 @@ type FixHandler struct {
 
 // ResourceFixInfo is a struct that holds the information about the resource that needs to be fixed
 type ResourceFixInfo struct {
-	YamlExpressions map[string]*armotypes.FixPath
+	YamlExpressions map[string]armotypes.FixPath
 	Resource        *reporthandling.Resource
 	FilePath        string
 	DocumentIndex   int

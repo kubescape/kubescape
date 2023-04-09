@@ -155,7 +155,7 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 		rfi := ResourceFixInfo{
 			FilePath:        absolutePath,
 			Resource:        resourceObj,
-			YamlExpressions: make(map[string]*armotypes.FixPath, 0),
+			YamlExpressions: make(map[string]armotypes.FixPath, 0),
 			DocumentIndex:   documentIndex,
 		}
 
@@ -185,7 +185,7 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 
 		i := 1
 		for _, fixPath := range resourceFixInfo.YamlExpressions {
-			sb.WriteString(fmt.Sprintf("\t%d) %s = %s\n", i, (*fixPath).Path, (*fixPath).Value))
+			sb.WriteString(fmt.Sprintf("\t%d) %s = %s\n", i, fixPath.Path, fixPath.Value))
 			i++
 		}
 		sb.WriteString("\n------\n")
@@ -302,7 +302,7 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 			}
 
 			yamlExpression := fixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
-			rfi.YamlExpressions[yamlExpression] = &rulePaths.FixPath
+			rfi.YamlExpressions[yamlExpression] = rulePaths.FixPath
 		}
 	}
 }
