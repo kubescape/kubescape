@@ -10,6 +10,10 @@ on:
         description: 'Client name'
         required: true
         type: string
+      UNIT_TESTS_PATH:
+        required: false
+        type: string
+        default: "./..."
 jobs:
   scanners:
     env:
@@ -57,6 +61,21 @@ jobs:
           command: test --all-projects
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+      - name: Test coverage
+        id: unit-test
+        run: go test -v ${{ inputs.UNIT_TESTS_PATH }} -covermode=count -coverprofile=coverage.out
+
+      - name: Convert coverage count to lcov format
+        uses: jandelgado/gcov2lcov-action@v1
+        
+      - name: Submit coverage tests to Coveralls
+        continue-on-error: true
+        uses: coverallsapp/github-action@v1
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: coverage.lcov
+
       - name: Comment results to PR
         continue-on-error: true # Warning: This might break opening PRs from forks
         uses: peter-evans/create-or-update-comment@5adcb0bb0f9fb3f95ef05400558bdb3f329ee808 # ratchet:peter-evans/create-or-update-comment@v2.1.0
