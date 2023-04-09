@@ -37,7 +37,7 @@ func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessio
 		CustomerGUID:         report.customerGUID,
 		ClusterName:          report.clusterName,
 		ReportID:             report.reportID,
-		ReportGenerationTime: opaSessionObj.Report.ReportGenerationTime,
+		ReportGenerationTime: report.reportTime,
 		SummaryDetails:       opaSessionObj.Report.SummaryDetails,
 		Attributes:           opaSessionObj.Report.Attributes,
 		ClusterAPIServerInfo: opaSessionObj.Report.ClusterAPIServerInfo,
