@@ -16,7 +16,7 @@ You can also
 
 * [Install on windows](#install-on-windows)
 * [Install on macOS](#install-on-macos)
-* [Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix)
+* [Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix) 
 
 ## Run your first scan
 
