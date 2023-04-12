@@ -27,3 +27,9 @@ jobs:
           workflow: release.yml
           repo: kubescape/homebrew-tap
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+      - name: Invoke workflow to update github action
+        uses: benc-uk/workflow-dispatch@v1
+        with:
+          workflow: release.yml
+          repo: kubescape/github-action
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
