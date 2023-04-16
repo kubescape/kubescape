@@ -78,12 +78,12 @@ func (drp *DownloadReleasedPolicy) ListControls() ([]string, error) {
 	}
 	var controlsFrameworksList [][]string
 	for _, control := range controls {
-		controlsFrameworksList = append(controlsFrameworksList, control.FrameworkNames)
+		controlsFrameworksList = append(controlsFrameworksList, drp.gs.GetOpaFrameworkListByControlID(control.ControlID))
 	}
 	controlsNamesWithIDsandFrameworksList := make([]string, len(controlsIDsList))
 	// by design all slices have the same lengt
 	for i := range controlsIDsList {
-		controlsNamesWithIDsandFrameworksList[i] = fmt.Sprintf("%v|%v|%v", controlsIDsList[i], controlsNamesList[i], strings.Join(controlsFrameworksList[i], ","))
+		controlsNamesWithIDsandFrameworksList[i] = fmt.Sprintf("%v|%v|%v", controlsIDsList[i], controlsNamesList[i], strings.Join(controlsFrameworksList[i], ", "))
 	}
 	return controlsNamesWithIDsandFrameworksList, nil
 }
