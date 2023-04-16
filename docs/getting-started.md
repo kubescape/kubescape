@@ -5,18 +5,19 @@ Kubescape can run as a command line tool on a client, as an operator inside a cl
 The best way to get started with Kubescape is to download it to the machine you use to manage your Kubernetes cluster.
 
 ## Install Kubescape
-
-```sh
-curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
-```
-
 (We're a security product; please read the file before you run it!)
-
-You can also 
-
-* [Install on windows](#install-on-windows)
-* [Install on macOS](#install-on-macos)
-* [Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix) 
+* [Install on Linux / macOS (X86_64 or ARM64 (M1/M2))](https://github.com/kubescape/kubescape/wiki/Installation#x86_64-or-arm64-m1m2-linux--macos)
+* [Install on Windows (X86_64)](https://github.com/kubescape/kubescape/wiki/Installation#x86_64-windows)
+* [Install on openSUSE](https://github.com/kubescape/kubescape/wiki/Installation#opensuse)
+* [Install on Arch Linux](https://github.com/kubescape/kubescape/wiki/Installation#arch)
+* [Install on Ubuntu](https://github.com/kubescape/kubescape/wiki/Installation#ubuntu)
+* [Install on Other Debian-based or RPM-based Linux Distros](https://software.opensuse.org/download.html?project=home%3Akubescape&package=kubescape)
+* [Install on NixOS or Linux/macOS via nix](https://github.com/kubescape/kubescape/wiki/Installation#nixos-or-with-nix) 
+* [Install with Homebrew](https://github.com/kubescape/kubescape/wiki/Installation#homebrew)
+* [Install with Chocolatey](https://github.com/kubescape/kubescape/wiki/Installation#chocolatey)
+* [Install with Scoop](https://scoop.sh/#/apps?q=kubescape&s=0&d=1&o=true&id=1f5ae05eaafe3e7a26505f0889101e0da91ffe91)
+* [Install with Krew](https://github.com/kubescape/kubescape/wiki/Installation#krew)
+* [Install with Snap](https://snapcraft.io/cli-kubescape)
 
 ## Run your first scan
 
@@ -235,61 +236,3 @@ Experiment with Kubescape in the [Kubescape playground](https://killercoda.com/s
 * Customize control configurations: 
   - [Kubescape CLI](https://youtu.be/955psg6TVu4) 
   - [ARMO Platform](https://youtu.be/lIMVSVhH33o)
-
-## Other installation methods
-
-The `curl` install method will work on all platforms, but you may wish to use a native method to install Kubescape.
-
-### Install on Windows
-
-You must have PowerShell v5.0 or higher installed.
-
-``` powershell
-iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex
-```
-
-If you get an error, you may need to change the execution policy:
-
-``` powershell
-Set-ExecutionPolicy RemoteSigned -scope CurrentUser
-```
-
-### Install on macOS
-
-You can install Kubescape via [Homebrew](https://brew.sh/):
-
-```sh
-brew tap kubescape/tap
-brew install kubescape-cli
-```
-</details>
-
-### Install on NixOS or with nix
-
-_This method is community-supported.  If you are having trouble, please reach out to [NixOS support](https://nixos.wiki/wiki/Support)_
-
-You can use `nix` on Linux or macOS.
-
-Try it out in an ephemeral shell: `nix-shell -p kubescape`
-
-NixOS:
-
-```
-  # your other config ...
-  environment.systemPackages = with pkgs; [
-    # your other packages ...
-    kubescape
-  ];
-```
-
-home-manager:
-
-```
-  # your other config ...
-  home.packages = with pkgs; [
-    # your other packages ...
-    kubescape
-  ];
-```
-
-Or, to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`

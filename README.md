@@ -37,7 +37,7 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 
 Learn more about:
 
-* [Installing Kubescape](docs/getting-started.md#install-kubescape)
+* [Installing Kubescape](https://github.com/kubescape/kubescape/wiki/Installation)
 * [Running your first scan](docs/getting-started.md#run-your-first-scan)
 * [Usage](docs/getting-started.md#examples)
 * [Architecture](docs/architecture.md)
