@@ -118,7 +118,8 @@ type ScanInfo struct {
 	IncludeNamespaces     string             //
 	InputPatterns         []string           // Yaml files input patterns
 	Silent                bool               // Silent mode - Do not print progress logs
-	FailThreshold         float32            // Failure score threshold
+	FailThreshold         float32            // DEPRECATED - Failure score threshold
+	ComplianceThreshold   float32            // Compliance score threshold
 	FailThresholdSeverity string             // Severity at and above which the command should fail
 	Submit                bool               // Submit results to Kubescape Cloud BE
 	CreateAccount         bool               // Create account in Kubescape Cloud BE if no account found in local cache
@@ -250,6 +251,7 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 	metadata.ScanMetadata.KubescapeVersion = BuildNumber
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
+	metadata.ScanMetadata.ComplianceThreshold = scanInfo.ComplianceThreshold
 	metadata.ScanMetadata.HostScanner = scanInfo.HostSensorEnabled.GetBool()
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
