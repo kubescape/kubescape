@@ -5,19 +5,14 @@ Kubescape can run as a command line tool on a client, as an operator inside a cl
 The best way to get started with Kubescape is to download it to the machine you use to manage your Kubernetes cluster.
 
 ## Install Kubescape
+
+```sh
+curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
+```
+
 (We're a security product; please read the file before you run it!)
-* [Install on Linux / macOS (X86_64 or ARM64 (M1/M2))](https://github.com/kubescape/kubescape/wiki/Installation#x86_64-or-arm64-m1m2-linux--macos)
-* [Install on Windows (X86_64)](https://github.com/kubescape/kubescape/wiki/Installation#x86_64-windows)
-* [Install on openSUSE](https://github.com/kubescape/kubescape/wiki/Installation#opensuse)
-* [Install on Arch Linux](https://github.com/kubescape/kubescape/wiki/Installation#arch)
-* [Install on Ubuntu](https://github.com/kubescape/kubescape/wiki/Installation#ubuntu)
-* [Install on Other Debian-based or RPM-based Linux Distros](https://software.opensuse.org/download.html?project=home%3Akubescape&package=kubescape)
-* [Install on NixOS or Linux/macOS via nix](https://github.com/kubescape/kubescape/wiki/Installation#nixos-or-with-nix) 
-* [Install with Homebrew](https://github.com/kubescape/kubescape/wiki/Installation#homebrew)
-* [Install with Chocolatey](https://github.com/kubescape/kubescape/wiki/Installation#chocolatey)
-* [Install with Scoop](https://scoop.sh/#/apps?q=kubescape&s=0&d=1&o=true&id=1f5ae05eaafe3e7a26505f0889101e0da91ffe91)
-* [Install with Krew](https://github.com/kubescape/kubescape/wiki/Installation#krew)
-* [Install with Snap](https://snapcraft.io/cli-kubescape)
+
+You can also check [other installation methods](installation.md)
 
 ## Run your first scan
 
