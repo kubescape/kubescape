@@ -78,9 +78,7 @@ kubectl kubescape
 ```
 
 ## Snap
-> **Note**: If installed using snap, the executable is called cli-kubescape and not kubescape.
-
-[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-white.svg)](https://snapcraft.io/cli-kubescape)
+[![Get it from the Snap Store](https://snapcraft.io/static/images/badges/en/snap-store-white.svg)](https://snapcraft.io/kubescape)
 
 ## NixOS or with nix
 > **Note**: This method is community-supported. If you are having trouble, please reach out to [NixOS support](https://nixos.wiki/wiki/Support).
