@@ -28,20 +28,10 @@ else
     osName=ubuntu
 fi
 
-arch=$(uname -m)
-if [[ $arch == *"aarch64"* ]]; then
-    arch="-arm64"
-else
-    if [[ $arch != *"x86_64"* ]]; then
-        echo -e "\033[33mArchitecture $arch may be unsupported, will try to install the amd64 one anyway."
-    fi
-    arch=""
-fi
-
 mkdir -p $BASE_DIR 
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
-DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/${RELEASE}/kubescape${arch}-${osName}-latest"
+DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/${RELEASE}/kubescape-${osName}-latest"
 
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
 
