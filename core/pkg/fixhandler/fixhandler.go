@@ -201,14 +201,14 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 	fileYamlExpressions := h.getFileYamlExpressions(resourcesToFix)
 
 	for filepath, yamlExpression := range fileYamlExpressions {
-		fileAsString, err := getFileString(filepath)
+		fileAsString, err := GetFileString(filepath)
 
 		if err != nil {
 			errors = append(errors, err)
 			continue
 		}
 
-		fixedYamlString, err := h.ApplyFixToContent(ctx, fileAsString, yamlExpression)
+		fixedYamlString, err := ApplyFixToContent(ctx, fileAsString, yamlExpression)
 
 		if err != nil {
 			errors = append(errors, fmt.Errorf("Failed to fix file %s: %w ", filepath, err))
@@ -242,7 +242,7 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 }
 
-func (h *FixHandler) ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
+func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
 	newline := determineNewlineSeparator(yamlAsString)
 
 	yamlLines := strings.Split(yamlAsString, newline)
@@ -301,7 +301,7 @@ func (rfi *ResourceFixInfo) addYamlExpressionsFromResourceAssociatedControl(docu
 				continue
 			}
 
-			yamlExpression := fixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
+			yamlExpression := FixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
 			rfi.YamlExpressions[yamlExpression] = rulePaths.FixPath
 		}
 	}
@@ -317,7 +317,7 @@ func reduceYamlExpressions(resource *ResourceFixInfo) string {
 	return strings.Join(expressions, " | ")
 }
 
-func fixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
+func FixPathToValidYamlExpression(fixPath, value string, documentIndexInYaml int) string {
 	isStringValue := true
 	if _, err := strconv.ParseBool(value); err == nil {
 		isStringValue = false
@@ -340,7 +340,7 @@ func joinStrings(inputStrings ...string) string {
 	return strings.Join(inputStrings, "")
 }
 
-func getFileString(filepath string) (string, error) {
+func GetFileString(filepath string) (string, error) {
 	bytes, err := os.ReadFile(filepath)
 
 	if err != nil {

@@ -182,9 +182,7 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 			want := string(wantRaw)
 			expression := tc.yamlExpression
 
-			h, _ := NewFixHandlerMock()
-
-			got, _ := h.ApplyFixToContent(context.TODO(), string(input), expression)
+			got, _ := ApplyFixToContent(context.TODO(), string(input), expression)
 
 			assert.Equalf(
 				t, want, got,
@@ -241,7 +239,7 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := fixPathToValidYamlExpression(tt.args.fixPath, tt.args.value, tt.args.documentIndexInYaml); got != tt.want {
+			if got := FixPathToValidYamlExpression(tt.args.fixPath, tt.args.value, tt.args.documentIndexInYaml); got != tt.want {
 				t.Errorf("fixPathToValidYamlExpression() = %v, want %v", got, tt.want)
 			}
 		})
