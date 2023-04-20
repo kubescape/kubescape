@@ -37,11 +37,11 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 
 Learn more about:
 
-* [Installing Kubescape](docs/getting-started.md#install-kubescape)
+* [Installing Kubescape](docs/installation.md)
 * [Running your first scan](docs/getting-started.md#run-your-first-scan)
 * [Usage](docs/getting-started.md#examples)
 * [Architecture](docs/architecture.md)
-* [Building Kubescape from source](docs/building.md)
+* [Building Kubescape from source](https://github.com/kubescape/kubescape/wiki/Building)
 
 _Did you know you can use Kubescape in all these places?_
 

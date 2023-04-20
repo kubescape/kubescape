@@ -12,11 +12,7 @@ curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh 
 
 (We're a security product; please read the file before you run it!)
 
-You can also 
-
-* [Install on windows](#install-on-windows)
-* [Install on macOS](#install-on-macos)
-* [Install on NixOS or Linux/macOS via nix](#install-on-nixos-or-with-nix) 
+You can also check [other installation methods](installation.md)
 
 ## Run your first scan
 
@@ -235,61 +231,3 @@ Experiment with Kubescape in the [Kubescape playground](https://killercoda.com/s
 * Customize control configurations: 
   - [Kubescape CLI](https://youtu.be/955psg6TVu4) 
   - [ARMO Platform](https://youtu.be/lIMVSVhH33o)
-
-## Other installation methods
-
-The `curl` install method will work on all platforms, but you may wish to use a native method to install Kubescape.
-
-### Install on Windows
-
-You must have PowerShell v5.0 or higher installed.
-
-``` powershell
-iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex
-```
-
-If you get an error, you may need to change the execution policy:
-
-``` powershell
-Set-ExecutionPolicy RemoteSigned -scope CurrentUser
-```
-
-### Install on macOS
-
-You can install Kubescape via [Homebrew](https://brew.sh/):
-
-```sh
-brew tap kubescape/tap
-brew install kubescape-cli
-```
-</details>
-
-### Install on NixOS or with nix
-
-_This method is community-supported.  If you are having trouble, please reach out to [NixOS support](https://nixos.wiki/wiki/Support)_
-
-You can use `nix` on Linux or macOS.
-
-Try it out in an ephemeral shell: `nix-shell -p kubescape`
-
-NixOS:
-
-```
-  # your other config ...
-  environment.systemPackages = with pkgs; [
-    # your other packages ...
-    kubescape
-  ];
-```
-
-home-manager:
-
-```
-  # your other config ...
-  home.packages = with pkgs; [
-    # your other packages ...
-    kubescape
-  ];
-```
-
-Or, to your profile (not preferred): `nix-env --install -A nixpkgs.kubescape`
