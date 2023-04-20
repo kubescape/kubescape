@@ -1,7 +1,7 @@
 Write-Host "Installing Kubescape..." -ForegroundColor Cyan
 
 $BASE_DIR=$env:USERPROFILE + "\.kubescape"
-$packageName = "/kubescape.exe"
+$packageName = "/kubescape-windows-latest"
 
 # Get latest release url
 $config = Invoke-WebRequest "https://api.github.com/repos/kubescape/kubescape/releases/latest" | ConvertFrom-Json
