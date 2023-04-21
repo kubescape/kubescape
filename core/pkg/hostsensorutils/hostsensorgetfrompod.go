@@ -84,12 +84,17 @@ func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(ctx context.Context, pat
 	podList := hsh.getPodList()
 	res := make([]hostsensor.HostSensorDataEnvelope, 0, len(podList))
 	var wg sync.WaitGroup
+
 	// initialization of the channels
 	hsh.workerPool.init(len(podList))
 
+	// log is used to avoid log duplication
+	// coming from the different host-scanner instances
+	log := NewLogCoupling()
+
 	hsh.workerPool.hostSensorApplyJobs(podList, path, requestKind)
 	hsh.workerPool.hostSensorGetResults(&res)
-	hsh.workerPool.createWorkerPool(ctx, hsh, &wg)
+	hsh.workerPool.createWorkerPool(ctx, hsh, &wg, log)
 	hsh.workerPool.waitForDone(&wg)
 
 	return res, nil

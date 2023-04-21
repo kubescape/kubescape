@@ -85,6 +85,10 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 	logger.L().Info("Installing host scanner")
 	logger.L().Debug("The host scanner is a DaemonSet that runs on each node in the cluster. The DaemonSet will be running in it's own Namespace and will be deleted once the scan is completed. If you do not wish to install the host scanner, please run the scan without the --enable-host-scan flag.")
 
+	// log is used to avoid log duplication
+	// coming from the different host-scanner instances
+	log := NewLogCoupling()
+
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
@@ -92,9 +96,9 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 		return fmt.Errorf("failed to apply host scanner YAML, reason: %v", err)
 	}
 
-	hsh.populatePodNamesToNodeNames(ctx)
+	hsh.populatePodNamesToNodeNames(ctx, log)
 	if err := hsh.checkPodForEachNode(); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to validate host-scanner pods status", helpers.Error(err))
+		logger.L().Ctx(ctx).Warning(failedToValidateHostSensorPodStatus, helpers.Error(err))
 	}
 
 	return nil
@@ -157,7 +161,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 			containers, err := w.GetContainers()
 			if err != nil {
 				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-					logger.L().Ctx(ctx).Warning("failed to tear down Namespace", helpers.Error(erra))
+					logger.L().Ctx(ctx).Warning(failedToTeardownNamespace, helpers.Error(erra))
 				}
 				return fmt.Errorf("container not found in DaemonSet: %v", err)
 			}
@@ -181,7 +185,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 		}
 		if e != nil {
 			if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-				logger.L().Ctx(ctx).Warning("failed to tear down Namespace", helpers.Error(erra))
+				logger.L().Ctx(ctx).Warning(failedToTeardownNamespace, helpers.Error(erra))
 			}
 			return fmt.Errorf("failed to create/update YAML, reason: %v", e)
 		}
@@ -191,14 +195,14 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 			b, err := json.Marshal(newWorkload.GetObject())
 			if err != nil {
 				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-					logger.L().Ctx(ctx).Warning("failed to tear down Namespace", helpers.Error(erra))
+					logger.L().Ctx(ctx).Warning(failedToTeardownNamespace, helpers.Error(erra))
 				}
 				return fmt.Errorf("failed to Marshal YAML of DaemonSet, reason: %v", err)
 			}
 			var ds appsv1.DaemonSet
 			if err := json.Unmarshal(b, &ds); err != nil {
 				if erra := hsh.tearDownNamespace(namespaceName); erra != nil {
-					logger.L().Ctx(ctx).Warning("failed to tear down Namespace", helpers.Error(erra))
+					logger.L().Ctx(ctx).Warning(failedToTeardownNamespace, helpers.Error(erra))
 				}
 				return fmt.Errorf("failed to Unmarshal YAML of DaemonSet, reason: %v", err)
 			}
@@ -239,7 +243,7 @@ func (hsh *HostSensorHandler) checkPodForEachNode() error {
 }
 
 // initiating routine to keep pod list updated
-func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
+func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context, log *LogsMap) {
 	go func() {
 		var watchRes watch.Interface
 		var err error
@@ -248,7 +252,7 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
 			LabelSelector: fmt.Sprintf("name=%s", hsh.daemonSet.Spec.Template.Labels["name"]),
 		})
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to watch over DaemonSet pods - are we missing watch pods permissions?", helpers.Error(err))
+			logger.L().Ctx(ctx).Warning(failedToWatchOverDaemonSetPods, helpers.Error(err))
 		}
 		if watchRes == nil {
 			logger.L().Ctx(ctx).Error("failed to watch over DaemonSet pods, will not be able to get host-scanner data")
@@ -260,12 +264,12 @@ func (hsh *HostSensorHandler) populatePodNamesToNodeNames(ctx context.Context) {
 			if !ok {
 				continue
 			}
-			go hsh.updatePodInListAtomic(ctx, eve.Type, pod)
+			go hsh.updatePodInListAtomic(ctx, eve.Type, pod, log)
 		}
 	}()
 }
 
-func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventType watch.EventType, podObj *corev1.Pod) {
+func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventType watch.EventType, podObj *corev1.Pod, log *LogsMap) {
 	hsh.podListLock.Lock()
 	defer hsh.podListLock.Unlock()
 
@@ -286,10 +290,11 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventTy
 					len(podObj.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchFields[0].Values) > 0 {
 					nodeName = podObj.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms[0].MatchFields[0].Values[0]
 				}
-				logger.L().Ctx(ctx).Warning("One host-scanner pod is unable to schedule on node. We will fail to collect the data from this node",
-					helpers.String("message", podObj.Status.Conditions[0].Message),
-					helpers.String("nodeName", nodeName),
-					helpers.String("podName", podObj.ObjectMeta.Name))
+				if !log.isDuplicated(oneHostSensorPodIsUnabledToSchedule) {
+					logger.L().Ctx(ctx).Warning(oneHostSensorPodIsUnabledToSchedule,
+						helpers.String("message", podObj.Status.Conditions[0].Message))
+					log.update(oneHostSensorPodIsUnabledToSchedule)
+				}
 				if nodeName != "" {
 					hsh.hostSensorUnscheduledPodNames[podObj.ObjectMeta.Name] = nodeName
 				}
