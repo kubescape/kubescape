@@ -26,7 +26,78 @@ You will see output like this:
 
 ## Usage
 
-_Some documentation on using Kubescape is yet to move here from the [ARMO Platform docs](https://hub.armosec.io/docs?utm_source=github&utm_medium=repository)_.
+## Repository Scanning
+
+### Scan a remote or cloned local repository
+
+1.  Open the Repository Scanning page and click on Get started with repository scanning
+    
+    <img src="https://files.readme.io/2cab2d2-image.png">
+    
+2.  Select your operating system in the following dialog open your cloud shell or terminal, copy the script below and run it, and then click "I run the script".
+    
+
+    <img src="https://files.readme.io/9250ddc-image.png">
+
+3.  In the following dialog, Replace the REPOSITORY\_LOCATION placeholder with your repository remote URL or local path, and then copy the script below and run it. After you run it, click "I ran the script".
+
+    <img src="https://files.readme.io/7d27ffc-image.png">
+
+4.  Wait for the Repository scanning to complete...
+
+    <img src="https://files.readme.io/2e1202d-image.png">
+
+5.  When the scan is completed successfully, it shows the following dialog, and you can now view and fix your resources for that repository.
+
+    <img src="https://files.readme.io/dbf15bd-image.png">
+
+### Private Repository - Configure Authentication Using Environment Variables
+
+
+If authentication is required, you can use environment variables to set the authorization token for the kubescape scanner. To configure environment variables in your local system, run one of the following commands:
+
+**GitHub**
+
+1.  Generate a GitHub token as described [here](https://docs.github.com/en/enterprise-server@3.4/authentication/keeping-your-account-and-data-secure/creating-a-personal-access-token)
+2.  Run the following command and use the generated token instead of my-access-token:
+    1.  Linux/Mac: export GITHUB\_TOKEN=my-access-token
+    2.  Windows: set GITHUB\_TOKEN=my-access-token
+
+**GitLab**
+
+1.  Generate a GitLab token as described [here](https://docs.gitlab.com/ee/user/project/settings/project_access_tokens.html)
+2.  Run one of the following commands and use your token instead of my-access-token:
+    1.  Linux/Mac: export GITLAB\_TOKEN=my-access-token
+    2.  Windows: set GITLAB\_TOKEN=my-access-token
+
+**Azure**
+
+1.  Generate an Azure token as described [here](https://learn.microsoft.com/en-us/azure/devops/organizations/accounts/use-personal-access-tokens-to-authenticate?view=azure-devops&tabs=Windows)
+2.  Run one of the following commands and use your token instead of my-access-token:
+    1.  Linux/Mac: export AZURE\_TOKEN=my-access-token
+    2.  Windows: set AZURE\_TOKEN=my-access-token
+
+**BitBucket**
+
+1.  Generate a BitBucket token as described [here](https://support.atlassian.com/bitbucket-cloud/docs/create-a-repository-access-token/)
+2.  Run one of the following commands and use your token instead of my-access-token:
+    1.  Linux/Mac: export BITBUCKET\_TOKEN=my-access-token
+    2.  Windows: set BITBUCKET\_TOKEN=my-access-token
+
+## Helm Chart Scanning
+
+When scanning directories and/or Git repositories, Kubescape identifies directories that contain Helm charts automatically.
+
+Whenever a [Helm chart](https://helm.sh/docs/topics/charts/) is detected, Kubescape will render the chart templates, using the [`values.yaml`](https://helm.sh/docs/chart_template_guide/values_files) file in the chart's root directory. Then, the rendered manifests will be scanned by Kubescape.
+
+Currently, submitting the results to the [Kubescape Cloud Platform](https://cloud.armosec.io/repositories-scan) is only available when scanning a Git repository.
+
+For usage information, check out [Repository scanning](/docs/repository-scanning).
+
+**Limitation**
+
+*   At the moment it is not possible to override the `Values` which are used for the Helm template rendering. Kubescape will not be able to scan Helm charts that are missing default values.
+
 
 ### Examples
 
