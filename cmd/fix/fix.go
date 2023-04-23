@@ -17,7 +17,7 @@ var fixCmdExamples = fmt.Sprintf(`
   Use with caution, this command will change your files in-place.
 
   # Fix kubernetes YAML manifest files based on a scan command output (output.json)
-  1) %[1]s scan --format json --format-version v2 --output output.json
+  1) %[1]s scan . --format json --output output.json
   2) %[1]s fix output.json
 
 `, cautils.ExecName())
