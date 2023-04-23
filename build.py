@@ -27,7 +27,10 @@ def get_build_dir():
 def get_package_name():
     if CURRENT_PLATFORM not in platformSuffixes: raise OSError("Platform %s is not supported!" % (CURRENT_PLATFORM))
 
-    return "kubescape-" + platformSuffixes[CURRENT_PLATFORM]
+    package_name = "kubescape-"
+    if os.getenv("GOARCH"):
+        package_name += os.getenv("GOARCH") + "-"
+    return package_name + platformSuffixes[CURRENT_PLATFORM]
 
 
 def main():

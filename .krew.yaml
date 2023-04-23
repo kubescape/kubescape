@@ -18,9 +18,21 @@ spec:
     bin: kubescape
   - selector:
       matchLabels:
+        os: darwin
+        arch: arm64
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-arm64-macos-latest.tar.gz" .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
         os: linux
         arch: amd64
     {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-ubuntu-latest.tar.gz" .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/{{ .TagName }}/kubescape-arm64-ubuntu-latest.tar.gz" .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
