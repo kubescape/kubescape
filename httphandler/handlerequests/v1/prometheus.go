@@ -75,6 +75,7 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanIn
 	scanInfo.ScanAll = true                                                        // scan all frameworks
 	scanInfo.ScanID = scanID                                                       // scan ID
 	scanInfo.FailThreshold = 100                                                   // Do not fail scanning
+	scanInfo.ComplianceThreshold = 0                                               // Do not fail scanning
 	scanInfo.Output = resultsFile                                                  // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus")                       // default output should be json
 	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", false)) // enable host scanner

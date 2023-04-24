@@ -30,9 +30,14 @@ func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrin
 	}
 }
 
+// GetRiskScore returns the result’s risk score
+func (rh *ResultsHandler) GetRiskScore() float32 {
+	return rh.scanData.Report.SummaryDetails.Score
+}
+
 // GetComplianceScore returns the result’s compliance score
 func (rh *ResultsHandler) GetComplianceScore() float32 {
-	return rh.scanData.Report.SummaryDetails.Score
+	return rh.scanData.Report.SummaryDetails.ComplianceScore
 }
 
 // GetData returns scan/action related data (policies, resources, results, etc.)
