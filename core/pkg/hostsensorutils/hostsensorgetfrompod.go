@@ -10,12 +10,9 @@ import (
 	"sync"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
-
-	"sigs.k8s.io/yaml"
 )
 
 // getPodList clones the internal list of pods being watched as a map of pod names.
@@ -204,22 +201,6 @@ func (hsh *HostSensorHandler) getOsReleaseFile(ctx context.Context) ([]hostsenso
 	return hsh.sendAllPodsHTTPGETRequest(ctx, "/osRelease", "OsReleaseFile")
 }
 
-// getKubeletConfigurations returns the list of kubelet configurations.
-func (hsh *HostSensorHandler) getKubeletConfigurations(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	res, err := hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeletConfigurations", "KubeletConfiguration") // empty kind, will be overridden
-	for resIdx := range res {
-		jsonBytes, ery := yaml.YAMLToJSON(res[resIdx].Data)
-		if ery != nil {
-			logger.L().Ctx(ctx).Warning("failed to convert kubelet configurations from yaml to json", helpers.Error(ery))
-			continue
-		}
-		res[resIdx].SetData(jsonBytes)
-	}
-
-	return res, err
-}
-
 // hasCloudProviderInfo iterates over the []hostsensor.HostSensorDataEnvelope list to find info about the cloud provider.
 //
 // If information are found, then return true. Return false otherwise.
@@ -259,10 +240,6 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		Query    func(context.Context) ([]hostsensor.HostSensorDataEnvelope, error)
 	}{
 		// queries to the deployed host-scanner
-		{
-			Resource: KubeletConfiguration,
-			Query:    hsh.getKubeletConfigurations,
-		},
 		{
 			Resource: KubeletCommandLine,
 			Query:    hsh.getKubeletCommandLine,
