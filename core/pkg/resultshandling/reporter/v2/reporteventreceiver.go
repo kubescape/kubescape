@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"time"
 
 	"github.com/armosec/armoapi-go/apis"
 	logger "github.com/kubescape/go-logger"
@@ -35,6 +36,7 @@ const (
 var _ reporter.IReport = &ReportEventReceiver{}
 
 type ReportEventReceiver struct {
+	reportTime         time.Time
 	httpClient         *http.Client
 	clusterName        string
 	customerGUID       string
@@ -55,6 +57,7 @@ func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string, su
 		customerAdminEMail: tenantConfig.CustomerAdminEMail,
 		reportID:           reportID,
 		submitContext:      submitContext,
+		reportTime:         time.Now().UTC(),
 	}
 }
 

@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/fixhandler"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/locationresolver"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -19,6 +21,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/owenrumney/go-sarif/v2/sarif"
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 const (
@@ -91,10 +94,10 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 }
 
 // addResult adds a result of checking a rule to the scan run based on the given control summary
-func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location) {
-	scanRun.CreateResultForRule(ctl.GetID()).
+func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControlSummary, filepath string, location locationresolver.Location) *sarif.Result {
+	return scanRun.CreateResultForRule(ctl.GetID()).
 		WithMessage(sarif.NewTextMessage(ctl.GetDescription())).
-		AddLocation(
+		WithLocations([]*sarif.Location{
 			sarif.NewLocationWithPhysicalLocation(
 				sarif.NewPhysicalLocation().
 					WithArtifactLocation(
@@ -103,10 +106,10 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 					sarif.NewRegion().WithStartLine(location.Line).WithStartColumn(location.Column),
 				),
 			),
-		)
+		})
 }
 
-func (sp *SARIFPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
 		panic(err)
@@ -139,7 +142,8 @@ func (sp *SARIFPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OP
 					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 
 					sp.addRule(run, ctl)
-					sp.addResult(run, ctl, filepath, location)
+					result := sp.addResult(run, ctl, filepath, location)
+					collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath)
 				}
 			}
 		}
@@ -172,24 +176,154 @@ func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj,
 		return defaultLocation
 	}
 
-	resource := opaSessionObj.AllResources[resourceID]
-	localworkload, ok := resource.(*localworkload.LocalWorkload)
+	docIndex, ok := getDocIndex(opaSessionObj, resourceID)
+
 	if !ok {
 		return defaultLocation
 	}
 
-	splittedPath := strings.Split(localworkload.GetPath(), ":")
-	if len(splittedPath) <= 1 {
-		return defaultLocation
-	}
-
-	docIndex, _ := strconv.Atoi(splittedPath[1])
 	location, _ = locationResolver.ResolveLocation(fixPath, docIndex)
 	if location.Line == 0 {
 		return defaultLocation
 	}
 
 	return location
+}
+
+func addFix(result *sarif.Result, filepath string, startLine int, startColumn int, endLine int, endColumn int, text string) {
+	result.AddFix(
+		sarif.NewFix().
+			WithArtifactChanges([]*sarif.ArtifactChange{
+				sarif.NewArtifactChange(
+					sarif.NewSimpleArtifactLocation(filepath),
+				).WithReplacement(
+					sarif.NewReplacement(sarif.NewRegion().
+						WithStartLine(startLine).
+						WithStartColumn(startColumn).
+						WithEndLine(endLine).
+						WithEndColumn(endColumn),
+					).WithInsertedContent(
+						sarif.NewArtifactContent().WithText(text),
+					),
+				),
+			}),
+	)
+}
+
+func calculateMove(str string, file []string, endColumn int, endLine int) (int, int, bool) {
+	num, err := strconv.Atoi(str)
+	if err != nil {
+		logger.L().Debug("failed to get move from string "+str, helpers.Error(err))
+		return 0, 0, false
+	}
+	for num+endColumn-1 > len(file[endLine-1]) {
+		num -= len(file[endLine-1]) - endColumn + 2
+		endLine++
+		endColumn = 1
+	}
+	endColumn += num
+	return endLine, endColumn, true
+}
+
+func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Diff, result *sarif.Result, filepath string, fileAsString string) {
+	file := strings.Split(fileAsString, "\n")
+	text := ""
+	startLine := 1
+	startColumn := 1
+	endLine := 1
+	endColumn := 1
+
+	delta := strings.Split(dmp.DiffToDelta(diffs), "\t")
+	for index, seg := range delta {
+		switch seg[0] {
+		case '+':
+			var err error
+			text, err = url.QueryUnescape(seg[1:])
+			if err != nil {
+				logger.L().Debug("failed to unescape string", helpers.Error(err))
+				continue
+			}
+			if index >= len(delta)-1 || delta[index+1][0] == '=' {
+				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
+			}
+		case '-':
+			var ok bool
+			endLine, endColumn, ok = calculateMove(seg[1:], file, endColumn, endLine)
+			if !ok {
+				continue
+			}
+			if index >= len(delta)-1 || delta[index+1][0] == '=' {
+				addFix(result, filepath, startLine, startColumn, endLine, endColumn, text)
+			}
+		case '=':
+			var ok bool
+			endLine, endColumn, ok = calculateMove(seg[1:], file, endColumn, endLine)
+			if !ok {
+				continue
+			}
+			startLine = endLine
+			startColumn = endColumn
+			text = ""
+		}
+	}
+}
+
+func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string) {
+	for _, rule := range ac.ResourceAssociatedRules {
+		if !rule.GetStatus(nil).IsFailed() {
+			continue
+		}
+
+		for _, rulePaths := range rule.Paths {
+			if rulePaths.FixPath.Path == "" {
+				continue
+			}
+			// if strings.HasPrefix(rulePaths.FixPath.Value, fixhandler.UserValuePrefix) {
+			// 	continue
+			// }
+
+			documentIndex, ok := getDocIndex(opaSessionObj, resourceID)
+			if !ok {
+				continue
+			}
+
+			yamlExpression := fixhandler.FixPathToValidYamlExpression(rulePaths.FixPath.Path, rulePaths.FixPath.Value, documentIndex)
+			fileAsString, err := fixhandler.GetFileString(filepath)
+			if err != nil {
+				logger.L().Debug("failed to access "+filepath, helpers.Error(err))
+				continue
+			}
+
+			fixedYamlString, err := fixhandler.ApplyFixToContent(ctx, fileAsString, yamlExpression)
+			if err != nil {
+				logger.L().Debug("failed to fix "+filepath+" with "+yamlExpression, helpers.Error(err))
+				continue
+			}
+
+			dmp := diffmatchpatch.New()
+			diffs := dmp.DiffMain(fileAsString, fixedYamlString, false)
+			collectDiffs(dmp, diffs, result, filepath, fileAsString)
+		}
+	}
+}
+
+func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, bool) {
+	resource := opaSessionObj.AllResources[resourceID]
+	localworkload, ok := resource.(*localworkload.LocalWorkload)
+	if !ok {
+		return 0, false
+	}
+
+	splittedPath := strings.Split(localworkload.GetPath(), ":")
+	if len(splittedPath) <= 1 {
+		return 0, false
+	}
+
+	docIndex, err := strconv.Atoi(splittedPath[1])
+	if err != nil {
+		return 0, false
+	}
+	return docIndex, true
 }
 
 func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
