@@ -1,8 +1,8 @@
 package testutils
 
 import (
-	"path/filepath"
 	"runtime"
+	"path/filepath"
 )
 
 func CurrentDir() string {
