@@ -119,6 +119,7 @@ jobs:
 
       - name: start ${{ matrix.arch }} environment in container
         run: |
+          sudo apt-get update
           sudo apt-get install -y binfmt-support qemu-user-static
           sudo docker run --platform linux/${{ matrix.arch }} -e RELEASE=${{ inputs.RELEASE }} \
           -e CLIENT=${{ inputs.CLIENT }} -e CGO_ENABLED=${{ inputs.CGO_ENABLED }} \
