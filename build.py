@@ -26,9 +26,7 @@ def get_build_dir():
 
 def get_package_name():
     if CURRENT_PLATFORM not in platformSuffixes: raise OSError("Platform %s is not supported!" % (CURRENT_PLATFORM))
-
-    # # TODO: kubescape-windows-latest is deprecated and should be removed
-    # if CURRENT_PLATFORM == "Windows": return "kubescape.exe"
+    if CURRENT_PLATFORM == "Windows": return "kubescape.exe"
 
     package_name = "kubescape-"
     if os.getenv("GOARCH"):
