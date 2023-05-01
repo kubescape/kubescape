@@ -80,7 +80,7 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 			return "", getProviderError(gitURL)
 		}
 		auth = &http.BasicAuth{
-			Username: "anything Except Empty String",
+			Username: "x-token-auth",
 			Password: gitURL.GetToken(),
 		}
 	}
