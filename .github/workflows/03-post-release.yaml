@@ -1,4 +1,4 @@
-name: 03-create_release_digests
+name: 03-post_release
 on:
   release:
     types: [published]
@@ -6,7 +6,7 @@ on:
       - 'master'
       - 'main'
 jobs:
-  create_release_digests:
+  post_release:
     name: Creating digests
     runs-on: ubuntu-latest
     steps:
@@ -15,3 +15,24 @@ jobs:
         with:
           hash-type: sha1
           file-name: kubescape-release-digests
+      - name: Invoke workflow to update packaging
+        uses: benc-uk/workflow-dispatch@v1
+        if: github.repository_owner == 'kubescape'
+        with:
+          workflow: release.yml
+          repo: kubescape/packaging
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+      - name: Invoke workflow to update homebrew tap
+        uses: benc-uk/workflow-dispatch@v1
+        if: github.repository_owner == 'kubescape'
+        with:
+          workflow: release.yml
+          repo: kubescape/homebrew-tap
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+      - name: Invoke workflow to update github action
+        uses: benc-uk/workflow-dispatch@v1
+        if: github.repository_owner == 'kubescape'
+        with:
+          workflow: release.yml
+          repo: kubescape/github-action
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
