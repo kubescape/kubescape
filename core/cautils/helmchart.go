@@ -1,7 +1,10 @@
 package cautils
 
 import (
+	"fmt"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
@@ -56,10 +59,23 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		return nil, []error{err}
 	}
 
+	// change the chart to template with comment, only is template(.yaml added otherwise no)
+	hc.AddCommentToTemplate()
+
 	sourceToFile, err := helmengine.Render(hc.chart, vals)
 	if err != nil {
 		return nil, []error{err}
 	}
+
+	// get the resouse and analysis and store it to the struct
+	fileMapping := NewFileMapping()
+	err = GetTemplateMapping(sourceToFile, fileMapping)
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// delete the comment from chart and from sourceToFile
+	RemoveComment(sourceToFile)
 
 	workloads := make(map[string][]workloadinterface.IMetadata, 0)
 	errs := []error{}
@@ -76,7 +92,6 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		if len(wls) == 0 {
 			continue
 		}
-		// separate base path and file name. We do not use the os.Separator because the paths returned from the helm engine are not OS specific (e.g. mychart/templates/myfile.yaml)
 		if firstPathSeparatorIndex := strings.Index(path, string("/")); firstPathSeparatorIndex != -1 {
 			absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
 
@@ -89,4 +104,43 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		}
 	}
 	return workloads, errs
+}
+
+func (hc *HelmChart) AddCommentToTemplate() {
+	for index, t := range hc.chart.Templates {
+		if IsYaml(strings.ToLower(t.Name)) {
+			var newLines []string
+			originalTemplate := string(t.Data)
+			lines := strings.Split(originalTemplate, "\n")
+
+			for index, line := range lines {
+				comment := " #This is the " + strconv.Itoa(index+1) + " line"
+				newLines = append(newLines, line+comment)
+			}
+			templateWithComment := strings.Join(newLines, "\n")
+			hc.chart.Templates[index].Data = []byte(templateWithComment)
+		}
+	}
+}
+
+func RemoveComment(sourceToFile map[string]string) {
+	commentRe := regexp.MustCompile(CommentFormat)
+	for fileName, file := range sourceToFile {
+		if !IsYaml(strings.ToLower((fileName))) {
+			continue
+		}
+		sourceToFile[fileName] = commentRe.ReplaceAllLiteralString(file, "")
+	}
+}
+
+func GetTemplateMapping(sourceToFile map[string]string, fileMapping *FileMapping) error {
+	for fileName, fileContent := range sourceToFile {
+		mappingNodes, err := GetMapping(fileName, fileContent)
+		if err != nil {
+			err = fmt.Errorf("GetMapping wrong, err: %s", err.Error())
+			return err
+		}
+		fileMapping.Mapping[fileName] = mappingNodes
+	}
+	return nil
 }
