@@ -6,13 +6,13 @@ metadata:
     k8s-app: kubescape-host-scanner
     kubernetes.io/metadata.name: kubescape-host-scanner
     tier: kubescape-host-scanner-control-plane
-  name: kubescape-host-scanner
+  name: kubescape
 ---
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: host-scanner
-  namespace: kubescape-host-scanner
+  namespace: kubescape
   labels:
     app: host-scanner
     k8s-app: kubescape-host-scanner
