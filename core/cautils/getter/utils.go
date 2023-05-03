@@ -67,6 +67,12 @@ func errAuth(resp *http.Response) error {
 }
 
 func readString(rdr io.Reader, sizeHint int64) (string, error) {
+
+	// if the response is empty, return an empty string
+	if sizeHint < 0 {
+		return "", nil
+	}
+
 	var b strings.Builder
 
 	b.Grow(int(sizeHint))
