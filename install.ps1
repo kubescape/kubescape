@@ -29,8 +29,11 @@ $currentPath = [Environment]::GetEnvironmentVariable("Path", "User")
 if (-not $currentPath.Contains($BASE_DIR)) {
     $confirmation = Read-Host "Add kubescape to user path? (y/n)"
     if ($confirmation -eq 'y') {
-        [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";$BASE_DIR;", "User")
+        $env:Path=[Environment]::GetEnvironmentVariable("Path", "User") + ";$BASE_DIR;"
+        [Environment]::SetEnvironmentVariable("Path", "${env:Path}", "User")
     }
 }
 
-Write-Host "Finished Installation" -ForegroundColor Green 
+Write-Host "Finished Installation.`n" -ForegroundColor Green
+kubescape version
+Write-Host "`nUsage: $ kubescape scan --enable-host-scan" -ForegroundColor Magenta
