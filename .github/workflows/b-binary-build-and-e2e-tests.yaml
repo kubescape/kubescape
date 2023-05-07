@@ -22,7 +22,7 @@ on:
         default: 1
       BINARY_TESTS:
         type: string
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner" ]'
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score" ]'
       CHECKOUT_REPO:
         required: false
         type: string
