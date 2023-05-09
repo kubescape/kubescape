@@ -111,7 +111,10 @@ func NewLocalConfig(
 	}
 	// get from configMap
 	if existsConfigFile() { // get from file
-		loadConfigFromFile(lc.configObj)
+		if err := loadConfigFromFile(lc.configObj); err != nil {
+			logger.L().Error("failed load config from file")
+		}
+
 	}
 
 	updateCredentials(lc.configObj, credentials)

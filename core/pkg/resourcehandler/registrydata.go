@@ -150,7 +150,7 @@ func imageTagsToContainerImageIdentifier(images []string) []registryvulnerabilit
 }
 func listAdaptors() ([]registryvulnerabilities.IContainerImageVulnerabilityAdaptor, error) {
 
-	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
+	var adaptors []registryvulnerabilities.IContainerImageVulnerabilityAdaptor
 
 	ksCloudAPI := getter.GetKSCloudAPIConnector()
 	if ksCloudAPI != nil {

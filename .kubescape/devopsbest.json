@@ -1,0 +1,905 @@
+{
+  "guid": "",
+  "name": "DevOpsBest",
+  "attributes": {
+    "armoBuiltin": true
+  },
+  "creationTime": "",
+  "description": "",
+  "controls": [
+    {
+      "guid": "",
+      "name": "Naked PODs",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "devops"
+        ]
+      },
+      "id": "C-0073",
+      "controlID": "C-0073",
+      "creationTime": "",
+      "description": "It is not recommended to create PODs without parental Deployment, ReplicaSet, StatefulSet etc.Manual creation if PODs may lead to a configuration drifts and other untracked changes in the system. Such PODs won't be automatically rescheduled by Kubernetes in case of a crash or infrastructure failure. This control identifies every POD that does not have corresponding parental object.",
+      "remediation": "Create necessary Deployment object for every POD making any POD a first class citizen in your IaC architecture.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "naked-pods",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\n\n# Fails if workload is Pod\ndeny[msga] {\n    pod := input[_]\n\tpod.kind == \"Pod\"\n\tnot pod.metadata.ownerReferences\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Pod: %v not associated with ReplicaSet or Deployment\", [pod.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 3,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": [{\"path\": \"metadata.ownerReferences\", \"value\": \"YOUR_VALUE\"}],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\n\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": null,
+          "controlConfigInputs": null,
+          "description": "Don't use naked Pods (that is, Pods not bound to a ReplicaSet or Deployment) if you can avoid it. Naked Pods will not be rescheduled in the event of a node failure.",
+          "remediation": "",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 3
+    },
+    {
+      "guid": "",
+      "name": "Containers mounting Docker socket",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "devops"
+        ]
+      },
+      "id": "C-0074",
+      "controlID": "C-0074",
+      "creationTime": "",
+      "description": "Mounting Docker socket (Unix socket) enables container to access Docker internals, retrieve sensitive information and execute Docker commands, if Docker runtime is available. This control identifies PODs that attempt to mount Docker socket for accessing Docker runtime.",
+      "remediation": "Remove docker socket mount request or define an exception.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "containers-mounting-docker-socket",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\n\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n    volume := pod.spec.volumes[i]\n\thost_path := volume.hostPath\n    is_docker_mounting(host_path)\n\tpath := sprintf(\"spec.volumes[%v].hostPath.path\", [format_int(i, 10)])\n    msga := {\n\t\t\"alertMessage\": sprintf(\"volume: %v in pod: %v has mounting to Docker internals.\", [volume.name, pod.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [path],\n\t\t\"fixPaths\":[],\n\t\t\"alertScore\": 5,\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\t\n}\n\n\n\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n    volume := wl.spec.template.spec.volumes[i]\n\thost_path := volume.hostPath\n    is_docker_mounting(host_path)\n\tpath := sprintf(\"spec.template.spec.volumes[%v].hostPath.path\", [format_int(i, 10)])\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"volume: %v in %v: %v has mounting to Docker internals.\", [ volume.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [path],\n\t\t\"fixPaths\":[],\n\t\t\"alertScore\": 5,\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n\ndeny[msga] {\n  \twl := input[_]\n\twl.kind == \"CronJob\"\n\tvolume = wl.spec.jobTemplate.spec.template.spec.volumes[i]\n    host_path := volume.hostPath\n    is_docker_mounting(host_path)\n\tpath := sprintf(\"spec.jobTemplate.spec.template.spec.volumes[%v].hostPath.path\", [format_int(i, 10)])\n    msga := {\n\t\t\"alertMessage\": sprintf(\"volume: %v in %v: %v has mounting to Docker internals.\", [ volume.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [path],\n\t\t\"fixPaths\":[],\n\t\t\"alertScore\": 5,\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n\nis_docker_mounting(host_path) {\n\thost_path.path == \"/var/run/docker.sock\"\n}\n\nis_docker_mounting(host_path) {\n\thost_path.path == \"/var/run/docker\"\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": null,
+          "controlConfigInputs": null,
+          "description": "Check hostpath. If the path is set to /var/run/docker.sock or /var/lib/docker , the container has access to Docker internals - fail.",
+          "remediation": "",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 5
+    },
+    {
+      "guid": "",
+      "name": "Image pull policy on latest tag",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "devops"
+        ]
+      },
+      "id": "C-0075",
+      "controlID": "C-0075",
+      "creationTime": "",
+      "description": "While usage of the latest tag is not generally recommended, in some cases this is necessary. If it is, the ImagePullPolicy must be set to Always, otherwise Kubernetes may run an older image with the same name that happens to be present in the node cache. Note that using Always will not cause additional image downloads because Kubernetes will check the image hash of the local local against the registry and only pull the image if this hash has changed, which is exactly what users want when use the latest tag. This control will identify all PODs with latest tag that have ImagePullSecret not set to Always.",
+      "remediation": "Set ImagePullPolicy to Always in all PODs found by this control.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "image-pull-policy-is-not-set-to-always",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\n\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n\tcontainer := pod.spec.containers[i]\n    is_bad_container(container)\n\tpaths = [sprintf(\"spec.containers[%v].image\", [format_int(i, 10)]), sprintf(\"spec.containers[%v].imagePullPolicy\", [format_int(i, 10)])]\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"container: %v in pod: %v  has 'latest' tag on image but imagePullPolicy is not set to 'Always'\", [container.name, pod.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"failedPaths\": paths,\n\t\t\"fixPaths\":[],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n\tcontainer := wl.spec.template.spec.containers[i]\n\tpaths = [sprintf(\"spec.template.spec.containers[%v].image\", [format_int(i, 10)]), sprintf(\"spec.template.spec.containers[%v].imagePullPolicy\", [format_int(i, 10)])]\n    is_bad_container(container)\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"container: %v in %v: %v  has 'latest' tag on image but imagePullPolicy is not set to 'Always'\", [container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"failedPaths\": paths,\n\t\t\"fixPaths\":[],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\ndeny[msga] {\n    wl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer := wl.spec.jobTemplate.spec.template.spec.containers[i]\n\tpaths = [sprintf(\"spec.jobTemplate.spec.template.spec.containers[%v].image\", [format_int(i, 10)]), sprintf(\"spec.jobTemplate.spec.template.spec.containers[%v].imagePullPolicy\", [format_int(i, 10)])]\n    is_bad_container(container)\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"container: %v in cronjob: %v  has 'latest' tag on image but imagePullPolicy is not set to 'Always'\", [container.name, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"failedPaths\": paths,\n\t\t\"fixPaths\":[],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n# image tag is latest\nis_bad_container(container){\n    reg := \":[\\\\w][\\\\w.-]{0,127}(\\/)?\"\n    version := regex.find_all_string_submatch_n(reg, container.image, -1)\n    v := version[_]\n    img := v[_]\n    img == \":latest\"\n    not_image_pull_policy(container)\n}\n\n# No image tag or digest (== latest)\nis_bad_container(container){\n    not is_tag_image(container.image)\n    not_image_pull_policy(container)\n}\n\n# image tag is only letters (== latest)\nis_bad_container(container){\n    is_tag_image_only_letters(container.image)\n    not_image_pull_policy(container)\n}\n\nnot_image_pull_policy(container) {\n     container.imagePullPolicy == \"Never\"\n}\n\n\nnot_image_pull_policy(container) {\n     container.imagePullPolicy == \"IfNotPresent\"\n}\n\nis_tag_image(image) {\n    reg := \":[\\\\w][\\\\w.-]{0,127}(\\/)?\"\n    version := regex.find_all_string_submatch_n(reg, image, -1)\n    v := version[_]\n    img := v[_]\n    not endswith(img, \"/\")\n}\n\n# The image has a tag, and contains only letters\nis_tag_image_only_letters(image) {\n    reg := \":[\\\\w][\\\\w.-]{0,127}(\\/)?\"\n    version := regex.find_all_string_submatch_n(reg, image, -1)\n    v := version[_]\n    img := v[_]\n\treg1 := \"^:[a-zA-Z]{1,127}$\"\n\tre_match(reg1, img)\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": null,
+          "controlConfigInputs": null,
+          "description": "check imagePullPolicy filed, if imagePullPolicy = always pass, else fail.",
+          "remediation": "",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 2
+    },
+    {
+      "guid": "",
+      "name": "Label usage for resources",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "devops"
+        ]
+      },
+      "id": "C-0076",
+      "controlID": "C-0076",
+      "creationTime": "",
+      "description": "It is recommended to set labels that identify semantic attributes of your application or deployment. For example, { app: myapp, tier: frontend, phase: test, deployment: v3 }. These labels can used to assign policies to logical groups of the deployments as well as for presentation and tracking purposes. This control helps you find deployments without any of the expected labels.",
+      "remediation": "Define labels that are most suitable to your needs of use the exceptions to prevent further notifications.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "label-usage-for-resources",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n# Deny mutating action unless user is in group owning the resource\n\n\n\ndeny[msga] {\n\n\tpod := input[_]\n\tpod.kind == \"Pod\"\n\tfixPath := no_label_or_no_label_usage(pod, \"\")\n\n    msga := {\n\t\t\"alertMessage\": sprintf(\"in the following pods a certain set of labels is not defined: %v\", [pod.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPath,\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n     }\n}\n\n\ndeny[msga] {\n\twl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n\tpodSpec := wl.spec.template\n\tbeggining_of_pod_path := \"spec.template.\"\n\tfixPath := no_label_usage(wl, podSpec, beggining_of_pod_path)\n\n    msga := {\n\t\t\"alertMessage\": sprintf(\"%v: %v a certain set of labels is not defined:\", [wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPath,\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n     }\n}\n\n#handles cronjob\ndeny[msga] {\n\twl := input[_]\n\twl.kind == \"CronJob\"\n\tpodSpec := wl.spec.jobTemplate.spec.template\n\tbeggining_of_pod_path := \"spec.jobTemplate.spec.template.\"\n\tfixPath := no_label_usage(wl, podSpec, beggining_of_pod_path)\n\n\n    msga := {\n\t\t\"alertMessage\": sprintf(\"the following cronjobs a certain set of labels is not defined: %v\", [wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 2,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPath,\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n     }\n}\n\n# There is no label-usage in WL and also for his Pod\nno_label_usage(wl, podSpec, beggining_of_pod_path) = path{\n\tpath1 := no_label_or_no_label_usage(wl, \"\")\n\tpath2 := no_label_or_no_label_usage(podSpec, beggining_of_pod_path)\n\tpath = array.concat(path1, path2)\n}\n \n# There is label-usage for WL but not for his Pod\nno_label_usage(wl, podSpec, beggining_of_pod_path) = path{\n\tnot no_label_or_no_label_usage(wl, \"\")\n\tpath := no_label_or_no_label_usage(podSpec, beggining_of_pod_path)\n}\n\n# There is no label-usage for WL but there is for his Pod\nno_label_usage(wl, podSpec, beggining_of_pod_path) = path{\n\tnot no_label_or_no_label_usage(podSpec, beggining_of_pod_path)\n\tpath := no_label_or_no_label_usage(wl, \"\")\n}\n\nno_label_or_no_label_usage(wl, beggining_of_path) = path{\n\tnot wl.metadata\n\tpath = [{\"path\": sprintf(\"%vmetadata.labels\", [beggining_of_path]), \"value\": \"YOUR_VALUE\"}]\n}\n\nno_label_or_no_label_usage(wl, beggining_of_path) = path{\n\tmetadata := wl.metadata\n\tnot metadata.labels\n\tpath = [{\"path\": sprintf(\"%vmetadata.labels\", [beggining_of_path]), \"value\": \"YOUR_VALUE\"}]\n}\n\nno_label_or_no_label_usage(wl, beggining_of_path) = path{\n\tlabels := wl.metadata.labels\n\tnot is_desired_label(labels)\n\tpath = [{\"path\": sprintf(\"%vmetadata.labels\", [beggining_of_path]), \"value\": \"YOUR_VALUE\"}]\n}\n\nis_desired_label(labels) {\n\trecommended_labels := data.postureControlInputs.recommendedLabels\n\trecommended_label := recommended_labels[_]\n\tlabels[recommended_label]\n}\n\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                "*"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Pod",
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet",
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": [
+            "settings.postureControlInputs.recommendedLabels"
+          ],
+          "controlConfigInputs": [
+            {
+              "path": "settings.postureControlInputs.recommendedLabels",
+              "name": "Recommended Labels",
+              "description": "Kubescape checks that workloads have at least one of the following labels."
+            }
+          ],
+          "description": "check if a certain set of labels is defined, this is a configurable control. Initial list: app, tier, phase, version, owner, env.",
+          "remediation": "",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 2
+    },
+    {
+      "guid": "",
+      "name": "K8s common labels usage",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "devops"
+        ]
+      },
+      "id": "C-0077",
+      "controlID": "C-0077",
+      "creationTime": "",
+      "description": "Kubernetes common labels help manage and monitor Kubernetes cluster using different tools such as kubectl, dashboard and others in an interoperable way. Refer to https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/ for more information. This control helps you find objects that don't have any of these labels defined.",
+      "remediation": "Define applicable labels or use the exception mechanism to prevent further notifications.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "K8s common labels usage",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n# Deny mutating action unless user is in group owning the resource\n\n\n\ndeny[msga] {\n\n\tpod := input[_]\n\tpod.kind == \"Pod\"\n\tfixPath := no_K8s_label_or_no_K8s_label_usage(pod, \"\")\n\n    msga := {\n\t\t\"alertMessage\": sprintf(\"in the following pod the kubernetes common labels are not defined: %v\", [pod.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 1,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPath,\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n     }\n}\n\n\ndeny[msga] {\n\twl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n\tpodSpec := wl.spec.template\n\tbeggining_of_pod_path := \"spec.template.\"\n\tfixPath := no_K8s_label_usage(wl, podSpec, beggining_of_pod_path)\n\n    msga := {\n\t\t\"alertMessage\": sprintf(\"%v: %v the kubernetes common labels are is not defined:\", [wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 1,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPath,\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n     }\n}\n\n#handles cronjob\ndeny[msga] {\n\twl := input[_]\n\twl.kind == \"CronJob\"\n\tpodSpec := wl.spec.jobTemplate.spec.template\n\tbeggining_of_pod_path := \"spec.jobTemplate.spec.template.\"\n\tfixPath := no_K8s_label_usage(wl, podSpec, beggining_of_pod_path)\n\n\n    msga := {\n\t\t\"alertMessage\": sprintf(\"the following cronjobs the kubernetes common labels are not defined: %v\", [wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 1,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPath,\n         \"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n     }\n}\n\n\n\n# There is no label-usage in WL and also for his Pod\nno_K8s_label_usage(wl, podSpec, beggining_of_pod_path) = path{\n\tpath1 := no_K8s_label_or_no_K8s_label_usage(wl, \"\")\n\tpath2 := no_K8s_label_or_no_K8s_label_usage(podSpec, beggining_of_pod_path)\n\tpath = array.concat(path1, path2)\n}\n\n# There is label-usage for WL but not for his Pod\nno_K8s_label_usage(wl, podSpec, beggining_of_pod_path) = path{\n\tnot no_K8s_label_or_no_K8s_label_usage(wl, \"\")\n\tpath := no_K8s_label_or_no_K8s_label_usage(podSpec, beggining_of_pod_path)\n}\n\n# There is no label-usage for WL but there is for his Pod\nno_K8s_label_usage(wl, podSpec, beggining_of_pod_path) = path{\n\tnot no_K8s_label_or_no_K8s_label_usage(podSpec, beggining_of_pod_path)\n\tpath := no_K8s_label_or_no_K8s_label_usage(wl, \"\")\n}\n\nno_K8s_label_or_no_K8s_label_usage(wl, beggining_of_path) = path{\n\tnot wl.metadata.labels\n\tpath = [{\"path\": sprintf(\"%vmetadata.labels\", [beggining_of_path]), \"value\": \"YOUR_VALUE\"}]\n}\n\nno_K8s_label_or_no_K8s_label_usage(wl, beggining_of_path) = path{\n\tmetadata := wl.metadata\n\tnot metadata.labels\n\tpath = [{\"path\": sprintf(\"%vmetadata.labels\", [beggining_of_path]), \"value\": \"YOUR_VALUE\"}]\n}\n\nno_K8s_label_or_no_K8s_label_usage(wl, beggining_of_path) = path{\n\tlabels := wl.metadata.labels\n\tnot all_kubernetes_labels(labels)\n\tpath = [{\"path\": sprintf(\"%vmetadata.labels\", [beggining_of_path]), \"value\": \"YOUR_VALUE\"}]\n}\n\nall_kubernetes_labels(labels){\n\trecommended_labels := data.postureControlInputs.k8sRecommendedLabels\n\trecommended_label := recommended_labels[_]\n\tlabels[recommended_label]\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": [
+            "settings.postureControlInputs.k8sRecommendedLabels"
+          ],
+          "controlConfigInputs": [
+            {
+              "path": "settings.postureControlInputs.k8sRecommendedLabels",
+              "name": "Kubernetes Recommended Labels",
+              "description": "Kubescape checks that workloads have at least one of the following kubernetes recommended labels."
+            }
+          ],
+          "description": "Check if the list of label that start with app.kubernetes.io/ are defined.",
+          "remediation": "",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 2
+    },
+    {
+      "guid": "",
+      "name": "Pods in default namespace",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "compliance",
+          "devops"
+        ]
+      },
+      "id": "C-0061",
+      "controlID": "C-0061",
+      "creationTime": "",
+      "description": "It is recommended to avoid running PODs in cluster without explicit namespace assignment. This control identifies all the PODs running in the default namespace.",
+      "remediation": "Create necessary namespaces and move all the PODs from default namespace there.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "pods-in-default-namespace",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\", \"Job\", \"CronJob\", \"Pod\"}\n\tspec_template_spec_patterns[wl.kind]\n\tresult := is_default_namespace(wl.metadata)\n\tfailed_path := get_failed_path(result)\n    fixed_path := get_fixed_path(result)\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"%v: %v has pods running in the 'default' namespace\", [wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 3,\n\t\t\"failedPaths\": failed_path,\n\t\t\"fixPaths\": fixed_path,\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\nis_default_namespace(metadata) = [failed_path, fixPath] {\n\tmetadata.namespace == \"default\"\n\tfailed_path = \"metadata.namespace\"\n\tfixPath = \"\" \n}\n\nis_default_namespace(metadata) = [failed_path, fixPath] {\n\tnot metadata.namespace\n\tfailed_path = \"\"\n\tfixPath = {\"path\": \"metadata.namespace\", \"value\": \"YOUR_NAMESPACE\"} \n}\n\nget_failed_path(paths) = [paths[0]] {\n\tpaths[0] != \"\"\n} else = []\n\nget_fixed_path(paths) = [paths[1]] {\n\tpaths[1] != \"\"\n} else = []\n\n\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": null,
+          "controlConfigInputs": null,
+          "description": "",
+          "remediation": "",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 3
+    },
+    {
+      "guid": "",
+      "name": "Container hostPort",
+      "attributes": {
+        "armoBuiltin": true,
+        "attackTracks": [
+          {
+            "attackTrack": "container",
+            "categories": [
+              "Initial access"
+            ]
+          }
+        ],
+        "controlTypeTags": [
+          "security",
+          "compliance",
+          "devops"
+        ]
+      },
+      "id": "C-0044",
+      "controlID": "C-0044",
+      "creationTime": "",
+      "description": "Configuring hostPort requires a particular port number. If two objects specify the same HostPort, they could not be deployed to the same node. It may prevent the second object from starting, even if Kubernetes will try reschedule it on another node, provided there are available nodes with sufficient amount of resources. Also, if the number of replicas of such workload is higher than the number of nodes, the deployment will consistently fail.",
+      "remediation": "Avoid usage of hostPort unless it is absolutely necessary, in which case define appropriate exception. Use NodePort / ClusterIP instead.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "container-hostPort",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\n\n# Fails if pod has container with hostPort\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n    container := pod.spec.containers[i]\n\tbeggining_of_path := \"spec.\"\n\tpath := is_host_port(container, i, beggining_of_path)\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v has Host-port\", [ container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 4,\n\t\t\"failedPaths\": path,\n\t\t\"fixPaths\":[],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\n# Fails if workload has container with hostPort\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n    container := wl.spec.template.spec.containers[i]\n\tbeggining_of_path := \"spec.template.spec.\"\n    path := is_host_port(container, i, beggining_of_path)\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   has Host-port\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 4,\n\t\t\"failedPaths\": path,\n\t\t\"fixPaths\":[],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n# Fails if cronjob has container with hostPort\ndeny[msga] {\n  \twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n\tbeggining_of_path := \"spec.jobTemplate.spec.template.spec.\"\n    path := is_host_port(container, i, beggining_of_path)\n    msga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   has Host-port\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 4,\n\t\t\"failedPaths\": path,\n\t\t\"fixPaths\":[],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n\n\nis_host_port(container, i, beggining_of_path) = path {\n\tpath = [sprintf(\"%vcontainers[%v].ports[%v].hostPort\", [beggining_of_path, format_int(i, 10), format_int(j, 10)]) | port = container.ports[j];  port.hostPort]\n\tcount(path) \u003e 0\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": null,
+          "controlConfigInputs": null,
+          "description": "fails if container has hostPort",
+          "remediation": "Make sure you do not configure hostPort for the container, if necessary use NodePort / ClusterIP",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 4
+    },
+    {
+      "guid": "",
+      "name": "Resources CPU limit and request",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "compliance",
+          "devops"
+        ]
+      },
+      "id": "C-0050",
+      "controlID": "C-0050",
+      "creationTime": "",
+      "description": "This control identifies all Pods for which the CPU limit is not set.",
+      "remediation": "Set the CPU limit or use exception mechanism to avoid unnecessary notifications.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "resources-cpu-limit-and-request",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\nimport data\n\n# Fails if pod does not have container with CPU-limit or request\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n    container := pod.spec.containers[i]\n\tnot request_or_limit_cpu(container)\n\n\tfixPaths := [{\"path\": sprintf(\"spec.containers[%v].resources.limits.cpu\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}, \n\t\t\t\t{\"path\": sprintf(\"spec.containers[%v].resources.requests.cpu\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}]\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v does not have CPU-limit or request\", [ container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPaths,\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\n# Fails if workload does not have container with CPU-limit or request\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n    container := wl.spec.template.spec.containers[i]\n    not request_or_limit_cpu(container)\n\n\tfixPaths := [{\"path\": sprintf(\"spec.template.spec.containers[%v].resources.limits.cpu\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}, \n\t\t\t\t{\"path\": sprintf(\"spec.template.spec.containers[%v].resources.requests.cpu\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}]\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have CPU-limit or request\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPaths,\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n# Fails if cronjob does not have container with CPU-limit or request\ndeny[msga] {\n  \twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n    not request_or_limit_cpu(container)\n\n\tfixPaths := [{\"path\": sprintf(\"spec.jobTemplate.template.spec.containers[%v].resources.limits.cpu\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}, \n\t\t\t\t{\"path\": sprintf(\"spec.jobTemplate.template.spec.containers[%v].resources.requests.cpu\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}]\n\t\n    msga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have CPU-limit or request\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": fixPaths,\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n\n\n\n###################################################################################################################\n\n# Fails if pod exceeds CPU-limit or request\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n    container := pod.spec.containers[i]\n\trequest_or_limit_cpu(container)\n\tresource := is_min_max_exceeded_cpu(container)\n\tresource != \"\"\n\n\tfailed_paths := sprintf(\"spec.containers[%v].%v\", [format_int(i, 10), resource])\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v exceeds CPU-limit or request\", [ container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [failed_paths],\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\n# Fails if workload exceeds CPU-limit or request\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n    container := wl.spec.template.spec.containers[i]\n\n\trequest_or_limit_cpu(container)\n\tresource := is_min_max_exceeded_cpu(container)\n\tresource != \"\"\n\n\tfailed_paths := sprintf(\"spec.template.spec.containers[%v].%v\", [format_int(i, 10), resource])\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v exceeds CPU-limit or request\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [failed_paths],\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n# Fails if cronjob doas exceeds CPU-limit or request\ndeny[msga] {\n  \twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n\n\trequest_or_limit_cpu(container)\n   \tresource := is_min_max_exceeded_cpu(container)\n\tresource != \"\"\n\n\tfailed_paths := sprintf(\"spec.jobTemplate.spec.template.spec.containers[%v].%v\", [format_int(i, 10), resource])\n\t\n    msga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v exceeds CPU-limit or request\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [failed_paths],\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n\n\n\n#################################################################################################################3\n\nrequest_or_limit_cpu(container) {\n\tcontainer.resources.limits.cpu\n\tcontainer.resources.requests.cpu\n}\n\n\nis_min_max_exceeded_cpu(container)  = \"resources.limits.cpu\" {\n\tcpu_limit := container.resources.limits.cpu\n\tis_limit_exceeded_cpu(cpu_limit)\n} else = \"resouces.requests.cpu\" {\n\tcpu_req := container.resources.requests.cpu\n\tis_req_exceeded_cpu(cpu_req)\n} else = \"\"\n\n\nis_limit_exceeded_cpu(cpu_limit) {\n\tis_min_limit_exceeded_cpu(cpu_limit)\n}\n\nis_limit_exceeded_cpu(cpu_limit) {\n\tis_max_limit_exceeded_cpu(cpu_limit)\n}\n\nis_req_exceeded_cpu(cpu_req) {\n\tis_max_request_exceeded_cpu(cpu_req)\n}\n\nis_req_exceeded_cpu(cpu_req) {\n\tis_min_request_exceeded_cpu(cpu_req)\n}\n\nis_max_limit_exceeded_cpu(cpu_limit) {\n\tcpu_limit_max :=  data.postureControlInputs.cpu_limit_max[_]\n\tcompare_max(cpu_limit_max, cpu_limit)\n}\n\nis_min_limit_exceeded_cpu(cpu_limit) {\n\tcpu_limit_min :=  data.postureControlInputs.cpu_limit_min[_]\n\tcompare_min(cpu_limit_min, cpu_limit) \n}\n\nis_max_request_exceeded_cpu(cpu_req) {\n\tcpu_req_max :=  data.postureControlInputs.cpu_request_max[_]\n\tcompare_max(cpu_req_max, cpu_req)\n}\n\nis_min_request_exceeded_cpu(cpu_req) {\n\tcpu_req_min := data.postureControlInputs.cpu_request_min[_]\n\tcompare_min(cpu_req_min, cpu_req) \n}\n\n##############\n# helpers\n\n# Compare according to unit - max\ncompare_max(max, given) {\n\tendswith(max, \"Mi\")\n\tendswith(given, \"Mi\")\n\tsplit_max :=  split(max, \"Mi\")[0]\n\tsplit_given :=  split(given, \"Mi\")[0]\n\tsplit_given \u003e split_max\n}\n\ncompare_max(max, given) {\n\tendswith(max, \"M\")\n\tendswith(given, \"M\")\n\tsplit_max :=  split(max, \"M\")[0]\n\tsplit_given :=  split(given, \"M\")[0]\n\tsplit_given \u003e split_max\n}\n\ncompare_max(max, given) {\n\tendswith(max, \"m\")\n\tendswith(given, \"m\")\n\tsplit_max :=  split(max, \"m\")[0]\n\tsplit_given :=  split(given, \"m\")[0]\n\tsplit_given \u003e split_max\n}\n\ncompare_max(max, given) {\n\tnot is_special_measure(max)\n\tnot is_special_measure(given)\n\tgiven \u003e max\n}\n\n\n\n################\n# Compare according to unit - min\ncompare_min(min, given) {\n\tendswith(min, \"Mi\")\n\tendswith(given, \"Mi\")\n\tsplit_min :=  split(min, \"Mi\")[0]\n\tsplit_given :=  split(given, \"Mi\")[0]\n\tsplit_given \u003c split_min\n}\n\ncompare_min(min, given) {\n\tendswith(min, \"M\")\n\tendswith(given, \"M\")\n\tsplit_min :=  split(min, \"M\")[0]\n\tsplit_given :=  split(given, \"M\")[0]\n\tsplit_given \u003c split_min\n}\n\ncompare_min(min, given) {\n\tendswith(min, \"m\")\n\tendswith(given, \"m\")\n\tsplit_min :=  split(min, \"m\")[0]\n\tsplit_given :=  split(given, \"m\")[0]\n\tsplit_given \u003c split_min\n}\n\ncompare_min(min, given) {\n\tnot is_special_measure(min)\n\tnot is_special_measure(given)\n\tgiven \u003c min\n}\n\n\n# Check that is same unit\nis_special_measure(unit) {\n\tendswith(unit, \"m\")\n}\n\nis_special_measure(unit) {\n\tendswith(unit, \"M\")\n}\n\nis_special_measure(unit) {\n\tendswith(unit, \"Mi\")\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": [
+            "settings.postureControlInputs.cpu_request_max",
+            "settings.postureControlInputs.cpu_request_min",
+            "settings.postureControlInputs.cpu_limit_min",
+            "settings.postureControlInputs.cpu_limit_max"
+          ],
+          "controlConfigInputs": [
+            {
+              "path": "settings.postureControlInputs.cpu_request_max",
+              "name": "cpu_request_max",
+              "description": "Ensure CPU max requests are set"
+            },
+            {
+              "path": "settings.postureControlInputs.cpu_request_min",
+              "name": "cpu_request_min",
+              "description": "Ensure CPU min requests are set"
+            },
+            {
+              "path": "settings.postureControlInputs.cpu_limit_max",
+              "name": "cpu_limit_max",
+              "description": "Ensure CPU max limits are set"
+            },
+            {
+              "path": "settings.postureControlInputs.cpu_limit_min",
+              "name": "cpu_limit_min",
+              "description": "Ensure CPU min limits are set"
+            }
+          ],
+          "description": "CPU limits and requests are not set.",
+          "remediation": "Ensure CPU limits and requests are set.",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 8
+    },
+    {
+      "guid": "",
+      "name": "Resources memory limit and request",
+      "attributes": {
+        "armoBuiltin": true,
+        "attackTracks": [
+          {
+            "attackTrack": "container",
+            "categories": [
+              "Impact - service destruction"
+            ]
+          }
+        ],
+        "controlTypeTags": [
+          "compliance",
+          "devops"
+        ]
+      },
+      "id": "C-0004",
+      "controlID": "C-0004",
+      "creationTime": "",
+      "description": "This control identifies all Pods for which the memory limit is not set.",
+      "remediation": "Set the memory limit or use exception mechanism to avoid unnecessary notifications.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "resources-memory-limit-and-request",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\n# Fails if pod does not have container with memory-limit or request\ndeny[msga] {\n\tpod := input[_]\n\tpod.kind == \"Pod\"\n\tcontainer := pod.spec.containers[i]\n\tnot request_or_limit_memory(container)\n\tfixPaths := [\n\t\t{\"path\": sprintf(\"spec.containers[%v].resources.limits.memory\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"},\n\t\t{\"path\": sprintf(\"spec.containers[%v].resources.requests.memory\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"},\n\t]\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v does not have memory-limit or request\", [container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"fixPaths\": fixPaths,\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\"k8sApiObjects\": [pod]},\n\t}\n}\n\n# Fails if workload does not have container with memory-limit or request\ndeny[msga] {\n\twl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n\tcontainer := wl.spec.template.spec.containers[i]\n\tnot request_or_limit_memory(container)\n\tfixPaths := [\n\t\t{\"path\": sprintf(\"spec.template.spec.containers[%v].resources.limits.memory\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"},\n\t\t{\"path\": sprintf(\"spec.template.spec.containers[%v].resources.requests.memory\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"},\n\t]\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have memory-limit or request\", [container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"fixPaths\": fixPaths,\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\"k8sApiObjects\": [wl]},\n\t}\n}\n\n# Fails if cronjob does not have container with memory-limit or request\ndeny[msga] {\n\twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n\tnot request_or_limit_memory(container)\n\tfixPaths := [\n\t\t{\"path\": sprintf(\"spec.jobTemplate.template.spec.containers[%v].resources.limits.memory\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"},\n\t\t{\"path\": sprintf(\"spec.jobTemplate.template.spec.containers[%v].resources.requests.memory\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"},\n\t]\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have memory-limit or request\", [container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"fixPaths\": fixPaths,\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\"k8sApiObjects\": [wl]},\n\t}\n}\n\nrequest_or_limit_memory(container) {\n\tcontainer.resources.limits.memory\n\tcontainer.resources.requests.memory\n}\n\n######################################################################################################\n\n# Fails if pod exceeds memory-limit or request\ndeny[msga] {\n\tpod := input[_]\n\tpod.kind == \"Pod\"\n\tcontainer := pod.spec.containers[i]\n\trequest_or_limit_memory(container)\n\tresource := is_min_max_exceeded_memory(container)\n\tresource != \"\"\n\n\tfailed_paths := sprintf(\"spec.containers[%v].%v\", [format_int(i, 10), resource])\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v exceeds memory-limit or request\", [container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [failed_paths],\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\"k8sApiObjects\": [pod]},\n\t}\n}\n\n# Fails if workload exceeds memory-limit or request\ndeny[msga] {\n\twl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n\tcontainer := wl.spec.template.spec.containers[i]\n\n\trequest_or_limit_memory(container)\n\tresource := is_min_max_exceeded_memory(container)\n\tresource != \"\"\n\n\tfailed_paths := sprintf(\"spec.template.spec.containers[%v].%v\", [format_int(i, 10), resource])\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v exceeds memory-limit or request\", [container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [failed_paths],\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\"k8sApiObjects\": [wl]},\n\t}\n}\n\n# Fails if cronjob exceeds memory-limit or request\ndeny[msga] {\n\twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n\n\trequest_or_limit_memory(container)\n\tresource := is_min_max_exceeded_memory(container)\n\tresource != \"\"\n\n\tfailed_paths := sprintf(\"spec.jobTemplate.spec.template.spec.containers[%v].%v\", [format_int(i, 10), resource])\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v exceeds memory-limit or request\", [container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [failed_paths],\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\"k8sApiObjects\": [wl]},\n\t}\n}\n\n######################################################################################################\n\nis_min_max_exceeded_memory(container) = \"resources.limits.memory\" {\n\tmemory_limit := container.resources.limits.memory\n\tis_limit_exceeded_memory(memory_limit)\n} else = \"resouces.requests.memory\" {\n\tmemory_req := container.resources.requests.memory\n\tis_req_exceeded_memory(memory_req)\n} else = \"\" {\n\ttrue\n}\n\nis_limit_exceeded_memory(memory_limit) {\n\tis_min_limit_exceeded_memory(memory_limit)\n}\n\nis_limit_exceeded_memory(memory_limit) {\n\tis_max_limit_exceeded_memory(memory_limit)\n}\n\nis_req_exceeded_memory(memory_req) {\n\tis_max_request_exceeded_memory(memory_req)\n}\n\nis_req_exceeded_memory(memory_req) {\n\tis_min_request_exceeded_memory(memory_req)\n}\n\n# helpers\n\nis_max_limit_exceeded_memory(memory_limit) {\n\tmemory_limit_max :=data.postureControlInputs.memory_limit_max[_]\n\tcompare_max(memory_limit_max, memory_limit)\n}\n\nis_min_limit_exceeded_memory(memory_limit) {\n\tmemory_limit_min := data.postureControlInputs.memory_limit_min[_]\n\tcompare_min(memory_limit_min, memory_limit)\n}\n\nis_max_request_exceeded_memory(memory_req) {\n\tmemory_req_max := data.postureControlInputs.memory_request_max[_]\n\tcompare_max(memory_req_max, memory_req)\n}\n\nis_min_request_exceeded_memory(memory_req) {\n\tmemory_req_min := data.postureControlInputs.memory_request_min[_]\n\tcompare_min(memory_req_min, memory_req)\n}\n\n##############\n# helpers\n\n# Compare according to unit - max\ncompare_max(max, given) {\n\tendswith(max, \"Mi\")\n\tendswith(given, \"Mi\")\n\tsplit_max :=  split(max, \"Mi\")[0]\n\tsplit_given :=  split(given, \"Mi\")[0]\n\tsplit_given \u003e split_max\n}\n\ncompare_max(max, given) {\n\tendswith(max, \"M\")\n\tendswith(given, \"M\")\n\tsplit_max :=  split(max, \"M\")[0]\n\tsplit_given :=  split(given, \"M\")[0]\n\tsplit_given \u003e split_max\n}\n\ncompare_max(max, given) {\n\tendswith(max, \"m\")\n\tendswith(given, \"m\")\n\tsplit_max :=  split(max, \"m\")[0]\n\tsplit_given :=  split(given, \"m\")[0]\n\tsplit_given \u003e split_max\n}\n\ncompare_max(max, given) {\n\tnot is_special_measure(max)\n\tnot is_special_measure(given)\n\tgiven \u003e max\n}\n\n\n\n################\n# Compare according to unit - min\ncompare_min(min, given) {\n\tendswith(min, \"Mi\")\n\tendswith(given, \"Mi\")\n\tsplit_min :=  split(min, \"Mi\")[0]\n\tsplit_given :=  split(given, \"Mi\")[0]\n\tsplit_given \u003c split_min\n}\n\ncompare_min(min, given) {\n\tendswith(min, \"M\")\n\tendswith(given, \"M\")\n\tsplit_min :=  split(min, \"M\")[0]\n\tsplit_given :=  split(given, \"M\")[0]\n\tsplit_given \u003c split_min\n}\n\ncompare_min(min, given) {\n\tendswith(min, \"m\")\n\tendswith(given, \"m\")\n\tsplit_min :=  split(min, \"m\")[0]\n\tsplit_given :=  split(given, \"m\")[0]\n\tsplit_given \u003c split_min\n}\n\ncompare_min(min, given) {\n\tnot is_special_measure(min)\n\tnot is_special_measure(given)\n\tgiven \u003c min\n}\n\n\n# Check that is same unit\nis_special_measure(unit) {\n\tendswith(unit, \"m\")\n}\n\nis_special_measure(unit) {\n\tendswith(unit, \"M\")\n}\n\nis_special_measure(unit) {\n\tendswith(unit, \"Mi\")\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                "*"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet",
+                "Job",
+                "Pod",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": [
+            "settings.postureControlInputs.memory_request_max",
+            "settings.postureControlInputs.memory_request_min",
+            "settings.postureControlInputs.memory_limit_max",
+            "settings.postureControlInputs.memory_limit_min"
+          ],
+          "controlConfigInputs": [
+            {
+              "path": "settings.postureControlInputs.memory_request_max",
+              "name": "memory_request_max",
+              "description": "Ensure memory max requests are set"
+            },
+            {
+              "path": "settings.postureControlInputs.memory_request_min",
+              "name": "memory_request_min",
+              "description": "Ensure memory min requests are set"
+            },
+            {
+              "path": "settings.postureControlInputs.memory_limit_max",
+              "name": "memory_limit_max",
+              "description": "Ensure memory max limits are set"
+            },
+            {
+              "path": "settings.postureControlInputs.memory_limit_min",
+              "name": "memory_limit_min",
+              "description": "Ensure memory min limits are set"
+            }
+          ],
+          "description": "memory limits and requests are not set.",
+          "remediation": "Ensure memory limits and requests are set.",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 8
+    },
+    {
+      "guid": "",
+      "name": "Configured liveness probe",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "devops"
+        ]
+      },
+      "id": "C-0056",
+      "controlID": "C-0056",
+      "creationTime": "",
+      "description": "Liveness probe is intended to ensure that workload remains healthy during its entire execution lifecycle, or otherwise restrat the container. It is highly recommended to define liveness probe for every worker container. This control finds all the PODs where the Liveness probe is not configured.",
+      "remediation": "Ensure Liveness probes are configured wherever possible.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "configured-liveness-probe",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\n\n# Fails if  container does not have livenessProbe - for pod\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n    container := pod.spec.containers[i]\n\tnot container.livenessProbe\n\tfix_path := {\"path\": sprintf(\"spec.containers[%v].livenessProbe\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v does not have livenessProbe\", [ container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 4,\n\t\t\"fixPaths\": [fix_path],\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\n# Fails if  container does not have livenessProbe - for wl\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n    container := wl.spec.template.spec.containers[i]\n    not container.livenessProbe\n\tfix_path := {\"path\": sprintf(\"spec.template.spec.containers[%v].livenessProbe\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have livenessProbe\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 4,\n\t\t\"fixPaths\": [fix_path],\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n# Fails if  container does not have livenessProbe - for cronjob\ndeny[msga] {\n  \twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n    not container.livenessProbe\n\tfix_path := {\"path\": sprintf(\"spec.jobTemplate.spec.template.spec.containers[%v].livenessProbe\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}\n    msga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have livenessProbe\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 4,\n\t\t\"fixPaths\": [fix_path],\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": null,
+          "controlConfigInputs": null,
+          "description": "Liveness probe is not configured",
+          "remediation": "Ensure Liveness probe is configured",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 4
+    },
+    {
+      "guid": "",
+      "name": "Configured readiness probe",
+      "attributes": {
+        "armoBuiltin": true,
+        "controlTypeTags": [
+          "devops"
+        ]
+      },
+      "id": "C-0018",
+      "controlID": "C-0018",
+      "creationTime": "",
+      "description": "Readiness probe is intended to ensure that workload is ready to process network traffic. It is highly recommended to define readiness probe for every worker container. This control finds all the PODs where the readiness probe is not configured.",
+      "remediation": "Ensure Readiness probes are configured wherever possible.",
+      "rules": [
+        {
+          "guid": "",
+          "name": "configured-readiness-probe",
+          "attributes": {
+            "armoBuiltin": true
+          },
+          "creationTime": "",
+          "rule": "package armo_builtins\n\n\n# Fails if pod does not have container with readinessProbe\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n    container := pod.spec.containers[i]\n\tnot container.readinessProbe\n\tfix_path := {\"path\": sprintf(\"spec.containers[%v].readinessProbe\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v does not have readinessProbe\", [ container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 3,\n\t\t\"fixPaths\": [fix_path],\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\n# Fails if workload does not have container with readinessProbe\ndeny[msga] {\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n    container := wl.spec.template.spec.containers[i]\n    not container.readinessProbe\n\tfix_path := {\"path\": sprintf(\"spec.template.spec.containers[%v].readinessProbe\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have readinessProbe\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 3,\n\t\t\"fixPaths\": [fix_path],\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n\n# Fails if cronjob does not have container with readinessProbe\ndeny[msga] {\n  \twl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n    not container.readinessProbe\n\tfix_path := {\"path\": sprintf(\"spec.jobTemplate.spec.template.spec.containers[%v].readinessProbe\", [format_int(i, 10)]), \"value\": \"YOUR_VALUE\"}\n    msga := {\n\t\t\"alertMessage\": sprintf(\"Container: %v in %v: %v   does not have readinessProbe\", [ container.name, wl.kind, wl.metadata.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 3,\n\t\t\"fixPaths\": [fix_path],\n\t\t\"failedPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [wl]\n\t\t}\n\t}\n}\n",
+          "resourceEnumerator": "",
+          "ruleLanguage": "Rego",
+          "match": [
+            {
+              "apiGroups": [
+                ""
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Pod"
+              ]
+            },
+            {
+              "apiGroups": [
+                "apps"
+              ],
+              "apiVersions": [
+                "v1"
+              ],
+              "resources": [
+                "Deployment",
+                "ReplicaSet",
+                "DaemonSet",
+                "StatefulSet"
+              ]
+            },
+            {
+              "apiGroups": [
+                "batch"
+              ],
+              "apiVersions": [
+                "*"
+              ],
+              "resources": [
+                "Job",
+                "CronJob"
+              ]
+            }
+          ],
+          "ruleDependencies": [],
+          "configInputs": null,
+          "controlConfigInputs": null,
+          "description": "Readiness probe is not configured",
+          "remediation": "Ensure Readiness probe is configured",
+          "ruleQuery": "armo_builtins",
+          "relevantCloudProviders": null
+        }
+      ],
+      "rulesIDs": [
+        ""
+      ],
+      "baseScore": 3
+    }
+  ],
+  "controlsIDs": [
+    "C-0073",
+    "C-0074",
+    "C-0075",
+    "C-0076",
+    "C-0077",
+    "C-0061",
+    "C-0044",
+    "C-0050",
+    "C-0004",
+    "C-0056",
+    "C-0018"
+  ]
+}
