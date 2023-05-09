@@ -8,3 +8,6 @@
 ca.srl
 *.out
 ks
+httphandler/ksserver
+httphandler/kubescape
+httphandler/httphandler
