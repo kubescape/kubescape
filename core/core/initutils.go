@@ -251,7 +251,7 @@ func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *gett
 }
 
 func getDefaultFrameworksPaths() []string {
-	fwPaths := []string{}
+	var fwPaths []string
 	for i := range getter.NativeFrameworks {
 		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]))
 	}

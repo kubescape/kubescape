@@ -117,7 +117,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		// NOTE: since policies.Controls is a map, iterating over it doesn't guarantee any
 		// specific ordering. Therefore, if a conflict is possible on resources, e.g. 2 rules,
 		// referencing the same resource, the eventual result of the merge is not guaranteed to be
-		// stable. This behavior is consistent with the previous (unparallelized) processing.
+		// stable. This behavior is consistent with the previous (unparalleled) processing.
 		defer resultsCollector.Done()
 
 		for result := range resultsChan {

@@ -54,7 +54,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 }
 
 func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) ([]reporthandling.Framework, error) {
-	frameworks := []reporthandling.Framework{}
+	var frameworks []reporthandling.Framework
 
 	switch getScanKind(policyIdentifier) {
 	case apisv1.KindFramework: // Download frameworks

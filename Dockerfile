@@ -24,14 +24,12 @@ FROM alpine
 COPY --from=builder /usr/share/zoneinfo/Asia/Shanghai /usr/share/zoneinfo/Asia/Shanghai
 ENV TZ Asia/Shanghai
 
-CMD ["/bin/sh"]
 RUN addgroup -S ks && adduser -S ks -G ks
 COPY --from=builder  /home/ks/.kubescape /home/ks/.kubescape
 
-RUN chown -R ks:ks /home/ks/.kubescape
-USER ks
+RUN  chown -R ks:ks /home/ks/.kubescape
 COPY --from=builder /build/httphandler/ksserver /usr/bin/ksserver
 COPY --from=builder /build/kubescape /usr/bin/kubescape
 WORKDIR /home/ks
-
+USER ks
 ENTRYPOINT ["ksserver"]
