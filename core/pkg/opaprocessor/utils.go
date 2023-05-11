@@ -2,6 +2,8 @@ package opaprocessor
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -85,4 +87,18 @@ var cosignHasSignatureDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
 	return ast.BooleanTerm(has_signature(string(aStr))), nil
+}
+
+func parseIntEnvVar(varName string, defaultValue int) (int, error) {
+	varValue, exists := os.LookupEnv(varName)
+	if !exists {
+		return defaultValue, nil
+	}
+
+	intValue, err := strconv.Atoi(varValue)
+	if err != nil {
+		return defaultValue, fmt.Errorf("failed to parse %s env var as int: %w", varName, err)
+	}
+
+	return intValue, nil
 }
