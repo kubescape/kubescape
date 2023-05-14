@@ -1,6 +1,6 @@
 module github.com/kubescape/kubescape/v2
 
-go 1.19
+go 1.20
 
 require (
 	cloud.google.com/go/containeranalysis v0.6.0
