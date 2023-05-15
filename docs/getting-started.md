@@ -116,6 +116,22 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     > **Note**  
     > Kubescape will generate Kubernetes YAML objects using a `kustomize` file and scan them for security.
 
+
+* Compliance Score
+
+    We offer two important metrics to assess compliance:
+
+    - Control Compliance Score: This score measures the compliance of individual controls within a framework. It is calculated by evaluating the ratio of resources that passed to the total number of resources evaluated against that control.
+        ```sh
+        kubescape scan --compliance-threshold <SCORE_VALUE[float32]>
+        ```
+    - Framework Compliance Score: This score provides an overall assessment of your cluster's compliance with a specific framework. It is calculated by averaging the Control Compliance Scores of all controls within the framework.
+        ```sh
+        kubescape scan framework <FRAMEWORK_NAME> --compliance-threshold <SCORE_VALUE[float32]>
+        ```
+        Kubescape scan with compliance score
+        <img src="img/ks-scan-with-compliance.gif">
+
 ### Output formats
 
 * JSON:
