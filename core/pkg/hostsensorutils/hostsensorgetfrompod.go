@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -233,6 +232,18 @@ func (hsh *HostSensorHandler) CollectResources(parentCtx context.Context) ([]hos
 			err = errPool
 		case errCollect != nil:
 			err = errCollect
+
+	logger.L().Debug("Done reading information from the host scanner")
+  return results, statusMap, nil
+}
+
+// hasCloudProviderInfo iterates over the []hostsensor.HostSensorDataEnvelope list to find info about the cloud provider.
+//
+// If information are found, then return true. Return false otherwise.
+func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
+	for index := range cpi {
+		if !reflect.DeepEqual(cpi[index].GetData(), stdjson.RawMessage("{}\n")) {
+			return true
 		}
 
 		logger.L().Ctx(ctx).Warning("failed to get data", helpers.Error(err))
@@ -246,8 +257,80 @@ func (hsh *HostSensorHandler) CollectResources(parentCtx context.Context) ([]hos
 	} else {
 		logger.L().Info("Unknown host scanner version")
 	}
+  
+	var hasCloudProvider bool
+	for _, toPin := range []struct {
+		Resource scannerResource
+		Query    func(context.Context) ([]hostsensor.HostSensorDataEnvelope, error)
+	}{
+		// queries to the deployed host-scanner
+		{
+			Resource: KubeletCommandLine,
+			Query:    hsh.getKubeletCommandLine,
+		},
+		{
+			Resource: OsReleaseFile,
+			Query:    hsh.getOsReleaseFile,
+		},
+		{
+			Resource: KernelVersion,
+			Query:    hsh.getKernelVersion,
+		},
+		{
+			Resource: LinuxSecurityHardeningStatus,
+			Query:    hsh.getLinuxSecurityHardeningStatus,
+		},
+		{
+			Resource: OpenPortsList,
+			Query:    hsh.getOpenPortsList,
+		},
+		{
+			Resource: LinuxKernelVariables,
+			Query:    hsh.getKernelVariables,
+		},
+		{
+			Resource: KubeletInfo,
+			Query:    hsh.getKubeletInfo,
+		},
+		{
+			Resource: KubeProxyInfo,
+			Query:    hsh.getKubeProxyInfo,
+		},
+		{
+			Resource: CloudProviderInfo,
+			Query:    hsh.getCloudProviderInfo,
+		},
+		{
+			Resource: CNIInfo,
+			Query:    hsh.getCNIInfo,
+		},
+		{
+			// ControlPlaneInfo is queried _after_ CloudProviderInfo.
+			Resource: ControlPlaneInfo,
+			Query:    hsh.getControlPlaneInfo,
+		},
+	} {
+		k8sInfo := toPin
 
-	logger.L().Debug("Done reading information from the host scanner")
+		if k8sInfo.Resource == ControlPlaneInfo && hasCloudProvider {
+			// we retrieve control plane info only if we are not using a cloud provider
+			continue
+		}
+
+		kcData, err := k8sInfo.Query(ctx)
+		if err != nil {
+			addInfoToMap(k8sInfo.Resource, infoMap, err)
+			logger.L().Ctx(ctx).Warning(err.Error())
+		}
+
+		if k8sInfo.Resource == CloudProviderInfo {
+			hasCloudProvider = hasCloudProviderInfo(kcData)
+		}
+
+		if len(kcData) > 0 {
+			res = append(res, kcData...)
+		}
+	}
 
 	return results, statusMap, nil
 }

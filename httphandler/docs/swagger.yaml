@@ -35,6 +35,15 @@ definitions:
         format: float
         type: number
         x-go-name: FailThreshold
+      complianceThreshold:
+        description: |-
+          Threshold for a failing score.
+
+          Scores lower than the provided value will be considered failing.
+        example: 42
+        format: float
+        type: number
+        x-go-name: ComplianceThreshold
       format:
         description: |-
           Format of the results.

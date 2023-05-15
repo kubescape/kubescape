@@ -13,7 +13,7 @@ on:
         type: string
       GO_VERSION:
         type: string
-        default: "1.19"
+        default: "1.20"
       GO111MODULE:
         required: true
         type: string
@@ -22,7 +22,7 @@ on:
         default: 1
       BINARY_TESTS:
         type: string
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner" ]'
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score" ]'
       CHECKOUT_REPO:
         required: false
         type: string
@@ -61,10 +61,15 @@ jobs:
     name: Create cross-platform build
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GOARCH: ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         os: [ubuntu-20.04, macos-latest, windows-latest]
+        arch: ["", arm64]
+        exclude:
+        - os: windows-latest
+          arch: arm64
     steps:
 
       - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
@@ -112,6 +117,23 @@ jobs:
           go-version: ${{ inputs.GO_VERSION }}
           cache: true
 
+      - name: start ${{ matrix.arch }} environment in container
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binfmt-support qemu-user-static
+          sudo docker run --platform linux/${{ matrix.arch }} -e RELEASE=${{ inputs.RELEASE }} \
+          -e CLIENT=${{ inputs.CLIENT }} -e CGO_ENABLED=${{ inputs.CGO_ENABLED }} \
+          -e KUBESCAPE_SKIP_UPDATE_CHECK=true -e GOARCH=${{ matrix.arch }} -v ${PWD}:/work \
+          -w /work -v ~/go/pkg/mod:/root/go/pkg/mod -v ~/.cache/go-build:/root/.cache/go-build \
+          -d --name build golang:${{ inputs.GO_VERSION }}-bullseye sleep 21600
+          sudo docker ps
+          DOCKER_CMD="sudo docker exec build"
+          ${DOCKER_CMD} apt update
+          ${DOCKER_CMD} apt install -y cmake python3
+          ${DOCKER_CMD} git config --global --add safe.directory '*'
+          echo "DOCKER_CMD=${DOCKER_CMD}" >> $GITHUB_ENV;
+        if: matrix.os == 'ubuntu-20.04' && matrix.arch != ''
+
       - name: Install MSYS2 & libgit2 (Windows)
         shell: cmd
         run: .\build.bat all
@@ -122,35 +144,44 @@ jobs:
         if: matrix.os == 'macos-latest'
 
       - name: Install libgit2 (Linux/macOS)
-        run: make libgit2
+        run: ${{ env.DOCKER_CMD }} make libgit2${{ matrix.arch }}
         if: matrix.os != 'windows-latest'
 
       - name: Test core pkg
-        run: go test "-tags=static,gitenabled" -v ./...
+        run: ${{ env.DOCKER_CMD }} go test "-tags=static,gitenabled" -v ./...
+        if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Test httphandler pkg
-        run: cd httphandler && go test "-tags=static,gitenabled" -v ./...
+        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test "-tags=static,gitenabled" -v ./...'
+        if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Build
         env:
           RELEASE: ${{ inputs.RELEASE }}
           CLIENT: ${{ inputs.CLIENT }}
           CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
-        run: python3 --version && python3 build.py
+        run: ${{ env.DOCKER_CMD }} python3 --version && ${{ env.DOCKER_CMD }} python3 build.py
 
       - name: Smoke Testing (Windows / MacOS)
         env:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/kubescape-${{ matrix.os }}
-        if: matrix.os != 'ubuntu-20.04'
+        if: startsWith(github.ref, 'refs/tags') && matrix.os != 'ubuntu-20.04' && matrix.arch == ''
 
-      - name: Smoke Testing (Linux)
+      - name: Smoke Testing (Linux amd64)
         env:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: python3 smoke_testing/init.py ${PWD}/build/kubescape-ubuntu-latest
-        if: matrix.os == 'ubuntu-20.04'
+        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ${PWD}/build/kubescape-ubuntu-latest
+        if: matrix.os == 'ubuntu-20.04' && matrix.arch == ''
+
+      - name: Smoke Testing (Linux ${{ matrix.arch }})
+        env:
+          RELEASE: ${{ inputs.RELEASE }}
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ./build/kubescape-${{ matrix.arch }}-ubuntu-latest
+        if: startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch != ''
 
       - name: golangci-lint
         if: matrix.os == 'ubuntu-20.04'
@@ -165,7 +196,7 @@ jobs:
         name: Upload artifact (Linux)
         if: matrix.os == 'ubuntu-20.04'
         with:
-          name: kubescape-ubuntu-latest
+          name: kubescape${{ matrix.arch }}-ubuntu-latest
           path: build/
           if-no-files-found: error
 
@@ -173,7 +204,7 @@ jobs:
         name: Upload artifact (MacOS, Win)
         if: matrix.os != 'ubuntu-20.04'
         with:
-          name: kubescape-${{ matrix.os }}
+          name: kubescape${{ matrix.arch }}-${{ matrix.os }}
           path: build/
           if-no-files-found: error
 

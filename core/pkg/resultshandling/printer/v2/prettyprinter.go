@@ -206,7 +206,7 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	row[columnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
 	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
 	row[columnSeverity] = " "
-	row[columnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.Score, "%")
+	row[columnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
 
 	return row
 }

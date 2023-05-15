@@ -32,7 +32,7 @@ spec:
       - operator: Exists
       containers:
       - name: host-sensor
-        image: quay.io/kubescape/host-scanner:v1.0.54
+        image: quay.io/kubescape/host-scanner:v1.0.57
         securityContext:
           allowPrivilegeEscalation: true
           privileged: true
@@ -56,8 +56,8 @@ spec:
           httpGet:
             path: /kernelVersion
             port: 7888
-            initialDelaySeconds: 1
-            periodSeconds: 1
+          initialDelaySeconds: 1
+          periodSeconds: 1
       terminationGracePeriodSeconds: 120
       dnsPolicy: ClusterFirstWithHostNet
       automountServiceAccountToken: false

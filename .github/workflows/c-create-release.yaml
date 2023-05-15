@@ -19,6 +19,10 @@ jobs:
   create-release:
     name: create-release
     runs-on: ubuntu-latest
+    env:
+      MAC_OS: macos-latest
+      UBUNTU_OS: ubuntu-latest
+      WINDOWS_OS: windows-latest
     # permissions:
     #   contents: write
     steps:
@@ -26,6 +30,11 @@ jobs:
         id: download-artifact
         with:
           path: .
+
+      # TODO: kubescape-windows-latest is deprecated and should be removed
+      - name: Get kubescape.exe from kubescape-windows-latest
+        run: cp ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }} ./kubescape-${{ env.WINDOWS_OS }}/kubescape.exe
+
       - name: Set release token
         run: |
           if [ "${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}" != "" ]; then
@@ -35,10 +44,6 @@ jobs:
           fi
       - name: Release
         uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # ratchet:softprops/action-gh-release@v1
-        env:
-          MAC_OS: macos-latest
-          UBUNTU_OS: ubuntu-latest
-          WINDOWS_OS: windows-latest
         with:
           token: ${{ env.TOKEN }}
           name: ${{ inputs.RELEASE_NAME }}
@@ -47,13 +52,21 @@ jobs:
           draft: ${{ inputs.DRAFT }}
           fail_on_unmatched_files: true
           prerelease: false
+          # TODO: kubescape-windows-latest is deprecated and should be removed
           files: |
+            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}
             ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}
             ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.sha256
             ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.tar.gz
             ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}
             ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.sha256
             ./kubescape-${{ env.UBUNTU_OS }}/kubescape-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}
+            ./kubescape-${{ env.WINDOWS_OS }}/kubescape.exe
             ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.sha256
             ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}.tar.gz
+            ./kubescapearm64-${{ env.MAC_OS }}/kubescape-arm64-${{ env.MAC_OS }}
+            ./kubescapearm64-${{ env.MAC_OS }}/kubescape-arm64-${{ env.MAC_OS }}.sha256
+            ./kubescapearm64-${{ env.MAC_OS }}/kubescape-arm64-${{ env.MAC_OS }}.tar.gz
+            ./kubescapearm64-${{ env.UBUNTU_OS }}/kubescape-arm64-${{ env.UBUNTU_OS }}
+            ./kubescapearm64-${{ env.UBUNTU_OS }}/kubescape-arm64-${{ env.UBUNTU_OS }}.sha256
+            ./kubescapearm64-${{ env.UBUNTU_OS }}/kubescape-arm64-${{ env.UBUNTU_OS }}.tar.gz
