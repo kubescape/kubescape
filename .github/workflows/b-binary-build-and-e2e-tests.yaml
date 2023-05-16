@@ -162,12 +162,19 @@ jobs:
           CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
         run: ${{ env.DOCKER_CMD }} python3 --version && ${{ env.DOCKER_CMD }} python3 build.py
 
-      - name: Smoke Testing (Windows / MacOS)
+      - name: Smoke Testing (Windows)
+        env:
+          RELEASE: ${{ inputs.RELEASE }}
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: python3 smoke_testing/init.py ${PWD}/build/kubescape.exe
+        if: startsWith(github.ref, 'refs/tags') && matrix.os == 'windows-latest' && matrix.arch == ''
+
+      - name: Smoke Testing (MacOS)
         env:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: python3 smoke_testing/init.py ${PWD}/build/kubescape-${{ matrix.os }}
-        if: startsWith(github.ref, 'refs/tags') && matrix.os != 'ubuntu-20.04' && matrix.arch == ''
+        if: startsWith(github.ref, 'refs/tags') && matrix.os == 'macos-latest' && matrix.arch == ''
 
       - name: Smoke Testing (Linux amd64)
         env:
