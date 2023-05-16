@@ -30,6 +30,11 @@ jobs:
         id: download-artifact
         with:
           path: .
+
+      # TODO: kubescape-windows-latest is deprecated and should be removed
+      - name: Get kubescape.exe from kubescape-windows-latest
+        run: cp ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }} ./kubescape-${{ env.WINDOWS_OS }}/kubescape.exe
+
       - name: Set release token
         run: |
           if [ "${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}" != "" ]; then
@@ -47,7 +52,9 @@ jobs:
           draft: ${{ inputs.DRAFT }}
           fail_on_unmatched_files: true
           prerelease: false
+          # TODO: kubescape-windows-latest is deprecated and should be removed
           files: |
+            ./kubescape-${{ env.WINDOWS_OS }}/kubescape-${{ env.WINDOWS_OS }}
             ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}
             ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.sha256
             ./kubescape-${{ env.MAC_OS }}/kubescape-${{ env.MAC_OS }}.tar.gz
