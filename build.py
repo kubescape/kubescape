@@ -26,7 +26,6 @@ def get_build_dir():
 
 def get_package_name():
     if CURRENT_PLATFORM not in platformSuffixes: raise OSError("Platform %s is not supported!" % (CURRENT_PLATFORM))
-    if CURRENT_PLATFORM == "Windows": return "kubescape.exe"
 
     package_name = "kubescape-"
     if os.getenv("GOARCH"):
@@ -51,6 +50,7 @@ def main():
     ks_file = os.path.join(build_dir, package_name)
     hash_file = ks_file + ".sha256"
     tar_file = ks_file + ".tar.gz"
+    if CURRENT_PLATFORM == "Windows": ks_file = os.path.join(build_dir, "kubescape.exe")
 
     if not os.path.isdir(build_dir):
         os.makedirs(build_dir)
