@@ -29,7 +29,7 @@ else
 fi
 
 arch=$(uname -m)
-if [[ $arch == *"aarch64"* ]]; then
+if [[ $arch == *"aarch64"* || $arch == *"arm64"* ]]; then
     arch="-arm64"
 else
     if [[ $arch != *"x86_64"* ]]; then
