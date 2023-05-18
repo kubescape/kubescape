@@ -15,6 +15,65 @@ so the maintainers are able to help guide you and let you know if you are going 
 
 Please follow our [code of conduct](CODE_OF_CONDUCT.md) in all of your interactions within the project.
 
+## Setup Kubescape Locally 
+
+### Prerequisites
+
+1.  Setup [Golang compiling environment](https://go.dev/doc/install) (Golang ≥ 1.19)
+2.  Setup [Git](https://git-scm.com/downloads)
+3.  Clone this repository
+```
+git clone https://github.com/kubescape/kubescape
+cd kubescape
+```
+4. Checkout the git submodules 
+```
+git submodule init
+git submodule update --recursive
+```
+
+### Build on Windows
+
+1.  Install MSYS2 & build libgit _(needed only for the first time)_  
+   ```
+   build.bat all
+  ```  
+> **Note**  
+> You can install MSYS2 separately by running `build.bat install` and build libgit2 separately by running `build.bat build`
+2.  Build kubescape
+```
+make build 
+```
+OR
+```
+go build -tags=static .
+```
+3. Run kubescape
+```
+./kubescape
+```
+
+### Build on Linux/MacOS
+
+1.  Install libgit2 dependency _(needed only for the first time)_
+> **Note**: `cmake` and `pkg-config` are required to build libgit2. You can install it by running `sudo apt-get install cmake pkg-config` (Linux) or `brew install cmake pkg-config` (macOS).
+```
+make libgit2
+```
+2.  Build kubescape
+   ```
+   make build
+  ``` 
+ OR
+  ```
+   go build -tags=static .
+   ```
+3.  Run kubescape
+```
+./kubescape
+```
+For more details you can checkout [wiki](https://github.com/kubescape/kubescape/wiki/Building)
+
 ## Pull Request Process
 
 1. Ensure any install or build dependencies are removed before the end of the layer when doing a 
