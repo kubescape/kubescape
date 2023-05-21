@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/gorilla/schema"
 
@@ -106,7 +107,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, err, "")
 		return
 	}
-	scanRequestParams.ctx = r.Context()
+	scanRequestParams.ctx = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context()))
 
 	handler.state.setBusy(scanID)
 

@@ -29,7 +29,7 @@ jobs:
       - uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # Install go because go-licenses use it ratchet:actions/setup-go@v3
         name: Installing go
         with:
-          go-version: '1.19'
+          go-version: '1.20'
           cache: true
       - name: Scanning - Forbidden Licenses (go-licenses)
         id: licenses-scan
@@ -94,7 +94,7 @@ jobs:
       COMPONENT_NAME: kubescape
       CGO_ENABLED: 1
       GO111MODULE: ""
-      GO_VERSION: "1.19"
+      GO_VERSION: "1.20"
       RELEASE: ${{ inputs.RELEASE }}
       CLIENT: ${{ inputs.CLIENT }}
       CHECKOUT_REPO: ${{ github.repository }}
