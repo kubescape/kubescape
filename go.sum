@@ -1100,8 +1100,8 @@ github.com/kubescape/go-logger v0.0.11 h1:oucpq2S7+DT7O+UclG5IrmHado/tj6+IkYf9cz
 github.com/kubescape/go-logger v0.0.11/go.mod h1:yGiKBJ2lhq/kxzY/MVYDREL9fLV3RGD6gv+UFjslaew=
 github.com/kubescape/k8s-interface v0.0.116 h1:Sn76gsMLAArc5kbHZVoRMS6QlM4mOz9Dolpym9BOul8=
 github.com/kubescape/k8s-interface v0.0.116/go.mod h1:ENpA9SkkS6E3PIT+AaMu/JGkuyE04aUamY+a7WLqsJQ=
-github.com/kubescape/opa-utils v0.0.246 h1:WCCtkOD9ar8nSh7dUAGwuBsm+zOcVBbYE1jLQeo6wvo=
-github.com/kubescape/opa-utils v0.0.246/go.mod h1:aaAPHjaIJDoAK6RvAcUDXrXkja0ZTy0qSfnoxkE9z34=
+github.com/kubescape/opa-utils v0.0.247-0.20230522133540-5f7866f7d036 h1:v1Wu8KtRozunF5r1lj8DrU2GiwHoP8rORVbZ0xxywdM=
+github.com/kubescape/opa-utils v0.0.247-0.20230522133540-5f7866f7d036/go.mod h1:SkNqbhUGipSYVE+oAUaHko6aggp8XVVbDChoNg48lao=
 github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnGnhMhJw=
 github.com/kubescape/rbac-utils v0.0.20/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/kubescape/regolibrary v1.0.250 h1:BKoH89Cex+5rsD+vn1ILxULcJ++aA/KEhV5jJ4Wgp/8=
@@ -1556,8 +1556,8 @@ github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/stretchr/testify v1.7.2/go.mod h1:R6va5+xMeoiuVRoj+gSkQ7d3FALtqAAGI1FQKckRals=
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
-github.com/stretchr/testify v1.8.2 h1:+h33VjcLVPDHtOdpUCuF+7gSuG3yGIftsP1YvFihtJ8=
-github.com/stretchr/testify v1.8.2/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
+github.com/stretchr/testify v1.8.3 h1:RP3t2pwF7cMEbC1dqtB6poj3niw/9gnV4Cjg5oW5gtY=
+github.com/stretchr/testify v1.8.3/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/stripe/stripe-go/v74 v74.8.0 h1:0+3EfQSBhMg8SQ1+w+AP6Gxyko2crWbUG2uXbzYs8SU=
 github.com/stripe/stripe-go/v74 v74.8.0/go.mod h1:5PoXNp30AJ3tGq57ZcFuaMylzNi8KpwlrYAFmO1fHZw=
 github.com/subosito/gotenv v1.2.0/go.mod h1:N0PQaV/YGNqwC0u51sEeR/aUtSLEXKX9iv69rRypqCw=
@@ -1868,8 +1868,8 @@ golang.org/x/exp v0.0.0-20200119233911-0405dc783f0a/go.mod h1:2RIsYlXP63K8oxa1u0
 golang.org/x/exp v0.0.0-20200207192155-f17229e696bd/go.mod h1:J/WKrq2StrnmMY6+EHIKF9dgMWnmCNThgcyBT1FY9mM=
 golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6/go.mod h1:3jZMyOhIsHpP37uCMkUooju7aAi5cS1Q23tOzKc+0MU=
 golang.org/x/exp v0.0.0-20200331195152-e8c3332aa8e5/go.mod h1:4M0jN8W1tt0AVLNr8HDosyJCDCDuyL9N9+3m7wDWgKw=
-golang.org/x/exp v0.0.0-20230116083435-1de6713980de h1:DBWn//IJw30uYCgERoxCg84hWtA97F4wMiKOIh00Uf0=
-golang.org/x/exp v0.0.0-20230116083435-1de6713980de/go.mod h1:CxIveKay+FTh1D0yPZemJVgC/95VzuuOLq5Qi4xnoYc=
+golang.org/x/exp v0.0.0-20230519143937-03e91628a987 h1:3xJIFvzUFbu4ls0BTBYcgbCGhA63eAOEMxIHugyXJqA=
+golang.org/x/exp v0.0.0-20230519143937-03e91628a987/go.mod h1:V1LtkGg67GoY2N1AnLN78QLrzxkLyJw7RJb1gzOOz9w=
 golang.org/x/image v0.0.0-20180708004352-c73c2afc3b81/go.mod h1:ux5Hcp/YLpHSI86hEcLt0YII63i6oz57MZXIpbrjZUs=
 golang.org/x/image v0.0.0-20190227222117-0694c2d4d067/go.mod h1:kZ7UVZpmo3dzQBMxlp+ypCbDeSB+sBbTgSJuh5dn5js=
 golang.org/x/image v0.0.0-20190802002840-cff245a6509b/go.mod h1:FeLwcggjj3mMvU+oOTbSwawSJRM1uh48EjtB4UJZlP0=

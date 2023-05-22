@@ -5,6 +5,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -77,25 +78,23 @@ func isKindToBeGrouped(kind string) bool {
 }
 
 func listResultSummary(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) []WorkloadSummary {
-	workloadsSummary := []WorkloadSummary{}
+	resourceIds := helpersv1.GetAllListsFromPool()
+	defer helpersv1.PutAllListsToPool(resourceIds)
 
-	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Failed(), apis.StatusFailed)...)
-	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Passed(), apis.StatusPassed)...)
-	workloadsSummary = append(workloadsSummary, newListWorkloadsSummary(allResources, controlSummary.ListResourcesIDs().Skipped(), apis.StatusSkipped)...)
+	resourceIds = controlSummary.ListResourcesIDs(resourceIds)
+	workloadsSummary := make([]WorkloadSummary, 0, resourceIds.Len())
+	for rId, status := range resourceIds.All() {
+		if status == apis.StatusUnknown {
+			continue
+		}
 
-	return workloadsSummary
-}
-
-func newListWorkloadsSummary(allResources map[string]workloadinterface.IMetadata, resourcesIDs []string, status apis.ScanningStatus) []WorkloadSummary {
-	workloadsSummary := []WorkloadSummary{}
-
-	for _, i := range resourcesIDs {
-		if r, ok := allResources[i]; ok {
+		if r, ok := allResources[rId]; ok {
 			workloadsSummary = append(workloadsSummary, WorkloadSummary{
 				resource: r,
 				status:   status,
 			})
 		}
 	}
+
 	return workloadsSummary
 }
