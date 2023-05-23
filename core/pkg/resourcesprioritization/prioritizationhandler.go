@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 )
@@ -77,9 +78,9 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 		if workload != nil && handler.isSupportedKind(workload) {
 			// build a map of attack track categories to a list of failed controls for the specific resource
-			failedControls := result.ListControlsIDs(nil).Failed()
-			if len(failedControls) > 0 {
-
+			controlsIds := result.ListControlsIDs(nil)
+			if controlsIds.Failed() > 0 {
+				failedControls := controlsIds.GetItems(apis.StatusFailed)
 				controlsLookup := v1alpha1.NewAttackTrackControlsLookup(handler.attackTracks, failedControls, allControls)
 				replicaCount := workload.GetReplicas()
 

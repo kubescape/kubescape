@@ -193,18 +193,18 @@ func TestProcessResourcesResult(t *testing.T) {
 
 	assert.Equal(t, 1, len(opaSessionObj.ResourcesResult))
 	res := opaSessionObj.ResourcesResult[deployment.GetID()]
-	assert.Equal(t, 2, res.ListControlsIDs(nil).All().Len())
-	assert.Equal(t, 1, len(res.ListControlsIDs(nil).Failed()))
-	assert.Equal(t, 1, len(res.ListControlsIDs(nil).Passed()))
+	assert.Equal(t, 2, res.ListControlsIDs(nil).Len())
+	assert.Equal(t, 1, res.ListControlsIDs(nil).Failed())
+	assert.Equal(t, 1, res.ListControlsIDs(nil).Passed())
 	assert.True(t, res.GetStatus(nil).IsFailed())
 	assert.False(t, res.GetStatus(nil).IsPassed())
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
 
 	opap.updateResults(context.TODO())
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
-	assert.Equal(t, 2, res.ListControlsIDs(nil).All().Len())
-	assert.Equal(t, 1, len(res.ListControlsIDs(nil).Failed()))
-	assert.Equal(t, 1, len(res.ListControlsIDs(nil).Passed()))
+	assert.Equal(t, 2, res.ListControlsIDs(nil).Len())
+	assert.Equal(t, 1, res.ListControlsIDs(nil).Failed())
+	assert.Equal(t, 1, res.ListControlsIDs(nil).Passed())
 	assert.True(t, res.GetStatus(nil).IsFailed())
 	assert.False(t, res.GetStatus(nil).IsPassed())
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
@@ -217,32 +217,32 @@ func TestProcessResourcesResult(t *testing.T) {
 	assert.Equal(t, 0, summaryDetails.NumberOfResources().Skipped())
 
 	// test resource listing
-	assert.Equal(t, 1, summaryDetails.ListResourcesIDs().All().Len())
-	assert.Equal(t, 1, len(summaryDetails.ListResourcesIDs().Failed()))
-	assert.Equal(t, 0, len(summaryDetails.ListResourcesIDs().Passed()))
-	assert.Equal(t, 0, len(summaryDetails.ListResourcesIDs().Skipped()))
+	assert.Equal(t, 1, summaryDetails.ListResourcesIDs(nil).Len())
+	assert.Equal(t, 1, summaryDetails.ListResourcesIDs(nil).Failed())
+	assert.Equal(t, 0, summaryDetails.ListResourcesIDs(nil).Passed())
+	assert.Equal(t, 0, summaryDetails.ListResourcesIDs(nil).Skipped())
 
 	// test control listing
-	assert.Equal(t, res.ListControlsIDs(nil).All().Len(), summaryDetails.NumberOfControls().All())
-	assert.Equal(t, len(res.ListControlsIDs(nil).Passed()), summaryDetails.NumberOfControls().Passed())
-	assert.Equal(t, len(res.ListControlsIDs(nil).Skipped()), summaryDetails.NumberOfControls().Skipped())
-	assert.Equal(t, len(res.ListControlsIDs(nil).Failed()), summaryDetails.NumberOfControls().Failed())
+	assert.Equal(t, res.ListControlsIDs(nil).Len(), summaryDetails.NumberOfControls().All())
+	assert.Equal(t, res.ListControlsIDs(nil).Passed(), summaryDetails.NumberOfControls().Passed())
+	assert.Equal(t, res.ListControlsIDs(nil).Skipped(), summaryDetails.NumberOfControls().Skipped())
+	assert.Equal(t, res.ListControlsIDs(nil).Failed(), summaryDetails.NumberOfControls().Failed())
 	assert.True(t, summaryDetails.GetStatus().IsFailed())
 
 	opaSessionObj.Exceptions = []armotypes.PostureExceptionPolicy{*mocks.MockExceptionAllKinds(&armotypes.PosturePolicy{FrameworkName: frameworks[0].Name})}
 	opap.updateResults(context.TODO())
 
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
-	assert.Equal(t, 2, res.ListControlsIDs(nil).All().Len())
-	assert.Equal(t, 2, len(res.ListControlsIDs(nil).Passed()))
+	assert.Equal(t, 2, res.ListControlsIDs(nil).Len())
+	assert.Equal(t, 2, res.ListControlsIDs(nil).Passed())
 	assert.True(t, res.GetStatus(nil).IsPassed())
 	assert.False(t, res.GetStatus(nil).IsFailed())
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
 
 	// test resource listing
 	summaryDetails = opaSessionObj.Report.SummaryDetails
-	assert.Equal(t, 1, summaryDetails.ListResourcesIDs().All().Len())
-	assert.Equal(t, 1, len(summaryDetails.ListResourcesIDs().Failed()))
-	assert.Equal(t, 0, len(summaryDetails.ListResourcesIDs().Passed()))
-	assert.Equal(t, 0, len(summaryDetails.ListResourcesIDs().Skipped()))
+	assert.Equal(t, 1, summaryDetails.ListResourcesIDs(nil).Len())
+	assert.Equal(t, 1, summaryDetails.ListResourcesIDs(nil).Failed())
+	assert.Equal(t, 0, summaryDetails.ListResourcesIDs(nil).Passed())
+	assert.Equal(t, 0, summaryDetails.ListResourcesIDs(nil).Skipped())
 }

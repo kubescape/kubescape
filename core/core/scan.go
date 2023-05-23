@@ -178,13 +178,15 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	}
 
 	// ======================== prioritization ===================
-	_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
-	if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
-	} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
-		return resultsHandling, fmt.Errorf("%w", err)
+	if scanInfo.PrintAttackTree {
+		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
+		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
+		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
+			return resultsHandling, fmt.Errorf("%w", err)
+		}
+		spanPrioritization.End()
 	}
-	spanPrioritization.End()
 
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
