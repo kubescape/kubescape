@@ -14,7 +14,7 @@ require (
 	github.com/go-git/go-git/v5 v5.5.2
 	github.com/google/go-containerregistry v0.13.0
 	github.com/google/uuid v1.3.0
-	github.com/johnfercher/maroto v0.37.0
+	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.24
 	github.com/kubescape/go-logger v0.0.11
@@ -260,7 +260,7 @@ require (
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
 	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/ruudk/golang-pdf417 v0.0.0-20181029194003-1af4ab5afa58 // indirect
+	github.com/ruudk/golang-pdf417 v0.0.0-20201230142125-a7e3863a1245 // indirect
 	github.com/sassoftware/relic v0.0.0-20210427151427-dfb082b79b74 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.4.0 // indirect
 	github.com/segmentio/ksuid v1.0.4 // indirect
