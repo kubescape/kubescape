@@ -34,7 +34,7 @@ func TestHostSensorHandler(t *testing.T) {
 			})
 
 			t.Run("should return namespace", func(t *testing.T) {
-				require.Equal(t, "kubescape-host-scanner", h.GetNamespace())
+				require.Equal(t, "kubescape", h.GetNamespace())
 			})
 
 			t.Run("should collect resources from pods - happy path", func(t *testing.T) {

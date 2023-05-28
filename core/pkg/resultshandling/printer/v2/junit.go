@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
 )
@@ -167,9 +168,7 @@ func listTestsSuite(results *cautils.OPASessionObj) []JUnitTestSuite {
 func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControlsSummaries, classname string) []JUnitTestCase {
 	var testCases []JUnitTestCase
 
-	iter := controls.ListControlsIDs().All()
-	for iter.HasNext() {
-		cID := iter.Next()
+	for cID := range controls.ListControlsIDs(nil).All() {
 		testCase := JUnitTestCase{}
 		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, cID)
 
@@ -178,11 +177,14 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 
 		if control.GetStatus().IsFailed() {
 			resources := map[string]interface{}{}
-			resourceIDs := control.ListResourcesIDs().Failed()
-			for j := range resourceIDs {
-				resource := results.AllResources[resourceIDs[j]]
+			for rId, status := range control.ListResourcesIDs(nil).All() {
+				if status != apis.StatusFailed {
+					continue
+				}
+
+				resource := results.AllResources[rId]
 				sourcePath := ""
-				if ResourceSourcePath, ok := results.ResourceSource[resourceIDs[j]]; ok {
+				if ResourceSourcePath, ok := results.ResourceSource[rId]; ok {
 					sourcePath = ResourceSourcePath.RelativePath
 				}
 				resources[resourceToString(resource, sourcePath)] = nil
@@ -191,7 +193,6 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 			sort.Strings(resourcesStr)
 			testCaseFailure := JUnitFailure{}
 			testCaseFailure.Type = "Control"
-			// testCaseFailure.Contents =
 			testCaseFailure.Message = fmt.Sprintf("Remediation: %s\nMore details: %s\n\n%s", control.GetRemediation(), cautils.GetControlLink(control.GetID()), strings.Join(resourcesStr, "\n"))
 
 			testCase.Failure = &testCaseFailure

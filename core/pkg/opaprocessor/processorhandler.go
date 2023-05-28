@@ -63,8 +63,13 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
+	maxGoRoutines, err := parseIntEnvVar("RULE_PROCESSING_GOMAXPROCS", 2*runtime.NumCPU())
+	if err != nil {
+		logger.L().Ctx(ctx).Warning(err.Error())
+	}
+
 	// process
-	if err := opap.Process(ctx, opap.OPASessionObj.AllPolicies, progressListener); err != nil {
+	if err := opap.Process(ctx, opap.OPASessionObj.AllPolicies, progressListener, maxGoRoutines); err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 		// Return error?
 	}
@@ -80,7 +85,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 }
 
 // Process OPA policies (rules) on all configured controls.
-func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
+func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient, maxGoRoutines int) error {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
 	defer span.End()
 	opap.loggerStartScanning()
@@ -102,7 +107,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 
 	resultsChan := make(chan results)
 	controlsGroup, groupCtx := errgroup.WithContext(ctx)
-	controlsGroup.SetLimit(2 * runtime.NumCPU())
+	controlsGroup.SetLimit(maxGoRoutines)
 
 	allResources := make(map[string]workloadinterface.IMetadata, max(len(opap.AllResources), heuristicAllocResources))
 	for k, v := range opap.AllResources {

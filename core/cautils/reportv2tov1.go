@@ -3,6 +3,7 @@ package cautils
 import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -54,10 +55,8 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 		crv1.Remediation = crv2.Remediation
 
 		rulesv1 := map[string]reporthandling.RuleReport{}
-
-		iter := crv2.ListResourcesIDs().All()
-		for iter.HasNext() {
-			resourceID := iter.Next()
+		l := helpersv1.GetAllListsFromPool()
+		for resourceID := range crv2.ListResourcesIDs(l).All() {
 			if result, ok := opaSessionObj.ResourcesResult[resourceID]; ok {
 				for _, rulev2 := range result.ListRulesOfControl(crv2.GetID(), "") {
 
@@ -104,6 +103,7 @@ func controlReportV2ToV1(opaSessionObj *OPASessionObj, frameworkName string, con
 				}
 			}
 		}
+		helpersv1.PutAllListsToPool(l)
 		if len(rulesv1) > 0 {
 			for i := range rulesv1 {
 				crv1.RuleReports = append(crv1.RuleReports, rulesv1[i])

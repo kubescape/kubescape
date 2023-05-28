@@ -62743,7 +62743,7 @@
         },
         {
             "guid": "",
-            "name": "exclude-kubescape-host-scanner-resources",
+            "name": "exclude-host-scanner-resources",
             "attributes": {
                 "systemException": true
             },
@@ -62758,7 +62758,7 @@
                     "attributes": {
                         "kind": "DaemonSet",
                         "name": "host-scanner",
-                        "namespace": "kubescape-host-scanner"
+                        "namespace": "kubescape"
                     }
                 }
             ],

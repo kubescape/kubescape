@@ -15,6 +15,10 @@ so the maintainers are able to help guide you and let you know if you are going 
 
 Please follow our [code of conduct](CODE_OF_CONDUCT.md) in all of your interactions within the project.
 
+## Build and test locally
+
+Please follow the [instructions here](https://github.com/kubescape/kubescape/wiki/Building).
+
 ## Pull Request Process
 
 1. Ensure any install or build dependencies are removed before the end of the layer when doing a 
