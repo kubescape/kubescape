@@ -32,7 +32,7 @@ spec:
       - operator: Exists
       containers:
       - name: host-sensor
-        image: quay.io/kubescape/host-scanner:v1.0.59
+        image: quay.io/kubescape/host-scanner:v1.0.61
         securityContext:
           allowPrivilegeEscalation: true
           privileged: true
