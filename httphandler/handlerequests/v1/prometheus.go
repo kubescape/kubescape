@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/google/uuid"
 )
@@ -34,7 +36,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		scanInfo: scanInfo,
 		scanID:   scanID,
 	}
-	scanParams.ctx = r.Context()
+	scanParams.ctx = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context()))
 
 	handler.scanResponseChan.set(scanID) // add scan to channel
 	defer handler.scanResponseChan.delete(scanID)
