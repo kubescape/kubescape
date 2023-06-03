@@ -9,6 +9,8 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	"github.com/google/uuid"
@@ -69,15 +71,17 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
 func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
-	scanInfo.Submit = false // do not submit results every scan
-	scanInfo.Local = true   // do not submit results every scan
+	scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
+	scanInfo.Submit = false                              // do not submit results every scan
+	scanInfo.Local = true                                // do not submit results every scan
 	scanInfo.FrameworkScan = true
-	scanInfo.ScanAll = true                                                        // scan all frameworks
+	scanInfo.ScanAll = false                                                       // do not scan all frameworks
 	scanInfo.ScanID = scanID                                                       // scan ID
 	scanInfo.FailThreshold = 100                                                   // Do not fail scanning
 	scanInfo.ComplianceThreshold = 0                                               // Do not fail scanning
 	scanInfo.Output = resultsFile                                                  // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus")                       // default output should be json
 	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", false)) // enable host scanner
+	scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, apisv1.KindFramework)
 	return scanInfo
 }
