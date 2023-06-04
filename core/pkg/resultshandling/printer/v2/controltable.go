@@ -41,6 +41,27 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	return row
 }
 
+func generateRowPdf(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
+	row := make([]string, _rowLen)
+
+	// ignore passed results
+	if !verbose && (controlSummary.GetStatus().IsPassed()) {
+		return []string{}
+	}
+
+	row[columnSeverity] = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
+	if len(controlSummary.GetName()) > 50 {
+		row[columnName] = controlSummary.GetName()[:50] + "..."
+	} else {
+		row[columnName] = controlSummary.GetName()
+	}
+	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
+	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
+	row[columnComplianceScore] = getComplianceScoreColumn(controlSummary, infoToPrintInfo)
+
+	return row
+}
+
 func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
 	for i := range infoToPrintInfo {
 		if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
