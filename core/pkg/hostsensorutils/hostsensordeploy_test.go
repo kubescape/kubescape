@@ -34,14 +34,14 @@ func TestHostSensorHandler(t *testing.T) {
 			})
 
 			t.Run("should return namespace", func(t *testing.T) {
-				require.Equal(t, "kubescape-host-scanner", h.GetNamespace())
+				require.Equal(t, "kubescape", h.GetNamespace())
 			})
 
 			t.Run("should collect resources from pods - happy path", func(t *testing.T) {
 				envelope, status, err := h.CollectResources(ctx)
 				require.NoError(t, err)
 
-				require.Len(t, envelope, 10*2) // has cloud provider, no control plane requested
+				require.Len(t, envelope, 9*2) // has cloud provider, no control plane requested
 				require.Len(t, status, 0)
 
 				foundControl, foundProvider := false, false
@@ -91,7 +91,7 @@ func TestHostSensorHandler(t *testing.T) {
 				envelope, status, err := h.CollectResources(ctx)
 				require.NoError(t, err)
 
-				require.Len(t, envelope, 11*2) // has empty cloud provider, has control plane info
+				require.Len(t, envelope, 10*2) // has empty cloud provider, has control plane info
 				require.Len(t, status, 0)
 
 				foundControl, foundProvider := false, false

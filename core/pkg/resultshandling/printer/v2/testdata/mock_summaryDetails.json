@@ -1,0 +1,1016 @@
+{
+    "controls": {
+        "C-0002": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0002",
+            "name": "Exec into container",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 151,
+                "failedResources": 2,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 2
+            },
+            "score": 1.3071896,
+            "scoreFactor": 5
+        },
+        "C-0005": {
+            "statusInfo": {
+                "status": "passed",
+                "subStatus": "irrelevant"
+            },
+            "controlID": "C-0005",
+            "name": "API server insecure port is enabled",
+            "status": "passed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 0,
+            "scoreFactor": 9
+        },
+        "C-0009": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0009",
+            "name": "Resource limits",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 33,
+                "failedResources": 36,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 18
+            },
+            "score": 50.559006,
+            "scoreFactor": 7
+        },
+        "C-0012": {
+            "statusInfo": {
+                "status": "skipped",
+                "subStatus": "configuration",
+                "info": "Control configurations are empty"
+            },
+            "controlID": "C-0012",
+            "name": "Applications credentials in configuration files",
+            "status": "skipped",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 134,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 0,
+            "scoreFactor": 8
+        },
+        "C-0013": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0013",
+            "name": "Non-root containers",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 32,
+                "failedResources": 37,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 14
+            },
+            "score": 48.81987,
+            "scoreFactor": 6
+        },
+        "C-0016": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0016",
+            "name": "Allow privilege escalation",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 39,
+                "failedResources": 37,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 14
+            },
+            "score": 44.914284,
+            "scoreFactor": 6
+        },
+        "C-0017": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0017",
+            "name": "Immutable container filesystem",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 27,
+                "failedResources": 42,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 23
+            },
+            "score": 55.03105,
+            "scoreFactor": 3
+        },
+        "C-0030": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0030",
+            "name": "Ingress and Egress blocked",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 24,
+                "failedResources": 45,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 24
+            },
+            "score": 61.739136,
+            "scoreFactor": 6
+        },
+        "C-0034": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0034",
+            "name": "Automatic mapping of service account",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 84,
+                "failedResources": 59,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 64
+            },
+            "score": 41.229774,
+            "scoreFactor": 6
+        },
+        "C-0035": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0035",
+            "name": "Cluster-admin binding",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 151,
+                "failedResources": 2,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 2
+            },
+            "score": 1.3071896,
+            "scoreFactor": 6
+        },
+        "C-0038": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0038",
+            "name": "Host PID/IPC privileges",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 68,
+                "failedResources": 1,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 1
+            },
+            "score": 1.242236,
+            "scoreFactor": 7
+        },
+        "C-0041": {
+            "statusInfo": {
+                "status": "passed",
+                "subStatus": "w/exceptions"
+            },
+            "controlID": "C-0041",
+            "name": "HostNetwork access",
+            "status": "passed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 69,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 11
+            },
+            "score": 0,
+            "scoreFactor": 7
+        },
+        "C-0044": {
+            "statusInfo": {
+                "status": "passed"
+            },
+            "controlID": "C-0044",
+            "name": "Container hostPort",
+            "status": "passed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 69,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 0,
+            "scoreFactor": 4
+        },
+        "C-0046": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0046",
+            "name": "Insecure capabilities",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 68,
+                "failedResources": 1,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 1.242236,
+            "scoreFactor": 7
+        },
+        "C-0054": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0054",
+            "name": "Cluster internal networking",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 4,
+                "failedResources": 9,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 4
+            },
+            "score": 69.23077,
+            "scoreFactor": 4
+        },
+        "C-0055": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0055",
+            "name": "Linux hardening",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 39,
+                "failedResources": 30,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 16
+            },
+            "score": 40.12422,
+            "scoreFactor": 4
+        },
+        "C-0057": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0057",
+            "name": "Privileged container",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 68,
+                "failedResources": 1,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 11
+            },
+            "score": 1.242236,
+            "scoreFactor": 8
+        },
+        "C-0058": {
+            "statusInfo": {
+                "status": "passed",
+                "subStatus": "irrelevant"
+            },
+            "controlID": "C-0058",
+            "name": "CVE-2021-25741 - Using symlink for arbitrary host file system access.",
+            "status": "passed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 0,
+            "scoreFactor": 6
+        },
+        "C-0059": {
+            "statusInfo": {
+                "status": "passed",
+                "subStatus": "irrelevant"
+            },
+            "controlID": "C-0059",
+            "name": "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",
+            "status": "passed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 0,
+            "scoreFactor": 8
+        },
+        "C-0066": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0066",
+            "name": "Secret/ETCD encryption enabled",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 1,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 100,
+            "scoreFactor": 6
+        },
+        "C-0067": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0067",
+            "name": "Audit logs enabled",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 1,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 100,
+            "scoreFactor": 5
+        },
+        "C-0068": {
+            "statusInfo": {
+                "status": "failed"
+            },
+            "controlID": "C-0068",
+            "name": "PSP enabled",
+            "status": "failed",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 1,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 100,
+            "scoreFactor": 1
+        },
+        "C-0069": {
+            "statusInfo": {
+                "status": "skipped",
+                "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+            },
+            "controlID": "C-0069",
+            "name": "Disable anonymous access to Kubelet service",
+            "status": "skipped",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 0,
+            "scoreFactor": 10
+        },
+        "C-0070": {
+            "statusInfo": {
+                "status": "skipped",
+                "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+            },
+            "controlID": "C-0070",
+            "name": "Enforce Kubelet client TLS authentication",
+            "status": "skipped",
+            "resourceIDs": {},
+            "ResourceCounters": {
+                "passedResources": 0,
+                "failedResources": 0,
+                "skippedResources": 0,
+                "excludedResources": 0
+            },
+            "subStatusCounters": {
+                "ignoredResources": 0
+            },
+            "score": 0,
+            "scoreFactor": 9
+        }
+    },
+    "status": "failed",
+    "frameworks": [
+        {
+            "controls": {
+                "C-0002": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0002",
+                    "name": "Exec into container",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 151,
+                        "failedResources": 2,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 2
+                    },
+                    "score": 1.3071896,
+                    "scoreFactor": 5
+                },
+                "C-0005": {
+                    "statusInfo": {
+                        "status": "passed",
+                        "subStatus": "irrelevant"
+                    },
+                    "controlID": "C-0005",
+                    "name": "API server insecure port is enabled",
+                    "status": "passed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 0,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 0,
+                    "scoreFactor": 9
+                },
+                "C-0009": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0009",
+                    "name": "Resource limits",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 33,
+                        "failedResources": 36,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 18
+                    },
+                    "score": 50.559006,
+                    "scoreFactor": 7
+                },
+                "C-0012": {
+                    "statusInfo": {
+                        "status": "skipped",
+                        "subStatus": "configuration",
+                        "info": "Control configurations are empty"
+                    },
+                    "controlID": "C-0012",
+                    "name": "Applications credentials in configuration files",
+                    "status": "skipped",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 0,
+                        "skippedResources": 134,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 0,
+                    "scoreFactor": 8
+                },
+                "C-0013": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0013",
+                    "name": "Non-root containers",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 32,
+                        "failedResources": 37,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 14
+                    },
+                    "score": 48.81987,
+                    "scoreFactor": 6
+                },
+                "C-0016": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0016",
+                    "name": "Allow privilege escalation",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 39,
+                        "failedResources": 37,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 14
+                    },
+                    "score": 44.914284,
+                    "scoreFactor": 6
+                },
+                "C-0017": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0017",
+                    "name": "Immutable container filesystem",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 27,
+                        "failedResources": 42,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 23
+                    },
+                    "score": 55.03105,
+                    "scoreFactor": 3
+                },
+                "C-0030": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0030",
+                    "name": "Ingress and Egress blocked",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 24,
+                        "failedResources": 45,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 24
+                    },
+                    "score": 61.739136,
+                    "scoreFactor": 6
+                },
+                "C-0034": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0034",
+                    "name": "Automatic mapping of service account",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 84,
+                        "failedResources": 59,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 64
+                    },
+                    "score": 41.229774,
+                    "scoreFactor": 6
+                },
+                "C-0035": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0035",
+                    "name": "Cluster-admin binding",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 151,
+                        "failedResources": 2,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 2
+                    },
+                    "score": 1.3071896,
+                    "scoreFactor": 6
+                },
+                "C-0038": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0038",
+                    "name": "Host PID/IPC privileges",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 68,
+                        "failedResources": 1,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 1
+                    },
+                    "score": 1.242236,
+                    "scoreFactor": 7
+                },
+                "C-0041": {
+                    "statusInfo": {
+                        "status": "passed",
+                        "subStatus": "w/exceptions"
+                    },
+                    "controlID": "C-0041",
+                    "name": "HostNetwork access",
+                    "status": "passed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 69,
+                        "failedResources": 0,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 11
+                    },
+                    "score": 0,
+                    "scoreFactor": 7
+                },
+                "C-0044": {
+                    "statusInfo": {
+                        "status": "passed"
+                    },
+                    "controlID": "C-0044",
+                    "name": "Container hostPort",
+                    "status": "passed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 69,
+                        "failedResources": 0,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 0,
+                    "scoreFactor": 4
+                },
+                "C-0046": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0046",
+                    "name": "Insecure capabilities",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 68,
+                        "failedResources": 1,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 1.242236,
+                    "scoreFactor": 7
+                },
+                "C-0054": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0054",
+                    "name": "Cluster internal networking",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 4,
+                        "failedResources": 9,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 4
+                    },
+                    "score": 69.23077,
+                    "scoreFactor": 4
+                },
+                "C-0055": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0055",
+                    "name": "Linux hardening",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 39,
+                        "failedResources": 30,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 16
+                    },
+                    "score": 40.12422,
+                    "scoreFactor": 4
+                },
+                "C-0057": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0057",
+                    "name": "Privileged container",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 68,
+                        "failedResources": 1,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 11
+                    },
+                    "score": 1.242236,
+                    "scoreFactor": 8
+                },
+                "C-0058": {
+                    "statusInfo": {
+                        "status": "passed",
+                        "subStatus": "irrelevant"
+                    },
+                    "controlID": "C-0058",
+                    "name": "CVE-2021-25741 - Using symlink for arbitrary host file system access.",
+                    "status": "passed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 0,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 0,
+                    "scoreFactor": 6
+                },
+                "C-0059": {
+                    "statusInfo": {
+                        "status": "passed",
+                        "subStatus": "irrelevant"
+                    },
+                    "controlID": "C-0059",
+                    "name": "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",
+                    "status": "passed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 0,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 0,
+                    "scoreFactor": 8
+                },
+                "C-0066": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0066",
+                    "name": "Secret/ETCD encryption enabled",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 1,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 100,
+                    "scoreFactor": 6
+                },
+                "C-0067": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0067",
+                    "name": "Audit logs enabled",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 1,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 100,
+                    "scoreFactor": 5
+                },
+                "C-0068": {
+                    "statusInfo": {
+                        "status": "failed"
+                    },
+                    "controlID": "C-0068",
+                    "name": "PSP enabled",
+                    "status": "failed",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 1,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 100,
+                    "scoreFactor": 1
+                },
+                "C-0069": {
+                    "statusInfo": {
+                        "status": "skipped",
+                        "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+                    },
+                    "controlID": "C-0069",
+                    "name": "Disable anonymous access to Kubelet service",
+                    "status": "skipped",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 0,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 0,
+                    "scoreFactor": 10
+                },
+                "C-0070": {
+                    "statusInfo": {
+                        "status": "skipped",
+                        "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+                    },
+                    "controlID": "C-0070",
+                    "name": "Enforce Kubelet client TLS authentication",
+                    "status": "skipped",
+                    "resourceIDs": {},
+                    "ResourceCounters": {
+                        "passedResources": 0,
+                        "failedResources": 0,
+                        "skippedResources": 0,
+                        "excludedResources": 0
+                    },
+                    "subStatusCounters": {
+                        "ignoredResources": 0
+                    },
+                    "score": 0,
+                    "scoreFactor": 9
+                }
+            },
+            "name": "NSA",
+            "status": "failed",
+            "version": "",
+            "ResourceCounters": {
+                "passedResources": 210,
+                "failedResources": 83,
+                "skippedResources": 89,
+                "excludedResources": 0
+            },
+            "score": 19.654322
+        }
+    ],
+    "resourcesSeverityCounters": {
+        "criticalSeverity": 0,
+        "highSeverity": 39,
+        "mediumSeverity": 223,
+        "lowSeverity": 43
+    },
+    "controlsSeverityCounters": {
+        "criticalSeverity": 0,
+        "highSeverity": 4,
+        "mediumSeverity": 10,
+        "lowSeverity": 2
+    },
+    "ResourceCounters": {
+        "passedResources": 210,
+        "failedResources": 83,
+        "skippedResources": 89,
+        "excludedResources": 0
+    },
+    "score": 19.654322
+}

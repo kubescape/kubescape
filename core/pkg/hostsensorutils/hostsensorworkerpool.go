@@ -43,22 +43,23 @@ func (wp *workerPool) init(noOfPods ...int) {
 }
 
 // The worker takes a job out of the chan, executes the request, and pushes the result to the results chan
-func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
+func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup, log *LogsMap) {
 	defer wg.Done()
 	for job := range wp.jobs {
 		hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to get data", helpers.String("path", job.path), helpers.String("podName", job.podName), helpers.Error(err))
+		if err != nil && !log.isDuplicated(failedToGetData) {
+			logger.L().Ctx(ctx).Warning(failedToGetData, helpers.String("path", job.path), helpers.Error(err))
+			log.update(failedToGetData)
 			continue
 		}
 		wp.results <- hostSensorDataEnvelope
 	}
 }
 
-func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup) {
+func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup, log *LogsMap) {
 	for i := 0; i < noOfWorkers; i++ {
 		wg.Add(1)
-		go wp.hostSensorWorker(ctx, hsh, wg)
+		go wp.hostSensorWorker(ctx, hsh, wg, log)
 	}
 }
 

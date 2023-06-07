@@ -16,6 +16,10 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 	assert.Equal(t, scanID, scanInfo.ScanID)
 	assert.Equal(t, outputFile, scanInfo.Output)
 	assert.Equal(t, "prometheus", scanInfo.Format)
-	// assert.False(t, *scanInfo.HostSensorEnabled.Get())
+	assert.False(t, scanInfo.Submit)
+	assert.True(t, scanInfo.Local)
+	assert.True(t, scanInfo.FrameworkScan)
+	assert.False(t, scanInfo.ScanAll)
+	assert.False(t, scanInfo.HostSensorEnabled.GetBool())
 	assert.Equal(t, getter.DefaultLocalStore, scanInfo.UseArtifactsFrom)
 }

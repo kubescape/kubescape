@@ -62,11 +62,18 @@ func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.Summ
 	for i := range infoMap {
 		if infoMap[i].info != "" {
 			m.Row(5, func() {
-				m.Col(1, func() {
-					m.Text(fmt.Sprintf("%v", infoMap[i].info))
-				})
 				m.Col(12, func() {
-					m.Text(fmt.Sprintf("%v", infoMap[i].stars))
+					m.Text(fmt.Sprintf("%v %v", infoMap[i].stars, infoMap[i].info),props.Text{
+						Style: consts.Bold,
+						Align:  consts.Left,
+						Size:   8,
+						Extrapolate: false,
+						Color: color.Color{
+							Red:   0,
+							Green: 0,
+							Blue:  255,
+						},
+					})
 				})
 			})
 			if emptyRowCounter < len(infoMap) {
@@ -156,28 +163,53 @@ func (pp *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IF
 func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 	headers := getControlTableHeaders()
 	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
-	controls := make([][]string, len(sortedControlIDs))
-	for i := range controls {
-		controls[i] = make([]string, len(headers))
-	}
+	var controls [][]string
 	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
 		for _, c := range sortedControlIDs[i] {
-			controls[i] = generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap, true)
+			row := generateRowPdf(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap, true)
+			if len(row) > 0 {
+				controls = append(controls, row)
+			}
 		}
 	}
 
 	m.TableList(headers, controls, props.TableList{
 		HeaderProp: props.TableListContent{
-			Family: consts.Arial,
-			Style:  consts.Bold,
-			Size:   8.0,
+			Family:    consts.Arial,
+			Style:     consts.Bold,
+			Size:      6.0,
+			GridSizes: []uint{1, 5, 2, 2, 2},
 		},
 		ContentProp: props.TableListContent{
-			Family: consts.Courier,
-			Style:  consts.Normal,
-			Size:   8.0,
+			Family:                          consts.Courier,
+			Style:                           consts.Normal,
+			Size:                            6.0,
+			GridSizes:                       []uint{1, 5, 2, 2, 2},
+			CellTextColorChangerColumnIndex: 0,
+			CellTextColorChangerFunc: func(cellValue string) color.Color {
+				if cellValue == "Critical" {
+					return color.Color{
+						Red:   255,
+						Green: 0,
+						Blue:  0,
+					}
+				} else if cellValue == "High" {
+					return color.Color{
+						Red:   0,
+						Green: 0,
+						Blue:  255,
+					}
+				} else if cellValue == "Medium" {
+					return color.Color{
+						Red:   252,
+						Green: 186,
+						Blue:  3,
+					}
+				}
+				return color.NewBlack()
+			},
 		},
-		Align: consts.Center,
+		Align: consts.Left,
 		AlternatedBackground: &color.Color{
 			Red:   224,
 			Green: 224,
@@ -193,7 +225,9 @@ func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.Sum
 // printFinalResult adds the final results
 func (pp *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails) {
 	m.Row(_rowLen, func() {
-		m.Col(3, func() {
+		m.Col(1, func() {
+		})
+		m.Col(5, func() {
 			m.Text("Resource summary", props.Text{
 				Align:  consts.Left,
 				Size:   8.0,
@@ -210,14 +244,6 @@ func (pp *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *reportsumma
 			})
 		})
 		m.Col(2, func() {
-			m.Text(fmt.Sprintf("%d", summaryDetails.NumberOfResources().Skipped()), props.Text{
-				Align:  consts.Left,
-				Size:   8.0,
-				Style:  consts.Bold,
-				Family: consts.Arial,
-			})
-		})
-		m.Col(2, func() {
 			m.Text(fmt.Sprintf("%d", summaryDetails.NumberOfResources().All()), props.Text{
 				Align:  consts.Left,
 				Size:   8.0,
@@ -226,7 +252,7 @@ func (pp *PdfPrinter) printFinalResult(m pdf.Maroto, summaryDetails *reportsumma
 			})
 		})
 		m.Col(2, func() {
-			m.Text(fmt.Sprintf("%.2f%s", summaryDetails.Score, "%"), props.Text{
+			m.Text(fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%"), props.Text{
 				Align:  consts.Left,
 				Size:   8.0,
 				Style:  consts.Bold,

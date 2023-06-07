@@ -14,12 +14,12 @@ require (
 	github.com/go-git/go-git/v5 v5.5.2
 	github.com/google/go-containerregistry v0.13.0
 	github.com/google/uuid v1.3.0
-	github.com/johnfercher/maroto v0.37.0
+	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
-	github.com/kubescape/go-git-url v0.0.24
+	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.11
 	github.com/kubescape/k8s-interface v0.0.116
-	github.com/kubescape/opa-utils v0.0.247-0.20230509143927-cb5d41cd85bd
+	github.com/kubescape/opa-utils v0.0.247
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.250
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -32,7 +32,7 @@ require (
 	github.com/sergi/go-diff v1.2.0
 	github.com/sigstore/cosign v1.13.1
 	github.com/spf13/cobra v1.7.0
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.3
 	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.14.0
 	golang.org/x/mod v0.8.0
@@ -260,7 +260,7 @@ require (
 	github.com/rcrowley/go-metrics v0.0.0-20201227073835-cf1acfcdf475 // indirect
 	github.com/rivo/uniseg v0.4.3 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
-	github.com/ruudk/golang-pdf417 v0.0.0-20181029194003-1af4ab5afa58 // indirect
+	github.com/ruudk/golang-pdf417 v0.0.0-20201230142125-a7e3863a1245 // indirect
 	github.com/sassoftware/relic v0.0.0-20210427151427-dfb082b79b74 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.4.0 // indirect
 	github.com/segmentio/ksuid v1.0.4 // indirect
@@ -336,7 +336,7 @@ require (
 	go.uber.org/multierr v1.9.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.3.0 // indirect
-	golang.org/x/exp v0.0.0-20230116083435-1de6713980de // indirect
+	golang.org/x/exp v0.0.0-20230519143937-03e91628a987 // indirect
 	golang.org/x/net v0.9.0 // indirect
 	golang.org/x/oauth2 v0.5.0 // indirect
 	golang.org/x/sys v0.7.0 // indirect
