@@ -45,7 +45,7 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 					c.Status = apis.StatusSkipped
 					c.StatusInfo.InnerStatus = apis.StatusSkipped
 					c.StatusInfo.SubStatus = apis.SubStatusManualReview
-					c.StatusInfo.InnerInfo = "Manual review required"
+					c.StatusInfo.InnerInfo = string(apis.SubStatusManualReviewInfo)
 				}
 				controls[frameworks[i].Controls[j].ControlID] = c
 				summaryDetails.Controls[id] = c
