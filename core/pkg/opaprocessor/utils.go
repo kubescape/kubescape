@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
@@ -39,6 +40,12 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 					ScoreFactor: frameworks[i].Controls[j].BaseScore,
 					Description: frameworks[i].Controls[j].Description,
 					Remediation: frameworks[i].Controls[j].Remediation,
+				}
+				if frameworks[i].Controls[j].GetActionRequiredAttribute() == string(apis.SubStatusManualReview) {
+					c.Status = apis.StatusSkipped
+					c.StatusInfo.InnerStatus = apis.StatusSkipped
+					c.StatusInfo.SubStatus = apis.SubStatusManualReview
+					c.StatusInfo.InnerInfo = string(apis.SubStatusManualReviewInfo)
 				}
 				controls[frameworks[i].Controls[j].ControlID] = c
 				summaryDetails.Controls[id] = c
