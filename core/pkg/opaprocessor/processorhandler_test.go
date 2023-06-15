@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"runtime"
 	"testing"
@@ -65,7 +64,7 @@ func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error 
 	if err != nil {
 		panic(err)
 	}
-	allResourcesMockData, err = ioutil.ReadAll(file)
+	allResourcesMockData, err = io.ReadAll(file)
 	if err != nil {
 		panic(err)
 	}
