@@ -61,6 +61,72 @@ func TestToScanInfo(t *testing.T) {
 }
 
 func TestSetTargetInScanInfo(t *testing.T) {
+	// framework scan with "security" framework
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{""},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		scanInfo.ScanSecurityFramework = true
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
+		assert.Contains(t, scanInfo.PolicyIdentifier[0].Identifier, "security")
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		scanInfo.ScanSecurityFramework = true
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
+		assert.Contains(t, scanInfo.PolicyIdentifier[0].Identifier, "security")
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{"nsa", "mitre"},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		scanInfo.ScanSecurityFramework = true
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.False(t, scanInfo.ScanAll)
+		assert.Equal(t, 3, len(scanInfo.PolicyIdentifier))
+		assert.Contains(t, scanInfo.PolicyIdentifier[2].Identifier, "security")
+
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{"all"},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		scanInfo.ScanSecurityFramework = true
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
+		assert.Contains(t, scanInfo.PolicyIdentifier[0].Identifier, "security")
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{}
+		scanInfo := &cautils.ScanInfo{}
+		scanInfo.ScanSecurityFramework = true
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
+		assert.Contains(t, scanInfo.PolicyIdentifier[0].Identifier, "security")
+	}
+
+	// framework scan without "security" framework
 	{
 		req := &utilsmetav1.PostScanRequest{
 			TargetType:  apisv1.KindFramework,
@@ -113,6 +179,8 @@ func TestSetTargetInScanInfo(t *testing.T) {
 		assert.True(t, scanInfo.ScanAll)
 		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
 	}
+
+	// control scan
 	{
 		req := &utilsmetav1.PostScanRequest{
 			TargetType:  apisv1.KindControl,

@@ -173,7 +173,8 @@ func defaultScanInfo() *cautils.ScanInfo {
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
-	scanInfo.KubeContext = envToString("KS_CONTEXT", "") // publish results to Kubescape SaaS
+	scanInfo.KubeContext = envToString("KS_CONTEXT", "")                            // publish results to Kubescape SaaS
+	scanInfo.ScanSecurityFramework = envToBool("KS_SCAN_SECURITY_FRAMEWORK", false) // enable security framework scan
 
 	return scanInfo
 }

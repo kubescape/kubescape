@@ -11,6 +11,10 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
+const (
+	securityFrameworkName = "security"
+)
+
 func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
 
@@ -85,5 +89,13 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 	} else {
 		scanInfo.FrameworkScan = true
 		scanInfo.ScanAll = true
+	}
+
+	// Add "security" framework if not present
+	if scanInfo.FrameworkScan == true && scanInfo.ScanSecurityFramework {
+		if cautils.StringInSlice(scanRequest.TargetNames, securityFrameworkName) == cautils.ValueNotFound {
+			scanRequest.TargetNames = append(scanRequest.TargetNames, securityFrameworkName)
+			scanInfo.SetPolicyIdentifiers(scanRequest.TargetNames, scanRequest.TargetType)
+		}
 	}
 }

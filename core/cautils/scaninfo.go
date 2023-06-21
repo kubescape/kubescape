@@ -133,6 +133,7 @@ type ScanInfo struct {
 	ScanAll               bool               // true if scan all frameworks
 	OmitRawResources      bool               // true if omit raw resources from the output
 	PrintAttackTree       bool               // true if print attack tree
+	ScanSecurityFramework bool               // true if to scan also "Security" framework, relevant only when FrameworkScan is true
 }
 
 type Getters struct {
