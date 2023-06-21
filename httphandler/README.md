@@ -178,3 +178,4 @@ go tool pprof http://localhost:6060/debug/pprof/heap
 * `KS_DOWNLOAD_ARTIFACTS`: Download the artifacts every scan
 * `KS_LOGGER_NAME`: Set logger name
 * `KS_LOGGER_LEVEL`: Set logger level
+* `KS_SCAN_SECURITY_FRAMEWORK`: Enable "security" framework scan on top of any framework scan.
