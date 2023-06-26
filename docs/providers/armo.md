@@ -1,6 +1,6 @@
 <img src="armo-powered-by-kubescape-logo-grey.svg" width="25%" height="25%" align="right">
 
-[ARMO Platform](https://cloud.armosec.io/account/sign-up?utm_source=ARMOgithub&utm_medium=ARMOcli) is an enterprise solution based on Kubescape. It’s a multi-cloud Kubernetes and CI/CD security platform with a single pane of glass including risk analysis, security compliance, misconfiguration, image vulnerability, repository and registry scanning, RBAC visualization, and more.
+[ARMO Platform](https://cloud.armosec.io/account/sign-up?utm_source=ARMOgithub&utm_medium=ARMOcli) is an enterprise solution based on Kubescape. It’s a multi-cloud and multi-cluster Kubernetes and CI/CD security platform with a single pane of glass, Including Kubernetes hardening and compliance, misconfiguration and container images’ vulnerabilities scanning and remediation, RBAC investigator, and more.
 
 ## Connect Kubescape to ARMO Platform
 
@@ -15,11 +15,11 @@
     kubescape scan --create-account
     ```
 
-The scan results will be submitted to the ARMO Platform. 
+The scan results will be submitted to the ARMO Platform.
 
-**Click the URL printed at the end of the scan and sign-up (for free) to the ARMO portal. After sign-up you will directed to the scanning results!**
+**Using the link printed at the end of the scan, sign up for the ARMO platform (for free) and see the scanning results**
 
-Here is an examples of the results you will see:
+Here is an example of the results you will see:
 ![compliance](compliance.png)
 
 ## Key features: 
