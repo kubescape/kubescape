@@ -4,12 +4,16 @@
 
 ## Connect Kubescape to ARMO Platform
 
-Install and run Kubescape in your CLI
-```
-curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash; kubescape scan --create-account
-```
+1. Install Kubescape
+    ```
+    curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
+    ```
+    > Alternatively, you can [install Kubescape using via package managers](../installation.md#installation)
 
-> Alternatively, you can [install Kubescape using via package managers](../installation.md#installation). After installation, run the scan command: `kubescape scan --create-account`
+2. Scan Kubescape with the `--create-account` flag
+    ```
+    kubescape scan --create-account
+    ```
 
 The scan results will be submitted to the ARMO Platform. 
 
