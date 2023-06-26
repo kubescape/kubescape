@@ -8,7 +8,7 @@
     ```
     curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
     ```
-    > Alternatively, you can [install Kubescape using via package managers](../installation.md#installation)
+    > Alternatively, you can [install Kubescape using package managers](../installation.md#installation)
 
 2. Scan Kubescape with the `--create-account` flag
     ```
