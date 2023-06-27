@@ -17,9 +17,8 @@
 
 The scan results will be submitted to the ARMO Platform.
 
-**Using the link printed at the end of the scan, sign up for the ARMO platform (for free) and see the scanning results**
+3. Using the link printed at the end of the scan, sign up for the ARMO Platform — for free — and see your scan results.
 
-Here is an example of the results you will see:
 ![compliance](compliance.png)
 
 ## Key features: 
