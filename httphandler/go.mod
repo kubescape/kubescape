@@ -13,7 +13,7 @@ require (
 	github.com/kubescape/go-logger v0.0.11
 	github.com/kubescape/k8s-interface v0.0.116
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.249
+	github.com/kubescape/opa-utils v0.0.250
 	github.com/stretchr/testify v1.8.3
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
 	go.opentelemetry.io/otel v1.14.0
@@ -219,7 +219,7 @@ require (
 	github.com/klauspost/compress v1.15.11 // indirect
 	github.com/kubescape/go-git-url v0.0.25 // indirect
 	github.com/kubescape/rbac-utils v0.0.20 // indirect
-	github.com/kubescape/regolibrary v1.0.250 // indirect
+	github.com/kubescape/regolibrary v1.0.286-rc.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20220929215747-76583552c2be // indirect
