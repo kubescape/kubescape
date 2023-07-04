@@ -36,4 +36,4 @@ if (-not $currentPath.Contains($BASE_DIR)) {
 
 Write-Host "Finished Installation.`n" -ForegroundColor Green
 kubescape version
-Write-Host "`nUsage: $ kubescape scan --enable-host-scan" -ForegroundColor Magenta
+Write-Host "`nUsage: $ kubescape scan" -ForegroundColor Magenta

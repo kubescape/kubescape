@@ -9,35 +9,35 @@ single_file = os.path.join("..", "examples", "online-boutique", "frontend.yaml")
 
 
 def scan_all(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files])
 
 
 def scan_control_name(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'HostPath mount', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'HostPath mount', all_files])
 
 
 def scan_control_id(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048', all_files])
 
 
 def scan_controls(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048,C-0016', all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048,C-0016', all_files])
 
 
 def scan_framework(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa", all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa", all_files])
 
 
 def scan_frameworks(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa,mitre", all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa,mitre", all_files])
 
 
 def scan_all(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files])
 
 
 def scan_from_stdin(kubescape_exec: str):
-    return smoke_utils.run_command(command=["cat", single_file, "|", kubescape_exec, "scan", "framework", "nsa", "-", "--enable-host-scan=false"])
+    return smoke_utils.run_command(command=["cat", single_file, "|", kubescape_exec, "scan", "framework", "nsa", "-"])
 
 
 def run(kubescape_exec: str):

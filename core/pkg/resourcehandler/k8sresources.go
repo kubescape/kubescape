@@ -131,7 +131,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
 		} else {
-			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator", hostResources, sessionObj.InfoMap)
 		}
 	}
 
