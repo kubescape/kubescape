@@ -19,9 +19,9 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.11
 	github.com/kubescape/k8s-interface v0.0.116
-	github.com/kubescape/opa-utils v0.0.249
+	github.com/kubescape/opa-utils v0.0.250
 	github.com/kubescape/rbac-utils v0.0.20
-	github.com/kubescape/regolibrary v1.0.250
+	github.com/kubescape/regolibrary v1.0.286-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.17
 	github.com/mikefarah/yq/v4 v4.29.1

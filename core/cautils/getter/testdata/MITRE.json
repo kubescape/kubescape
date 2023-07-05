@@ -6,6 +6,7 @@
   },
   "creationTime": "",
   "description": "Testing MITRE for Kubernetes as suggested by microsoft in https://www.microsoft.com/security/blog/wp-content/uploads/2020/04/k8s-matrix.png",
+  "typeTags": ["compliance"],
   "controls": [
     {
       "guid": "",
