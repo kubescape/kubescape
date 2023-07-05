@@ -113,7 +113,7 @@ echo -e "\033[0m"
 $KUBESCAPE_EXEC version
 echo
 
-echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan --enable-host-scan"
+echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo -e "\nRemember to add the Kubescape CLI to your path with:"

@@ -49241,7 +49241,7 @@
                 "C-0069": {
                     "statusInfo": {
                         "status": "skipped",
-                        "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+                        "info": "This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
                     },
                     "controlID": "C-0069",
                     "name": "Disable anonymous access to Kubelet service",
@@ -49262,7 +49262,7 @@
                 "C-0070": {
                     "statusInfo": {
                         "status": "skipped",
-                        "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+                        "info": "This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
                     },
                     "controlID": "C-0070",
                     "name": "Enforce Kubelet client TLS authentication",
@@ -49734,7 +49734,7 @@
                         "C-0069": {
                             "statusInfo": {
                                 "status": "skipped",
-                                "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+                                "info": "This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
                             },
                             "controlID": "C-0069",
                             "name": "Disable anonymous access to Kubelet service",
@@ -49755,7 +49755,7 @@
                         "C-0070": {
                             "statusInfo": {
                                 "status": "skipped",
-                                "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+                                "info": "This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
                             },
                             "controlID": "C-0070",
                             "name": "Enforce Kubelet client TLS authentication",
@@ -50001,15 +50001,15 @@
     "InfoMap": {
         "hostdata.kubescape.cloud/v1beta0/KubeletCommandLine": {
             "status": "skipped",
-            "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+            "info": "This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
         },
         "hostdata.kubescape.cloud/v1beta0/KubeletConfiguration": {
             "status": "skipped",
-            "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+            "info": "This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
         },
         "hostdata.kubescape.cloud/v1beta0/KubeletInfo": {
             "status": "skipped",
-            "info": "enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor"
+            "info": "This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
         }
     },
     "ResourceToControlsMap": {

@@ -16,7 +16,7 @@ var scanCmdExamples = fmt.Sprintf(`
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
   # Scan current cluster with all frameworks
-  %[1]s scan --enable-host-scan --verbose
+  %[1]s scan
 
   # Scan kubernetes YAML manifest files
   %[1]s scan .
@@ -97,7 +97,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
 
 	// hidden flags
-	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
 	scanCmd.PersistentFlags().MarkHidden("omit-raw-resources")
 	scanCmd.PersistentFlags().MarkHidden("print-attack-tree")
 
@@ -107,6 +106,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	hostF := scanCmd.PersistentFlags().VarPF(&scanInfo.HostSensorEnabled, "enable-host-scan", "", "Deploy Kubescape host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls. Yaml file: https://github.com/kubescape/kubescape/blob/master/core/pkg/hostsensorutils/hostsensor.yaml")
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
+	scanCmd.PersistentFlags().MarkHidden("enable-host-scan")
+	scanCmd.PersistentFlags().MarkDeprecated("enable-host-scan", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator. The flag will be removed at 1.Dec.2023")
+
+	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
+	scanCmd.PersistentFlags().MarkDeprecated("host-scan-yaml", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator. The flag will be removed at 1.Dec.2023")
 
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
