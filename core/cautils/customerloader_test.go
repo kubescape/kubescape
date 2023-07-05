@@ -299,3 +299,34 @@ func Test_initializeCloudAPI(t *testing.T) {
 		})
 	}
 }
+
+func TestGetConfigMapNamespace(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{
+			name: "no env",
+			want: "default",
+		},
+		{
+			name: "default ns",
+			env:  "kubescape",
+			want: "kubescape",
+		},
+		{
+			name: "custom ns",
+			env:  "my-ns",
+			want: "my-ns",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.env != "" {
+				_ = os.Setenv("KS_DEFAULT_CONFIGMAP_NAMESPACE", tt.env)
+			}
+			assert.Equalf(t, tt.want, GetConfigMapNamespace(), "GetConfigMapNamespace()")
+		})
+	}
+}

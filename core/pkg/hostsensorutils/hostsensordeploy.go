@@ -135,7 +135,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 	}
 
 	// Get namespace name
-	namespaceName := ""
+	namespaceName := cautils.GetConfigMapNamespace()
 	for i := range workloads {
 		if workloads[i].GetKind() == "Namespace" {
 			namespaceName = workloads[i].GetName()
@@ -153,6 +153,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 		}
 		// set namespace in all objects
 		if w.GetKind() != "Namespace" {
+			logger.L().Debug("Setting namespace", helpers.String("kind", w.GetKind()), helpers.String("name", w.GetName()), helpers.String("namespace", namespaceName))
 			w.SetNamespace(namespaceName)
 		}
 		// Get container port
