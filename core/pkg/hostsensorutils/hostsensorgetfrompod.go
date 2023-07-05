@@ -220,8 +220,8 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 
 	var hasCloudProvider bool
 	for _, toPin := range []struct {
-		Resource scannerResource
 		Query    func(context.Context) ([]hostsensor.HostSensorDataEnvelope, error)
+		Resource scannerResource
 	}{
 		// queries to the deployed host-scanner
 		{

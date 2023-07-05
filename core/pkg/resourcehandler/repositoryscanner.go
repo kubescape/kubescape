@@ -35,15 +35,14 @@ type tree struct {
 }
 
 type GitHubRepository struct {
-	// name   string // <org>/<repo>
 	host   string
-	owner  string //
-	repo   string //
+	owner  string
+	repo   string
 	branch string
 	path   string
 	token  string
-	isFile bool
 	tree   tree
+	isFile bool
 }
 type githubDefaultBranchAPI struct {
 	DefaultBranch string `json:"default_branch"`

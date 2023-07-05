@@ -33,14 +33,14 @@ const portName string = "scanner"
 //
 // The API exposed by the host sensor is defined here: https://github.com/kubescape/host-scanner
 type HostSensorHandler struct {
-	hostSensorPort                int32
-	hostSensorPodNames            map[string]string //map from pod names to node names
-	hostSensorUnscheduledPodNames map[string]string //map from pod names to node names
+	hostSensorPodNames            map[string]string
+	hostSensorUnscheduledPodNames map[string]string
 	k8sObj                        *k8sinterface.KubernetesApi
 	daemonSet                     *appsv1.DaemonSet
-	podListLock                   sync.RWMutex
-	gracePeriod                   int64
 	workerPool                    workerPool
+	gracePeriod                   int64
+	podListLock                   sync.RWMutex
+	hostSensorPort                int32
 }
 
 // NewHostSensorHandler builds a new http client to the host-scanner API.
