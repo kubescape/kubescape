@@ -94,20 +94,19 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	cautils.StopSpinner()
 	logger.L().Success("Accessed to Kubernetes objects")
 
-	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
-	// check that controls use image vulnerability resources
-	if len(imgVulnResources) > 0 {
-		logger.L().Info("Requesting images vulnerabilities results")
-		cautils.StartSpinner()
-		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
-			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
-		} else {
-			if isEmptyImgVulns(*ksResourceMap) {
-				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", imgVulnResources, sessionObj.InfoMap)
+	// backswords compatibility - get image vulnerability resources
+	if k8sHandler.registryAdaptors != nil {
+		imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
+		// check that controls use image vulnerability resources
+		if len(imgVulnResources) > 0 {
+			logger.L().Info("Requesting images vulnerabilities results")
+			cautils.StartSpinner()
+			if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
+				cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
 			}
+			cautils.StopSpinner()
+			logger.L().Success("Requested images vulnerabilities results")
 		}
-		cautils.StopSpinner()
-		logger.L().Success("Requested images vulnerabilities results")
 	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
