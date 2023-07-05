@@ -92,7 +92,7 @@ func generateResourceHeader() []string {
 	headers[resourceColumnSeverity] = "Severity"
 	headers[resourceColumnName] = "Control Name"
 	headers[resourceColumnURL] = "Docs"
-	headers[resourceColumnPath] = "Assistant Remediation"
+	headers[resourceColumnPath] = "Assisted Remediation"
 	return headers
 }
 
