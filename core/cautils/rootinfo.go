@@ -24,27 +24,15 @@ type CloudURLs struct {
 }
 
 type Credentials struct {
-	Account   string
-	ClientID  string
-	SecretKey string
+	Account string
 }
 
-// To check if the user's credentials: accountID / clientID / secretKey are valid.
+// To check if the user's credentials: accountID is valid.
 func (credentials *Credentials) Validate() error {
 
 	// Check if the Account-ID is valid
 	if _, err := uuid.Parse(credentials.Account); credentials.Account != "" && err != nil {
 		return fmt.Errorf("bad argument: account must be a valid UUID")
 	}
-	// Check if the Client-ID is valid
-	if _, err := uuid.Parse(credentials.ClientID); credentials.ClientID != "" && err != nil {
-		return fmt.Errorf("bad argument: account must be a valid UUID")
-	}
-
-	// Check if the Secret-Key is valid
-	if _, err := uuid.Parse(credentials.SecretKey); credentials.SecretKey != "" && err != nil {
-		return fmt.Errorf("bad argument: account must be a valid UUID")
-	}
-
 	return nil
 }

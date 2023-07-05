@@ -4,9 +4,7 @@ import "testing"
 
 func TestCredentials_Validate(t *testing.T) {
 	type fields struct {
-		Account   string
-		ClientID  string
-		SecretKey string
+		Account string
 	}
 	tests := []struct {
 		name    string
@@ -28,40 +26,29 @@ func TestCredentials_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "valid client ID",
-			fields: fields{
-				ClientID: "22019933-feac-4012-a8eb-e81461ba6655",
-			},
+			name:    "valid client ID",
 			wantErr: false,
 		},
 		{
-			name: "invalid client ID",
-			fields: fields{
-				ClientID: "22019933-feac-4012-a8eb-e81461ba665",
-			},
+			name:    "invalid client ID",
+			fields:  fields{},
 			wantErr: true,
 		},
 		{
-			name: "valid secret key",
-			fields: fields{
-				SecretKey: "22019933-feac-4012-a8eb-e81461ba6655",
-			},
+			name:    "valid secret key",
+			fields:  fields{},
 			wantErr: false,
 		},
 		{
-			name: "invalid secret key",
-			fields: fields{
-				SecretKey: "22019933-feac-4012-a8eb-e81461ba665",
-			},
+			name:    "invalid secret key",
+			fields:  fields{},
 			wantErr: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			credentials := &Credentials{
-				Account:   tt.fields.Account,
-				ClientID:  tt.fields.ClientID,
-				SecretKey: tt.fields.SecretKey,
+				Account: tt.fields.Account,
 			}
 			if err := credentials.Validate(); (err != nil) != tt.wantErr {
 				t.Errorf("Credentials.Validate() error = %v, wantErr %v", err, tt.wantErr)

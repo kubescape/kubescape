@@ -23,12 +23,6 @@ var (
   # Set account id
   %[1]s config set accountID <account id>
 
-  # Set client id
-  %[1]s config set clientID <client id> 
-
-  # Set access key
-  %[1]s config set secretKey <access key>
-
   # Set cloudAPIURL
   %[1]s config set cloudAPIURL <cloud API URL>
 `, cautils.ExecName())

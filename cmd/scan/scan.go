@@ -66,8 +66,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.CreateAccount, "create-account", false, "Create a Kubescape SaaS account ID account ID is not found in cache. After creating the account, the account ID will be saved in cache. In addition, the scanning results will be uploaded to the Kubescape SaaS")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")

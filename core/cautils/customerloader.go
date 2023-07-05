@@ -27,8 +27,6 @@ func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName +
 
 type ConfigObj struct {
 	AccountID          string `json:"accountID,omitempty"`
-	ClientID           string `json:"clientID,omitempty"`
-	SecretKey          string `json:"secretKey,omitempty"`
 	CustomerGUID       string `json:"customerGUID,omitempty"` // Deprecated
 	Token              string `json:"invitationParam,omitempty"`
 	CustomerAdminEMail string `json:"adminMail,omitempty"`
@@ -77,8 +75,6 @@ type ITenantConfig interface {
 	GetAccountID() string
 	GetTenantEmail() string
 	GetToken() string
-	GetClientID() string
-	GetSecretKey() string
 	GetConfigObj() *ConfigObj
 	GetCloudReportURL() string
 	GetCloudAPIURL() string
@@ -125,8 +121,6 @@ func NewLocalConfig(
 	}
 
 	lc.backendAPI.SetAccountID(lc.configObj.AccountID)
-	lc.backendAPI.SetClientID(lc.configObj.ClientID)
-	lc.backendAPI.SetSecretKey(lc.configObj.SecretKey)
 	if lc.configObj.CloudAPIURL != "" {
 		lc.backendAPI.SetCloudAPIURL(lc.configObj.CloudAPIURL)
 	} else {
@@ -157,8 +151,6 @@ func NewLocalConfig(
 func (lc *LocalConfig) GetConfigObj() *ConfigObj  { return lc.configObj }
 func (lc *LocalConfig) GetTenantEmail() string    { return lc.configObj.CustomerAdminEMail }
 func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountID }
-func (lc *LocalConfig) GetClientID() string       { return lc.configObj.ClientID }
-func (lc *LocalConfig) GetSecretKey() string      { return lc.configObj.SecretKey }
 func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterName }
 func (lc *LocalConfig) GetToken() string          { return lc.configObj.Token }
 func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
@@ -271,8 +263,6 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	}
 
 	c.backendAPI.SetAccountID(c.configObj.AccountID)
-	c.backendAPI.SetClientID(c.configObj.ClientID)
-	c.backendAPI.SetSecretKey(c.configObj.SecretKey)
 	if c.configObj.CloudAPIURL != "" {
 		c.backendAPI.SetCloudAPIURL(c.configObj.CloudAPIURL)
 	} else {
@@ -303,8 +293,6 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 func (c *ClusterConfig) GetConfigObj() *ConfigObj  { return c.configObj }
 func (c *ClusterConfig) GetDefaultNS() string      { return c.configMapNamespace }
 func (c *ClusterConfig) GetAccountID() string      { return c.configObj.AccountID }
-func (c *ClusterConfig) GetClientID() string       { return c.configObj.ClientID }
-func (c *ClusterConfig) GetSecretKey() string      { return c.configObj.SecretKey }
 func (c *ClusterConfig) GetTenantEmail() string    { return c.configObj.CustomerAdminEMail }
 func (c *ClusterConfig) GetToken() string          { return c.configObj.Token }
 func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudReportURL }
@@ -569,12 +557,6 @@ func getAccountFromEnv(credentials *Credentials) {
 	if accountID := os.Getenv("KS_ACCOUNT_ID"); credentials.Account == "" && accountID != "" {
 		credentials.Account = accountID
 	}
-	if clientID := os.Getenv("KS_CLIENT_ID"); credentials.ClientID == "" && clientID != "" {
-		credentials.ClientID = clientID
-	}
-	if secretKey := os.Getenv("KS_SECRET_KEY"); credentials.SecretKey == "" && secretKey != "" {
-		credentials.SecretKey = secretKey
-	}
 }
 
 func updateCredentials(configObj *ConfigObj, credentials *Credentials) {
@@ -587,13 +569,6 @@ func updateCredentials(configObj *ConfigObj, credentials *Credentials) {
 	if credentials.Account != "" {
 		configObj.AccountID = credentials.Account // override config Account
 	}
-	if credentials.ClientID != "" {
-		configObj.ClientID = credentials.ClientID // override config ClientID
-	}
-	if credentials.SecretKey != "" {
-		configObj.SecretKey = credentials.SecretKey // override config SecretKey
-	}
-
 }
 
 func getCloudURLsFromEnv(cloudURLs *CloudURLs) {
@@ -635,8 +610,6 @@ func updateCloudURLs(configObj *ConfigObj) {
 func initializeCloudAPI(c ITenantConfig) {
 	cloud := getter.GetKSCloudAPIConnector()
 	cloud.SetAccountID(c.GetAccountID())
-	cloud.SetClientID(c.GetClientID())
-	cloud.SetSecretKey(c.GetSecretKey())
 	cloud.SetCloudAuthURL(c.GetCloudAuthURL())
 	cloud.SetCloudReportURL(c.GetCloudReportURL())
 	cloud.SetCloudUIURL(c.GetCloudUIURL())

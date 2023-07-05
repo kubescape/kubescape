@@ -27,9 +27,9 @@ type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
 	report            reporter.IReport
-	outputPrinters    []printer.IPrinter
 	uiPrinter         printer.IPrinter
 	hostSensorHandler hostsensorutils.IHostSensor
+	outputPrinters    []printer.IPrinter
 }
 
 func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInterfaces {
@@ -78,16 +78,8 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 	spanHostScanner.End()
 
-	// ================== setup registry adaptors ======================================
-
-	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to initialize registry adaptors", helpers.Error(err))
-	}
-
 	// ================== setup resource collector object ======================================
-
-	resourceHandler := getResourceHandler(ctx, scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
+	resourceHandler := getResourceHandler(ctx, scanInfo, tenantConfig, k8s, hostSensorHandler)
 
 	// ================== setup reporter & printer objects ======================================
 

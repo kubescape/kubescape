@@ -20,15 +20,13 @@ import (
 
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
-	inputPatterns    []string
-	registryAdaptors *RegistryAdaptors
+	inputPatterns []string
 }
 
-func NewFileResourceHandler(_ context.Context, inputPatterns []string, registryAdaptors *RegistryAdaptors) *FileResourceHandler {
+func NewFileResourceHandler(_ context.Context, inputPatterns []string) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
-		inputPatterns:    inputPatterns,
-		registryAdaptors: registryAdaptors,
+		inputPatterns: inputPatterns,
 	}
 }
 

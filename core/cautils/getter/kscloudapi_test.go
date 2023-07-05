@@ -82,18 +82,11 @@ func TestKSCloudAPI(t *testing.T) {
 		)...,
 	)
 	ks.SetAccountID("armo")
-	ks.SetClientID("armo")
-	ks.SetSecretKey("armo")
 	ks.SetInvitationToken("armo")
 	hdrs := map[string]string{"key": "value"}
 	body := []byte("body-post")
 
 	t.Run("with authenticated", func(t *testing.T) {
-		require.NoError(t, ks.Login())
-		require.True(t, ks.IsLoggedIn())
-
-		require.NotEmpty(t, ks.feToken.Token)
-		require.NotNil(t, ks.authCookie)
 
 		t.Run("with generic REST methods", func(t *testing.T) {
 			t.Run("should POST", func(t *testing.T) {
@@ -413,63 +406,12 @@ func TestKSCloudAPI(t *testing.T) {
 			WithTrace(true),
 		)
 		kt.SetAccountID("armo")
-		kt.SetClientID("armo")
-		kt.SetSecretKey("armo")
-
-		require.NoError(t, kt.Login())
-		require.True(t, kt.IsLoggedIn())
 
 		resp, err := kt.Post(srv.URL(pathTestPost), hdrs, body)
 		require.NoError(t, err)
 
 		require.EqualValues(t, string(body), resp)
-	})
 
-	t.Run("with login", func(t *testing.T) {
-		t.Run("login requires an account ID", func(t *testing.T) {
-			t.Parallel()
-
-			kno := NewKSCloudAPICustomized(
-				"",
-				srv.Root(),
-			)
-			kno.SetClientID("armo")
-			kno.SetSecretKey("armo")
-
-			err := kno.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "missing accountID")
-		})
-
-		t.Run("login requires a client ID", func(t *testing.T) {
-			t.Parallel()
-
-			kno := NewKSCloudAPICustomized(
-				"",
-				srv.Root(),
-			)
-			kno.SetAccountID("armo")
-			kno.SetSecretKey("armo")
-
-			err := kno.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "missing clientID")
-		})
-
-		t.Run("login requires a secret key", func(t *testing.T) {
-			t.Parallel()
-
-			kno := NewKSCloudAPICustomized(
-				"",
-				srv.Root(),
-			)
-			kno.SetAccountID("armo")
-			kno.SetClientID("armo")
-
-			err := kno.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "missing secretKey")
-		})
 	})
 
 	t.Run("with getters & setters", func(t *testing.T) {
@@ -488,18 +430,6 @@ func TestKSCloudAPI(t *testing.T) {
 			str := pickString()
 			kno.SetAccountID(str)
 			require.Equal(t, str, kno.GetAccountID())
-		})
-
-		t.Run("should get&set client", func(t *testing.T) {
-			str := pickString()
-			kno.SetClientID(str)
-			require.Equal(t, str, kno.GetClientID())
-		})
-
-		t.Run("should get&set key", func(t *testing.T) {
-			str := pickString()
-			kno.SetSecretKey(str)
-			require.Equal(t, str, kno.GetSecretKey())
 		})
 
 		t.Run("should get&set invitation token", func(t *testing.T) {
@@ -546,8 +476,6 @@ func TestKSCloudAPI(t *testing.T) {
 			errSrv.Root(),
 		)
 		ke.SetAccountID("armo")
-		ke.SetClientID("armo")
-		ke.SetSecretKey("armo")
 
 		hdrs := map[string]string{"key": "value"}
 		body := []byte("body-post")
@@ -589,11 +517,6 @@ func TestKSCloudAPI(t *testing.T) {
 			require.Error(t, err)
 			require.Contains(t, err.Error(), errAPI.Error())
 
-			err = ke.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "error authenticating")
-			require.False(t, ke.IsLoggedIn())
-
 			_, err = ke.GetAttackTracks()
 			require.Error(t, err)
 			require.Contains(t, err.Error(), errAPI.Error())
@@ -628,8 +551,6 @@ func TestKSCloudAPI(t *testing.T) {
 			errSrv.Root(),
 		)
 		ke.SetAccountID("armo")
-		ke.SetClientID("armo")
-		ke.SetSecretKey("armo")
 
 		t.Run("API calls should return unmarshalling error", func(t *testing.T) {
 			// only API calls that return a typed response are checked
@@ -642,10 +563,6 @@ func TestKSCloudAPI(t *testing.T) {
 
 			_, err = ke.GetAccountConfig("")
 			require.Error(t, err)
-
-			err = ke.Login()
-			require.Error(t, err)
-			require.False(t, ke.IsLoggedIn())
 
 			_, err = ke.GetControlsInputs("")
 			require.Error(t, err)
@@ -665,42 +582,6 @@ func TestKSCloudAPI(t *testing.T) {
 			_, err = ke.ListCustomFrameworks()
 			require.Error(t, err)
 		})
-	})
-
-	t.Run("with no cookie response", func(t *testing.T) {
-		// simulates a successul login, but the second stage (retrieving the cookie) fails: no cookie is set in response
-		t.Parallel()
-
-		errSrv := mockAPIServer(t, withAPIAuth(true), withAPINoCookie(true)) // assert that a token is passed as header, and no cookie is returned
-		t.Cleanup(errSrv.Close)
-
-		kt := NewKSCloudAPICustomized(errSrv.Root(), errSrv.Root(), testOptions...)
-		kt.SetAccountID("armo")
-		kt.SetClientID("armo")
-		kt.SetSecretKey("armo")
-
-		err := kt.Login()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "no auth cookie in response")
-		require.False(t, kt.IsLoggedIn())
-	})
-
-	t.Run("with error on cookie response", func(t *testing.T) {
-		// simulates a successul login, but the second stage (retrieving the cookie) fails: API error
-		t.Parallel()
-
-		errSrv := mockAPIServer(t, withAPIAuth(true), withAPIErrOnCookie(errors.New("cookie error")))
-		t.Cleanup(errSrv.Close)
-
-		kt := NewKSCloudAPICustomized(errSrv.Root(), errSrv.Root(), testOptions...)
-		kt.SetAccountID("armo")
-		kt.SetClientID("armo")
-		kt.SetSecretKey("armo")
-
-		err := kt.Login()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to get cookie")
-		require.False(t, kt.IsLoggedIn())
 	})
 }
 

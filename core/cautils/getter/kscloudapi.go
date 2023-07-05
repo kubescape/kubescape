@@ -98,7 +98,6 @@ type KSCloudAPI struct {
 	*ksCloudOptions
 	authhost        string
 	cloudAPIURL     string
-	secretKey       string
 	accountID       string
 	cloudAuthURL    string
 	invitationToken string
@@ -106,12 +105,9 @@ type KSCloudAPI struct {
 	scheme          string
 	host            string
 	authscheme      string
-	clientID        string
 	uischeme        string
 	uihost          string
 	reportscheme    string
-	feToken         feLoginResponse
-	loggedIn        bool
 }
 
 // SetKSCloudAPIConnector registers a global instance of the KS Cloud client.
@@ -262,11 +258,6 @@ func (api *KSCloudAPI) Delete(fullURL string, headers map[string]string) (string
 // GetAccountID returns the customer account's GUID.
 func (api *KSCloudAPI) GetAccountID() string { return api.accountID }
 
-// IsLoggedIn indicates if the client has sucessfully authenticated.
-func (api *KSCloudAPI) IsLoggedIn() bool { return api.loggedIn }
-
-func (api *KSCloudAPI) GetClientID() string        { return api.clientID }
-func (api *KSCloudAPI) GetSecretKey() string       { return api.secretKey }
 func (api *KSCloudAPI) GetCloudReportURL() string  { return api.cloudReportURL }
 func (api *KSCloudAPI) GetCloudAPIURL() string     { return api.cloudAPIURL }
 func (api *KSCloudAPI) GetCloudUIURL() string      { return api.cloudUIURL }
@@ -274,8 +265,6 @@ func (api *KSCloudAPI) GetCloudAuthURL() string    { return api.cloudAuthURL }
 func (api *KSCloudAPI) GetInvitationToken() string { return api.invitationToken }
 
 func (api *KSCloudAPI) SetAccountID(accountID string)   { api.accountID = accountID }
-func (api *KSCloudAPI) SetClientID(clientID string)     { api.clientID = clientID }
-func (api *KSCloudAPI) SetSecretKey(secretKey string)   { api.secretKey = secretKey }
 func (api *KSCloudAPI) SetInvitationToken(token string) { api.invitationToken = token }
 
 func (api *KSCloudAPI) SetCloudAPIURL(cloudAPIURL string) {
@@ -653,43 +642,6 @@ func (api *KSCloudAPI) ViewSignURL() string {
 	)
 }
 
-// Login to the KS Cloud using the caller's accountID, clientID and secret key.
-func (api *KSCloudAPI) Login() error {
-	if err := api.loginRequirements(); err != nil {
-		return err
-	}
-
-	// 1. acquire auth token
-	body, err := json.Marshal(feLoginData{ClientId: api.clientID, Secret: api.secretKey})
-	if err != nil {
-		return err
-	}
-
-	rdr, _, err := api.post(api.authTokenURL(), body, withContentJSON(true))
-	if err != nil {
-		return err
-	}
-	defer rdr.Close()
-
-	resp, err := decode[feLoginResponse](rdr)
-	if err != nil {
-		return err
-	}
-
-	api.feToken = resp
-
-	// 2. acquire auth cookie
-	// Now that we have the JWT token, acquire a cookie from the API
-	api.authCookie, err = api.getAuthCookie()
-	if err != nil {
-		return err
-	}
-
-	api.loggedIn = true
-
-	return nil
-}
-
 func (api *KSCloudAPI) authTokenURL() string {
 	return api.buildAuthURL(pathLogin)
 }
@@ -733,26 +685,9 @@ func (api *KSCloudAPI) getAuthCookie() (*http.Cookie, error) {
 	return nil, fmt.Errorf("no auth cookie in response from %s", target)
 }
 
-func (api *KSCloudAPI) loginRequirements() error {
-	if api.accountID == "" {
-		return ErrLoginMissingAccountID
-	}
-
-	if api.clientID == "" {
-		return ErrLoginMissingClientID
-	}
-
-	if api.secretKey == "" {
-		return ErrLoginMissingSecretKey
-	}
-
-	return nil
-}
-
 // defaultRequestOptions adds standard authentication headers to all requests
 func (api *KSCloudAPI) defaultRequestOptions(opts []requestOption) *requestOptions {
 	optionsWithDefaults := append(make([]requestOption, 0, 4),
-		withToken(api.feToken.Token),
 		withCookie(api.authCookie),
 		withTrace(api.withTrace),
 	)

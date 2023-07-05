@@ -13,8 +13,6 @@ import (
 func mockConfigObj() *ConfigObj {
 	return &ConfigObj{
 		AccountID:          "aaa",
-		ClientID:           "bbb",
-		SecretKey:          "ccc",
 		ClusterName:        "ddd",
 		CustomerAdminEMail: "ab@cd",
 		Token:              "eee",
@@ -43,8 +41,6 @@ func TestConfig(t *testing.T) {
 
 	assert.NoError(t, json.Unmarshal(co.Config(), &cop))
 	assert.Equal(t, co.AccountID, cop.AccountID)
-	assert.Equal(t, co.ClientID, cop.ClientID)
-	assert.Equal(t, co.SecretKey, cop.SecretKey)
 	assert.Equal(t, co.CloudReportURL, cop.CloudReportURL)
 	assert.Equal(t, co.CloudAPIURL, cop.CloudAPIURL)
 	assert.Equal(t, co.CloudUIURL, cop.CloudUIURL)
@@ -65,8 +61,6 @@ func TestITenantConfig(t *testing.T) {
 
 	// test LocalConfig methods
 	assert.Equal(t, co.AccountID, lc.GetAccountID())
-	assert.Equal(t, co.ClientID, lc.GetClientID())
-	assert.Equal(t, co.SecretKey, lc.GetSecretKey())
 	assert.Equal(t, co.ClusterName, lc.GetContextName())
 	assert.Equal(t, co.CustomerAdminEMail, lc.GetTenantEmail())
 	assert.Equal(t, co.Token, lc.GetToken())
@@ -77,8 +71,6 @@ func TestITenantConfig(t *testing.T) {
 
 	// test ClusterConfig methods
 	assert.Equal(t, co.AccountID, c.GetAccountID())
-	assert.Equal(t, co.ClientID, c.GetClientID())
-	assert.Equal(t, co.SecretKey, c.GetSecretKey())
 	assert.Equal(t, co.ClusterName, c.GetContextName())
 	assert.Equal(t, co.CustomerAdminEMail, c.GetTenantEmail())
 	assert.Equal(t, co.Token, c.GetToken())
@@ -96,8 +88,6 @@ func TestUpdateConfigData(t *testing.T) {
 	c.updateConfigData(configMap)
 
 	assert.Equal(t, c.GetAccountID(), configMap.Data["accountID"])
-	assert.Equal(t, c.GetClientID(), configMap.Data["clientID"])
-	assert.Equal(t, c.GetSecretKey(), configMap.Data["secretKey"])
 	assert.Equal(t, c.GetCloudReportURL(), configMap.Data["cloudReportURL"])
 	assert.Equal(t, c.GetCloudAPIURL(), configMap.Data["cloudAPIURL"])
 	assert.Equal(t, c.GetCloudUIURL(), configMap.Data["cloudUIURL"])
@@ -114,8 +104,6 @@ func TestReadConfig(t *testing.T) {
 	readConfig(b, co)
 
 	assert.Equal(t, com.AccountID, co.AccountID)
-	assert.Equal(t, com.ClientID, co.ClientID)
-	assert.Equal(t, com.SecretKey, co.SecretKey)
 	assert.Equal(t, com.ClusterName, co.ClusterName)
 	assert.Equal(t, com.CustomerAdminEMail, co.CustomerAdminEMail)
 	assert.Equal(t, com.Token, co.Token)
@@ -141,8 +129,6 @@ func TestLoadConfigFromData(t *testing.T) {
 		loadConfigFromData(c.configObj, configMap.Data)
 
 		assert.Equal(t, c.GetAccountID(), co.AccountID)
-		assert.Equal(t, c.GetClientID(), co.ClientID)
-		assert.Equal(t, c.GetSecretKey(), co.SecretKey)
 		assert.Equal(t, c.GetContextName(), co.ClusterName)
 		assert.Equal(t, c.GetTenantEmail(), co.CustomerAdminEMail)
 		assert.Equal(t, c.GetToken(), co.Token)
@@ -167,8 +153,6 @@ func TestLoadConfigFromData(t *testing.T) {
 		loadConfigFromData(c.configObj, configMap.Data)
 
 		assert.Equal(t, c.GetAccountID(), co.AccountID)
-		assert.Equal(t, c.GetClientID(), co.ClientID)
-		assert.Equal(t, c.GetSecretKey(), co.SecretKey)
 		assert.Equal(t, c.GetCloudReportURL(), co.CloudReportURL)
 		assert.Equal(t, c.GetCloudAPIURL(), co.CloudAPIURL)
 		assert.Equal(t, c.GetCloudUIURL(), co.CloudUIURL)
@@ -183,21 +167,15 @@ func TestLoadConfigFromData(t *testing.T) {
 		}
 
 		// add to map
-		configMap.Data["clientID"] = c.configObj.ClientID
-		configMap.Data["secretKey"] = c.configObj.SecretKey
 		configMap.Data["cloudReportURL"] = c.configObj.CloudReportURL
 
 		// delete the content
-		c.configObj.ClientID = ""
-		c.configObj.SecretKey = ""
 		c.configObj.CloudReportURL = ""
 
 		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
 		loadConfigFromData(c.configObj, configMap.Data)
 
 		assert.NotEmpty(t, c.GetAccountID())
-		assert.NotEmpty(t, c.GetClientID())
-		assert.NotEmpty(t, c.GetSecretKey())
 		assert.NotEmpty(t, c.GetCloudReportURL())
 	}
 
@@ -212,19 +190,11 @@ func TestLoadConfigFromData(t *testing.T) {
 
 		// add to map
 		configMap.Data["accountID"] = mockConfigObj().AccountID
-		configMap.Data["clientID"] = c.configObj.ClientID
-		configMap.Data["secretKey"] = c.configObj.SecretKey
-
-		// delete the content
-		c.configObj.ClientID = ""
-		c.configObj.SecretKey = ""
 
 		configMap.Data["config.json"] = string(c.GetConfigObj().Config())
 		loadConfigFromData(c.configObj, configMap.Data)
 
 		assert.Equal(t, mockConfigObj().AccountID, c.GetAccountID())
-		assert.NotEmpty(t, c.GetClientID())
-		assert.NotEmpty(t, c.GetSecretKey())
 	}
 
 }
@@ -294,8 +264,6 @@ func Test_initializeCloudAPI(t *testing.T) {
 			assert.Equal(t, tt.args.c.GetCloudUIURL(), cloud.GetCloudUIURL())
 			assert.Equal(t, tt.args.c.GetCloudReportURL(), cloud.GetCloudReportURL())
 			assert.Equal(t, tt.args.c.GetAccountID(), cloud.GetAccountID())
-			assert.Equal(t, tt.args.c.GetClientID(), cloud.GetClientID())
-			assert.Equal(t, tt.args.c.GetSecretKey(), cloud.GetSecretKey())
 		})
 	}
 }

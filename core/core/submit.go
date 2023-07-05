@@ -55,9 +55,6 @@ func (ks *Kubescape) SubmitExceptions(ctx context.Context, credentials *cautils.
 
 	// login kubescape SaaS
 	ksCloudAPI := getter.GetKSCloudAPIConnector()
-	if err := ksCloudAPI.Login(); err != nil {
-		return err
-	}
 
 	if err := ksCloudAPI.PostExceptions(exceptions); err != nil {
 		return err

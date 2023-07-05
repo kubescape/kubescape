@@ -16,9 +16,6 @@ func (ks *Kubescape) DeleteExceptions(delExceptions *v1.DeleteExceptions) error 
 
 	// login kubescape SaaS
 	ksCloudAPI := getter.GetKSCloudAPIConnector()
-	if err := ksCloudAPI.Login(); err != nil {
-		return err
-	}
 
 	for i := range delExceptions.Exceptions {
 		exceptionName := delExceptions.Exceptions[i]

@@ -43,7 +43,7 @@ func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
 			listFormatFunction(ctx, listPolicies.Target, policies)
 		} else {
-			return fmt.Errorf("Invalid format \"%s\", Supported formats: 'pretty-print'/'json' ", listPolicies.Format)
+			return fmt.Errorf("invalid format \"%s\", Supported formats: 'pretty-print'/'json' ", listPolicies.Format)
 		}
 
 		return nil
