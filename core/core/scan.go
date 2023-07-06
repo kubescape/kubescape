@@ -104,7 +104,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
 
-	uiPrinter := getUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View))
+	uiPrinter := getUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), cautils.ScanTypes(scanInfo.ScanType))
 
 	// ================== return interface ======================================
 

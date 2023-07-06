@@ -133,6 +133,7 @@ type ScanInfo struct {
 	ScanAll               bool               // true if scan all frameworks
 	OmitRawResources      bool               // true if omit raw resources from the output
 	PrintAttackTree       bool               // true if print attack tree
+	ScanType              ScanTypes          // scan type
 }
 
 type Getters struct {

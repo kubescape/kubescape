@@ -2,6 +2,8 @@ module github.com/kubescape/kubescape/v2
 
 go 1.20
 
+replace github.com/kubescape/opa-utils => /Users/danielgrunberger/armo/opa-utils
+
 require (
 	cloud.google.com/go/containeranalysis v0.6.0
 	github.com/armosec/armoapi-go v0.0.173

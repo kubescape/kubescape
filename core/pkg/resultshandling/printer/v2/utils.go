@@ -82,3 +82,13 @@ func finalizeResources(results []resourcesresults.Result, allResources map[strin
 	}
 	return resources
 }
+
+func mapCategoryToControlSummaries(summaryDetails reportsummary.SummaryDetails) map[string][]reportsummary.IControlSummary {
+	categories := map[string][]reportsummary.IControlSummary{}
+	for i := range summaryDetails.Controls {
+		for j := range summaryDetails.Controls[i].Categories {
+			categories[summaryDetails.Controls[i].Categories[j]] = append(categories[summaryDetails.Controls[i].Categories[j]], summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, summaryDetails.Controls[i].ControlID))
+		}
+	}
+	return categories
+}

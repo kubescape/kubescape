@@ -32,14 +32,21 @@ type PrettyPrinter struct {
 	viewType        cautils.ViewTypes
 	verboseMode     bool
 	printAttackTree bool
+	scanType        cautils.ScanTypes
+	mainPrinter     mainPrinter
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) *PrettyPrinter {
+type mainPrinter interface {
+	PrintMainTable(writer *os.File, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string)
+}
+
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes) *PrettyPrinter {
 	return &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
 		viewType:        viewType,
 		printAttackTree: attackTree,
+		scanType:        scanType,
 	}
 }
 
@@ -57,7 +64,17 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 		}
 	}
 
-	pp.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+	if pp.scanType != "" {
+		cautils.InfoTextDisplay(pp.writer, "\n"+mapScanTypeToOutput[pp.scanType]+":\n")
+	}
+
+	pp.mainPrinter.PrintMainTable(pp.writer, &opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+
+	if pp.scanType == cautils.ScanTypeCluster {
+		pp.printCategoriesTables(&opaSessionObj.Report.SummaryDetails)
+	} else {
+		pp.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+	}
 
 	// When writing to Stdout, we aren’t really writing to an output file,
 	// so no need to print that we are
@@ -210,6 +227,22 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 
 	return row
 }
+
+func (pp *PrettyPrinter) printCategoriesTables(summaryDetails *reportsummary.SummaryDetails) {
+
+	categoriesToControlSummariesMap := mapCategoryToControlSummaries(*summaryDetails)
+
+	categoriesTable := tablewriter.NewWriter(pp.writer)
+	categoriesTable.SetHeader(getCategoriesTableHeaders())
+	categoriesTable.SetHeaderLine(true)
+	categoriesTable.SetColumnAlignment(getCategoriesColumnsAlignments())
+
+	for category, ctrls := range categoriesToControlSummariesMap {
+		renderSingleCategory(pp, category, ctrls, categoriesTable)
+	}
+	fmt.Println("")
+}
+
 func (pp *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
 	if summaryDetails.NumberOfControls().All() == 0 {

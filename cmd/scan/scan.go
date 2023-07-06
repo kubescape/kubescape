@@ -51,6 +51,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 
 			if len(args) == 0 {
+				scanInfo.ScanType = cautils.ScanTypeCluster
 				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{strings.Join(getter.NativeFrameworks, ",")})
 			}
 			return nil

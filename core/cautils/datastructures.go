@@ -17,6 +17,12 @@ import (
 type K8SResources map[string][]string
 type KSResources map[string][]string
 
+type ScanTypes string
+
+const (
+	ScanTypeCluster ScanTypes = "cluster"
+)
+
 type OPASessionObj struct {
 	K8SResources          *K8SResources                                 // input k8s objects
 	ArmoResource          *KSResources                                  // input ARMO objects
@@ -36,6 +42,7 @@ type OPASessionObj struct {
 	Policies              []reporthandling.Framework         // list of frameworks to scan
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	OmitRawResources      bool                               // omit raw resources from output
+	ScanType              ScanTypes                          // scan type
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {
