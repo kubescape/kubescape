@@ -183,12 +183,6 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	scanningContext := scanInfo.GetScanningContext()
-	if scanningContext == cautils.ContextFile || scanningContext == cautils.ContextDir {
-		scanInfo.Submit = false
-		return
-	}
-
 	if scanInfo.Local {
 		scanInfo.Submit = false
 		return
