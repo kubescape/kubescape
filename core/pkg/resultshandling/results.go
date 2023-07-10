@@ -123,6 +123,6 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
-		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType, "")
+		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType, "", nil)
 	}
 }

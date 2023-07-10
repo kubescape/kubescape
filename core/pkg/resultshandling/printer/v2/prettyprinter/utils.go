@@ -14,90 +14,9 @@ import (
 	"k8s.io/utils/strings/slices"
 )
 
-const (
-	categoriesColumnSeverity  = iota
-	categoriesColumnName      = iota
-	categoriesColumnFailed    = iota
-	categoriesColumnNextSteps = iota
-)
-
 var (
-	mapScanTypeToOutput = map[cautils.ScanTypes]string{
-		cautils.ScanTypeCluster: "Security Overview",
-	}
 	complianceFrameworks = []string{"nsa", "mitre"}
 )
-
-func mapCategoryToControlSummaries(summaryDetails reportsummary.SummaryDetails, sortedControlIDs [][]string) map[string][]reportsummary.IControlSummary {
-	categories := map[string][]reportsummary.IControlSummary{}
-
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
-			ctrl := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c)
-			if ctrl.GetStatus().Status() == apis.StatusPassed {
-				continue
-			}
-			for j := range ctrl.GetCategories() {
-				categories[ctrl.GetCategories()[j]] = append(categories[ctrl.GetCategories()[j]], ctrl)
-			}
-		}
-	}
-
-	return categories
-}
-
-func generateCategoriesRow(controlSummary reportsummary.IControlSummary) []string {
-	row := make([]string, 4)
-	row[categoriesColumnSeverity] = getSeverityColumn(controlSummary)
-
-	if len(controlSummary.GetName()) > 50 {
-		row[categoriesColumnName] = controlSummary.GetName()[:50] + "..."
-	} else {
-		row[categoriesColumnName] = controlSummary.GetName()
-	}
-
-	row[categoriesColumnFailed] = fmt.Sprintf("%s", controlSummary.GetStatus().Status())
-	row[categoriesColumnNextSteps] = generateNextSteps(controlSummary)
-
-	return row
-}
-
-func generateNextSteps(controlSummary reportsummary.IControlSummary) string {
-	return fmt.Sprintf("$ kubescape scan control %s", controlSummary.GetID())
-}
-
-func getCategoriesTableHeaders() []string {
-	headers := make([]string, 4)
-	headers[categoriesColumnSeverity] = "SEVERITY"
-	headers[categoriesColumnName] = "CONTROL NAME"
-	headers[categoriesColumnFailed] = "FAILED RESOURCES"
-	headers[categoriesColumnNextSteps] = "NEXT STEPS"
-
-	return headers
-}
-
-func getCategoriesColumnsAlignments() []int {
-	alignments := make([]int, 4)
-	alignments[categoriesColumnSeverity] = tablewriter.ALIGN_LEFT
-	alignments[categoriesColumnName] = tablewriter.ALIGN_LEFT
-	alignments[categoriesColumnFailed] = tablewriter.ALIGN_CENTER
-	alignments[categoriesColumnNextSteps] = tablewriter.ALIGN_LEFT
-
-	return alignments
-}
-
-func renderSingleCategory(writer *os.File, category string, ctrls []reportsummary.IControlSummary, categoriesTable *tablewriter.Table) {
-	cautils.InfoTextDisplay(writer, "\n"+category+"\n")
-
-	categoriesTable.ClearRows()
-	for i := range ctrls {
-		row := generateCategoriesRow(ctrls[i])
-		if len(row) > 0 {
-			categoriesTable.Append(row)
-		}
-	}
-	categoriesTable.Render()
-}
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
 	return color.New(getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
@@ -148,6 +67,7 @@ func printInfo(writer *os.File, infoToPrintInfo []infoStars) {
 		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].stars, infoToPrintInfo[i].info))
 	}
 }
+
 func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
@@ -169,7 +89,7 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
 	cautils.InfoTextDisplay(writer, "Compliance Score:\n")
 	for _, fw := range frameworks {
-		cautils.SimpleDisplay(writer, "* %s: %.2f\n", fw.GetName(), fw.GetComplianceScore())
+		cautils.SimpleDisplay(writer, "* %s: %.2f%%\n", fw.GetName(), fw.GetComplianceScore())
 	}
 
 	cautils.InfoTextDisplay(writer, "\n")
@@ -205,82 +125,8 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 	return row
 }
 
-func ControlCountersForSummary(counters reportsummary.ICounters) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
-}
-
 func ControlCountersForResource(l *helpersv1.AllLists) string {
 	return fmt.Sprintf("Controls: %d (Failed: %d, action required: %d)", l.Len(), l.Failed(), l.Skipped())
-}
-
-// renderSeverityCountersSummary renders the string that reports severity counters summary
-func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) string {
-	critical := counters.NumberOfCriticalSeverity()
-	high := counters.NumberOfHighSeverity()
-	medium := counters.NumberOfMediumSeverity()
-	low := counters.NumberOfLowSeverity()
-
-	return fmt.Sprintf(
-		"Failed Resources by Severity: Critical — %d, High — %d, Medium — %d, Low — %d",
-		critical, high, medium, low,
-	)
-}
-
-func getControlTableHeaders() []string {
-	headers := make([]string, _summaryRowLen)
-	headers[summaryColumnName] = "CONTROL NAME"
-	headers[summaryColumnCounterFailed] = "FAILED RESOURCES"
-	headers[summaryColumnCounterAll] = "ALL RESOURCES"
-	headers[summaryColumnSeverity] = "SEVERITY"
-	headers[summaryColumnComplianceScore] = "% COMPLIANCE-SCORE"
-	return headers
-}
-
-func getColumnsAlignments() []int {
-	alignments := make([]int, _summaryRowLen)
-	alignments[summaryColumnName] = tablewriter.ALIGN_LEFT
-	alignments[summaryColumnCounterFailed] = tablewriter.ALIGN_CENTER
-	alignments[summaryColumnCounterAll] = tablewriter.ALIGN_CENTER
-	alignments[summaryColumnSeverity] = tablewriter.ALIGN_LEFT
-	alignments[summaryColumnComplianceScore] = tablewriter.ALIGN_CENTER
-	return alignments
-}
-
-func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
-	row := make([]string, _summaryRowLen)
-
-	// ignore passed results
-	if !verbose && (controlSummary.GetStatus().IsPassed()) {
-		return []string{}
-	}
-
-	row[summaryColumnSeverity] = getSeverityColumn(controlSummary)
-	if len(controlSummary.GetName()) > 50 {
-		row[summaryColumnName] = controlSummary.GetName()[:50] + "..."
-	} else {
-		row[summaryColumnName] = controlSummary.GetName()
-	}
-	row[summaryColumnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
-	row[summaryColumnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
-	row[summaryColumnComplianceScore] = getComplianceScoreColumn(controlSummary, infoToPrintInfo)
-
-	return row
-}
-
-func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
-	if controlSummary.GetStatus().IsSkipped() {
-		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
-	}
-	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
-}
-
-func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
-	for i := range infoToPrintInfo {
-		if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
-			return infoToPrintInfo[i].stars
-		}
-	}
-	return ""
 }
 
 func getWorkloadPrefixForCmd(namespace, kind, name string) string {
@@ -288,4 +134,22 @@ func getWorkloadPrefixForCmd(namespace, kind, name string) string {
 		return fmt.Sprintf("name: %s, kind: %s", name, kind)
 	}
 	return fmt.Sprintf("namespace: %s, name: %s, kind: %s", namespace, name, kind)
+}
+
+func getCommonColumnsAlignments() []int {
+	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT}
+}
+
+func printNextSteps(writer *os.File, nextSteps []string) {
+	cautils.InfoTextDisplay(writer, "Follow-up steps:\n")
+	for _, ns := range nextSteps {
+		cautils.SimpleDisplay(writer, "- "+ns+"\n")
+	}
+}
+
+func getTopWorkloadsTitle(topWLsLen int) string {
+	if topWLsLen > 2 {
+		return "Your most risky workloads:\n"
+	}
+	return "Your risky workloads:\n"
 }

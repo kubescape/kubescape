@@ -32,22 +32,37 @@ type PrettyPrinter struct {
 	verboseMode     bool
 	printAttackTree bool
 	scanType        cautils.ScanTypes
+	inputPatterns   []string
 	mainPrinter     prettyprinter.MainPrinter
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string) *PrettyPrinter {
 
 	return &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
 		viewType:        viewType,
 		printAttackTree: attackTree,
-		mainPrinter:     prettyprinter.NewMainPrinter(scanType),
+		scanType:        scanType,
+		inputPatterns:   inputPatterns,
+	}
+}
+
+func (pp *PrettyPrinter) setMainPrinter() {
+	switch pp.scanType {
+	case cautils.ScanTypeCluster:
+		pp.mainPrinter = prettyprinter.NewClusterPrinter(pp.writer)
+	case cautils.ScanTypeRepo:
+		pp.mainPrinter = prettyprinter.NewRepoPrinter(pp.writer, pp.inputPatterns)
+	default:
+		pp.mainPrinter = prettyprinter.NewSummaryPrinter(pp.writer, pp.verboseMode)
 	}
 }
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
 	fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+
+	pp.setMainPrinter()
 
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
@@ -60,7 +75,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 		}
 	}
 
-	pp.mainPrinter.Print(pp.writer, &opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+	pp.mainPrinter.Print(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 
 	// When writing to Stdout, we aren’t really writing to an output file,
 	// so no need to print that we are
