@@ -21,7 +21,6 @@ import (
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft/pkg/cataloger"
-	"github.com/anchore/syft/syft/sbom"
 )
 
 const (
@@ -46,30 +45,16 @@ type Service struct {
 func (s *Service) Scan(ctx context.Context, userInput string) (*models.PresenterConfig, error) {
 	var err error
 
-	var str *store.Store
-	var status *db.Status
-	var dbCloser *db.Closer
-	var packages []pkg.Package
-	var sbom *sbom.SBOM
-	var pkgContext pkg.Context
-	var loadedDB, gatheredPackages bool
-
 	errs := make(chan error)
 
-	str, status, dbCloser, err = grype.LoadVulnerabilityDB(s.dbCfg, true)
+	store, status, dbCloser, err := grype.LoadVulnerabilityDB(s.dbCfg, true)
 	if err = validateDBLoad(err, status); err != nil {
 		errs <- err
 		return nil, err
 	}
-	loadedDB = true
 
-	packages, pkgContext, sbom, err = pkg.Provide(userInput, getProviderConfig())
+	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig())
 	if err != nil {
-		return nil, err
-	}
-	gatheredPackages = true
-
-	if !loadedDB || !gatheredPackages {
 		return nil, err
 	}
 
@@ -80,7 +65,7 @@ func (s *Service) Scan(ctx context.Context, userInput string) (*models.Presenter
 	// applyDistroHint(packages, &pkgContext, appConfig)
 
 	vulnMatcher := grype.VulnerabilityMatcher{
-		Store:    *str,
+		Store:    *store,
 		Matchers: getMatchers(),
 	}
 
@@ -97,7 +82,7 @@ func (s *Service) Scan(ctx context.Context, userInput string) (*models.Presenter
 		IgnoredMatches:   ignoredMatches,
 		Packages:         packages,
 		Context:          pkgContext,
-		MetadataProvider: str,
+		MetadataProvider: store,
 		SBOM:             sbom,
 		AppConfig:        nil,
 		DBStatus:         status,
