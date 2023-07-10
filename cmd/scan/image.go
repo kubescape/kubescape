@@ -3,11 +3,15 @@ package scan
 import (
 	"fmt"
 	"strings"
+	"context"
+	"os"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 
 	"github.com/spf13/cobra"
+	"github.com/anchore/grype/grype/presenter"
 )
 
 // TODO(vladklokun): image scan documentation
@@ -46,7 +50,19 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return nil
+			ctx := context.Background()
+			userInput := args[0]
+			dbCfg, _ := imagescan.NewDefaultDBConfig()
+			svc := imagescan.NewScanService(dbCfg)
+
+			scanResults, err := svc.Scan(ctx, userInput)
+
+			presenterConfig, _ := presenter.ValidatedConfig("table", "", false)
+			pres := presenter.GetPresenter(presenterConfig, *scanResults)
+
+			pres.Present(os.Stdout)
+
+			return err
 		},
 	}
 }
