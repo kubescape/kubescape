@@ -1,4 +1,4 @@
-package policyhandler
+package resourcehandler
 
 import (
 	"context"
@@ -7,89 +7,44 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
-	"go.opentelemetry.io/otel"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
-
-	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
-	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-
 	"github.com/kubescape/k8s-interface/cloudsupport"
+	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
+	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"go.opentelemetry.io/otel"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// PolicyHandler -
-type PolicyHandler struct {
-	resourceHandler resourcehandler.IResourceHandler
-	// we are listening on this chan in opaprocessor/processorhandler.go/ProcessRulesListener func
-	getters *cautils.Getters
-}
-
-// CreatePolicyHandler Create ws-handler obj
-func NewPolicyHandler(resourceHandler resourcehandler.IResourceHandler) *PolicyHandler {
-	return &PolicyHandler{
-		resourceHandler: resourceHandler,
-	}
-}
-
-func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
-
-	// validate notification
-	// TODO
-	policyHandler.getters = &scanInfo.Getters
-
-	// get policies
-	if err := policyHandler.getPolicies(ctx, policyIdentifier, opaSessionObj); err != nil {
-		return opaSessionObj, err
-	}
-
-	err := policyHandler.getResources(ctx, policyIdentifier, opaSessionObj, progressListener)
-	if err != nil {
-		return opaSessionObj, err
-	}
-	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
-		return opaSessionObj, fmt.Errorf("empty list of resources")
-	}
-
-	// update channel
-	return opaSessionObj, nil
-}
-
-func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) error {
-	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getResources")
+// CollectResources uses the provided resource handler to collect resources and returns an updated OPASessionObj
+func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.OPASessionObj, error) {
+	ctx, span := otel.Tracer("").Start(ctx, "resourcehandler.CollectResources")
 	defer span.End()
-	opaSessionObj.Report.ClusterAPIServerInfo = policyHandler.resourceHandler.GetClusterAPIServerInfo(ctx)
+	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
 
 	// set cloud metadata only when scanning a cluster
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reportv2.Cluster {
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
+	resourcesMap, allResources, ksResources, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
 	if err != nil {
-		return err
+		return opaSessionObj, err
 	}
 
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
 	opaSessionObj.ArmoResource = ksResources
 
-	return nil
-}
-
-/* unused for now
-func getDesignator(policyIdentifier []cautils.PolicyIdentifier) *armotypes.PortalDesignator {
-	if len(policyIdentifier) > 0 {
-		return &policyIdentifier[0].Designators
+	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
+		return opaSessionObj, fmt.Errorf("empty list of resources")
 	}
-	return &armotypes.PortalDesignator{}
+
+	return opaSessionObj, nil
 }
-*/
 
 func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 	iCloudMetadata := getCloudMetadata(opaSessionObj, k8sinterface.GetConfig())

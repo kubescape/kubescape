@@ -63,7 +63,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
-	maxGoRoutines, err := parseIntEnvVar("RULE_PROCESSING_GOMAXPROCS", 2*runtime.NumCPU())
+	maxGoRoutines, err := cautils.ParseIntEnvVar("RULE_PROCESSING_GOMAXPROCS", 2*runtime.NumCPU())
 	if err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 	}
