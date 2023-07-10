@@ -117,6 +117,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
+	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
 
 	return scanCmd
 }
