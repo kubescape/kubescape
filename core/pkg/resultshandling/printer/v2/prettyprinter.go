@@ -12,11 +12,10 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
-	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/olekukonko/tablewriter"
 )
 
 const (
@@ -33,20 +32,17 @@ type PrettyPrinter struct {
 	verboseMode     bool
 	printAttackTree bool
 	scanType        cautils.ScanTypes
-	mainPrinter     mainPrinter
-}
-
-type mainPrinter interface {
-	PrintMainTable(writer *os.File, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string)
+	mainPrinter     prettyprinter.MainPrinter
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes) *PrettyPrinter {
+
 	return &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
 		viewType:        viewType,
 		printAttackTree: attackTree,
-		scanType:        scanType,
+		mainPrinter:     prettyprinter.NewMainPrinter(scanType),
 	}
 }
 
@@ -64,17 +60,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 		}
 	}
 
-	if pp.scanType != "" {
-		cautils.InfoTextDisplay(pp.writer, "\n"+mapScanTypeToOutput[pp.scanType]+":\n")
-	}
-
-	pp.mainPrinter.PrintMainTable(pp.writer, &opaSessionObj.Report.SummaryDetails, sortedControlIDs)
-
-	if pp.scanType == cautils.ScanTypeCluster {
-		pp.printCategoriesTables(&opaSessionObj.Report.SummaryDetails)
-	} else {
-		pp.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
-	}
+	pp.mainPrinter.Print(pp.writer, &opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 
 	// When writing to Stdout, we aren’t really writing to an output file,
 	// so no need to print that we are
@@ -216,83 +202,6 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	}
 	return relatedStr
 }
-func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
-	// Severity | Control name | failed resources | all resources | % success
-	row := make([]string, _rowLen)
-	row[columnName] = "Resource Summary"
-	row[columnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
-	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
-	row[columnSeverity] = " "
-	row[columnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
-
-	return row
-}
-
-func (pp *PrettyPrinter) printCategoriesTables(summaryDetails *reportsummary.SummaryDetails) {
-
-	categoriesToControlSummariesMap := mapCategoryToControlSummaries(*summaryDetails)
-
-	categoriesTable := tablewriter.NewWriter(pp.writer)
-	categoriesTable.SetHeader(getCategoriesTableHeaders())
-	categoriesTable.SetHeaderLine(true)
-	categoriesTable.SetColumnAlignment(getCategoriesColumnsAlignments())
-
-	for category, ctrls := range categoriesToControlSummariesMap {
-		renderSingleCategory(pp, category, ctrls, categoriesTable)
-	}
-	fmt.Println("")
-}
-
-func (pp *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-
-	if summaryDetails.NumberOfControls().All() == 0 {
-		fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
-		return
-	}
-	cautils.InfoTextDisplay(pp.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
-	cautils.InfoTextDisplay(pp.writer, renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters())+"\n\n")
-
-	// cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+"Severities: SOME OTHER"+"\n\n")
-
-	summaryTable := tablewriter.NewWriter(pp.writer)
-	summaryTable.SetAutoWrapText(false)
-	summaryTable.SetHeader(getControlTableHeaders())
-	summaryTable.SetHeaderLine(true)
-	summaryTable.SetColumnAlignment(getColumnsAlignments())
-
-	printAll := pp.verboseMode
-	if summaryDetails.NumberOfResources().Failed() == 0 {
-		// if there are no failed controls, print the resource table and detailed information
-		printAll = true
-	}
-
-	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
-			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfo, printAll)
-			if len(row) > 0 {
-				summaryTable.Append(row)
-			}
-		}
-	}
-
-	summaryTable.SetFooter(generateFooter(summaryDetails))
-
-	summaryTable.Render()
-
-	// When scanning controls the framework list will be empty
-	cautils.InfoTextDisplay(pp.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
-
-	pp.printInfo(infoToPrintInfo)
-
-}
-
-func (pp *PrettyPrinter) printInfo(infoToPrintInfo []infoStars) {
-	fmt.Println()
-	for i := range infoToPrintInfo {
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].stars, infoToPrintInfo[i].info))
-	}
-}
 
 func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
@@ -312,26 +221,6 @@ func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 	return ""
 }
 
-// renderSeverityCountersSummary renders the string that reports severity counters summary
-func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) string {
-	critical := counters.NumberOfCriticalSeverity()
-	high := counters.NumberOfHighSeverity()
-	medium := counters.NumberOfMediumSeverity()
-	low := counters.NumberOfLowSeverity()
-
-	return fmt.Sprintf(
-		"Failed Resources by Severity: Critical — %d, High — %d, Medium — %d, Low — %d",
-		critical, high, medium, low,
-	)
-}
-
-func controlCountersForSummary(counters reportsummary.ICounters) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
-}
-
-func controlCountersForResource(l *helpersv1.AllLists) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, action required: %d)", l.Len(), l.Failed(), l.Skipped())
-}
 func getSeparator(sep string) string {
 	s := ""
 	for i := 0; i < 80; i++ {

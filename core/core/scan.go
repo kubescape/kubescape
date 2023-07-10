@@ -103,8 +103,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 		printerHandler.SetWriter(ctx, scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
-
-	uiPrinter := getUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), cautils.ScanTypes(scanInfo.ScanType))
+	uiPrinter := getUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.GetScanningContext())
 
 	// ================== return interface ======================================
 
@@ -178,12 +177,16 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	}
 
 	// ======================== prioritization ===================
-	if scanInfo.PrintAttackTree {
+	scanInfo.ScanType = cautils.ScanTypeRepo
+	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
 		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)
+		}
+		if err == nil && isPrioritizationScanType(scanInfo.ScanType) {
+			scanData.SetTopWorkloads()
 		}
 		spanPrioritization.End()
 	}
@@ -196,4 +199,8 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	// }
 
 	return resultsHandling, nil
+}
+
+func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
+	return scanType == cautils.ScanTypeCluster || scanType == cautils.ScanTypeRepo
 }

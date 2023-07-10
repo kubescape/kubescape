@@ -9,6 +9,7 @@ import (
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -20,7 +21,9 @@ type KSResources map[string][]string
 type ScanTypes string
 
 const (
-	ScanTypeCluster ScanTypes = "cluster"
+	TopWorkloadsNumber           = 5
+	ScanTypeCluster    ScanTypes = "cluster"
+	ScanTypeRepo       ScanTypes = "repo"
 )
 
 type OPASessionObj struct {
@@ -59,6 +62,22 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		SessionID:             scanInfo.ScanID,
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
 		OmitRawResources:      scanInfo.OmitRawResources,
+	}
+}
+
+func (sessionObj *OPASessionObj) SetTopWorkloads() {
+	count := 0
+
+	for key := range sessionObj.ResourcesPrioritized {
+		if count >= TopWorkloadsNumber {
+			break
+		}
+		wlObj := reportsummary.TopWorkload{
+			Workload:       sessionObj.AllResources[key],
+			ResourceSource: sessionObj.ResourceSource[key],
+		}
+		sessionObj.Report.SummaryDetails.TopWorkloadsByScore = append(sessionObj.Report.SummaryDetails.TopWorkloadsByScore, wlObj)
+		count++
 	}
 }
 
