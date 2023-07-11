@@ -8,6 +8,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/metrics"
 	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -83,31 +84,32 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		return k8sResourcesMap, allResources, ksResourceMap, err
 	}
 
+	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
 
 	if err != nil {
 		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
 	} else {
 		sessionObj.SetNumberOfWorkerNodes(numberOfWorkerNodes)
+		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
 	}
 
 	cautils.StopSpinner()
 	logger.L().Success("Accessed to Kubernetes objects")
 
-	imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
-	// check that controls use image vulnerability resources
-	if len(imgVulnResources) > 0 {
-		logger.L().Info("Requesting images vulnerabilities results")
-		cautils.StartSpinner()
-		if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
-			cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
-		} else {
-			if isEmptyImgVulns(*ksResourceMap) {
-				cautils.SetInfoMapForResources("image scanning is not configured. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", imgVulnResources, sessionObj.InfoMap)
+	// backswords compatibility - get image vulnerability resources
+	if k8sHandler.registryAdaptors != nil {
+		imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
+		// check that controls use image vulnerability resources
+		if len(imgVulnResources) > 0 {
+			logger.L().Info("Requesting images vulnerabilities results")
+			cautils.StartSpinner()
+			if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
+				cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
 			}
+			cautils.StopSpinner()
+			logger.L().Success("Requested images vulnerabilities results")
 		}
-		cautils.StopSpinner()
-		logger.L().Success("Requested images vulnerabilities results")
 	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
@@ -131,7 +133,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
 		} else {
-			cautils.SetInfoMapForResources("enable-host-scan flag not used. For more information: https://hub.armosec.io/docs/host-sensor", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator", hostResources, sessionObj.InfoMap)
 		}
 	}
 

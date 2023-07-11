@@ -101,7 +101,7 @@ When scanning is not in progress
   "excludedNamespaces": [<str>], // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
   "includeNamespaces": [<str>],  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
   "useCachedArtifacts"`: <bool>, // use the cached artifacts instead of downloading (offline support)
-  "hostScanner": <bool>,         // deploy Kubescape K8s host-scanner DaemonSet in the scanned cluster (same as 'kubescape scan --enable-host-scan')
+  "hostScanner": <bool>,         // deploy Kubescape host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls
   "keepLocal": <bool>,           // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
   "account": <str>,              // account ID (same as 'kubescape scan --account')
   "targetType": <str>,           // framework/control

@@ -250,10 +250,10 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 func (report *ReportEventReceiver) generateMessage() {
 	report.message = ""
 
-	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
+	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
 	report.message = sep
-	report.message += "   << WOW! Now you can see the scan results on the web >>\n\n"
-	report.message += fmt.Sprintf("   %s\n", report.GetURL())
+	report.message += "Now, take your scan results to the next level with actionable insights on ARMO Platform.\n\n"
+	report.message += fmt.Sprintf("Sign up for free here - %s\n", report.GetURL())
 	report.message += sep
 
 }

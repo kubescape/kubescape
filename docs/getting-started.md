@@ -17,7 +17,7 @@ You can also check [other installation methods](installation.md)
 ## Run your first scan
 
 ```sh
-kubescape scan --enable-host-scan --verbose
+kubescape scan --verbose
 ```
 
 You will see output like this:
@@ -33,7 +33,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
 * Scan a running Kubernetes cluster:
 
     ```sh
-    kubescape scan --enable-host-scan  --verbose
+    kubescape scan --verbose
     ```
 
     > **Note**  

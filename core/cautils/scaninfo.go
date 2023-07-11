@@ -338,14 +338,23 @@ func setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.C
 		}
 		contextMetadata.RepoContextMetadata = context
 	case ContextDir:
-		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
-			BasePath: getAbsPath(input),
-			HostName: getHostname(),
+		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
+			Provider:      "none",
+			Repo:          fmt.Sprintf("path@%s", getAbsPath(input)),
+			Owner:         getHostname(),
+			Branch:        "none",
+			DefaultBranch: "none",
+			LocalRootPath: getAbsPath(input),
 		}
+
 	case ContextFile:
-		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
-			FilePath: getAbsPath(input),
-			HostName: getHostname(),
+		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
+			Provider:      "none",
+			Repo:          fmt.Sprintf("file@%s", getAbsPath(input)),
+			Owner:         getHostname(),
+			Branch:        "none",
+			DefaultBranch: "none",
+			LocalRootPath: getAbsPath(input),
 		}
 	case ContextGitLocal:
 		// local

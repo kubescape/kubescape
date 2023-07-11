@@ -6,6 +6,7 @@
   },
   "creationTime": "",
   "description": "Implement NSA security advices for K8s ",
+  "typeTags": ["compliance"],
   "controls": [
     {
       "guid": "",

@@ -20,15 +20,13 @@ import (
 
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
-	inputPatterns    []string
-	registryAdaptors *RegistryAdaptors
+	inputPatterns []string
 }
 
-func NewFileResourceHandler(_ context.Context, inputPatterns []string, registryAdaptors *RegistryAdaptors) *FileResourceHandler {
+func NewFileResourceHandler(_ context.Context, inputPatterns []string) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
-		inputPatterns:    inputPatterns,
-		registryAdaptors: registryAdaptors,
+		inputPatterns: inputPatterns,
 	}
 }
 
@@ -77,11 +75,6 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		}
 
 	}
-
-	// Should Kubescape scan image related controls when scanning local files?
-	// if err := fileHandler.registryAdaptors.collectImagesVulnerabilities(k8sResources, allResources, ksResources); err != nil {
-	// 	logger.L().Ctx(ctx).Warning("failed to collect images vulnerabilities", helpers.Error(err))
-	// }
 
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")

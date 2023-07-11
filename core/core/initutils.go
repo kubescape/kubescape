@@ -94,7 +94,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
 		// scanInfo.HostSensor.SetBool(false)
-		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, registryAdaptors)
+		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns)
 	}
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
@@ -179,12 +179,6 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 	// do not submit control scanning
 	if !scanInfo.FrameworkScan {
-		scanInfo.Submit = false
-		return
-	}
-
-	scanningContext := scanInfo.GetScanningContext()
-	if scanningContext == cautils.ContextFile || scanningContext == cautils.ContextDir {
 		scanInfo.Submit = false
 		return
 	}

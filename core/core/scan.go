@@ -79,11 +79,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	spanHostScanner.End()
 
 	// ================== setup registry adaptors ======================================
-
-	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to initialize registry adaptors", helpers.Error(err))
-	}
+	registryAdaptors, _ := resourcehandler.NewRegistryAdaptors()
 
 	// ================== setup resource collector object ======================================
 

@@ -32,6 +32,10 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	if err != nil {
 		return registryAdaptors, err
 	}
+	if len(adaptors) == 0 {
+		return nil, nil
+	}
+
 	registryAdaptors.adaptors = adaptors
 	return registryAdaptors, nil
 }

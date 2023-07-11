@@ -242,7 +242,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		backendAPI:         backendAPI,
 		configObj:          &ConfigObj{},
 		configMapName:      getConfigMapName(),
-		configMapNamespace: getConfigMapNamespace(),
+		configMapNamespace: GetConfigMapNamespace(),
 	}
 
 	// first, load from configMap
@@ -557,7 +557,8 @@ func getConfigMapName() string {
 	return "kubescape"
 }
 
-func getConfigMapNamespace() string {
+// GetConfigMapNamespace returns the namespace of the cluster config, which is the same for all in-cluster components
+func GetConfigMapNamespace() string {
 	if n := os.Getenv("KS_DEFAULT_CONFIGMAP_NAMESPACE"); n != "" {
 		return n
 	}
