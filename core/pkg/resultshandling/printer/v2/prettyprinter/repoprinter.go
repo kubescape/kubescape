@@ -28,7 +28,9 @@ var _ MainPrinter = &RepoPrinter{}
 func (rp *RepoPrinter) Print(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 	rp.printCategories(summaryDetails, sortedControlIDs, rp.inputPatterns)
 
-	rp.printTopWorkloads(summaryDetails)
+	if len(summaryDetails.TopWorkloadsByScore) > 0 {
+		rp.printTopWorkloads(summaryDetails)
+	}
 
 	printNextSteps(rp.writer, rp.getNextSteps())
 }
@@ -60,9 +62,9 @@ func (rp *RepoPrinter) getCategoriesColumnsAlignments() []int {
 
 func (rp *RepoPrinter) getNextSteps() []string {
 	return []string{
-		"cluster scan run: '$ kubescape scan cluster'",
-		"CICD setup: <link to docs>",
-		"continue monitoring install helm: <docs to helm>",
+		clusterScanRunText,
+		CICDSetupText,
+		installHelmText,
 	}
 }
 

@@ -26,7 +26,9 @@ func (cp *ClusterPrinter) Print(summaryDetails *reportsummary.SummaryDetails, so
 
 	printComplianceScore(cp.writer, filterComplianceFrameworks(summaryDetails.ListFrameworks()))
 
-	cp.printTopWorkloads(summaryDetails)
+	if len(summaryDetails.TopWorkloadsByScore) > 0 {
+		cp.printTopWorkloads(summaryDetails)
+	}
 
 	printNextSteps(cp.writer, cp.getNextSteps())
 }
@@ -76,8 +78,8 @@ func (cp *ClusterPrinter) getWorkloadScanCommand(namespace, kind, name string) s
 
 func (cp *ClusterPrinter) getNextSteps() []string {
 	return []string{
-		"compliance scan run: '$ kubescape scan framework nsa,mitre'",
-		"install helm to continuing monitoring: <docs to helm>",
+		complianceScanRunText,
+		installHelmText,
 	}
 }
 

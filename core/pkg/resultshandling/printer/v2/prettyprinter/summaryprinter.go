@@ -9,15 +9,6 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-const (
-	summaryColumnSeverity        = iota
-	summaryColumnName            = iota
-	summaryColumnCounterFailed   = iota
-	summaryColumnCounterAll      = iota
-	summaryColumnComplianceScore = iota
-	_summaryRowLen               = iota
-)
-
 var _ MainPrinter = &SummaryPrinter{}
 
 type SummaryPrinter struct {

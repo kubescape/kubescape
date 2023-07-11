@@ -14,7 +14,16 @@ import (
 	"k8s.io/utils/strings/slices"
 )
 
+const (
+	linkToHelm            = "https://github.com/kubescape/helm-charts"
+	linkToCICDSetup       = "https://hub.armosec.io/docs/integrations"
+	complianceScanRunText = "Run a compliance scan: '$ kubescape scan framework nsa,mitre'"
+	clusterScanRunText    = "Run a cluster scan: '$ kubescape scan cluster'"
+)
+
 var (
+	installHelmText      = fmt.Sprintf("Install helm for continuos monitoring: %s", linkToHelm)
+	CICDSetupText        = fmt.Sprintf("Add Kubescape to CICD: %s", linkToCICDSetup)
 	complianceFrameworks = []string{"nsa", "mitre"}
 )
 
@@ -151,5 +160,8 @@ func getTopWorkloadsTitle(topWLsLen int) string {
 	if topWLsLen > 2 {
 		return "Your most risky workloads:\n"
 	}
-	return "Your risky workloads:\n"
+	if topWLsLen > 0 {
+		return "Your most risky workload:\n"
+	}
+	return ""
 }

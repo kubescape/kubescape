@@ -8,6 +8,15 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
+const (
+	summaryColumnSeverity        = iota
+	summaryColumnName            = iota
+	summaryColumnCounterFailed   = iota
+	summaryColumnCounterAll      = iota
+	summaryColumnComplianceScore = iota
+	_summaryRowLen               = iota
+)
+
 func ControlCountersForSummary(counters reportsummary.ICounters) string {
 	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
 }
