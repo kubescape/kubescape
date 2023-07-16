@@ -13,7 +13,7 @@ require (
 	github.com/kubescape/go-logger v0.0.11
 	github.com/kubescape/k8s-interface v0.0.116
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.251-0.20230709171627-3c937f68b093
+	github.com/kubescape/opa-utils v0.0.253
 	github.com/stretchr/testify v1.8.3
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
 	go.opentelemetry.io/otel v1.14.0
@@ -26,8 +26,8 @@ require (
 	go.uber.org/multierr v1.9.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
-	golang.org/x/exp v0.0.0-20230519143937-03e91628a987 // indirect
-	golang.org/x/mod v0.8.0 // indirect
+	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22 // indirect
+	golang.org/x/mod v0.11.0 // indirect
 	golang.org/x/net v0.9.0 // indirect
 	golang.org/x/oauth2 v0.5.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
@@ -83,7 +83,7 @@ require (
 	github.com/alibabacloud-go/tea-utils v1.4.4 // indirect
 	github.com/alibabacloud-go/tea-xml v1.1.2 // indirect
 	github.com/aliyun/credentials-go v1.2.3 // indirect
-	github.com/armosec/armoapi-go v0.0.201-0.20230709172935-54a82b5da9dc // indirect
+	github.com/armosec/armoapi-go v0.0.202 // indirect
 	github.com/armosec/utils-k8s-go v0.0.13 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/aws/aws-sdk-go v1.44.114 // indirect
