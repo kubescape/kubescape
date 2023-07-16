@@ -9,6 +9,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/metrics"
 	"github.com/kubescape/kubescape/v2/httphandler/docs"
 	handlerequestsv1 "github.com/kubescape/kubescape/v2/httphandler/handlerequests/v1"
 
@@ -64,6 +65,9 @@ func SetupHTTPListener() error {
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan)
 	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
 	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.Results)
+
+	// OpenTelemetry metrics initialization
+	metrics.Init()
 
 	server.Handler = rtr
 
