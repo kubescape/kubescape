@@ -36,7 +36,7 @@ require (
 	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.16.0
 	go.opentelemetry.io/otel/metric v1.16.0
-	golang.org/x/mod v0.8.0
+	golang.org/x/mod v0.11.0
 	golang.org/x/sync v0.1.0
 	google.golang.org/api v0.114.0
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1
@@ -336,7 +336,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
-	golang.org/x/exp v0.0.0-20230519143937-03e91628a987 // indirect
+	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22 // indirect
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect
@@ -366,4 +366,5 @@ require (
 )
 
 replace github.com/libgit2/git2go/v33 => ./git2go
+
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0
