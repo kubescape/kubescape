@@ -2,10 +2,6 @@ module github.com/kubescape/kubescape/v2
 
 go 1.20
 
-// replace github.com/kubescape/regolibrary => /home/raziel/armo/go/src/regolibrary
-
-// replace github.com/kubescape/opa-utils => /home/raziel/armo/go/src/opa-utils
-
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
 	github.com/armosec/armoapi-go v0.0.173
@@ -369,5 +365,5 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-// replace github.com/libgit2/git2go/v33 => ./git2go
+replace github.com/libgit2/git2go/v33 => ./git2go
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0
