@@ -19,7 +19,7 @@ import (
 type AttackTracksGetterMock struct{}
 
 func (mock *AttackTracksGetterMock) GetAttackTracks() ([]v1alpha1.AttackTrack, error) {
-	mock_1 := v1alpha1.AttackTrackMock(v1alpha1.AttackTrackStep{
+	mock_1 := v1alpha1.GetAttackTrackMock(v1alpha1.AttackTrackStep{
 		Name: "A",
 		SubSteps: []v1alpha1.AttackTrackStep{
 			{
@@ -39,12 +39,13 @@ func (mock *AttackTracksGetterMock) GetAttackTracks() ([]v1alpha1.AttackTrack, e
 		},
 	})
 
-	mock_2 := v1alpha1.AttackTrackMock(v1alpha1.AttackTrackStep{
+	mock_2 := v1alpha1.GetAttackTrackMock(v1alpha1.AttackTrackStep{
 		Name: "Z",
 	})
-	mock_2.Metadata["name"] = "TestAttackTrack_2"
-
-	return []v1alpha1.AttackTrack{*mock_1, *mock_2}, nil
+	// mock_2["metadata"]["name"] = "TestAttackTrack_2"
+	m1 := mock_1.(*v1alpha1.AttackTrack)
+	m2 := mock_2.(*v1alpha1.AttackTrack)
+	return []v1alpha1.AttackTrack{*m1, *m2}, nil
 }
 
 func ControlMock(id string, baseScore float32, tags, categories []string) reporthandling.Control {
