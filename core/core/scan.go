@@ -66,6 +66,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== version testing ======================================
 
+	// move this
 	v := cautils.NewIVersionCheckHandler(ctx)
 	v.CheckLatestVersion(ctx, cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
 
@@ -79,7 +80,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	spanHostScanner.End()
 
 	// ================== setup registry adaptors ======================================
-	registryAdaptors, _ := resourcehandler.NewRegistryAdaptors()
+
+	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
+	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to initialize registry adaptors", helpers.Error(err))
+	}
 
 	// ================== setup resource collector object ======================================
 
@@ -91,15 +96,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, scanInfo.GetScanningContext())
 
 	// setup printers
-	formats := scanInfo.Formats()
+	outputPrinters := GetOutputPrinters(scanInfo, ctx)
 
-	outputPrinters := make([]printer.IPrinter, 0)
-	for _, format := range formats {
-		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
-		printerHandler.SetWriter(ctx, scanInfo.Output)
-		outputPrinters = append(outputPrinters, printerHandler)
-	}
-	uiPrinter := getUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
+	uiPrinter := GetUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
 
 	// ================== return interface ======================================
 
@@ -111,6 +110,18 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 		uiPrinter:         uiPrinter,
 		hostSensorHandler: hostSensorHandler,
 	}
+}
+
+func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printer.IPrinter {
+	formats := scanInfo.Formats()
+
+	outputPrinters := make([]printer.IPrinter, 0)
+	for _, format := range formats {
+		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
+		printerHandler.SetWriter(ctx, scanInfo.Output)
+		outputPrinters = append(outputPrinters, printerHandler)
+	}
+	return outputPrinters
 }
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
@@ -148,7 +159,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 		}
 	}()
 
-	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
+	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter, nil)
 
 	// ===================== policies & resources =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies & resources")

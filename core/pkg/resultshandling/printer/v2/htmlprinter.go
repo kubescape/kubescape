@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -51,7 +52,14 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	hp.writer = printer.GetWriter(ctx, outputFile)
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (hp *HtmlPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
+}
+
+func (hp *HtmlPrinter) PrintNextSteps() {
+
+}
+
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0

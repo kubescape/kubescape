@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -24,7 +25,8 @@ const (
 )
 
 type IPrinter interface {
-	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj)
+	PrintNextSteps()
+	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig)
 	SetWriter(ctx context.Context, outputFile string)
 	Score(score float32)
 }

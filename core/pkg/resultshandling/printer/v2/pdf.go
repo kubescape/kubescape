@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -63,10 +64,10 @@ func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.Summ
 		if infoMap[i].info != "" {
 			m.Row(5, func() {
 				m.Col(12, func() {
-					m.Text(fmt.Sprintf("%v %v", infoMap[i].stars, infoMap[i].info),props.Text{
-						Style: consts.Bold,
-						Align:  consts.Left,
-						Size:   8,
+					m.Text(fmt.Sprintf("%v %v", infoMap[i].stars, infoMap[i].info), props.Text{
+						Style:       consts.Bold,
+						Align:       consts.Left,
+						Size:        8,
 						Extrapolate: false,
 						Color: color.Color{
 							Red:   0,
@@ -85,7 +86,14 @@ func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.Summ
 
 }
 
-func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (pp *PdfPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
+}
+
+func (pp *PdfPrinter) PrintNextSteps() {
+
+}
+
+func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)

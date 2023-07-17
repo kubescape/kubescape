@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -16,60 +17,62 @@ import (
 )
 
 type ResultsHandler struct {
-	reporterObj reporter.IReport
-	uiPrinter   printer.IPrinter
-	scanData    *cautils.OPASessionObj
-	printerObjs []printer.IPrinter
+	ReporterObj   reporter.IReport
+	UiPrinter     printer.IPrinter
+	ScanData      *cautils.OPASessionObj
+	PrinterObjs   []printer.IPrinter
+	ImageScanData *models.PresenterConfig
 }
 
-func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {
+func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter, imageScanData *models.PresenterConfig) *ResultsHandler {
 	return &ResultsHandler{
-		reporterObj: reporterObj,
-		printerObjs: printerObjs,
-		uiPrinter:   uiPrinter,
+		ReporterObj:   reporterObj,
+		PrinterObjs:   printerObjs,
+		UiPrinter:     uiPrinter,
+		ImageScanData: imageScanData,
 	}
 }
 
 // GetRiskScore returns the result’s risk score
 func (rh *ResultsHandler) GetRiskScore() float32 {
-	return rh.scanData.Report.SummaryDetails.Score
+	return rh.ScanData.Report.SummaryDetails.Score
 }
 
 // GetComplianceScore returns the result’s compliance score
 func (rh *ResultsHandler) GetComplianceScore() float32 {
-	return rh.scanData.Report.SummaryDetails.ComplianceScore
+	return rh.ScanData.Report.SummaryDetails.ComplianceScore
 }
 
 // GetData returns scan/action related data (policies, resources, results, etc.)
 //
 // Call the ToJson() method if you want the JSON representation of the data
 func (rh *ResultsHandler) GetData() *cautils.OPASessionObj {
-	return rh.scanData
+	return rh.ScanData
 }
 
 // SetData sets the scan/action related data
 func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
-	rh.scanData = data
+	rh.ScanData = data
 }
 
 // GetPrinter returns all printers
 func (rh *ResultsHandler) GetPrinters() []printer.IPrinter {
-	return rh.printerObjs
+	return rh.PrinterObjs
 }
 
 // GetReporter returns the reporter object
 func (rh *ResultsHandler) GetReporter() reporter.IReport {
-	return rh.reporterObj
+	return rh.ReporterObj
 }
 
 // ToJson returns the results in the JSON format
 func (rh *ResultsHandler) ToJson() ([]byte, error) {
-	return json.Marshal(printerv2.FinalizeResults(rh.scanData))
+	return json.Marshal(printerv2.FinalizeResults(rh.ScanData))
 }
 
 // GetResults returns the results
 func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
-	return printerv2.FinalizeResults(rh.scanData)
+	return printerv2.FinalizeResults(rh.ScanData)
 }
 
 // HandleResults handles all necessary actions for the scan results
@@ -78,21 +81,26 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context) error {
 	// First we output the results and then the score, so the
 	// score - a summary of the results—can always be seen at the end
 	// of output
-	rh.uiPrinter.ActionPrint(ctx, rh.scanData)
-	rh.uiPrinter.Score(rh.GetComplianceScore())
+	rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
+
+	rh.UiPrinter.PrintNextSteps()
 
 	// Then print to output files
-	for _, printer := range rh.printerObjs {
-		printer.ActionPrint(ctx, rh.scanData)
-		printer.Score(rh.GetComplianceScore())
+	for _, printer := range rh.PrinterObjs {
+		printer.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
+		if rh.ScanData != nil {
+			printer.Score(rh.GetComplianceScore())
+		}
 	}
 
 	// We should submit only after printing results, so a user can see
 	// results at all times, even if submission fails
-	if err := rh.reporterObj.Submit(ctx, rh.scanData); err != nil {
-		return err
+	if rh.ReporterObj != nil {
+		if err := rh.ReporterObj.Submit(ctx, rh.ScanData); err != nil {
+			return err
+		}
+		rh.ReporterObj.DisplayReportURL()
 	}
-	rh.reporterObj.DisplayReportURL()
 
 	return nil
 }

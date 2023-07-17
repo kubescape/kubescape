@@ -8,11 +8,17 @@ import (
 	"sort"
 	"strings"
 
+	v5 "github.com/anchore/grype/grype/db/v5"
+	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/enescakir/emoji"
+	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -37,8 +43,7 @@ type PrettyPrinter struct {
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string) *PrettyPrinter {
-
-	return &PrettyPrinter{
+	prettyPrinter := &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
 		viewType:        viewType,
@@ -46,44 +51,131 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 		scanType:        scanType,
 		inputPatterns:   inputPatterns,
 	}
+
+	return prettyPrinter
 }
 
-func (pp *PrettyPrinter) setMainPrinter() {
+func (pp *PrettyPrinter) PrintNextSteps() {
+	pp.mainPrinter.PrintNextSteps()
+}
+
+func (pp *PrettyPrinter) SetMainPrinter() {
 	switch pp.scanType {
 	case cautils.ScanTypeCluster:
 		pp.mainPrinter = prettyprinter.NewClusterPrinter(pp.writer)
 	case cautils.ScanTypeRepo:
 		pp.mainPrinter = prettyprinter.NewRepoPrinter(pp.writer, pp.inputPatterns)
+	case cautils.ScanTypeImage:
+		pp.mainPrinter = prettyprinter.NewImagePrinter(pp.writer, pp.verboseMode)
 	default:
 		pp.mainPrinter = prettyprinter.NewSummaryPrinter(pp.writer, pp.verboseMode)
 	}
 }
 
-func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
-	fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+func (pp *PrettyPrinter) convertToImageScanSummary(presenterConfig *models.PresenterConfig) (*imageprinter.ImageScanSummary, error) {
+	doc, err := models.NewDocument(presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
 
-	pp.setMainPrinter()
+	if err != nil {
+		return nil, err
+	}
 
-	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+	cves := extractCVEs(doc)
 
-	switch pp.viewType {
-	case cautils.ControlViewType:
-		pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
-	case cautils.ResourceViewType:
-		if pp.verboseMode {
-			pp.resourceTable(opaSessionObj)
+	mapPackageNameToScore := extractPkgNameToScore(doc)
+
+	mapSeverityToSummary := extractSeverityToSummaryMap(cves)
+
+	imageScanSummary := imageprinter.ImageScanSummary{
+		CVEs:                  cves,
+		MapsSeverityToSummary: mapSeverityToSummary,
+		PackageScores:         mapPackageNameToScore,
+	}
+
+	return &imageScanSummary, nil
+}
+
+func extractSeverityToSummaryMap(cves []imageprinter.CVE) map[string]*imageprinter.SeveritySummary {
+	mapSeverityToSummary := map[string]*imageprinter.SeveritySummary{}
+	for _, cve := range cves {
+		if _, ok := mapSeverityToSummary[cve.Severity]; !ok {
+			mapSeverityToSummary[cve.Severity] = &imageprinter.SeveritySummary{}
+		}
+		mapSeverityToSummary[cve.Severity].NumberOfCVEs = mapSeverityToSummary[cve.Severity].NumberOfCVEs + 1
+		if cve.FixedState == string(v5.FixedState) {
+			mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs = mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs + 1
 		}
 	}
+	return mapSeverityToSummary
+}
 
-	pp.mainPrinter.Print(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+func extractPkgNameToScore(doc models.Document) map[string]*imageprinter.Package {
+	mapPackageNameToScore := make(map[string]*imageprinter.Package, 0)
+	for _, cve := range doc.Matches {
+		if _, ok := mapPackageNameToScore[cve.Artifact.Name]; !ok {
+			mapPackageNameToScore[cve.Artifact.Name] = &imageprinter.Package{
+				Score: 0,
+			}
+		}
+		mapPackageNameToScore[cve.Artifact.Name].Score = mapPackageNameToScore[cve.Artifact.Name].Score + utils.ImageSeverityToInt(cve.Vulnerability.Severity)
+		mapPackageNameToScore[cve.Artifact.Name].Version = cve.Artifact.Version
+	}
+	return mapPackageNameToScore
+}
 
-	// When writing to Stdout, we aren’t really writing to an output file,
-	// so no need to print that we are
-	if pp.writer.Name() != os.Stdout.Name() {
-		printer.LogOutputFile(pp.writer.Name())
+func extractCVEs(doc models.Document) []imageprinter.CVE {
+	cves := []imageprinter.CVE{}
+	for _, match := range doc.Matches {
+		cve := imageprinter.CVE{
+			ID:          match.Vulnerability.ID,
+			Severity:    match.Vulnerability.Severity,
+			Package:     match.Artifact.Name,
+			Version:     match.Artifact.Version,
+			FixVersions: match.Vulnerability.Fix.Versions,
+			FixedState:  match.Vulnerability.Fix.State,
+		}
+		cves = append(cves, cve)
+	}
+	return cves
+}
+
+func (pp *PrettyPrinter) PrintImageScan(ctx context.Context, presenterConfig *models.PresenterConfig) {
+	imageScanSummary, err := pp.convertToImageScanSummary(presenterConfig)
+	if err != nil {
+		logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
+		return
+	}
+	pp.mainPrinter.PrintImageScanning(imageScanSummary)
+}
+
+func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+	if opaSessionObj != nil {
+		fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+
+		sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+
+		switch pp.viewType {
+		case cautils.ControlViewType:
+			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
+		case cautils.ResourceViewType:
+			if pp.verboseMode {
+				pp.resourceTable(opaSessionObj)
+			}
+		}
+
+		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+
+		// When writing to Stdout, we aren’t really writing to an output file,
+		// so no need to print that we are
+		if pp.writer.Name() != os.Stdout.Name() {
+			printer.LogOutputFile(pp.writer.Name())
+		}
+
+		pp.printAttackTracks(opaSessionObj)
 	}
 
-	pp.printAttackTracks(opaSessionObj)
+	if imageScanData != nil {
+		pp.PrintImageScan(context.Background(), imageScanData)
+	}
 }
 
 func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
@@ -92,6 +184,7 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 	// otherwise
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
+		pp.SetMainPrinter()
 		return
 	}
 
@@ -103,6 +196,8 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 	}
 
 	pp.writer = printer.GetWriter(ctx, outputFile)
+
+	pp.SetMainPrinter()
 }
 
 func (pp *PrettyPrinter) Score(score float32) {

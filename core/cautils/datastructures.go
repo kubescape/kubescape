@@ -24,6 +24,7 @@ const (
 	TopWorkloadsNumber           = 5
 	ScanTypeCluster    ScanTypes = "cluster"
 	ScanTypeRepo       ScanTypes = "repo"
+	ScanTypeImage      ScanTypes = "image"
 )
 
 type OPASessionObj struct {

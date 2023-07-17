@@ -1,9 +1,10 @@
-package prettyprinter
+package configurationprinter
 
 import (
 	"fmt"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
@@ -17,24 +18,7 @@ const (
 	_summaryRowLen               = iota
 )
 
-func ControlCountersForSummary(counters reportsummary.ICounters) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
-}
-
-// renderSeverityCountersSummary renders the string that reports severity counters summary
-func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) string {
-	critical := counters.NumberOfCriticalSeverity()
-	high := counters.NumberOfHighSeverity()
-	medium := counters.NumberOfMediumSeverity()
-	low := counters.NumberOfLowSeverity()
-
-	return fmt.Sprintf(
-		"Failed Resources by Severity: Critical — %d, High — %d, Medium — %d, Low — %d",
-		critical, high, medium, low,
-	)
-}
-
-func getControlTableHeaders() []string {
+func GetControlTableHeaders() []string {
 	headers := make([]string, _summaryRowLen)
 	headers[summaryColumnName] = "CONTROL NAME"
 	headers[summaryColumnCounterFailed] = "FAILED RESOURCES"
@@ -44,7 +28,7 @@ func getControlTableHeaders() []string {
 	return headers
 }
 
-func getColumnsAlignments() []int {
+func GetColumnsAlignments() []int {
 	alignments := make([]int, _summaryRowLen)
 	alignments[summaryColumnName] = tablewriter.ALIGN_LEFT
 	alignments[summaryColumnCounterFailed] = tablewriter.ALIGN_CENTER
@@ -54,7 +38,7 @@ func getColumnsAlignments() []int {
 	return alignments
 }
 
-func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
+func GenerateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars, verbose bool) []string {
 	row := make([]string, _summaryRowLen)
 
 	// ignore passed results
@@ -62,7 +46,7 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 		return []string{}
 	}
 
-	row[summaryColumnSeverity] = getSeverityColumn(controlSummary)
+	row[summaryColumnSeverity] = GetSeverityColumn(controlSummary)
 	if len(controlSummary.GetName()) > 50 {
 		row[summaryColumnName] = controlSummary.GetName()[:50] + "..."
 	} else {
@@ -70,23 +54,35 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	}
 	row[summaryColumnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 	row[summaryColumnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
-	row[summaryColumnComplianceScore] = getComplianceScoreColumn(controlSummary, infoToPrintInfo)
+	row[summaryColumnComplianceScore] = GetComplianceScoreColumn(controlSummary, infoToPrintInfo)
 
 	return row
 }
 
-func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
+func GetComplianceScoreColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
 	if controlSummary.GetStatus().IsSkipped() {
-		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
+		return fmt.Sprintf("%s %s", "Action Required", GetInfoColumn(controlSummary, infoToPrintInfo))
 	}
 	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
 }
 
-func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
+func GetInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
 	for i := range infoToPrintInfo {
-		if infoToPrintInfo[i].info == controlSummary.GetStatus().Info() {
-			return infoToPrintInfo[i].stars
+		if infoToPrintInfo[i].Info == controlSummary.GetStatus().Info() {
+			return infoToPrintInfo[i].Stars
 		}
 	}
 	return ""
+}
+
+func GenerateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
+	// Severity | Control name | failed resources | all resources | % success
+	row := make([]string, _summaryRowLen)
+	row[summaryColumnName] = "Resource Summary"
+	row[summaryColumnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
+	row[summaryColumnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
+	row[summaryColumnSeverity] = " "
+	row[summaryColumnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
+
+	return row
 }

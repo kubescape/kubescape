@@ -205,6 +205,10 @@ func (scanInfo *ScanInfo) Formats() []string {
 	}
 }
 
+func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
+	scanInfo.ScanType = scanType
+}
+
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
 		if !scanInfo.contains(policy) {

@@ -1,46 +1,52 @@
-package prettyprinter
+package configurationprinter
 
 import (
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 type WorkloadPrinter struct {
-	writer *os.File
 }
 
-func NewWorkloadPrinter(writer *os.File) *WorkloadPrinter {
-	return &WorkloadPrinter{
-		writer: writer,
-	}
+var _ TablePrinter = &WorkloadPrinter{}
+
+func NewWorkloadPrinter() *WorkloadPrinter {
+	return &WorkloadPrinter{}
 }
 
-var _ MainPrinter = &WorkloadPrinter{}
-
-func (wp *WorkloadPrinter) Print(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	wp.printCategories(summaryDetails, sortedControlIDs)
-
-	printNextSteps(wp.writer, wp.getNextSteps())
+func (wp *WorkloadPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
 }
 
-func (wp *WorkloadPrinter) printCategories(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	categoriesTable := getCategoriesTable(wp.writer, wp.getCategoriesTableHeaders(), wp.getCategoriesColumnsAlignments())
+func (wp *WorkloadPrinter) PrintCategoriesTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+
+	headers := wp.getCategoriesTableHeaders()
+	columnAligments := wp.getCategoriesColumnsAlignments()
+
+	table := getTableWriter(writer, headers, columnAligments)
+
+	mapCategoryToRows := wp.generateRows(summaryDetails, sortedControlIDs)
+
+	renderCategoriesTable(mapCategoryToRows, writer, table)
+}
+
+func (wp *WorkloadPrinter) generateRows(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) map[string][][]string {
+	mapCategoryToRows := make(map[string][][]string)
 
 	categoriesToControlSummariesMap := mapCategoryToControlSummaries(*summaryDetails, sortedControlIDs)
 
 	for category, ctrls := range categoriesToControlSummariesMap {
-		rows := make([][]string, 0, len(ctrls))
 		for i := range ctrls {
 			row := wp.generateCategoriesRow(ctrls[i])
 			if len(row) > 0 {
-				rows = append(rows, row)
+				mapCategoryToRows[category] = append(mapCategoryToRows[category], row)
 			}
 		}
-		renderCategoryTable(wp.writer, categoriesTable, rows, category)
 	}
+
+	return mapCategoryToRows
 }
 
 func (wp *WorkloadPrinter) getCategoriesTableHeaders() []string {
@@ -54,7 +60,7 @@ func (wp *WorkloadPrinter) getCategoriesColumnsAlignments() []int {
 func (wp *WorkloadPrinter) generateCategoriesRow(controlSummary reportsummary.IControlSummary) []string {
 	row := make([]string, 4)
 
-	row[categoriesColumnSeverity] = getSeverityColumn(controlSummary)
+	row[categoriesColumnSeverity] = GetSeverityColumn(controlSummary)
 
 	if len(controlSummary.GetName()) > 50 {
 		row[categoriesColumnName] = controlSummary.GetName()[:50] + "..."
@@ -71,12 +77,4 @@ func (wp *WorkloadPrinter) generateCategoriesRow(controlSummary reportsummary.IC
 
 func (wp *WorkloadPrinter) generateNextSteps(controlSummary reportsummary.IControlSummary) string {
 	return fmt.Sprintf("$ kubescape scan wokrload <ns>/<kind>/<name> %s", controlSummary.GetID())
-}
-
-func (wp *WorkloadPrinter) getNextSteps() []string {
-	return []string{
-		"run in verbose mode: '$ kubescape scan <command> --verbose'",
-		"scan helm-charts or YAML files: '$ kubescape scan /path/to/chart'",
-		"add kubescape to CICD: '<docs>'",
-	}
 }

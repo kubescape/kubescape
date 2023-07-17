@@ -1,17 +1,18 @@
 package scan
 
 import (
+	"context"
 	"fmt"
 	"strings"
-	"context"
-	"os"
 
+	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/core"
 	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 
 	"github.com/spf13/cobra"
-	"github.com/anchore/grype/grype/presenter"
 )
 
 // TODO(vladklokun): image scan documentation
@@ -57,10 +58,19 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 
 			scanResults, err := svc.Scan(ctx, userInput)
 
-			presenterConfig, _ := presenter.ValidatedConfig("table", "", false)
-			pres := presenter.GetPresenter(presenterConfig, *scanResults)
+			scanInfo.SetScanType(cautils.ScanTypeImage)
 
-			pres.Present(os.Stdout)
+			outputPrinters := core.GetOutputPrinters(scanInfo, ctx)
+
+			uiPrinter := core.GetUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
+
+			resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter, scanResults)
+
+			resultsHandler.HandleResults(ctx)
+
+			if !scanInfo.VerboseMode {
+				logger.L().Info("Run with '--verbose'/'-v' for the full report\n")
+			}
 
 			return err
 		},

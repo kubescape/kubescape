@@ -4,14 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/anchore/grype/grype/presenter"
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 const (
@@ -41,17 +45,77 @@ func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
 
 func (jp *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
+
 }
 
-func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
-	r, err := json.Marshal(FinalizeResults(opaSessionObj))
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to Marshal posture report object")
+func printImageAndConfigurationScanning(output io.Writer, imageScanData *models.PresenterConfig, opaSessionObj *cautils.OPASessionObj) error {
+	type Document struct {
+		*models.Document                `json:",omitempty"`
+		*reporthandlingv2.PostureReport `json:",omitempty"`
 	}
 
-	if _, err := jp.writer.Write(r); err != nil {
-		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
+	doc, err := models.NewDocument(imageScanData.Packages, imageScanData.Context, imageScanData.Matches, imageScanData.IgnoredMatches, imageScanData.MetadataProvider,
+		imageScanData.AppConfig, imageScanData.DBStatus)
+	if err != nil {
+		return err
+	}
+
+	docForJson := Document{
+		&doc,
+		FinalizeResults(opaSessionObj),
+	}
+
+	enc := json.NewEncoder(output)
+	// prevent > and < from being escaped in the payload
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", " ")
+	return enc.Encode(&docForJson)
+}
+
+func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+	var err error
+	if opaSessionObj != nil && imageScanData != nil {
+		err = printImageAndConfigurationScanning(jp.writer, imageScanData, opaSessionObj)
+	} else if opaSessionObj != nil {
+		err = printConfigurationsScanning(opaSessionObj, ctx, jp)
+	} else if imageScanData != nil {
+		err = jp.PrintImageScan(ctx, imageScanData)
+	} else {
+		err = fmt.Errorf("failed to print results, no data provided")
+	}
+
+	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to print results", helpers.Error(err))
 		return
 	}
+
 	printer.LogOutputFile(jp.writer.Name())
+}
+
+func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, ctx context.Context, jp *JsonPrinter) error {
+	r, err := json.Marshal(FinalizeResults(opaSessionObj))
+	if err != nil {
+		return err
+	}
+
+	_, err = jp.writer.Write(r)
+	return err
+}
+
+func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
+	presenterConfig, err := presenter.ValidatedConfig("json", "", false)
+	if err != nil {
+		return err
+	}
+
+	pres := presenter.GetPresenter(presenterConfig, *scanResults)
+
+	if err = pres.Present(jp.writer); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (jp *JsonPrinter) PrintNextSteps() {
+
 }
