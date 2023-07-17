@@ -42,9 +42,9 @@ func (mock *AttackTracksGetterMock) GetAttackTracks() ([]v1alpha1.AttackTrack, e
 	mock_2 := v1alpha1.GetAttackTrackMock(v1alpha1.AttackTrackStep{
 		Name: "Z",
 	})
-	// mock_2["metadata"]["name"] = "TestAttackTrack_2"
 	m1 := mock_1.(*v1alpha1.AttackTrack)
 	m2 := mock_2.(*v1alpha1.AttackTrack)
+	m2.Metadata["name"] = "TestAttackTrack_2"
 	return []v1alpha1.AttackTrack{*m1, *m2}, nil
 }
 
