@@ -2,6 +2,10 @@ module github.com/kubescape/kubescape/v2
 
 go 1.20
 
+// replace github.com/kubescape/regolibrary => /home/raziel/armo/go/src/regolibrary
+
+// replace github.com/kubescape/opa-utils => /home/raziel/armo/go/src/opa-utils
+
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
 	github.com/armosec/armoapi-go v0.0.173
@@ -18,10 +22,10 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.13
-	github.com/kubescape/k8s-interface v0.0.116
-	github.com/kubescape/opa-utils v0.0.250
+	github.com/kubescape/k8s-interface v0.0.131
+	github.com/kubescape/opa-utils v0.0.254-0.20230717053214-e0f1217b84f6
 	github.com/kubescape/rbac-utils v0.0.20
-	github.com/kubescape/regolibrary v1.0.286-rc.0
+	github.com/kubescape/regolibrary v1.0.286-rc.0.0.20230717053343-a18099b3fc87
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.17
 	github.com/mikefarah/yq/v4 v4.29.1
@@ -36,7 +40,7 @@ require (
 	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.16.0
 	go.opentelemetry.io/otel/metric v1.16.0
-	golang.org/x/mod v0.8.0
+	golang.org/x/mod v0.11.0
 	golang.org/x/sync v0.1.0
 	google.golang.org/api v0.114.0
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1
@@ -146,7 +150,7 @@ require (
 	github.com/dimchansky/utfbom v1.1.1 // indirect
 	github.com/docker/cli v20.10.21+incompatible // indirect
 	github.com/docker/distribution v2.8.1+incompatible // indirect
-	github.com/docker/docker v20.10.24+incompatible // indirect
+	github.com/docker/docker v24.0.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
 	github.com/docker/go-units v0.5.0 // indirect
@@ -336,7 +340,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
-	golang.org/x/exp v0.0.0-20230519143937-03e91628a987 // indirect
+	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22 // indirect
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect
@@ -365,5 +369,5 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/libgit2/git2go/v33 => ./git2go
+// replace github.com/libgit2/git2go/v33 => ./git2go
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0

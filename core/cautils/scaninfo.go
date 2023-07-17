@@ -87,10 +87,15 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 
 // TODO - UPDATE
 type ViewTypes string
+type EnvScopeTypes string
+type ManageClusterTypes string
 
 const (
-	ResourceViewType ViewTypes = "resource"
-	ControlViewType  ViewTypes = "control"
+	ResourceViewType ViewTypes          = "resource"
+	ControlViewType  ViewTypes          = "control"
+	EKSManageCluster ManageClusterTypes = "EKS"
+	GKEManageCluster ManageClusterTypes = "GKE"
+	AKSManageCluster ManageClusterTypes = "AKS"
 )
 
 type PolicyIdentifier struct {
