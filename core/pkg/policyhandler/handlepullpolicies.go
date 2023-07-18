@@ -27,6 +27,7 @@ type PolicyHandler struct {
 	cachedPolicyIdentifiers *TimedCache[[]string]
 	cachedFrameworks        *TimedCache[[]reporthandling.Framework]
 	cachedExceptions        *TimedCache[[]armotypes.PostureExceptionPolicy]
+	cachedControlInputs     *TimedCache[map[string][]string]
 }
 
 // NewPolicyHandler creates and returns an instance of the `PolicyHandler`. The function initializes the `PolicyHandler` only if it hasn't been previously created.
@@ -38,6 +39,7 @@ func NewPolicyHandler() *PolicyHandler {
 			cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
 			cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
 			cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
+			cachedControlInputs:     NewTimedCache[map[string][]string](cacheTtl),
 		}
 	}
 	return policyHandlerInstance
@@ -84,7 +86,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	}
 
 	// get account configuration
-	if controlInputs, err = policyHandler.getters.ControlsInputsGetter.GetControlsInputs(cautils.ClusterName); err != nil {
+	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 
@@ -180,4 +182,18 @@ func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptio
 	}
 
 	return exceptions, err
+}
+
+func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, error) {
+	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist {
+		logger.L().Info("Using cached control inputs")
+		return cachedControlInputs, nil
+	}
+
+	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(cautils.ClusterName)
+	if err == nil {
+		policyHandler.cachedControlInputs.Set(controlInputs)
+	}
+
+	return controlInputs, err
 }

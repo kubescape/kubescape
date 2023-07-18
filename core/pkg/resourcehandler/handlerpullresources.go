@@ -20,7 +20,7 @@ import (
 )
 
 // CollectResources uses the provided resource handler to collect resources and returns an updated OPASessionObj
-func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.OPASessionObj, error) {
+func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) error {
 	ctx, span := otel.Tracer("").Start(ctx, "resourcehandler.CollectResources")
 	defer span.End()
 	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
@@ -32,7 +32,7 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 
 	resourcesMap, allResources, ksResources, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
 	if err != nil {
-		return opaSessionObj, err
+		return err
 	}
 
 	opaSessionObj.K8SResources = resourcesMap
@@ -40,10 +40,10 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 	opaSessionObj.ArmoResource = ksResources
 
 	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
-		return opaSessionObj, fmt.Errorf("empty list of resources")
+		return fmt.Errorf("empty list of resources")
 	}
 
-	return opaSessionObj, nil
+	return nil
 }
 
 func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
