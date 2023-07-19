@@ -208,6 +208,8 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 
+		fileAsString = sanitizeYaml(fileAsString)
+
 		fixedYamlString, err := ApplyFixToContent(ctx, fileAsString, yamlExpression)
 
 		if err != nil {
@@ -216,6 +218,8 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 		} else {
 			updatedFiles[filepath] = true
 		}
+
+		fixedYamlString = revertSanitizeYaml(fixedYamlString)
 
 		err = writeFixesToFile(filepath, fixedYamlString)
 
@@ -367,4 +371,21 @@ func determineNewlineSeparator(contents string) string {
 	default:
 		return unixNewline
 	}
+}
+
+// Handle the case where the resource file starts with ---
+// causes yaml.Node to misinterpret the resources
+func sanitizeYaml(fileAsString string) string {
+	if fileAsString[:3] == "---" {
+		fileAsString = "# " + fileAsString
+	}
+	return fileAsString
+}
+
+// For the --- case to ensure correct output file format
+func revertSanitizeYaml(fixedYamlString string) string {
+	if fixedYamlString[:5] == "# ---" {
+		fixedYamlString = fixedYamlString[2:]
+	}
+	return fixedYamlString
 }

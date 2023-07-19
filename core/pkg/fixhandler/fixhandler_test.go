@@ -101,6 +101,13 @@ func getTestCases() []indentationTestCase {
 			"inserts/tc-11-01-expected.yaml",
 		},
 
+		// Starts with ---
+		{
+			"inserts/tc-12-00-begin-with-document-separator.yaml",
+			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+			"inserts/tc-12-01-expected.yaml",
+		},
+
 		// Removal Scenarios
 		{
 			"removals/tc-01-00-input.yaml",
@@ -118,10 +125,10 @@ func getTestCases() []indentationTestCase {
 			"removals/tc-03-01-expected.yaml",
 		},
 		{
-			"removes/tc-04-00-input.yaml",
+			"removals/tc-04-00-input.yaml",
 			`del(select(di==0).spec.containers[0].securityContext) |
 			 del(select(di==1).spec.containers[1])`,
-			"removes/tc-04-01-expected.yaml",
+			"removals/tc-04-01-expected.yaml",
 		},
 
 		// Replace Scenarios
@@ -182,7 +189,9 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 			want := string(wantRaw)
 			expression := tc.yamlExpression
 
-			got, _ := ApplyFixToContent(context.TODO(), string(input), expression)
+			fileAsString := sanitizeYaml(string(input))
+			fixedYamlString, _ := ApplyFixToContent(context.TODO(), fileAsString, expression)
+			got := revertSanitizeYaml(fixedYamlString)
 
 			assert.Equalf(
 				t, want, got,
@@ -241,6 +250,72 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := FixPathToValidYamlExpression(tt.args.fixPath, tt.args.value, tt.args.documentIndexInYaml); got != tt.want {
 				t.Errorf("fixPathToValidYamlExpression() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_sanitizeYaml(t *testing.T) {
+	type args struct {
+		fileAsString string
+	}
+	tests := []struct{
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "sanitize yaml starting with ---",
+			args: args{
+				fileAsString: "---\nlabel: test",
+			},
+			want: "# ---\nlabel: test",
+		},
+		{
+			name: "sanitize yaml not starting with ---",
+			args: args{
+				fileAsString: "label: test",
+			},
+			want: "label: test",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeYaml(tt.args.fileAsString); got != tt.want {
+				t.Errorf("sanitizeYaml() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_revertSanitizeYaml(t *testing.T) {
+	type args struct {
+		fixedYamlString string
+	}
+	tests := []struct{
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "revert sanitized yaml starting with ---",
+			args: args{
+				fixedYamlString: "# ---\nlabel: test",
+			},
+			want: "---\nlabel: test",
+		},
+		{
+			name: "revert sanitized yaml not starting with ---",
+			args: args{
+				fixedYamlString: "label: test",
+			},
+			want: "label: test",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := revertSanitizeYaml(tt.args.fixedYamlString); got != tt.want {
+				t.Errorf("revertSanitizeYaml() = %v, want %v", got, tt.want)
 			}
 		})
 	}
