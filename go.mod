@@ -2,6 +2,9 @@ module github.com/kubescape/kubescape/v2
 
 go 1.20
 
+// replace github.com/kubescape/regolibrary => /home/raziel/armo/go/src/regolibrary
+// replace github.com/kubescape/opa-utils => /home/raziel/armo/go/src/opa-utils
+
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
 	github.com/armosec/armoapi-go v0.0.173
@@ -19,9 +22,9 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.131
-	github.com/kubescape/opa-utils v0.0.254-0.20230717053214-e0f1217b84f6
+	github.com/kubescape/opa-utils v0.0.254-0.20230719084904-0b8953a7ceb6
 	github.com/kubescape/rbac-utils v0.0.20
-	github.com/kubescape/regolibrary v1.0.286-rc.0.0.20230717053343-a18099b3fc87
+	github.com/kubescape/regolibrary v1.0.287-rc.0.0.20230719092025-54cc191759fd
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.17
 	github.com/mikefarah/yq/v4 v4.29.1
@@ -365,5 +368,5 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/libgit2/git2go/v33 => ./git2go
+// replace github.com/libgit2/git2go/v33 => ./git2go
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0

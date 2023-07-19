@@ -18,7 +18,7 @@ func NewPolicies() *Policies {
 }
 
 func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, scanInfo *ScanInfo) {
-
+	scanScope := getScanningScope(scanInfo)
 	for i := range frameworks {
 		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
 			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
@@ -26,7 +26,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}
 			for r := range frameworks[i].Controls[j].Rules {
-				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanning(frameworks[i].Controls[j], scanInfo) {
+				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanning(frameworks[i].Controls[j], scanScope) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
@@ -93,33 +93,55 @@ func getCloudType(scanInfo *ScanInfo) (bool, reporthandling.ScanningScopeType) {
 	return false, ""
 }
 
-func getScanningScope(scanInfo *ScanInfo) []reporthandling.ScanningScopeType {
-	var scanningScope []reporthandling.ScanningScopeType
+func getScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
+	var result reporthandling.ScanningScopeType
 
 	switch scanInfo.GetScanningContext() {
 	case ContextCluster:
-		scanningScope = append(scanningScope, reporthandling.ScopeCluster)
 		isCloud, cloudType := getCloudType(scanInfo)
 		if isCloud {
-			scanningScope = append(scanningScope, cloudType)
+			result = cloudType
 		}
+		result = reporthandling.ScopeCluster
 	default:
-		scanningScope = append(scanningScope, reporthandling.ScopeFile)
+		result = reporthandling.ScopeFile
 	}
 
-	return scanningScope
+	return result
 }
 
-func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches []reporthandling.ScanningScopeType) bool {
+func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeType, controlScope reporthandling.ScanningScopeType) bool {
+	result := false
+
+	switch controlScope {
+	case reporthandling.ScopeFile:
+		result = (reporthandling.ScopeFile == scanScope)
+	case reporthandling.ScopeCluster:
+		result = (reporthandling.ScopeCluster == scanScope) || (reporthandling.ScopeCloud == scanScope) || (reporthandling.ScopeCloudAKS == scanScope) || (reporthandling.ScopeCloudEKS == scanScope) || (reporthandling.ScopeCloudGKE == scanScope)
+	case reporthandling.ScopeCloud:
+		result = (reporthandling.ScopeCloud == scanScope) || (reporthandling.ScopeCloudAKS == scanScope) || (reporthandling.ScopeCloudEKS == scanScope) || (reporthandling.ScopeCloudGKE == scanScope)
+	case reporthandling.ScopeCloudAKS:
+		result = (reporthandling.ScopeCloudAKS == scanScope)
+	case reporthandling.ScopeCloudEKS:
+		result = (reporthandling.ScopeCloudEKS == scanScope)
+	case reporthandling.ScopeCloudGKE:
+		result = (reporthandling.ScopeCloudGKE == scanScope)
+	default:
+		result = true
+	}
+
+	return result
+}
+
+func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches reporthandling.ScanningScopeType) bool {
 	for i := range control.ScanningScope.Matches {
-		if IsSubSliceScanningScopeType(scanScopeMatches, control.ScanningScope.Matches[i]) {
+		if isScanningScopeMatchToControlScope(scanScopeMatches, control.ScanningScope.Matches[i]) {
 			return true
 		}
 	}
-
 	return false
 }
 
-func isControlFitToScanning(control reporthandling.Control, scanInfo *ScanInfo) bool {
-	return isControlFitToScanScope(control, getScanningScope(scanInfo))
+func isControlFitToScanning(control reporthandling.Control, scanScope reporthandling.ScanningScopeType) bool {
+	return isControlFitToScanScope(control, scanScope)
 }
