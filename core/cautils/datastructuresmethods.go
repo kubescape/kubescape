@@ -134,6 +134,9 @@ func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeTy
 }
 
 func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches reporthandling.ScanningScopeType) bool {
+	if len(control.ScanningScope.Matches) == 0 {
+		return true
+	}
 	for i := range control.ScanningScope.Matches {
 		if isScanningScopeMatchToControlScope(scanScopeMatches, control.ScanningScope.Matches[i]) {
 			return true
