@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -245,72 +244,4 @@ func TestProcessResourcesResult(t *testing.T) {
 	assert.Equal(t, 1, summaryDetails.ListResourcesIDs(nil).Failed())
 	assert.Equal(t, 0, summaryDetails.ListResourcesIDs(nil).Passed())
 	assert.Equal(t, 0, summaryDetails.ListResourcesIDs(nil).Skipped())
-}
-
-func TestAppendFailedPaths(t *testing.T) {
-	// Create test data
-	paths := []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}}
-	failedPaths := []string{"path2", "path3"}
-	resourceID := "2"
-
-	// Call the function
-	result := appendFailedPaths(paths, failedPaths, resourceID)
-
-	// Create the expected result
-	expected := []armotypes.PosturePaths{
-		{ResourceID: "1", FailedPath: "path1"},
-		{ResourceID: "2", FailedPath: "path2"},
-		{ResourceID: "2", FailedPath: "path3"},
-	}
-
-	// Compare the result with the expected result
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("Expected %v, but got %v", expected, result)
-	}
-}
-
-func TestAppendFixPaths(t *testing.T) {
-	// Create test data
-	paths := []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}}
-	fixPaths := []armotypes.FixPath{
-		{Path: "path2", Value: "command2"},
-		{Path: "path3", Value: "command3"},
-	}
-	resourceID := "2"
-
-	// Call the function
-	result := appendFixPaths(paths, fixPaths, resourceID)
-
-	// Create the expected result
-	expected := []armotypes.PosturePaths{
-		{ResourceID: "1", FailedPath: "path1"},
-		{ResourceID: "2", FixPath: armotypes.FixPath{Path: "path2", Value: "command2"}},
-		{ResourceID: "2", FixPath: armotypes.FixPath{Path: "path3", Value: "command3"}},
-	}
-
-	// Compare the result with the expected result
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("Expected %v, but got %v", expected, result)
-	}
-}
-
-func TestAppendFixCommand(t *testing.T) {
-	// Create test data
-	paths := []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}}
-	fixCommand := "fix command"
-	resourceID := "2"
-
-	// Call the function
-	result := appendFixCommand(paths, fixCommand, resourceID)
-
-	// Create the expected result
-	expected := []armotypes.PosturePaths{
-		{ResourceID: "1", FailedPath: "path1"},
-		{ResourceID: "2", FixCommand: "fix command"},
-	}
-
-	// Compare the result with the expected result
-	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("Expected %v, but got %v", expected, result)
-	}
 }
