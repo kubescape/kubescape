@@ -64,12 +64,8 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 		if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindFramework)) {
 			scanRequest.TargetType = apisv1.KindFramework
 			scanInfo.FrameworkScan = true
-			scanInfo.ScanAll = false
-			if cautils.StringInSlice(scanRequest.TargetNames, "all") != cautils.ValueNotFound ||
-				cautils.StringInSlice(scanRequest.TargetNames, "") != cautils.ValueNotFound { // if scan all frameworks
-				scanRequest.TargetNames = slices.Filter(nil, scanRequest.TargetNames, func(e string) bool { return e != "" && e != "all" })
-				scanInfo.ScanAll = true
-			}
+			scanInfo.ScanAll = slices.Contains(scanRequest.TargetNames, "all") || slices.Contains(scanRequest.TargetNames, "")
+			scanRequest.TargetNames = slices.Filter(nil, scanRequest.TargetNames, func(e string) bool { return e != "" && e != "all" })
 		} else if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindControl)) {
 			scanRequest.TargetType = apisv1.KindControl
 			scanInfo.ScanAll = false
