@@ -134,6 +134,7 @@ func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeTy
 }
 
 func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches reporthandling.ScanningScopeType) bool {
+	// for backward compatibility - case: kubescape with scope(new one) and regolibrary without scope(old one)
 	if len(control.ScanningScope.Matches) == 0 {
 		return true
 	}
