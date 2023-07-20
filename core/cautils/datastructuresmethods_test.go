@@ -10,9 +10,10 @@ import (
 )
 
 func TestIsControlFitToScanning(t *testing.T) {
-	tests_true := []struct {
-		scanInfo *ScanInfo
-		Control  reporthandling.Control
+	tests := []struct {
+		scanInfo     *ScanInfo
+		Control      reporthandling.Control
+		expected_res bool
 	}{
 		{
 			scanInfo: &ScanInfo{
@@ -22,13 +23,12 @@ func TestIsControlFitToScanning(t *testing.T) {
 			},
 			Control: reporthandling.Control{
 				ScanningScope: reporthandling.ScanningScope{
-					Matches: [][]reporthandling.ScanningScopeType{
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeFile,
-						},
+					Matches: []reporthandling.ScanningScopeType{
+						reporthandling.ScopeFile,
 					},
 				},
 			},
+			expected_res: true,
 		},
 		{
 			scanInfo: &ScanInfo{
@@ -39,17 +39,25 @@ func TestIsControlFitToScanning(t *testing.T) {
 			Control: reporthandling.Control{
 				ScanningScope: reporthandling.ScanningScope{
 
-					Matches: [][]reporthandling.ScanningScopeType{
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeFile,
-						},
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeCluster,
-							reporthandling.ScopeCloud,
-						},
+					Matches: []reporthandling.ScanningScopeType{
+						reporthandling.ScopeCluster,
+						reporthandling.ScopeFile,
 					},
 				},
 			},
+			expected_res: true,
+		},
+		{
+			scanInfo: &ScanInfo{},
+			Control: reporthandling.Control{
+				ScanningScope: reporthandling.ScanningScope{
+
+					Matches: []reporthandling.ScanningScopeType{
+						reporthandling.ScopeCluster,
+					},
+				},
+			},
+			expected_res: true,
 		},
 		{
 			scanInfo: &ScanInfo{
@@ -60,81 +68,37 @@ func TestIsControlFitToScanning(t *testing.T) {
 			Control: reporthandling.Control{
 				ScanningScope: reporthandling.ScanningScope{
 
-					Matches: [][]reporthandling.ScanningScopeType{
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeFile,
-						},
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeCluster,
-							reporthandling.ScopeCloud,
-							reporthandling.ScopeCloudAKS,
-						},
+					Matches: []reporthandling.ScanningScopeType{
+						reporthandling.ScopeCloudGKE,
 					},
 				},
 			},
+			expected_res: false,
 		},
 		{
-			scanInfo: &ScanInfo{
-				InputPatterns: []string{
-					"./testdata/any_file_for_test.json",
-				},
-			},
+			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
 				ScanningScope: reporthandling.ScanningScope{
 
-					Matches: [][]reporthandling.ScanningScopeType{
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeFile,
-						},
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeCluster,
-							reporthandling.ScopeCloud,
-							reporthandling.ScopeCloudGKE,
-						},
+					Matches: []reporthandling.ScanningScopeType{
+						reporthandling.ScopeCloudEKS,
 					},
 				},
 			},
+			expected_res: false,
 		},
 		{
-			scanInfo: &ScanInfo{
-				InputPatterns: []string{
-					"./testdata/any_file_for_test.json",
-				},
-			},
+			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
 				ScanningScope: reporthandling.ScanningScope{
-
-					Matches: [][]reporthandling.ScanningScopeType{
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeFile,
-						},
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeCluster,
-							reporthandling.ScopeCloud,
-							reporthandling.ScopeCloudEKS,
-						},
+					Matches: []reporthandling.ScanningScopeType{
+						reporthandling.ScopeCloud,
 					},
 				},
 			},
-		},
-		{
-			scanInfo: &ScanInfo{
-				InputPatterns: []string{
-					"",
-				},
-			},
-			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
-
-					Matches: [][]reporthandling.ScanningScopeType{
-						[]reporthandling.ScanningScopeType{
-							reporthandling.ScopeCluster,
-						},
-					},
-				},
-			},
+			expected_res: false,
 		}}
-	for i := range tests_true {
-		assert.Equal(t, isControlFitToScanning(tests_true[i].Control, tests_true[i].scanInfo), true, fmt.Sprintf("tests_true index %d", i))
+	for i := range tests {
+		assert.Equal(t, isControlFitToScanning(tests[i].Control, getScanningScope(tests[i].scanInfo)), tests[i].expected_res, fmt.Sprintf("tests_true index %d", i))
 	}
 }
