@@ -2,9 +2,7 @@ package printer
 
 import (
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/fatih/color"
@@ -77,23 +75,14 @@ func (prettyPrinter *PrettyPrinter) printResourceAttackGraph(attackTrack v1alpha
 	fmt.Fprintln(prettyPrinter.writer, tree.Print())
 }
 
-func getNumericValueFromEnvVar(envVar string, defaultValue int) int {
-	value := os.Getenv(envVar)
-	if value != "" {
-		if value, err := strconv.Atoi(value); err == nil {
-			return value
-		}
-	}
-	return defaultValue
-}
 func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPASessionObj) {
 	if !prettyPrinter.printAttackTree || opaSessionObj.ResourceAttackTracks == nil {
 		return
 	}
 
 	// check if counters are set in env vars and use them, otherwise use default values
-	topResourceCount := getNumericValueFromEnvVar("ATTACK_TREE_TOP_RESOURCES", TOP_RESOURCE_COUNT)
-	topVectorCount := getNumericValueFromEnvVar("ATTACK_TREE_TOP_VECTORS", TOP_VECTOR_COUNT)
+	topResourceCount, _ := cautils.ParseIntEnvVar("ATTACK_TREE_TOP_RESOURCES", TOP_RESOURCE_COUNT)
+	topVectorCount, _ := cautils.ParseIntEnvVar("ATTACK_TREE_TOP_VECTORS", TOP_VECTOR_COUNT)
 
 	prioritizedResources := opaSessionObj.ResourcesPrioritized
 	resourceToAttackTrack := opaSessionObj.ResourceAttackTracks

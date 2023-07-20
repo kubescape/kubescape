@@ -4,7 +4,7 @@ go 1.20
 
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
-	github.com/armosec/armoapi-go v0.0.173
+	github.com/armosec/armoapi-go v0.0.202
 	github.com/armosec/utils-go v0.0.14
 	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/briandowns/spinner v1.18.1
@@ -19,7 +19,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.116
-	github.com/kubescape/opa-utils v0.0.250
+	github.com/kubescape/opa-utils v0.0.253
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.286-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -36,7 +36,7 @@ require (
 	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.16.0
 	go.opentelemetry.io/otel/metric v1.16.0
-	golang.org/x/mod v0.8.0
+	golang.org/x/mod v0.11.0
 	golang.org/x/sync v0.1.0
 	google.golang.org/api v0.114.0
 	google.golang.org/genproto v0.0.0-20230410155749-daa745c078e1
@@ -336,7 +336,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.5.0 // indirect
-	golang.org/x/exp v0.0.0-20230519143937-03e91628a987 // indirect
+	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22 // indirect
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/oauth2 v0.6.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect
@@ -366,4 +366,5 @@ require (
 )
 
 replace github.com/libgit2/git2go/v33 => ./git2go
+
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0

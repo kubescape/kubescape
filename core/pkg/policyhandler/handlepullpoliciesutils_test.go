@@ -11,8 +11,8 @@ func Test_validateFramework(t *testing.T) {
 		framework *reporthandling.Framework
 	}
 	tests := []struct {
-		name    string
 		args    args
+		name    string
 		wantErr bool
 	}{
 		{

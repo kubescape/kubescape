@@ -3,6 +3,7 @@ package policyhandler
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -34,4 +35,21 @@ func validateFramework(framework *reporthandling.Framework) error {
 		return fmt.Errorf("failed to load controls for framework: %s: empty list of controls", framework.Name)
 	}
 	return nil
+}
+
+// getPoliciesCacheTtl - get policies cache TTL from environment variable or return 0 if not set
+func getPoliciesCacheTtl() time.Duration {
+	if val, err := cautils.ParseIntEnvVar(PoliciesCacheTtlEnvVar, 0); err == nil {
+		return time.Duration(val) * time.Minute
+	}
+
+	return 0
+}
+
+func policyIdentifierToSlice(rules []cautils.PolicyIdentifier) []string {
+	s := []string{}
+	for i := range rules {
+		s = append(s, fmt.Sprintf("%s: %s", rules[i].Kind, rules[i].Identifier))
+	}
+	return s
 }
