@@ -332,6 +332,15 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			if ruleResponse.FixCommand != "" {
 				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixCommand: ruleResponse.FixCommand})
 			}
+			// if ruleResponse has relatedObjects, add it to ruleResult
+			if len(ruleResponse.RelatedObjects) > 0 {
+				for _, relatedObject := range ruleResponse.RelatedObjects {
+					wl := objectsenvelopes.NewObject(relatedObject.Object)
+					if wl != nil {
+						ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+					}
+				}
+			}
 
 			resources[failedResource.GetID()] = ruleResult
 		}
