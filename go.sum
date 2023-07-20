@@ -1390,6 +1390,8 @@ github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnG
 github.com/kubescape/rbac-utils v0.0.20/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
 github.com/kubescape/regolibrary v1.0.287-rc.0.0.20230719092025-54cc191759fd h1:px36fUVMko9gLwdMvNgb4/TXZZOG+sXyCEB3eHfxKck=
 github.com/kubescape/regolibrary v1.0.287-rc.0.0.20230719092025-54cc191759fd/go.mod h1:2j47Snl7jbbR0GenKlnbIQ+dk1J3XpX3x5T/SWY3OJ0=
+github.com/kubescape/regolibrary v1.0.287-rc.0.0.20230720095228-7d560352ce2d h1:2+Tl3YN0c8o0/o9Hd39a+xPQj8up7H2ZyJeEvNi9iwU=
+github.com/kubescape/regolibrary v1.0.287-rc.0.0.20230720095228-7d560352ce2d/go.mod h1:2j47Snl7jbbR0GenKlnbIQ+dk1J3XpX3x5T/SWY3OJ0=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/leodido/go-urn v1.2.0/go.mod h1:+8+nEpDfqqsY+g338gtMEUOtuK+4dEMhiQEgxpxOKII=
