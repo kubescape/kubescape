@@ -39,7 +39,7 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 	opaSessionObj.KubescapeResource = ksResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
 
-	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
+	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.KubescapeResource == nil || len(opaSessionObj.KubescapeResource) == 0) {
 		return fmt.Errorf("empty list of resources")
 	}
 
