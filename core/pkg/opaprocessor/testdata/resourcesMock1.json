@@ -1,0 +1,220 @@
+{
+    "/v1/default/Pod/fake-pod-1-22gck": {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "annotations": {
+                "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"annotations\":{},\"name\":\"fake-pod-1-22gck\",\"namespace\":\"default\"},\"spec\":{\"containers\":[{\"image\":\"redis\",\"name\":\"fake-pod-1-22gck\",\"volumeMounts\":[{\"mountPath\":\"/etc/foo\",\"name\":\"foo\",\"readOnly\":true}]}],\"volumes\":[{\"name\":\"foo\",\"secret\":{\"optional\":true,\"secretName\":\"mysecret\"}}]}}\n"
+            },
+            "creationTimestamp": "2023-06-22T07:47:38Z",
+            "name": "fake-pod-1-22gck",
+            "namespace": "default",
+            "resourceVersion": "1087189",
+            "uid": "046753fa-c7b6-46dd-ae18-dd68b8b20cd3",
+            "labels": {"app": "argo-server"}
+        },
+        "spec": {
+            "containers": [
+                {
+                    "image": "redis",
+                    "imagePullPolicy": "Always",
+                    "name": "fake-pod-1-22gck",
+                    "resources": {},
+                    "terminationMessagePath": "/dev/termination-log",
+                    "terminationMessagePolicy": "File",
+                    "volumeMounts": [
+                        {
+                            "mountPath": "/etc/foo",
+                            "name": "foo",
+                            "readOnly": true
+                        },
+                        {
+                            "mountPath": "/var/run/secrets/kubernetes.io/serviceaccount",
+                            "name": "kube-api-access-lrpxm",
+                            "readOnly": true
+                        }
+                    ]
+                }
+            ],
+            "dnsPolicy": "ClusterFirst",
+            "enableServiceLinks": true,
+            "nodeName": "minikube-yiscah",
+            "preemptionPolicy": "PreemptLowerPriority",
+            "priority": 0,
+            "restartPolicy": "Always",
+            "schedulerName": "default-scheduler",
+            "securityContext": {},
+            "serviceAccount": "default",
+            "serviceAccountName": "default",
+            "terminationGracePeriodSeconds": 30,
+            "tolerations": [
+                {
+                    "effect": "NoExecute",
+                    "key": "node.kubernetes.io/not-ready",
+                    "operator": "Exists",
+                    "tolerationSeconds": 300
+                },
+                {
+                    "effect": "NoExecute",
+                    "key": "node.kubernetes.io/unreachable",
+                    "operator": "Exists",
+                    "tolerationSeconds": 300
+                }
+            ],
+            "volumes": [
+                {
+                    "name": "foo",
+                    "secret": {
+                        "defaultMode": 420,
+                        "optional": true,
+                        "secretName": "mysecret"
+                    }
+                },
+                {
+                    "name": "kube-api-access-lrpxm",
+                    "projected": {
+                        "defaultMode": 420,
+                        "sources": [
+                            {
+                                "serviceAccountToken": {
+                                    "expirationSeconds": 3607,
+                                    "path": "token"
+                                }
+                            },
+                            {
+                                "configMap": {
+                                    "items": [
+                                        {
+                                            "key": "ca.crt",
+                                            "path": "ca.crt"
+                                        }
+                                    ],
+                                    "name": "kube-root-ca.crt"
+                                }
+                            },
+                            {
+                                "downwardAPI": {
+                                    "items": [
+                                        {
+                                            "fieldRef": {
+                                                "apiVersion": "v1",
+                                                "fieldPath": "metadata.namespace"
+                                            },
+                                            "path": "namespace"
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        "status": {
+            "conditions": [
+                {
+                    "lastProbeTime": null,
+                    "lastTransitionTime": "2023-06-22T07:47:38Z",
+                    "status": "True",
+                    "type": "Initialized"
+                },
+                {
+                    "lastProbeTime": null,
+                    "lastTransitionTime": "2023-07-18T05:07:57Z",
+                    "status": "True",
+                    "type": "Ready"
+                },
+                {
+                    "lastProbeTime": null,
+                    "lastTransitionTime": "2023-07-18T05:07:57Z",
+                    "status": "True",
+                    "type": "ContainersReady"
+                },
+                {
+                    "lastProbeTime": null,
+                    "lastTransitionTime": "2023-06-22T07:47:38Z",
+                    "status": "True",
+                    "type": "PodScheduled"
+                }
+            ],
+            "containerStatuses": [
+                {
+                    "containerID": "docker://a3a1aac00031c6ab85f75cfa17d14ebd71ab15f1fc5c82a262449621a77d7a7e",
+                    "image": "redis:latest",
+                    "imageID": "docker-pullable://redis@sha256:08a82d4bf8a8b4dd94e8f5408cdbad9dd184c1cf311d34176cd3e9972c43f872",
+                    "lastState": {
+                        "terminated": {
+                            "containerID": "docker://1ae623f4faf8cda5dabdc65c342752dfdf1675cb173b46875596c2eb0dae472f",
+                            "exitCode": 255,
+                            "finishedAt": "2023-07-18T05:03:55Z",
+                            "reason": "Error",
+                            "startedAt": "2023-07-17T16:32:35Z"
+                        }
+                    },
+                    "name": "fake-pod-1-22gck",
+                    "ready": true,
+                    "restartCount": 9,
+                    "started": true,
+                    "state": {
+                        "running": {
+                            "startedAt": "2023-07-18T05:07:56Z"
+                        }
+                    }
+                }
+            ],
+            "hostIP": "192.168.85.2",
+            "phase": "Running",
+            "podIP": "10.244.1.131",
+            "podIPs": [
+                {
+                    "ip": "10.244.1.131"
+                }
+            ],
+            "qosClass": "BestEffort",
+            "startTime": "2023-06-22T07:47:38Z"
+        }
+    },
+    "/v1/default/Service/fake-service-1": {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "annotations": {
+                "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"v1\",\"kind\":\"Service\",\"metadata\":{\"annotations\":{},\"name\":\"fake-service-1\",\"namespace\":\"default\"},\"spec\":{\"clusterIP\":\"10.96.0.11\",\"ports\":[{\"port\":80,\"protocol\":\"TCP\",\"targetPort\":9376}],\"selector\":{\"app\":\"argo-server\"},\"type\":\"LoadBalancer\"},\"status\":{\"loadBalancer\":{\"ingress\":[{\"ip\":\"192.0.2.127\"}]}}}\n"
+            },
+            "creationTimestamp": "2023-07-09T06:22:27Z",
+            "name": "fake-service-1",
+            "namespace": "default",
+            "resourceVersion": "981856",
+            "uid": "dd629eb1-6779-4298-a70f-0bdbd046d409"
+        },
+        "spec": {
+            "allocateLoadBalancerNodePorts": true,
+            "clusterIP": "10.96.0.11",
+            "clusterIPs": [
+                "10.96.0.11"
+            ],
+            "externalTrafficPolicy": "Cluster",
+            "internalTrafficPolicy": "Cluster",
+            "ipFamilies": [
+                "IPv4"
+            ],
+            "ipFamilyPolicy": "SingleStack",
+            "ports": [
+                {
+                    "nodePort": 30706,
+                    "port": 80,
+                    "protocol": "TCP",
+                    "targetPort": 9376
+                }
+            ],
+            "selector": {
+                "app": "argo-server"
+            },
+            "sessionAffinity": "None",
+            "type": "LoadBalancer"
+        },
+        "status": {
+            "loadBalancer": {}
+        }
+    }
+}
