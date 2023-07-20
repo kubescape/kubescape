@@ -83,3 +83,7 @@ func getNamespacesSelector(resource *schema.GroupVersionResource, ns, operator s
 	return fmt.Sprintf("%s%s%s", fieldSelector, operator, ns)
 
 }
+
+func CombineFieldSelectors(selectors ...string) string {
+	return strings.Join(selectors, ",")
+}

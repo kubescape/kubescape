@@ -19,7 +19,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.116
-	github.com/kubescape/opa-utils v0.0.250
+	github.com/kubescape/opa-utils v0.0.256-0.20230720131313-796d89cc623c
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.286-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -366,4 +366,5 @@ require (
 )
 
 replace github.com/libgit2/git2go/v33 => ./git2go
+
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0

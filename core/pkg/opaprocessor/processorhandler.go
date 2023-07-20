@@ -227,6 +227,11 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 	allResources := make(map[string]workloadinterface.IMetadata, heuristicAllocResources)
 
 	for i := range control.Rules {
+		if opap.ExcludedRules != nil {
+			if _, exclude := opap.ExcludedRules[control.Rules[i].Name]; exclude {
+				continue
+			}
+		}
 		resourceAssociatedRule, allResourcesFromRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(err.Error())
@@ -271,7 +276,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 	inputResources, err := reporthandling.RegoResourcesAggregator(
 		rule,
-		getAllSupportedObjects(opap.K8SResources, opap.ArmoResource, opap.AllResources, rule), // NOTE: this uses the initial snapshot of AllResources
+		getAllSupportedObjects(opap.K8SResources, opap.KubescapeResource, opap.AllResources, rule), // NOTE: this uses the initial snapshot of AllResources
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error getting aggregated k8sObjects: %w", err)

@@ -53,15 +53,23 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var wlIdentifier string
 
-			if namespace != "" {
-				wlIdentifier = fmt.Sprintf("%s/", namespace)
-			}
 			wlIdentifier += args[0]
+			kind, name, err := parseWorkloadIdentifierString(wlIdentifier)
+			if err != nil {
+				logger.L().Fatal(err.Error())
+			}
 
-			scanInfo.WorkloadIdentifier = wlIdentifier
+			scanInfo.WorkloadIdentifier = &cautils.WorkloadIdentifier{
+				Namespace: namespace,
+				Kind:      kind,
+				Name:      name,
+			}
+
+			scanInfo.ScanAll = true
 
 			ctx := context.TODO()
-			_, err := ks.Scan(ctx, scanInfo)
+			results, err := ks.Scan(ctx, scanInfo)
+			print(results)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
@@ -72,4 +80,15 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	workloadCmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
 
 	return workloadCmd
+}
+
+func parseWorkloadIdentifierString(workloadIdentifier string) (kind, name string, err error) {
+	// workloadIdentifier is in the form of namespace/kind/name
+	// example: default/Deployment/nginx-deployment
+	x := strings.Split(workloadIdentifier, "/")
+	if len(x) != 2 {
+		return "", "", fmt.Errorf("invalid workload identifier")
+	}
+
+	return x[0], x[1], nil
 }

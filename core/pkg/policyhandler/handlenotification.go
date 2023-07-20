@@ -52,7 +52,7 @@ func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policy
 	if err != nil {
 		return opaSessionObj, err
 	}
-	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
+	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.KubescapeResource == nil || len(opaSessionObj.KubescapeResource) == 0) {
 		return opaSessionObj, fmt.Errorf("empty list of resources")
 	}
 
@@ -70,14 +70,15 @@ func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIden
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, err := policyHandler.resourceHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
+	resourcesMap, allResources, ksResources, excludedRulesMap, err := policyHandler.resourceHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
 	if err != nil {
 		return err
 	}
 
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
-	opaSessionObj.ArmoResource = ksResources
+	opaSessionObj.KubescapeResource = ksResources
+	opaSessionObj.ExcludedRules = excludedRulesMap
 
 	return nil
 }

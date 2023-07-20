@@ -183,7 +183,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "")
 	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Policies, policies)
 
-	opaSessionObj.K8SResources = &k8sResources
+	opaSessionObj.K8SResources = k8sResources
 	opaSessionObj.AllResources[deployment.GetID()] = deployment
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())

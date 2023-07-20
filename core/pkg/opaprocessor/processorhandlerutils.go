@@ -87,14 +87,14 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources *cautils.K8SResources, ksResources *cautils.KSResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
+func getAllSupportedObjects(k8sResources cautils.K8SResources, ksResources cautils.KSResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
 	k8sObjects = append(k8sObjects, getKSObjects(ksResources, allResources, rule.DynamicMatch)...)
 	return k8sObjects
 }
 
-func getKSObjects(k8sResources *cautils.KSResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getKSObjects(k8sResources cautils.KSResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 
 	for m := range match {
@@ -103,7 +103,7 @@ func getKSObjects(k8sResources *cautils.KSResources, allResources map[string]wor
 				for _, resource := range match[m].Resources {
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
-						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
+						if k8sObj, ok := k8sResources[groupResource]; ok {
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
@@ -117,7 +117,7 @@ func getKSObjects(k8sResources *cautils.KSResources, allResources map[string]wor
 	return filterOutChildResources(k8sObjects, match)
 }
 
-func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 
 	for m := range match {
@@ -126,7 +126,7 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 				for _, resource := range match[m].Resources {
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
-						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
+						if k8sObj, ok := k8sResources[groupResource]; ok {
 							/*
 								if k8sObj == nil {
 									// logger.L().Debug("skipping", helpers.String("resource", groupResource))

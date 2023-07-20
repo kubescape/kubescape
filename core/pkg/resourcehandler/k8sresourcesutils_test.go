@@ -1,31 +1,262 @@
 package resourcehandler
 
 import (
+	"fmt"
+	"reflect"
+
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"testing"
 )
 
-func TestGetK8sResources(t *testing.T) {
-	// getK8sResources
-}
-func TestSetResourceMap(t *testing.T) {
-	k8sinterface.InitializeMapResourcesMock()
-	framework := reporthandling.MockFrameworkA()
-	k8sResources := setK8sResourceMap([]reporthandling.Framework{*framework})
-	resources := k8sinterface.ResourceGroupToString("*", "v1", "Pod")
-	if len(resources) == 0 {
-		t.Error("expected resources")
+func mockMatch(i int) reporthandling.RuleMatchObjects {
+	switch i {
+	case 1:
+		return reporthandling.RuleMatchObjects{
+			APIGroups:   []string{"apps"},
+			APIVersions: []string{"v1", "v1beta"},
+			Resources:   []string{"Pod"},
+		}
+	case 2:
+		return reporthandling.RuleMatchObjects{
+			APIGroups:   []string{"apps"},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Deployment", "ReplicaSet"},
+		}
+	case 3:
+		return reporthandling.RuleMatchObjects{
+			APIGroups:   []string{"core"},
+			APIVersions: []string{"v1"},
+			Resources:   []string{"Secret"},
+		}
+	case 4:
+		return reporthandling.RuleMatchObjects{
+			APIGroups:     []string{"core"},
+			APIVersions:   []string{"v1"},
+			Resources:     []string{"Secret"},
+			FieldSelector: []string{"metadata.name=secret1", "metadata.name=secret2,metadata.namespace=default"},
+		}
+	case 5:
+		return reporthandling.RuleMatchObjects{
+			APIGroups:     []string{"rbac.authorization.k8s.io"},
+			APIVersions:   []string{"v1"},
+			Resources:     []string{"ClusterRoleBinding", "RoleBinding"},
+			FieldSelector: []string{"metadata.name=test123"},
+		}
+	case 6:
+		return reporthandling.RuleMatchObjects{
+			APIGroups:     []string{""},
+			APIVersions:   []string{"v1"},
+			Resources:     []string{"Namespace"},
+			FieldSelector: []string{},
+		}
+	case 7:
+		return reporthandling.RuleMatchObjects{
+			APIGroups:     []string{""},
+			APIVersions:   []string{"v1"},
+			Resources:     []string{"Node"},
+			FieldSelector: []string{},
+		}
+
+	default:
+		panic("invalid index")
 	}
-	_, ok := (*k8sResources)[resources[0]]
-	if !ok {
-		t.Errorf("missing: 'apps'. k8sResources: %v", k8sResources)
+}
+
+func mockRule(ruleName string, matches []reporthandling.RuleMatchObjects, ruleRego string) reporthandling.PolicyRule {
+	rule := reporthandling.PolicyRule{
+		PortalBase:   *armotypes.MockPortalBase("aaaaaaaa-bbbb-cccc-dddd-000000000001", ruleName, nil),
+		RuleLanguage: reporthandling.RegoLanguage,
+		Match:        matches,
+		RuleDependencies: []reporthandling.RuleDependency{
+			{
+				PackageName: "kubernetes.api.client",
+			},
+		},
+	}
+	if ruleRego != "" {
+		rule.Rule = ruleRego
+	} else {
+		rule.Rule = reporthandling.MockRegoPrivilegedPods()
+	}
+	return rule
+}
+
+func mockControl(controlName string, rules []reporthandling.PolicyRule) reporthandling.Control {
+	return reporthandling.Control{
+		PortalBase: *armotypes.MockPortalBase("aaaaaaaa-bbbb-cccc-dddd-000000000001", controlName, nil),
+		Rules:      rules,
 	}
 
 }
+
+func mockFramework(frameworkName string, controls []reporthandling.Control) *reporthandling.Framework {
+	return &reporthandling.Framework{
+		PortalBase:   *armotypes.MockPortalBase("aaaaaaaa-bbbb-cccc-dddd-000000000001", frameworkName, nil),
+		CreationTime: "",
+		Description:  "mock framework description",
+		Controls:     controls,
+	}
+}
+
+func mockWorkload(apiVersion, kind, namespace, name, ownerReferenceKind string) workloadinterface.IMetadata {
+	mock := workloadinterface.NewWorkloadMock(nil)
+	mock.SetKind(kind)
+	mock.SetApiVersion(apiVersion)
+	mock.SetName(name)
+	mock.SetNamespace(namespace)
+
+	if ownerReferenceKind != "" {
+		ownerreferences := []metav1.OwnerReference{
+			{
+				Kind: ownerReferenceKind,
+			},
+		}
+		workloadinterface.SetInMap(mock.GetWorkload(), []string{"metadata"}, "ownerReferences", ownerreferences)
+	}
+
+	if ok := k8sinterface.IsTypeWorkload(mock.GetObject()); !ok {
+		panic("mocked object is not a valid workload")
+	}
+
+	return mock
+}
+
+func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+
+	testCases := []struct {
+		name                   string
+		workload               workloadinterface.IMetadata
+		controls               []reporthandling.Control
+		expectedResourceGroups []string
+		expectedExcludedRules  []string
+	}{
+		{
+			name:     "no workload - all resources groups are queryable",
+			workload: nil,
+			controls: []reporthandling.Control{
+				mockControl("1", []reporthandling.PolicyRule{
+					mockRule("rule-a", []reporthandling.RuleMatchObjects{
+						mockMatch(1), mockMatch(2), mockMatch(3), mockMatch(4),
+					}, ""),
+					mockRule("rule-b", []reporthandling.RuleMatchObjects{
+						mockMatch(6),
+					}, ""),
+				}),
+			},
+			expectedExcludedRules: []string{},
+			expectedResourceGroups: []string{
+				"/v1/namespaces",
+				"apps/v1/deployments",
+				"apps/v1/pods",
+				"apps/v1/replicasets",
+				"apps/v1beta/pods",
+				"core/v1/secrets",
+				"core/v1/secrets/metadata.name=secret1",
+				"core/v1/secrets/metadata.name=secret2,metadata.namespace=default",
+			},
+		},
+		{
+			name:     "workload - pod with parent deployment",
+			workload: mockWorkload("apps/v1", "Pod", "default", "nginx", "Deployment"),
+			controls: []reporthandling.Control{
+				mockControl("1", []reporthandling.PolicyRule{
+					mockRule("rule-a", []reporthandling.RuleMatchObjects{
+						mockMatch(1), mockMatch(2), mockMatch(3), mockMatch(4),
+					}, ""),
+					mockRule("rule-b", []reporthandling.RuleMatchObjects{
+						mockMatch(6),
+					}, ""),
+				}),
+			},
+			expectedExcludedRules: []string{
+				"rule-b",
+				"rule-a",
+			},
+			expectedResourceGroups: []string{},
+		},
+		{
+			name:     "workload - Namespace",
+			workload: mockWorkload("v1", "Namespace", "", "ns1", ""),
+			controls: []reporthandling.Control{
+				mockControl("1", []reporthandling.PolicyRule{
+					mockRule("rule-a", []reporthandling.RuleMatchObjects{
+						mockMatch(1), mockMatch(2), mockMatch(3), mockMatch(4),
+					}, ""),
+					mockRule("rule-b", []reporthandling.RuleMatchObjects{
+						mockMatch(6), mockMatch(3), mockMatch(2), mockMatch(7),
+					}, ""),
+				}),
+			},
+			expectedExcludedRules: []string{
+				"rule-a",
+			},
+			expectedResourceGroups: []string{
+				"/v1/nodes",
+				"core/v1/secrets/metadata.namespace=ns1",
+				"apps/v1/deployments/metadata.namespace=ns1",
+				"apps/v1/replicasets/metadata.namespace=ns1",
+			},
+		},
+		{
+			name:     "workload - Deployment",
+			workload: mockWorkload("apps/v1", "Deployment", "ns1", "deploy1", ""),
+			controls: []reporthandling.Control{
+				mockControl("1", []reporthandling.PolicyRule{
+					mockRule("rule-b", []reporthandling.RuleMatchObjects{
+						mockMatch(6), mockMatch(3), mockMatch(2), mockMatch(7),
+					}, ""),
+				}),
+			},
+			expectedExcludedRules: []string{},
+			expectedResourceGroups: []string{
+				"core/v1/secrets/metadata.namespace=ns1",
+				"/v1/namespaces/metadata.name=ns1",
+				"/v1/nodes",
+			},
+		},
+		{
+			name:     "workload - Node",
+			workload: mockWorkload("v1", "Node", "", "node1", ""),
+			controls: []reporthandling.Control{
+				mockControl("1", []reporthandling.PolicyRule{
+					mockRule("rule-b", []reporthandling.RuleMatchObjects{
+						mockMatch(6), mockMatch(3), mockMatch(2), mockMatch(7),
+					}, ""),
+				}),
+			},
+			expectedExcludedRules: []string{},
+			expectedResourceGroups: []string{
+				"core/v1/secrets",
+				"/v1/namespaces",
+				"apps/v1/deployments",
+				"apps/v1/replicasets",
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			resourceGroups, excludedRulesMap := getQueryableResourceMapFromPolicies([]reporthandling.Framework{*mockFramework("test", testCase.controls)}, testCase.workload) // TODO check second param
+			assert.Equalf(t, len(testCase.expectedExcludedRules), len(excludedRulesMap), "excludedRulesMap length is not as expected")
+			for _, expectedExcludedRuleName := range testCase.expectedExcludedRules {
+				assert.Contains(t, excludedRulesMap, expectedExcludedRuleName, "excludedRulesMap does not contain expected rule name")
+			}
+
+			assert.Equalf(t, len(testCase.expectedResourceGroups), len(resourceGroups), "queryableResourceMap length is not as expected")
+			for _, expected := range testCase.expectedResourceGroups {
+				assert.Contains(t, resourceGroups, expected, "queryableResourceMap does not contain expected resource group")
+			}
+		})
+	}
+}
+
 func TestSsEmptyImgVulns(t *testing.T) {
 	ksResourcesMap := make(cautils.KSResources, 0)
 	ksResourcesMap["container.googleapis.com/v1"] = []string{"fsdfds"}
@@ -39,58 +270,330 @@ func TestSsEmptyImgVulns(t *testing.T) {
 	assert.Equal(t, true, isEmptyImgVulns(ksResourcesMap))
 }
 
-func TestInsertK8sResources(t *testing.T) {
-	// insertK8sResources
-	k8sResources := make(map[string]map[string]map[string]interface{})
-	match1 := reporthandling.RuleMatchObjects{
-		APIGroups:   []string{"apps"},
-		APIVersions: []string{"v1", "v1beta"},
-		Resources:   []string{"pods"},
+func WorkloadMockWithKindAndOwner(kind, ownerKind string) workloadinterface.IMetadata {
+	mock := workloadinterface.NewWorkloadMock(nil)
+	if ownerKind != "" {
+		mock.SetObject(map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"ownerReferences": []interface{}{
+					map[string]interface{}{
+						"kind": "Deployment",
+					},
+				},
+			},
+		})
 	}
-	match2 := reporthandling.RuleMatchObjects{
-		APIGroups:   []string{"apps"},
-		APIVersions: []string{"v1"},
-		Resources:   []string{"deployments"},
-	}
-	match3 := reporthandling.RuleMatchObjects{
-		APIGroups:   []string{"core"},
-		APIVersions: []string{"v1"},
-		Resources:   []string{"secrets"},
-	}
-	insertResources(k8sResources, match1)
-	insertResources(k8sResources, match2)
-	insertResources(k8sResources, match3)
+	mock.SetKind(kind)
 
-	apiGroup1, ok := k8sResources["apps"]
-	if !ok {
-		t.Errorf("missing: 'apps'. k8sResources: %v", k8sResources)
-		return
+	return mock
+}
+
+func TestUpdateQueryableResourcesMapFromRuleMatchObject(t *testing.T) {
+	testCases := []struct {
+		name                            string
+		matches                         []reporthandling.RuleMatchObjects
+		resourcesFilterMap              map[string]bool
+		namespace                       string
+		expectedQueryableResourceGroups []string
+		expectedK8SResourceGroups       []string
+	}{
+		{
+			name: "filter map is nil - query all",
+			matches: []reporthandling.RuleMatchObjects{
+				mockMatch(1), mockMatch(2), mockMatch(3), mockMatch(4),
+			},
+			resourcesFilterMap: nil,
+			namespace:          "",
+			expectedQueryableResourceGroups: []string{
+				"apps/v1/pods",
+				"apps/v1beta/pods",
+				"apps/v1/deployments",
+				"apps/v1/replicasets",
+				"core/v1/secrets",
+				"core/v1/secrets/metadata.name=secret1",
+				"core/v1/secrets/metadata.name=secret2,metadata.namespace=default",
+			},
+			expectedK8SResourceGroups: []string{
+				"apps/v1/pods",
+				"apps/v1beta/pods",
+				"apps/v1/deployments",
+				"apps/v1/replicasets",
+				"core/v1/secrets",
+			},
+		},
+		{
+			name: "filter map not nil - query only secrets and pods",
+			matches: []reporthandling.RuleMatchObjects{
+				mockMatch(1), mockMatch(2), mockMatch(3), mockMatch(4),
+			},
+			namespace: "",
+			resourcesFilterMap: map[string]bool{
+				"Secret":     true,
+				"Pod":        true,
+				"ReplicaSet": false,
+				"Deployment": false,
+			},
+			expectedQueryableResourceGroups: []string{
+				"apps/v1/pods",
+				"apps/v1beta/pods",
+				"core/v1/secrets",
+				"core/v1/secrets/metadata.name=secret1",
+				"core/v1/secrets/metadata.name=secret2,metadata.namespace=default",
+			},
+			expectedK8SResourceGroups: []string{
+				"apps/v1/pods",
+				"apps/v1beta/pods",
+				"core/v1/secrets",
+			},
+		},
+		{
+			name: "namespace field selector for namespaced resources",
+			matches: []reporthandling.RuleMatchObjects{
+				mockMatch(5),
+			},
+			namespace: "ns1",
+			resourcesFilterMap: map[string]bool{
+				"RoleBinding":        true,
+				"ClusterRoleBinding": true,
+			},
+			expectedQueryableResourceGroups: []string{
+
+				"rbac.authorization.k8s.io/v1/clusterrolebindings/metadata.name=test123",
+				"rbac.authorization.k8s.io/v1/rolebindings/metadata.namespace=ns1,metadata.name=test123",
+			},
+			expectedK8SResourceGroups: []string{
+				"rbac.authorization.k8s.io/v1/clusterrolebindings",
+				"rbac.authorization.k8s.io/v1/rolebindings",
+			},
+		},
+		{
+			name: "name field selector for Namespace resource",
+			matches: []reporthandling.RuleMatchObjects{
+				mockMatch(2), mockMatch(6),
+			},
+			namespace: "ns1",
+			resourcesFilterMap: map[string]bool{
+				"Deployment": true,
+				"ReplicaSet": false,
+				"Namespace":  true,
+			},
+			expectedQueryableResourceGroups: []string{
+				"apps/v1/deployments/metadata.namespace=ns1",
+				"/v1/namespaces/metadata.name=ns1",
+			},
+			expectedK8SResourceGroups: []string{
+				"apps/v1/deployments",
+				"/v1/namespaces",
+			},
+		},
 	}
-	apiVersion1, ok := apiGroup1["v1"]
-	if !ok {
-		t.Errorf("missing: 'v1'. k8sResources: %v", k8sResources)
-		return
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			queryableResources := make(QueryableResources)
+			for i := range testCase.matches {
+				updateQueryableResourcesMapFromRuleMatchObject(&testCase.matches[i], testCase.resourcesFilterMap, queryableResources, testCase.namespace)
+			}
+
+			assert.Equal(t, len(testCase.expectedQueryableResourceGroups), len(queryableResources))
+			for _, resourceGroup := range testCase.expectedQueryableResourceGroups {
+				assert.Contains(t, queryableResources, resourceGroup)
+			}
+
+			k8sResources := queryableResources.ToK8sResourceMap()
+			assert.Equal(t, len(testCase.expectedK8SResourceGroups), len(k8sResources))
+			for _, resourceGroup := range testCase.expectedK8SResourceGroups {
+				assert.Contains(t, k8sResources, resourceGroup)
+			}
+		})
 	}
-	_, ok = apiVersion1["pods"]
-	if !ok {
-		t.Errorf("missing: 'pods'. k8sResources: %v", k8sResources)
+}
+
+func TestFilterRuleMatchesForWorkload(t *testing.T) {
+	testCases := []struct {
+		workloadKind       string
+		ownerReferenceKind string
+		matchResources     []string
+		expectedMap        map[string]bool
+	}{
+		{
+			workloadKind:       "Pod",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
+			},
+			expectedMap: map[string]bool{
+				"Node":              true,
+				"PodSecurityPolicy": true,
+				"Pod":               false,
+				"DaemonSet":         false,
+				"Deployment":        false,
+				"ReplicaSet":        false,
+				"StatefulSet":       false,
+				"CronJob":           false,
+				"Job":               false,
+			},
+		},
+		{
+			workloadKind:       "Deployment",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
+			},
+			expectedMap: map[string]bool{
+				"Node":              true,
+				"PodSecurityPolicy": true,
+				"Pod":               false,
+				"DaemonSet":         false,
+				"Deployment":        false,
+				"ReplicaSet":        false,
+				"StatefulSet":       false,
+				"CronJob":           false,
+				"Job":               false,
+			},
+		},
+		{
+			workloadKind:       "Deployment",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"Deployment", "ReplicaSet",
+			},
+			expectedMap: map[string]bool{
+				"Deployment": false,
+				"ReplicaSet": false,
+			},
+		},
+		{
+			workloadKind:       "Pod",
+			ownerReferenceKind: "Deployment",
+			matchResources: []string{
+				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
+			},
+			expectedMap: nil, // rule does not apply to workload
+		},
+		{
+			workloadKind:       "ReplicaSet",
+			ownerReferenceKind: "Deployment",
+			matchResources: []string{
+				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
+			},
+			expectedMap: nil, // rule does not apply to workload
+		},
+		{
+			workloadKind:       "ReplicaSet",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
+			},
+			expectedMap: map[string]bool{
+				"Node":              true,
+				"PodSecurityPolicy": true,
+				"Pod":               false,
+				"DaemonSet":         false,
+				"Deployment":        false,
+				"ReplicaSet":        false,
+				"StatefulSet":       false,
+				"CronJob":           false,
+				"Job":               false,
+			},
+		},
+		{
+			workloadKind:       "ClusterRole",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
+			},
+			expectedMap: nil, // rule does not apply to workload
+		},
+		{
+			workloadKind:       "Node",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
+			},
+			expectedMap: map[string]bool{
+				"Node":              false,
+				"PodSecurityPolicy": true,
+				"Pod":               true,
+				"DaemonSet":         true,
+				"Deployment":        true,
+				"ReplicaSet":        true,
+				"StatefulSet":       true,
+				"CronJob":           true,
+				"Job":               true,
+			},
+		},
+		{
+			workloadKind:       "Pod",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"PodSecurityPolicy", "Pod",
+			},
+			expectedMap: map[string]bool{
+				"PodSecurityPolicy": true,
+				"Pod":               false,
+			},
+		},
+		{
+			workloadKind:       "Pod",
+			ownerReferenceKind: "Deployment",
+			matchResources: []string{
+				"PodSecurityPolicy", "Pod",
+			},
+			expectedMap: map[string]bool{
+				"PodSecurityPolicy": true,
+				"Pod":               false,
+			},
+		},
+		{
+			workloadKind:       "Pod",
+			ownerReferenceKind: "Deployment",
+			matchResources: []string{
+				"PodSecurityPolicy", "Pod", "ReplicaSet",
+			},
+			expectedMap: map[string]bool{
+				"PodSecurityPolicy": true,
+				"Pod":               false,
+				"ReplicaSet":        false,
+			},
+		},
+		{
+			workloadKind:       "Deployment",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"PodSecurityPolicy", "Pod",
+			},
+			expectedMap: nil, // rule does not apply to workload
+		},
+		{
+			workloadKind:       "PodSecurityPolicy",
+			ownerReferenceKind: "",
+			matchResources: []string{
+				"PodSecurityPolicy", "Pod",
+			},
+			expectedMap: map[string]bool{
+				"PodSecurityPolicy": false,
+				"Pod":               true,
+			},
+		},
 	}
-	_, ok = apiVersion1["deployments"]
-	if !ok {
-		t.Errorf("missing: 'deployments'. k8sResources: %v", k8sResources)
-	}
-	apiVersion2, ok := apiGroup1["v1beta"]
-	if !ok {
-		t.Errorf("missing: 'v1beta'. k8sResources: %v", k8sResources)
-		return
-	}
-	_, ok = apiVersion2["pods"]
-	if !ok {
-		t.Errorf("missing: 'pods'. k8sResources: %v", k8sResources)
-	}
-	_, ok = k8sResources["core"]
-	if !ok {
-		t.Errorf("missing: 'core'. k8sResources: %v", k8sResources)
-		return
+	for i, testCase := range testCases {
+		t.Run(fmt.Sprintf("%v", i), func(t *testing.T) {
+			matches := []reporthandling.RuleMatchObjects{
+				{
+					Resources: testCase.matchResources,
+				},
+			}
+
+			result := filterRuleMatchesForWorkload(testCase.workloadKind, testCase.ownerReferenceKind, matches)
+			if testCase.expectedMap == nil {
+				assert.Nil(t, result, "expected nil (rule does not apply to workload)")
+				return
+			}
+
+			if !reflect.DeepEqual(result, testCase.expectedMap) {
+				t.Errorf("expected %v, got %v", testCase.expectedMap, result)
+			}
+		})
 	}
 }
