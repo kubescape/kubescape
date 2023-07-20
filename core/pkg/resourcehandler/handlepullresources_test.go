@@ -1,4 +1,4 @@
-package policyhandler
+package resourcehandler
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
+
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -22,7 +22,7 @@ import (
 )
 
 var (
-	//go:embed kubeconfig_mock.json
+	//go:embed testdata/kubeconfig_mock.json
 	kubeConfigMock string
 )
 
@@ -35,9 +35,9 @@ func getKubeConfigMock() *clientcmdapi.Config {
 }
 func Test_getCloudMetadata(t *testing.T) {
 	type args struct {
-		context       string
 		opaSessionObj *cautils.OPASessionObj
 		kubeConfig    *clientcmdapi.Config
+		context       string
 	}
 	kubeConfig := getKubeConfigMock()
 	tests := []struct {
@@ -221,7 +221,7 @@ func (*iResourceHandlerMock) GetClusterAPIServerInfo() *version.Info {
 
 // https://github.com/kubescape/kubescape/pull/1004
 // Cluster named .*eks.* config without a cloudconfig panics whereas we just want to scan a file
-func getResourceHandlerMock() *resourcehandler.K8sResourceHandler {
+func getResourceHandlerMock() *K8sResourceHandler {
 	client := fakeclientset.NewSimpleClientset()
 	fakeDiscovery := client.Discovery()
 
@@ -232,10 +232,10 @@ func getResourceHandlerMock() *resourcehandler.K8sResourceHandler {
 		Context:          context.Background(),
 	}
 
-	return resourcehandler.NewK8sResourceHandler(k8s, &resourcehandler.EmptySelector{}, nil, nil, nil, nil)
+	return NewK8sResourceHandler(k8s, &EmptySelector{}, nil, nil, nil, nil)
 }
-func Test_getResources(t *testing.T) {
-	policyHandler := &PolicyHandler{resourceHandler: getResourceHandlerMock()}
+func Test_CollectResources(t *testing.T) {
+	resourceHandler := getResourceHandlerMock()
 	objSession := &cautils.OPASessionObj{
 		Metadata: &reporthandlingv2.Metadata{
 			ScanMetadata: reporthandlingv2.ScanMetadata{
@@ -249,12 +249,12 @@ func Test_getResources(t *testing.T) {
 	policyIdentifier := []cautils.PolicyIdentifier{{}}
 
 	assert.NotPanics(t, func() {
-		policyHandler.getResources(context.TODO(), policyIdentifier, objSession, cautils.NewProgressHandler(""))
+		CollectResources(context.TODO(), resourceHandler, policyIdentifier, objSession, cautils.NewProgressHandler(""))
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
-		policyHandler.getResources(context.TODO(), policyIdentifier, objSession, cautils.NewProgressHandler(""))
+		CollectResources(context.TODO(), resourceHandler, policyIdentifier, objSession, cautils.NewProgressHandler(""))
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }
