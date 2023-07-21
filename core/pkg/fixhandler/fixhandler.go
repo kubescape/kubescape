@@ -243,6 +243,7 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 }
 
 func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
+	yamlAsString = sanitizeYaml(yamlAsString)
 	newline := determineNewlineSeparator(yamlAsString)
 
 	yamlLines := strings.Split(yamlAsString, newline)
@@ -264,6 +265,7 @@ func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string)
 	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
 
 	fixedString = getStringFromSlice(fixedYamlLines, newline)
+	fixedString = revertSanitizeYaml(fixedString)
 
 	return fixedString, nil
 }
@@ -367,4 +369,29 @@ func determineNewlineSeparator(contents string) string {
 	default:
 		return unixNewline
 	}
+}
+
+// sanitizeYaml receives a YAML file as a string, sanitizes it and returns the result
+//
+// Callers should remember to call the corresponding revertSanitizeYaml function.
+//
+// It applies the following sanitization:
+//
+// - Since `yaml/v3` fails to serialize documents starting with a document
+// separator, we comment it out to be compatible.
+func sanitizeYaml(fileAsString string) string {
+	if fileAsString[:3] == "---" {
+		fileAsString = "# " + fileAsString
+	}
+	return fileAsString
+}
+
+// revertSanitizeYaml receives a sanitized YAML file as a string and reverts the applied sanitization
+//
+// For sanitization details, refer to the sanitizeYaml() function.
+func revertSanitizeYaml(fixedYamlString string) string {
+	if fixedYamlString[:5] == "# ---" {
+		fixedYamlString = fixedYamlString[2:]
+	}
+	return fixedYamlString
 }

@@ -101,6 +101,13 @@ func getTestCases() []indentationTestCase {
 			"inserts/tc-11-01-expected.yaml",
 		},
 
+		// Starts with ---
+		{
+			"inserts/tc-12-00-begin-with-document-separator.yaml",
+			"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+			"inserts/tc-12-01-expected.yaml",
+		},
+
 		// Removal Scenarios
 		{
 			"removals/tc-01-00-input.yaml",
@@ -118,10 +125,10 @@ func getTestCases() []indentationTestCase {
 			"removals/tc-03-01-expected.yaml",
 		},
 		{
-			"removes/tc-04-00-input.yaml",
+			"removals/tc-04-00-input.yaml",
 			`del(select(di==0).spec.containers[0].securityContext) |
 			 del(select(di==1).spec.containers[1])`,
-			"removes/tc-04-01-expected.yaml",
+			"removals/tc-04-01-expected.yaml",
 		},
 
 		// Replace Scenarios
@@ -162,6 +169,12 @@ func getTestCases() []indentationTestCase {
 			 select(di==0).spec.securityContext.runAsRoot |= false`,
 			"hybrids/tc-04-01-expected.yaml",
 		},
+		{
+			"hybrids/tc-05-00-input-leading-doc-separator.yaml",
+			`del(select(di==0).spec.containers[0].securityContext) |
+			 select(di==0).spec.securityContext.runAsRoot |= false`,
+			"hybrids/tc-05-01-expected.yaml",
+		},
 	}
 
 	return indentationTestCases
@@ -169,20 +182,28 @@ func getTestCases() []indentationTestCase {
 
 func TestApplyFixKeepsFormatting(t *testing.T) {
 	testCases := getTestCases()
+	getTestDataPath := func(filename string) string {
+		currentFile := "testdata/" + filename
+		return filepath.Join(testutils.CurrentDir(), currentFile)
+	}
 
 	for _, tc := range testCases {
 		t.Run(tc.inputFile, func(t *testing.T) {
-			getTestDataPath := func(filename string) string {
-				currentFile := "testdata/" + filename
-				return filepath.Join(testutils.CurrentDir(), currentFile)
+			inputFilename := getTestDataPath(tc.inputFile)
+			input, err := os.ReadFile(inputFilename)
+			if err != nil {
+				t.Fatalf(`Unable to open file %s due to: %v`, inputFilename, err)
 			}
-
-			input, _ := os.ReadFile(getTestDataPath(tc.inputFile))
-			wantRaw, _ := os.ReadFile(getTestDataPath(tc.expectedFile))
+			expectedFilename := getTestDataPath(tc.expectedFile)
+			wantRaw, err := os.ReadFile(expectedFilename)
+			if err != nil {
+				t.Fatalf(`Unable to open file %s due to: %v`, expectedFilename, err)
+			}
 			want := string(wantRaw)
 			expression := tc.yamlExpression
 
-			got, _ := ApplyFixToContent(context.TODO(), string(input), expression)
+			fileAsString := string(input)
+			got, _ := ApplyFixToContent(context.TODO(), fileAsString, expression)
 
 			assert.Equalf(
 				t, want, got,
