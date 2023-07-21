@@ -371,8 +371,14 @@ func determineNewlineSeparator(contents string) string {
 	}
 }
 
-// Handle the case where the resource file starts with ---
-// causes yaml.Node to misinterpret the resources
+// sanitizeYaml receives a YAML file as a string, sanitizes it and returns the result
+//
+// Callers should remember to call the corresponding revertSanitizeYaml function.
+//
+// It applies the following sanitization:
+//
+// - Since `yaml/v3` fails to serialize documents starting with a document
+// separator, we comment it out to be compatible.
 func sanitizeYaml(fileAsString string) string {
 	if fileAsString[:3] == "---" {
 		fileAsString = "# " + fileAsString
@@ -380,7 +386,9 @@ func sanitizeYaml(fileAsString string) string {
 	return fileAsString
 }
 
-// For the --- case to ensure correct output file format
+// revertSanitizeYaml receives a sanitized YAML file as a string and reverts the applied sanitization
+//
+// For sanitization details, refer to the sanitizeYaml() function.
 func revertSanitizeYaml(fixedYamlString string) string {
 	if fixedYamlString[:5] == "# ---" {
 		fixedYamlString = fixedYamlString[2:]
