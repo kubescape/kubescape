@@ -176,16 +176,23 @@ func getTestCases() []indentationTestCase {
 
 func TestApplyFixKeepsFormatting(t *testing.T) {
 	testCases := getTestCases()
+	getTestDataPath := func(filename string) string {
+		currentFile := "testdata/" + filename
+		return filepath.Join(testutils.CurrentDir(), currentFile)
+	}
 
 	for _, tc := range testCases {
 		t.Run(tc.inputFile, func(t *testing.T) {
-			getTestDataPath := func(filename string) string {
-				currentFile := "testdata/" + filename
-				return filepath.Join(testutils.CurrentDir(), currentFile)
+			inputFilename := getTestDataPath(tc.inputFile)
+			input, err := os.ReadFile(inputFilename)
+			if err != nil {
+				t.Fatalf(`Unable to open file %s due to: %v`, inputFilename, err)
 			}
-
-			input, _ := os.ReadFile(getTestDataPath(tc.inputFile))
-			wantRaw, _ := os.ReadFile(getTestDataPath(tc.expectedFile))
+			expectedFilename := getTestDataPath(tc.expectedFile)
+			wantRaw, err := os.ReadFile(expectedFilename)
+			if err != nil {
+				t.Fatalf(`Unable to open file %s due to: %v`, expectedFilename, err)
+			}
 			want := string(wantRaw)
 			expression := tc.yamlExpression
 
