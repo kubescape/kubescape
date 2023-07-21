@@ -169,6 +169,12 @@ func getTestCases() []indentationTestCase {
 			 select(di==0).spec.securityContext.runAsRoot |= false`,
 			"hybrids/tc-04-01-expected.yaml",
 		},
+		{
+			"hybrids/tc-05-00-input-leading-doc-separator.yaml",
+			`del(select(di==0).spec.containers[0].securityContext) |
+			 select(di==0).spec.securityContext.runAsRoot |= false`,
+			"hybrids/tc-05-01-expected.yaml",
+		},
 	}
 
 	return indentationTestCases
@@ -196,9 +202,8 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 			want := string(wantRaw)
 			expression := tc.yamlExpression
 
-			fileAsString := sanitizeYaml(string(input))
-			fixedYamlString, _ := ApplyFixToContent(context.TODO(), fileAsString, expression)
-			got := revertSanitizeYaml(fixedYamlString)
+			fileAsString := string(input)
+			got, _ := ApplyFixToContent(context.TODO(), fileAsString, expression)
 
 			assert.Equalf(
 				t, want, got,
@@ -288,9 +293,8 @@ func Test_sanitizeYaml(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := sanitizeYaml(tt.args.fileAsString); got != tt.want {
-				t.Errorf("sanitizeYaml() = %v, want %v", got, tt.want)
-			}
+			got := sanitizeYaml(tt.args.fileAsString)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }
@@ -321,9 +325,8 @@ func Test_revertSanitizeYaml(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := revertSanitizeYaml(tt.args.fixedYamlString); got != tt.want {
-				t.Errorf("revertSanitizeYaml() = %v, want %v", got, tt.want)
-			}
+			got := revertSanitizeYaml(tt.args.fixedYamlString)
+			assert.Equal(t, tt.want, got)
 		})
 	}
 }

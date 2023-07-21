@@ -208,8 +208,6 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 			continue
 		}
 
-		fileAsString = sanitizeYaml(fileAsString)
-
 		fixedYamlString, err := ApplyFixToContent(ctx, fileAsString, yamlExpression)
 
 		if err != nil {
@@ -218,8 +216,6 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 		} else {
 			updatedFiles[filepath] = true
 		}
-
-		fixedYamlString = revertSanitizeYaml(fixedYamlString)
 
 		err = writeFixesToFile(filepath, fixedYamlString)
 
@@ -247,6 +243,7 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 }
 
 func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
+	yamlAsString = sanitizeYaml(yamlAsString)
 	newline := determineNewlineSeparator(yamlAsString)
 
 	yamlLines := strings.Split(yamlAsString, newline)
@@ -268,6 +265,7 @@ func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string)
 	fixedYamlLines := getFixedYamlLines(yamlLines, fixInfo, newline)
 
 	fixedString = getStringFromSlice(fixedYamlLines, newline)
+	fixedString = revertSanitizeYaml(fixedString)
 
 	return fixedString, nil
 }
