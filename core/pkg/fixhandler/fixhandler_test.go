@@ -259,7 +259,7 @@ func Test_sanitizeYaml(t *testing.T) {
 	type args struct {
 		fileAsString string
 	}
-	tests := []struct{
+	tests := []struct {
 		name string
 		args args
 		want string
@@ -292,7 +292,7 @@ func Test_revertSanitizeYaml(t *testing.T) {
 	type args struct {
 		fixedYamlString string
 	}
-	tests := []struct{
+	tests := []struct {
 		name string
 		args args
 		want string
