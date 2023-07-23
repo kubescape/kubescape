@@ -599,8 +599,8 @@ github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj
 github.com/armon/go-radix v1.0.0 h1:F4z6KzEeeQIMeLFa97iZU6vupzoecKdU5TX24SNppXI=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5/go.mod h1:wHh0iHkYZB8zMSxRWpUBQtwG5a7fFgvEO+odwuTv2gs=
-github.com/armosec/armoapi-go v0.0.173 h1:TwNxmTxx9ATJPZBlld/53s/WvSVUfoF4gxgHT6UbFng=
-github.com/armosec/armoapi-go v0.0.173/go.mod h1:xlW8dGq0vVzbuk+kDZqMQIkfU9P/iiiiDavoCIboqgI=
+github.com/armosec/armoapi-go v0.0.202 h1:0PM89laC4rplz4eSELJ5ueVxxDIuEfIlDwlGa/c0pkg=
+github.com/armosec/armoapi-go v0.0.202/go.mod h1:Fq2xtueM2ha0VK1b/PcbtbkAzHUgjqMz4MEdabNpdwY=
 github.com/armosec/utils-go v0.0.14 h1:Q6HGxOyc5aPObgUM2FQpkYGXjj7/LSrUPkppFJGTexU=
 github.com/armosec/utils-go v0.0.14/go.mod h1:F/K1mI/qcj7fNuJl7xktoCeHM83azOF0Zq6eC2WuPyU=
 github.com/armosec/utils-k8s-go v0.0.13 h1:MzrRotrtZjpz4Yq1VRGbxDOfd6b5qRqZupzLnpj+W1A=
@@ -985,8 +985,8 @@ github.com/go-redis/redis v6.15.9+incompatible/go.mod h1:NAIEuMOZ/fxfXJIrKDQDz8w
 github.com/go-rod/rod v0.111.0 h1:aMNNdz10GYPYec9z1WsFqwAdRYVsuufVTOrah7whG3I=
 github.com/go-sql-driver/mysql v1.4.0/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
 github.com/go-sql-driver/mysql v1.4.1/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
-github.com/go-sql-driver/mysql v1.6.0 h1:BCTh4TKNUYmOmMUcQ3IipzF5prigylS7XXjEkfCHuOE=
 github.com/go-sql-driver/mysql v1.6.0/go.mod h1:DCzpHaOWr8IXmIStZouvnhqoel9Qv2LBy8hT2VhHyBg=
+github.com/go-sql-driver/mysql v1.7.0 h1:ueSltNNllEqE3qcWBTD0iQd3IpL/6U+mJxLkazJ7YPc=
 github.com/go-stack/stack v1.8.0/go.mod h1:v0f6uXyyMGvRgIKkXu+yp6POWl0qKG85gN/melR3HDY=
 github.com/go-stack/stack v1.8.1/go.mod h1:dcoOX6HbPZSZptuspn9bctJ+N/CnF5gGygcUP3XYfe4=
 github.com/go-task/slim-sprig v0.0.0-20210107165309-348f09dbbbc0/go.mod h1:fyg7847qk6SyHyPtNmDHnmrv/HOrqktSC+C9fM+CJOE=

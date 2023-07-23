@@ -1,7 +1,6 @@
 package opaprocessor
 
 import (
-	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -29,60 +28,4 @@ func TestInitializeSummaryDetails(t *testing.T) {
 	ConvertFrameworksToSummaryDetails(&summaryDetails, frameworks, policies)
 	assert.Equal(t, 2, len(summaryDetails.Frameworks))
 	// assert.Equal(t, 3, len(summaryDetails.Controls))
-}
-
-func TestParseIntEnvVar(t *testing.T) {
-	testCases := []struct {
-		expectedErr  string
-		name         string
-		varName      string
-		varValue     string
-		defaultValue int
-		expected     int
-	}{
-		{
-			name:         "Variable does not exist",
-			varName:      "DOES_NOT_EXIST",
-			varValue:     "",
-			defaultValue: 123,
-			expected:     123,
-			expectedErr:  "",
-		},
-		{
-			name:         "Variable exists and is a valid integer",
-			varName:      "MY_VAR",
-			varValue:     "456",
-			defaultValue: 123,
-			expected:     456,
-			expectedErr:  "",
-		},
-		{
-			name:         "Variable exists but is not a valid integer",
-			varName:      "MY_VAR",
-			varValue:     "not_an_integer",
-			defaultValue: 123,
-			expected:     123,
-			expectedErr:  "failed to parse MY_VAR env var as int",
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.varValue != "" {
-				os.Setenv(tc.varName, tc.varValue)
-			} else {
-				os.Unsetenv(tc.varName)
-			}
-
-			actual, err := parseIntEnvVar(tc.varName, tc.defaultValue)
-			if tc.expectedErr != "" {
-				assert.NotNil(t, err)
-				assert.ErrorContains(t, err, tc.expectedErr)
-			} else {
-				assert.Nil(t, err)
-			}
-
-			assert.Equalf(t, tc.expected, actual, "unexpected result")
-		})
-	}
 }

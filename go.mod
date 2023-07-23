@@ -7,7 +7,7 @@ go 1.20
 
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
-	github.com/armosec/armoapi-go v0.0.173
+	github.com/armosec/armoapi-go v0.0.202
 	github.com/armosec/utils-go v0.0.14
 	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/briandowns/spinner v1.18.1
@@ -368,5 +368,6 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-// replace github.com/libgit2/git2go/v33 => ./git2go
+replace github.com/libgit2/git2go/v33 => ./git2go
+
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0
