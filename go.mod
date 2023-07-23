@@ -24,7 +24,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.131
 	github.com/kubescape/opa-utils v0.0.254-0.20230719084904-0b8953a7ceb6
 	github.com/kubescape/rbac-utils v0.0.20
-	github.com/kubescape/regolibrary v1.0.287-rc.0.0.20230720095228-7d560352ce2d
+	github.com/kubescape/regolibrary v1.0.289-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.17
 	github.com/mikefarah/yq/v4 v4.29.1
@@ -368,5 +368,5 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/libgit2/git2go/v33 => ./git2go
+// replace github.com/libgit2/git2go/v33 => ./git2go
 replace google.golang.org/grpc => google.golang.org/grpc v1.54.0
