@@ -110,7 +110,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 	}
 
 	// load resource from local file system
-	sourceToWorkloads := cautils.LoadResourcesFromFiles(ctx, path, repoRoot)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool

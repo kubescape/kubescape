@@ -2,6 +2,8 @@ package cautils
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,6 +23,11 @@ func helmChartPath() string {
 	return filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
 }
 
+func emptyDirectory() string {
+	o, _ := os.Getwd()
+	return filepath.Join(filepath.Dir(o), ".", "cautils", "testdata", "emptyDirectory")
+}
+
 func TestListFiles(t *testing.T) {
 
 	filesPath := onlineBoutiquePath()
@@ -30,8 +37,16 @@ func TestListFiles(t *testing.T) {
 	assert.Equal(t, 12, len(files))
 }
 
+func TestLoadResourcesFromFilesEmptyFiles(t *testing.T) {
+	expectedError := errors.New(fmt.Sprintf(ErrNoFilesToScan, emptyDirectory())).Error()
+	_, err := LoadResourcesFromFiles(context.TODO(), emptyDirectory(), "")
+	assert.NotEqual(t, err, nil)
+	assert.Equal(t, err.Error(), expectedError)
+}
+
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(context.TODO(), onlineBoutiquePath(), "")
+	workloads, err := LoadResourcesFromFiles(context.TODO(), onlineBoutiquePath(), "")
+	assert.Equal(t, err, nil)
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {

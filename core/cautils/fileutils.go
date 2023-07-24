@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +23,10 @@ import (
 var (
 	YAML_PREFIX = []string{"yaml", "yml"}
 	JSON_PREFIX = []string{"json"}
+)
+
+var (
+	ErrNoFilesToScan string = "no files found to scan, input %s"
 )
 
 type FileFormat string
@@ -97,14 +102,14 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	return sourceToWorkloads, kustomizeDirectoryName
 }
 
-func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
+func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) (map[string][]workloadinterface.IMetadata, error) {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
 		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
-		return nil
+		return nil, errors.New(fmt.Sprintf(ErrNoFilesToScan, input))
 	}
 
 	workloads, errs := loadFiles(rootPath, files)
@@ -112,7 +117,7 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[str
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
 	}
 
-	return workloads
+	return workloads, nil
 }
 
 func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {
