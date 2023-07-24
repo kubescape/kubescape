@@ -31,7 +31,8 @@ func GetUpdateCmd() *cobra.Command {
 				//your version == latest version
 				logger.L().Info(("You are in the latest version"))
 			} else {
-
+				var err error
+				var output []byte
 				const OSTYPE string = runtime.GOOS
 				var ShellToUse string
 				switch OSTYPE {
@@ -40,7 +41,7 @@ func GetUpdateCmd() *cobra.Command {
 					cautils.StartSpinner()
 					//run the installation command for windows
 					ShellToUse = "powershell"
-					_, err := exec.Command(ShellToUse, "-c", "iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex").Output()
+					output, err = exec.Command(ShellToUse, "-c", "iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex").Output()
 
 					if err != nil {
 						logger.L().Fatal(err.Error())
@@ -51,13 +52,14 @@ func GetUpdateCmd() *cobra.Command {
 					ShellToUse = "bash"
 					cautils.StartSpinner()
 					//run the installation command for linux and macOS
-					_, err := exec.Command(ShellToUse, "-c", "curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash").Output()
+					output, err = exec.Command(ShellToUse, "-c", "curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash").Output()
 					if err != nil {
 						logger.L().Fatal(err.Error())
 					}
 
 					cautils.StopSpinner()
 				}
+				fmt.Printf("%s", string(output[:]))
 			}
 			return nil
 		},
