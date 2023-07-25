@@ -59,7 +59,7 @@ func (hp *HtmlPrinter) PrintNextSteps() {
 
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0

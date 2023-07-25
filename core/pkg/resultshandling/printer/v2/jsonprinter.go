@@ -72,14 +72,14 @@ func printImageAndConfigurationScanning(output io.Writer, imageScanData *models.
 	return enc.Encode(&docForJson)
 }
 
-func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	var err error
 	if opaSessionObj != nil && imageScanData != nil {
-		err = printImageAndConfigurationScanning(jp.writer, imageScanData, opaSessionObj)
+		err = printImageAndConfigurationScanning(jp.writer, imageScanData[0].PresenterConfig, opaSessionObj)
 	} else if opaSessionObj != nil {
 		err = printConfigurationsScanning(opaSessionObj, ctx, jp)
 	} else if imageScanData != nil {
-		err = jp.PrintImageScan(ctx, imageScanData)
+		err = jp.PrintImageScan(ctx, imageScanData[0].PresenterConfig)
 	} else {
 		err = fmt.Errorf("failed to print results, no data provided")
 	}

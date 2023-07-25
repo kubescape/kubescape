@@ -3,7 +3,6 @@ package prettyprinter
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
@@ -27,13 +26,15 @@ func NewRepoPrinter(writer *os.File, inputPatterns []string) *RepoPrinter {
 
 var _ MainPrinter = &RepoPrinter{}
 
-func (rp *RepoPrinter) PrintImageScanning(*imageprinter.ImageScanSummary) {
+func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	printImageScanningSummary(rp.writer, *summary, false)
+	printTopVulnerabilities(rp.writer, *summary)
 }
 
 func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	rp.categoriesTablePrinter.PrintCategoriesTable(rp.writer, summaryDetails, sortedControlIDs)
+	rp.categoriesTablePrinter.PrintCategoriesTables(rp.writer, summaryDetails, sortedControlIDs)
 
-	if len(summaryDetails.TopWorkloadsByScore) > 0 {
+	if len(summaryDetails.TopWorkloadsByScore) > 1 {
 		rp.printTopWorkloads(summaryDetails)
 	}
 
@@ -50,10 +51,6 @@ func (rp *RepoPrinter) getNextSteps() []string {
 		CICDSetupText,
 		installHelmText,
 	}
-}
-
-func (rp *RepoPrinter) printNextSteps() {
-	printNextSteps(rp.writer, rp.getNextSteps())
 }
 
 func (rp *RepoPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDetails) {
@@ -75,14 +72,10 @@ func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source repo
 	if ns == "" {
 		cmd = fmt.Sprintf("$ kubescape scan workload %s/%s", kind, name)
 	}
-	if source.FileType == "Helm" {
-		return fmt.Sprintf("%s --chart-path=%s", cmd, source.RelativePath)
+	if source.FileType == reporthandling.SourceTypeHelmChart {
+		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.Path, source.RelativePath)
 
 	} else {
 		return fmt.Sprintf("%s --file-path=%s", cmd, source.RelativePath)
 	}
-}
-
-func (rp *RepoPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary, inputPatterns []string) string {
-	return fmt.Sprintf("$ kubescape scan control %s %s", controlSummary.GetID(), strings.Join(inputPatterns, ","))
 }

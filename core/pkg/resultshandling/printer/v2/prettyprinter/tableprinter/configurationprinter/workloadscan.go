@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -20,59 +21,71 @@ func (wp *WorkloadPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *r
 
 }
 
-func (wp *WorkloadPrinter) PrintCategoriesTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
-	headers := wp.getCategoriesTableHeaders()
-	columnAligments := wp.getCategoriesColumnsAlignments()
+	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
 
-	table := getTableWriter(writer, headers, columnAligments)
+	for _, id := range categoriesDisplayOrder {
+		categoryControl, ok := categoriesToCategoryControls[id]
+		if !ok {
+			continue
+		}
 
-	mapCategoryToRows := wp.generateRows(summaryDetails, sortedControlIDs)
+		infoToPrintInfo := utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries)
 
-	renderCategoriesTable(mapCategoryToRows, writer, table)
+		wp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, infoToPrintInfo)
+	}
 }
 
-func (wp *WorkloadPrinter) generateRows(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) map[string][][]string {
-	mapCategoryToRows := make(map[string][][]string)
+func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
+	headers, columnAligments := initCategoryTableData(categoryType)
 
-	categoriesToControlSummariesMap := mapCategoryToControlSummaries(*summaryDetails, sortedControlIDs)
+	table := getCategoryTableWriter(writer, headers, columnAligments)
 
-	for category, ctrls := range categoriesToControlSummariesMap {
-		for i := range ctrls {
-			row := wp.generateCategoriesRow(ctrls[i])
-			if len(row) > 0 {
-				mapCategoryToRows[category] = append(mapCategoryToRows[category], row)
-			}
+	var rows [][]string
+	for _, ctrls := range controlSummaries {
+		var row []string
+		if categoryType == TypeCounting {
+			row = wp.generateCountingCategoryRow(ctrls)
+		} else {
+			row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
+		}
+		if len(row) > 0 {
+			rows = append(rows, row)
 		}
 	}
 
-	return mapCategoryToRows
+	if len(rows) == 0 {
+		return
+	}
+
+	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
+
+}
+
+func (wp *WorkloadPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary) []string {
+
+	row := make([]string, 3)
+
+	row[0] = controlSummary.GetName()
+
+	row[1] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
+
+	row[2] = wp.generateTableNextSteps(controlSummary)
+
+	return row
+}
+
+func (wp *WorkloadPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary) string {
+	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
 }
 
 func (wp *WorkloadPrinter) getCategoriesTableHeaders() []string {
-	return getCommonCategoriesTableHeaders()
+	return getCategoryCountingTypeHeaders()
 }
 
 func (wp *WorkloadPrinter) getCategoriesColumnsAlignments() []int {
-	return getCommonColumnsAlignments()
-}
-
-func (wp *WorkloadPrinter) generateCategoriesRow(controlSummary reportsummary.IControlSummary) []string {
-	row := make([]string, 4)
-
-	row[categoriesColumnSeverity] = GetSeverityColumn(controlSummary)
-
-	if len(controlSummary.GetName()) > 50 {
-		row[categoriesColumnName] = controlSummary.GetName()[:50] + "..."
-	} else {
-		row[categoriesColumnName] = controlSummary.GetName()
-	}
-
-	setCategoryStatusRow(controlSummary, row)
-
-	row[categoriesColumnNextSteps] = wp.generateNextSteps(controlSummary)
-
-	return row
+	return getCountingTypeAlignments()
 }
 
 func (wp *WorkloadPrinter) generateNextSteps(controlSummary reportsummary.IControlSummary) string {

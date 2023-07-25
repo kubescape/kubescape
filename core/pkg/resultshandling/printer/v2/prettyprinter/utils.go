@@ -27,15 +27,6 @@ var (
 	complianceFrameworks = []string{"nsa", "mitre"}
 )
 
-func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
-	cautils.InfoTextDisplay(writer, "Compliance Score:\n")
-	for _, fw := range frameworks {
-		cautils.SimpleDisplay(writer, "* %s: %.2f%%\n", fw.GetName(), fw.GetComplianceScore())
-	}
-
-	cautils.InfoTextDisplay(writer, "\n")
-}
-
 func filterComplianceFrameworks(frameworks []reportsummary.IFrameworkSummary) []reportsummary.IFrameworkSummary {
 	complianceFws := []reportsummary.IFrameworkSummary{}
 	for _, fw := range frameworks {
@@ -57,22 +48,88 @@ func getWorkloadPrefixForCmd(namespace, kind, name string) string {
 	return fmt.Sprintf("namespace: %s, name: %s, kind: %s", namespace, name, kind)
 }
 
-func printNextSteps(writer *os.File, nextSteps []string) {
-	cautils.InfoTextDisplay(writer, "Follow-up steps:\n")
-	for _, ns := range nextSteps {
-		cautils.SimpleDisplay(writer, "- "+ns+"\n")
-	}
-	cautils.SimpleDisplay(writer, "\n")
-}
-
 func getTopWorkloadsTitle(topWLsLen int) string {
-	if topWLsLen > 2 {
+	if topWLsLen > 1 {
 		return "Your most risky workloads:\n"
 	}
 	if topWLsLen > 0 {
 		return "Your most risky workload:\n"
 	}
 	return ""
+}
+
+// getSeverityToSummaryMap returns a map of severity to summary, if shouldMerge is true, it will merge Low, Negligible and Unknown to Other
+func getSeverityToSummaryMap(summary imageprinter.ImageScanSummary, shouldMerge bool) map[string]*imageprinter.SeveritySummary {
+	tempMap := map[string]*imageprinter.SeveritySummary{}
+	for severity, severitySummary := range summary.MapsSeverityToSummary {
+		if shouldMerge {
+			if severity == "Low" || severity == "Negligible" || severity == "Unknown" {
+				severity = "Other"
+			}
+		}
+		if _, ok := tempMap[severity]; !ok {
+			tempMap[severity] = &imageprinter.SeveritySummary{}
+		}
+		tempMap[severity].NumberOfCVEs += severitySummary.NumberOfCVEs
+		tempMap[severity].NumberOfFixableCVEs += severitySummary.NumberOfFixableCVEs
+	}
+	return tempMap
+}
+
+// filterCVEsBySeverities returns a list of CVEs only with the severities that are in the severities list
+func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imageprinter.CVE {
+	var filteredCVEs []imageprinter.CVE
+
+	for _, cve := range cves {
+		for _, severity := range severities {
+			if cve.Severity == severity {
+				filteredCVEs = append(filteredCVEs, cve)
+			}
+		}
+	}
+
+	return filteredCVEs
+}
+
+// sortTopVulnerablePackages sorts the top vulnerable packages by score. It return a map of packages to their score and version
+func sortTopVulnerablePackages(pkgScores map[string]*imageprinter.PackageScore) map[string]*imageprinter.PackageScore {
+	var ss []string
+	for k := range pkgScores {
+		ss = append(ss, k)
+	}
+
+	sort.Slice(ss, func(i, j int) bool {
+		return pkgScores[ss[i]].Score > pkgScores[ss[j]].Score
+	})
+
+	var sortedMap = make(map[string]*imageprinter.PackageScore)
+
+	for i := 0; i < len(ss) && i < TopPackagesNumber; i++ {
+		sortedMap[ss[i]] = &imageprinter.PackageScore{
+			Score:   pkgScores[ss[i]].Score,
+			Version: pkgScores[ss[i]].Version,
+		}
+	}
+
+	return sortedMap
+}
+
+// / PRINTERS ///
+func printTopVulnerabilities(writer *os.File, summary imageprinter.ImageScanSummary) {
+	if len(summary.PackageScores) == 0 {
+		return
+	}
+
+	cautils.InfoTextDisplay(writer, "\nMost vulnerable components:\n")
+
+	topVulnerablePackages := sortTopVulnerablePackages(summary.PackageScores)
+	for k, v := range topVulnerablePackages {
+		cautils.SimpleDisplay(writer, "  * %s (%s)\n", k, v.Version)
+	}
+
+	cautils.SimpleDisplay(writer, "\n")
+
+	return
 }
 
 func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSummary, verboseMode bool) {
@@ -98,71 +155,21 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 	}
 }
 
-func getSeverityToSummaryMap(summary imageprinter.ImageScanSummary, shouldMerge bool) map[string]*imageprinter.SeveritySummary {
-	tempMap := map[string]*imageprinter.SeveritySummary{}
-	for severity, severitySummary := range summary.MapsSeverityToSummary {
-		if shouldMerge && severity == "Low" || severity == "Negligible" || severity == "Unknown" {
-			severity = "Other"
-		}
-		if _, ok := tempMap[severity]; !ok {
-			tempMap[severity] = &imageprinter.SeveritySummary{}
-		}
-		tempMap[severity].NumberOfCVEs += severitySummary.NumberOfCVEs
-		tempMap[severity].NumberOfFixableCVEs += severitySummary.NumberOfFixableCVEs
+func printNextSteps(writer *os.File, nextSteps []string) {
+	cautils.InfoTextDisplay(writer, "Follow-up steps:\n")
+	for _, ns := range nextSteps {
+		cautils.SimpleDisplay(writer, "- "+ns+"\n")
 	}
-	return tempMap
-}
-
-func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imageprinter.CVE {
-	var filteredCves []imageprinter.CVE
-
-	for _, cve := range cves {
-		for _, severity := range severities {
-			if cve.Severity == severity {
-				filteredCves = append(filteredCves, cve)
-			}
-		}
-	}
-
-	return filteredCves
-}
-
-func sortTopVulnerableWorkloads(pkgScores map[string]*imageprinter.Package) map[string]*imageprinter.Package {
-	var ss []string
-	for k := range pkgScores {
-		ss = append(ss, k)
-	}
-
-	sort.Slice(ss, func(i, j int) bool {
-		return pkgScores[ss[i]].Score > pkgScores[ss[j]].Score
-	})
-
-	var sortedMap = make(map[string]*imageprinter.Package)
-
-	for i := 0; i < len(ss) && i < TopPackagesNumber; i++ {
-
-		sortedMap[ss[i]] = &imageprinter.Package{
-			Score:   pkgScores[ss[i]].Score,
-			Version: pkgScores[ss[i]].Version,
-		}
-	}
-
-	return sortedMap
-}
-
-func printTopVulnerabilities(writer *os.File, summary imageprinter.ImageScanSummary) {
-	if len(summary.PackageScores) == 0 {
-		return
-	}
-
-	cautils.InfoTextDisplay(writer, "\nMost vulnerable components:\n")
-
-	topVulnerableImages := sortTopVulnerableWorkloads(summary.PackageScores)
-	for k, v := range topVulnerableImages {
-		cautils.SimpleDisplay(writer, "  * %s (%s)\n", k, v.Version)
-	}
-
 	cautils.SimpleDisplay(writer, "\n")
+}
 
-	return
+func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
+	cautils.InfoTextDisplay(writer, "Compliance Score:\n")
+	for _, fw := range frameworks {
+		cautils.SimpleDisplay(writer, "* %s: %.2f%%\n", fw.GetName(), fw.GetComplianceScore())
+	}
+
+	cautils.SimpleDisplay(writer, "View full compliance report by running: $ kubescape scan framework nsa,mitre\n")
+
+	cautils.InfoTextDisplay(writer, "\n")
 }

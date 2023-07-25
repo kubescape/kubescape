@@ -66,7 +66,7 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	utils.PrintInfo(writer, infoToPrintInfo)
 }
 
-func (fp *FrameworkPrinter) PrintCategoriesTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (fp *FrameworkPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
 }
 

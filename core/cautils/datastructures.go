@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -17,6 +18,11 @@ import (
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
 type K8SResources map[string][]string
 type KSResources map[string][]string
+
+type ImageScanData struct {
+	PresenterConfig *models.PresenterConfig
+	Image           string
+}
 
 type ScanTypes string
 
@@ -48,6 +54,7 @@ type OPASessionObj struct {
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	OmitRawResources      bool                               // omit raw resources from output
 	ScanType              ScanTypes                          // scan type
+	ResourceIDToImageMap  map[string][]string
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {

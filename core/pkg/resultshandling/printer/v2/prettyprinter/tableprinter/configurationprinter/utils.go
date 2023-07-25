@@ -2,68 +2,70 @@ package configurationprinter
 
 import (
 	"fmt"
-	"io"
+	"strings"
 
-	"github.com/fatih/color"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/olekukonko/tablewriter"
 )
 
-func GetSeverityColumn(controlSummary reportsummary.IControlSummary) string {
-	return color.New(utils.GetColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
-}
+// returns map of category ID to category controls (name and controls)
+// controls will be on the map only if the are in the mapClusterControlsToCategories map
+func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapDisplayCtrlIDToCategory map[string]string) map[string]CategoryControls {
 
-type InfoStars struct {
-	Stars string
-	Info  string
-}
+	mapCategoriesToCtrlSummary := map[string][]reportsummary.IControlSummary{}
+	// helper map to get the category name
+	mapCategoryIDToName := make(map[string]string)
 
-func ControlCountersForSummary(counters reportsummary.ICounters) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
-}
+	for i := range controlSummaries {
+		// check if we need to print this control
+		category, ok := mapDisplayCtrlIDToCategory[controlSummaries[i].GetID()]
+		if !ok {
+			continue
+		}
 
-func getCommonColumnsAlignments() []int {
-	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT}
-}
-
-func mapCategoryToControlSummaries(summaryDetails reportsummary.SummaryDetails, sortedControlIDs [][]string) map[string][]reportsummary.IControlSummary {
-	categories := map[string][]reportsummary.IControlSummary{}
-
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
-			ctrl := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c)
-			if ctrl.GetStatus().Status() == apis.StatusPassed {
-				continue
+		// the category on the map can be either category or subcategory, so we need to check both
+		if controlSummaries[i].GetCategory().ID == category {
+			if _, ok := mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID]; !ok {
+				mapCategoryIDToName[controlSummaries[i].GetCategory().ID] = controlSummaries[i].GetCategory().Name // set category name
+				mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID] = []reportsummary.IControlSummary{}
 			}
-			for j := range ctrl.GetCategories() {
-				categories[ctrl.GetCategories()[j]] = append(categories[ctrl.GetCategories()[j]], ctrl)
+			mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID] = append(mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID], controlSummaries[i])
+			continue
+		}
+
+		if controlSummaries[i].GetCategory().SubCategory.ID == category {
+			if _, ok := mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().SubCategory.ID]; !ok {
+				mapCategoryIDToName[controlSummaries[i].GetCategory().SubCategory.ID] = controlSummaries[i].GetCategory().SubCategory.Name // set category name
+				mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().SubCategory.ID] = []reportsummary.IControlSummary{}
 			}
+			mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().SubCategory.ID] = append(mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().SubCategory.ID], controlSummaries[i])
+			continue
 		}
 	}
 
-	return categories
+	mapCategoryToControls := buildCategoryToControlsMap(mapCategoriesToCtrlSummary, mapCategoryIDToName)
+
+	return mapCategoryToControls
 }
 
-func getTableWriter(writer io.Writer, headers []string, columnAligments []int) *tablewriter.Table {
-	table := tablewriter.NewWriter(writer)
-	table.SetHeader(headers)
-	table.SetHeaderLine(true)
-	table.SetColumnAlignment(columnAligments)
-	return table
-}
-
-func renderCategoriesTable(mapCategoryToRows map[string][][]string, writer io.Writer, table *tablewriter.Table) {
-	for category, rows := range mapCategoryToRows {
-		cautils.InfoTextDisplay(writer, "\n"+category+"\n")
-
-		table.ClearRows()
-		table.AppendBulk(rows)
-
-		table.Render()
-
-		cautils.SimpleDisplay(writer, "\n")
+// returns map of category ID to category controls (name and controls)
+func buildCategoryToControlsMap(mapCategoriesToCtrlSummary map[string][]reportsummary.IControlSummary, mapCategoryIDToName map[string]string) map[string]CategoryControls {
+	mapCategoryToControls := make(map[string]CategoryControls)
+	for categoryID, ctrls := range mapCategoriesToCtrlSummary {
+		categoryName := mapCategoryIDToName[categoryID]
+		mapCategoryToControls[categoryID] = CategoryControls{
+			CategoryName:     categoryName,
+			controlSummaries: ctrls,
+		}
 	}
+	return mapCategoryToControls
+}
+
+// returns doc link for control
+func getDocsForControl(controlSummary reportsummary.IControlSummary) string {
+	return fmt.Sprintf("%s/%s", docsPrefix, strings.ToLower(controlSummary.GetID()))
+}
+
+// returns run command with verbose for control
+func getRunCommandForControl(controlSummary reportsummary.IControlSummary) string {
+	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
 }

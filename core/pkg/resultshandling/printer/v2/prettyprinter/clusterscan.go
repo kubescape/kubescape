@@ -30,7 +30,7 @@ func (cp *ClusterPrinter) PrintImageScanning(summary *imageprinter.ImageScanSumm
 
 func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
-	cp.categoriesTablePrinter.PrintCategoriesTable(cp.writer, summaryDetails, sortedControlIDs)
+	cp.categoriesTablePrinter.PrintCategoriesTables(cp.writer, summaryDetails, sortedControlIDs)
 
 	printComplianceScore(cp.writer, filterComplianceFrameworks(summaryDetails.ListFrameworks()))
 
@@ -44,6 +44,13 @@ func (cp *ClusterPrinter) PrintNextSteps() {
 	printNextSteps(cp.writer, cp.getNextSteps())
 }
 
+func (cp *ClusterPrinter) getNextSteps() []string {
+	return []string{
+		complianceScanRunText,
+		installHelmText,
+	}
+}
+
 func (cp *ClusterPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDetails) {
 	cautils.InfoTextDisplay(cp.writer, getTopWorkloadsTitle(len(summaryDetails.TopWorkloadsByScore)))
 
@@ -54,16 +61,11 @@ func (cp *ClusterPrinter) printTopWorkloads(summaryDetails *reportsummary.Summar
 		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s - '%s'\n", i+1, ns, name, kind, cp.getWorkloadScanCommand(ns, kind, name)))
 	}
 
+	cautils.SimpleDisplay(cp.writer, "Read more about the most risky workloads here: https://docs.io/most-risky-workloads\n")
+
 	cautils.InfoTextDisplay(cp.writer, "\n")
 }
 
 func (cp *ClusterPrinter) getWorkloadScanCommand(namespace, kind, name string) string {
 	return fmt.Sprintf("$ kubescape scan workload %s/%s/%s", namespace, kind, name)
-}
-
-func (cp *ClusterPrinter) getNextSteps() []string {
-	return []string{
-		complianceScanRunText,
-		installHelmText,
-	}
 }

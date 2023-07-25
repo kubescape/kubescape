@@ -32,9 +32,15 @@ func NewFileResourceHandler(_ context.Context, inputPatterns []string, workloadI
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient, isImageScan bool) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, map[string][]string, error) {
+
+	//
+	// build resources map
+	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
+	k8sResources := setK8sResourceMap(sessionObj.Policies)
 	allResources := map[string]workloadinterface.IMetadata{}
-	ksResources := cautils.KSResources{}
+	ksResources := &cautils.KSResources{}
+	resourceIDToImages := make(map[string][]string, 0)
 
 	if len(fileHandler.inputPatterns) == 0 {
 		return nil, nil, nil, nil, fmt.Errorf("missing input")
@@ -51,6 +57,16 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		}
 		if len(workloads) == 0 {
 			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", fileHandler.inputPatterns[path]))
+		}
+
+		if isImageScan {
+			for _, workload := range workloads {
+				wlObj := workloadinterface.NewWorkloadObj(workload.GetObject())
+				containers, _ := wlObj.GetContainers()
+				for _, container := range containers {
+					resourceIDToImages[workload.GetID()] = append(resourceIDToImages[workload.GetID()], container.Image)
+				}
+			}
 		}
 
 		for k, v := range workloadIDToSource {
@@ -124,6 +140,7 @@ func (fileHandler *FileResourceHandler) findWorkloadToScan(mappedResources map[s
 	}
 
 	return wls[0], nil
+	// return k8sResources, allResources, ksResources, resourceIDToImages, nil
 }
 
 func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
@@ -238,6 +255,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		}
 
 		workloadSource := reporthandling.Source{
+			Path:          path,
 			RelativePath:  source,
 			FileType:      reporthandling.SourceTypeHelmChart,
 			HelmChartName: helmChartName,

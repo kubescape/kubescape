@@ -55,7 +55,7 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 func (pp *PrometheusPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
-func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 
 	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
 

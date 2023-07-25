@@ -21,7 +21,7 @@ func (silentPrinter *SilentPrinter) PrintNextSteps() {
 func (silentPrinter *SilentPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
-func (silentPrinter *SilentPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+func (silentPrinter *SilentPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 }
 
 func (silentPrinter *SilentPrinter) SetWriter(ctx context.Context, outputFile string) {

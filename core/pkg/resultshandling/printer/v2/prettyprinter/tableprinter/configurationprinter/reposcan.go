@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -25,58 +26,58 @@ func (rp *RepoPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *repor
 
 }
 
-func (rp *RepoPrinter) PrintCategoriesTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	headers := rp.getCategoriesTableHeaders()
-	columnAligments := rp.getCategoriesColumnsAlignments()
+func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
-	table := getTableWriter(writer, headers, columnAligments)
+	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
 
-	mapCategoryToRows := rp.generateRows(summaryDetails, sortedControlIDs)
+	for _, id := range categoriesDisplayOrder {
+		categoryControl, ok := categoriesToCategoryControls[id]
+		if !ok {
+			continue
+		}
 
-	renderCategoriesTable(mapCategoryToRows, writer, table)
+		infoToPrintInfo := utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries)
+
+		rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, infoToPrintInfo)
+	}
 
 }
 
-func (rp *RepoPrinter) generateRows(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) map[string][][]string {
-	mapCategoryToRows := make(map[string][][]string)
+func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
+	headers, columnAligments := initCategoryTableData(categoryType)
 
-	categoriesToControlSummariesMap := mapCategoryToControlSummaries(*summaryDetails, sortedControlIDs)
+	table := getCategoryTableWriter(writer, headers, columnAligments)
 
-	for category, ctrls := range categoriesToControlSummariesMap {
-		for i := range ctrls {
-			row := rp.generateCategoriesRow(ctrls[i], rp.inputPatterns)
-			if len(row) > 0 {
-				mapCategoryToRows[category] = append(mapCategoryToRows[category], row)
-			}
+	var rows [][]string
+	for _, ctrls := range controlSummaries {
+		var row []string
+		if categoryType == TypeCounting {
+			row = rp.generateCountingCategoryRow(ctrls, rp.inputPatterns)
+		} else {
+			row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
+		}
+		if len(row) > 0 {
+			rows = append(rows, row)
 		}
 	}
 
-	return mapCategoryToRows
-}
-
-func (rp *RepoPrinter) generateCategoriesRow(controlSummary reportsummary.IControlSummary, inputPatterns []string) []string {
-	row := make([]string, 4)
-	row[categoriesColumnSeverity] = GetSeverityColumn(controlSummary)
-
-	if len(controlSummary.GetName()) > 50 {
-		row[categoriesColumnName] = controlSummary.GetName()[:50] + "..."
-	} else {
-		row[categoriesColumnName] = controlSummary.GetName()
+	if len(rows) == 0 {
+		return
 	}
 
-	setCategoryStatusRow(controlSummary, row)
-
-	row[categoriesColumnNextSteps] = rp.generateTableNextSteps(controlSummary, inputPatterns)
-
-	return row
+	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
 }
 
-func (rp *RepoPrinter) getCategoriesTableHeaders() []string {
-	return getCommonCategoriesTableHeaders()
-}
+func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary, inputPatterns []string) []string {
+	rows := make([]string, 3)
 
-func (rp *RepoPrinter) getCategoriesColumnsAlignments() []int {
-	return getCommonColumnsAlignments()
+	rows[0] = controlSummary.GetName()
+
+	rows[1] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
+
+	rows[2] = rp.generateTableNextSteps(controlSummary, inputPatterns)
+
+	return rows
 }
 
 func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source reporthandling.Source) string {

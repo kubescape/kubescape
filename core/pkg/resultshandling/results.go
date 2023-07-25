@@ -21,7 +21,7 @@ type ResultsHandler struct {
 	UiPrinter     printer.IPrinter
 	ScanData      *cautils.OPASessionObj
 	PrinterObjs   []printer.IPrinter
-	ImageScanData *models.PresenterConfig
+	ImageScanData []cautils.ImageScanData
 }
 
 func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter, imageScanData *models.PresenterConfig) *ResultsHandler {
@@ -29,7 +29,7 @@ func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrin
 		ReporterObj:   reporterObj,
 		PrinterObjs:   printerObjs,
 		UiPrinter:     uiPrinter,
-		ImageScanData: imageScanData,
+		ImageScanData: make([]cautils.ImageScanData, 0),
 	}
 }
 

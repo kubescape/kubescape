@@ -8,7 +8,9 @@ import (
 )
 
 // NativeFrameworks identifies all pre-built, native frameworks.
-var NativeFrameworks = []string{"security", "mitre", "nsa"}
+var NativeFrameworks = []string{"clusterscan", "mitre", "nsa"}
+
+// var NativeFrameworks = []string{"clusterscan"}
 
 type (
 	// TenantResponse holds the credentials for a tenant.

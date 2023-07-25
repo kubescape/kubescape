@@ -3,8 +3,10 @@ package configurationprinter
 import (
 	"fmt"
 
+	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
@@ -17,6 +19,14 @@ const (
 	summaryColumnComplianceScore = iota
 	_summaryRowLen               = iota
 )
+
+func ControlCountersForSummary(counters reportsummary.ICounters) string {
+	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
+}
+
+func GetSeverityColumn(controlSummary reportsummary.IControlSummary) string {
+	return color.New(utils.GetColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
+}
 
 func GetControlTableHeaders() []string {
 	headers := make([]string, _summaryRowLen)

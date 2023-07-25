@@ -117,7 +117,7 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 
 }
 
-func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
 		panic(err)

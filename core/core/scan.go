@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"go.opentelemetry.io/otel"
 
@@ -206,6 +207,9 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 		spanPrioritization.End()
 	}
 
+	if scanInfo.ScanImages && len(scanData.ResourceIDToImageMap) > 0 {
+		scanImages(scanInfo, scanData, ctx, resultsHandling)
+	}
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
 
@@ -214,6 +218,35 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	// }
 
 	return resultsHandling, nil
+}
+
+func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler) {
+	logger.L().Ctx(ctx).Info("Scanning images")
+
+	dbCfg, _ := imagescan.NewDefaultDBConfig()
+	svc := imagescan.NewScanService(dbCfg)
+
+	for _, imgs := range scanData.ResourceIDToImageMap {
+		for _, img := range imgs {
+			scanSingleImage(ctx, img, svc, resultsHandling)
+		}
+	}
+	logger.L().Ctx(ctx).Success("Finished scanning images")
+}
+
+func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) {
+	logger.L().Ctx(ctx).Debug(fmt.Sprintf("Scanning image: %s", img))
+
+	scanResults, err := svc.Scan(ctx, img)
+	if err != nil {
+		logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to scan image: %s", img), helpers.Error(err))
+		return
+	}
+
+	resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, cautils.ImageScanData{
+		Image:           img,
+		PresenterConfig: scanResults,
+	})
 }
 
 func isPrioritizationScanType(scanType cautils.ScanTypes) bool {

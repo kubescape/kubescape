@@ -93,7 +93,7 @@ func (pp *PdfPrinter) PrintNextSteps() {
 
 }
 
-func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)

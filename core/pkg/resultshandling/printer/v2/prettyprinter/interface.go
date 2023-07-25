@@ -6,7 +6,7 @@ import (
 )
 
 type MainPrinter interface {
-	PrintConfigurationsScanning(*reportsummary.SummaryDetails, [][]string)
-	PrintImageScanning(*imageprinter.ImageScanSummary)
+	PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControls [][]string)
+	PrintImageScanning(imageScanSummary *imageprinter.ImageScanSummary)
 	PrintNextSteps()
 }

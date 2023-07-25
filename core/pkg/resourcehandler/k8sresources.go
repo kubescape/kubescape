@@ -87,7 +87,29 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, namespace, labels)
 	if err != nil {
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
+		return k8sResourcesMap, allResources, ksResourceMap, nil, err
+	}
+
+	resourceIDToImages := make(map[string][]string, 0)
+	if isImageScan {
+		for _, workload := range allResources {
+			wlObj := workloadinterface.NewWorkloadObj(workload.GetObject())
+			containers, _ := wlObj.GetContainers()
+			for _, container := range containers {
+				resourceIDToImages[workload.GetID()] = append(resourceIDToImages[workload.GetID()], container.Image)
+			}
+		}
+	}
+
+	resourceIDToImages := make(map[string][]string, 0)
+	if isImageScan {
+		for _, workload := range allResources {
+			wlObj := workloadinterface.NewWorkloadObj(workload.GetObject())
+			containers, _ := wlObj.GetContainers()
+			for _, container := range containers {
+				resourceIDToImages[workload.GetID()] = append(resourceIDToImages[workload.GetID()], container.Image)
+			}
+		}
 	}
 
 	// add workload to k8s resources map (for single workload scan)
@@ -163,6 +185,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
+	return k8sResourcesMap, allResources, ksResourceMap, resourceIDToImages, nil
 }
 
 func (k8sHandler *K8sResourceHandler) findWorkloadToScan(workloadIdentifier *cautils.WorkloadIdentifier) (workloadinterface.IWorkload, error) {
@@ -349,6 +372,8 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		}
 	}
 	return k8sResources, allResources, errs
+
+	return errs
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {

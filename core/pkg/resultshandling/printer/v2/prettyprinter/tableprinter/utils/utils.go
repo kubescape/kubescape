@@ -16,6 +16,25 @@ type InfoStars struct {
 	Info  string
 }
 
+func MapInfoToPrintInfoFromIface(ctrls []reportsummary.IControlSummary) []InfoStars {
+	infoToPrintInfo := []InfoStars{}
+	infoToPrintInfoMap := map[string]interface{}{}
+	starCount := "*"
+	for _, ctrl := range ctrls {
+		if ctrl.GetStatus().IsSkipped() && ctrl.GetStatus().Info() != "" {
+			if _, ok := infoToPrintInfoMap[ctrl.GetStatus().Info()]; !ok {
+				infoToPrintInfo = append(infoToPrintInfo, InfoStars{
+					Info:  ctrl.GetStatus().Info(),
+					Stars: starCount,
+				})
+				starCount += "*"
+				infoToPrintInfoMap[ctrl.GetStatus().Info()] = nil
+			}
+		}
+	}
+	return infoToPrintInfo
+}
+
 func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
 	infoToPrintInfo := []InfoStars{}
 	infoToPrintInfoMap := map[string]interface{}{}

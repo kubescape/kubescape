@@ -1,8 +1,12 @@
 package printer
 
 import (
+	v5 "github.com/anchore/grype/grype/db/v5"
+	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -81,4 +85,73 @@ func finalizeResources(results []resourcesresults.Result, allResources map[strin
 		}
 	}
 	return resources
+}
+
+func insertSeveritiesSummariesIntoMap(mapSeverityToSummary map[string]*imageprinter.SeveritySummary, imageScanSummary imageprinter.ImageScanSummary) {
+	for k, v := range mapSeverityToSummary {
+		severitySummary, ok := imageScanSummary.MapsSeverityToSummary[k]
+		if !ok {
+			imageScanSummary.MapsSeverityToSummary[k] = v
+			continue
+		}
+		severitySummary.NumberOfCVEs = severitySummary.NumberOfCVEs + v.NumberOfCVEs
+		severitySummary.NumberOfFixableCVEs = severitySummary.NumberOfFixableCVEs + v.NumberOfFixableCVEs
+		imageScanSummary.MapsSeverityToSummary[k] = severitySummary
+	}
+}
+
+func insertPackageScoresIntoMap(mapPackageNameToScore map[string]*imageprinter.PackageScore, imageScanSummary imageprinter.ImageScanSummary) {
+	for k, v := range mapPackageNameToScore {
+		pkgScore, ok := imageScanSummary.PackageScores[k]
+		if !ok {
+			imageScanSummary.PackageScores[k] = v
+			continue
+		}
+		pkgScore.Score = pkgScore.Score + v.Score
+		imageScanSummary.PackageScores[k] = pkgScore
+	}
+}
+
+func extractSeverityToSummaryMap(cves []imageprinter.CVE) map[string]*imageprinter.SeveritySummary {
+	mapSeverityToSummary := map[string]*imageprinter.SeveritySummary{}
+	for _, cve := range cves {
+		if _, ok := mapSeverityToSummary[cve.Severity]; !ok {
+			mapSeverityToSummary[cve.Severity] = &imageprinter.SeveritySummary{}
+		}
+		mapSeverityToSummary[cve.Severity].NumberOfCVEs = mapSeverityToSummary[cve.Severity].NumberOfCVEs + 1
+		if cve.FixedState == string(v5.FixedState) {
+			mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs = mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs + 1
+		}
+	}
+	return mapSeverityToSummary
+}
+
+func extractPkgNameToScore(doc models.Document) map[string]*imageprinter.PackageScore {
+	mapPackageNameToScore := make(map[string]*imageprinter.PackageScore, 0)
+	for _, cve := range doc.Matches {
+		if _, ok := mapPackageNameToScore[cve.Artifact.Name]; !ok {
+			mapPackageNameToScore[cve.Artifact.Name] = &imageprinter.PackageScore{
+				Score: 0,
+			}
+		}
+		mapPackageNameToScore[cve.Artifact.Name].Score = mapPackageNameToScore[cve.Artifact.Name].Score + utils.ImageSeverityToInt(cve.Vulnerability.Severity)
+		mapPackageNameToScore[cve.Artifact.Name].Version = cve.Artifact.Version
+	}
+	return mapPackageNameToScore
+}
+
+func extractCVEs(doc models.Document) []imageprinter.CVE {
+	cves := []imageprinter.CVE{}
+	for _, match := range doc.Matches {
+		cve := imageprinter.CVE{
+			ID:          match.Vulnerability.ID,
+			Severity:    match.Vulnerability.Severity,
+			Package:     match.Artifact.Name,
+			Version:     match.Artifact.Version,
+			FixVersions: match.Vulnerability.Fix.Versions,
+			FixedState:  match.Vulnerability.Fix.State,
+		}
+		cves = append(cves, cve)
+	}
+	return cves
 }

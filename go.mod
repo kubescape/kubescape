@@ -2,6 +2,8 @@ module github.com/kubescape/kubescape/v2
 
 go 1.20
 
+replace github.com/kubescape/opa-utils => github.com/kubescape/opa-utils v0.0.255-0.20230720064723-b84bab720db2
+
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
 	github.com/anchore/grype v0.64.2

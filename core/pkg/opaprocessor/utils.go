@@ -38,7 +38,7 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 					ScoreFactor: frameworks[i].Controls[j].BaseScore,
 					Description: frameworks[i].Controls[j].Description,
 					Remediation: frameworks[i].Controls[j].Remediation,
-					Categories:  frameworks[i].Controls[j].Categories,
+					Category:    frameworks[i].Controls[j].Category,
 				}
 				if frameworks[i].Controls[j].GetActionRequiredAttribute() == string(apis.SubStatusManualReview) {
 					c.Status = apis.StatusSkipped

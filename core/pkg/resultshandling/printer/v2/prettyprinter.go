@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/enescakir/emoji"
 	logger "github.com/kubescape/go-logger"
@@ -18,7 +17,6 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -72,74 +70,39 @@ func (pp *PrettyPrinter) SetMainPrinter() {
 	}
 }
 
-func (pp *PrettyPrinter) convertToImageScanSummary(presenterConfig *models.PresenterConfig) (*imageprinter.ImageScanSummary, error) {
-	doc, err := models.NewDocument(presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
-
-	if err != nil {
-		return nil, err
+// convertToImageScanSummary takes a list of image scan data and converts it to a single image scan summary
+func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.ImageScanData) (*imageprinter.ImageScanSummary, error) {
+	imageScanSummary := imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
 	}
 
-	cves := extractCVEs(doc)
+	for _, imageScan := range imageScanData {
+		imageScanSummary.Images = append(imageScanSummary.Images, imageScan.Image)
 
-	mapPackageNameToScore := extractPkgNameToScore(doc)
+		presenterConfig := imageScan.PresenterConfig
+		doc, err := models.NewDocument(presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
+		if err != nil {
+			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScan.Image), helpers.Error(err))
+			continue
+		}
 
-	mapSeverityToSummary := extractSeverityToSummaryMap(cves)
+		cves := extractCVEs(doc)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
 
-	imageScanSummary := imageprinter.ImageScanSummary{
-		CVEs:                  cves,
-		MapsSeverityToSummary: mapSeverityToSummary,
-		PackageScores:         mapPackageNameToScore,
+		mapPackageNameToScore := extractPkgNameToScore(doc)
+		insertPackageScoresIntoMap(mapPackageNameToScore, imageScanSummary)
+
+		mapSeverityToSummary := extractSeverityToSummaryMap(cves)
+		insertSeveritiesSummariesIntoMap(mapSeverityToSummary, imageScanSummary)
 	}
 
 	return &imageScanSummary, nil
 }
 
-func extractSeverityToSummaryMap(cves []imageprinter.CVE) map[string]*imageprinter.SeveritySummary {
-	mapSeverityToSummary := map[string]*imageprinter.SeveritySummary{}
-	for _, cve := range cves {
-		if _, ok := mapSeverityToSummary[cve.Severity]; !ok {
-			mapSeverityToSummary[cve.Severity] = &imageprinter.SeveritySummary{}
-		}
-		mapSeverityToSummary[cve.Severity].NumberOfCVEs = mapSeverityToSummary[cve.Severity].NumberOfCVEs + 1
-		if cve.FixedState == string(v5.FixedState) {
-			mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs = mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs + 1
-		}
-	}
-	return mapSeverityToSummary
-}
-
-func extractPkgNameToScore(doc models.Document) map[string]*imageprinter.Package {
-	mapPackageNameToScore := make(map[string]*imageprinter.Package, 0)
-	for _, cve := range doc.Matches {
-		if _, ok := mapPackageNameToScore[cve.Artifact.Name]; !ok {
-			mapPackageNameToScore[cve.Artifact.Name] = &imageprinter.Package{
-				Score: 0,
-			}
-		}
-		mapPackageNameToScore[cve.Artifact.Name].Score = mapPackageNameToScore[cve.Artifact.Name].Score + utils.ImageSeverityToInt(cve.Vulnerability.Severity)
-		mapPackageNameToScore[cve.Artifact.Name].Version = cve.Artifact.Version
-	}
-	return mapPackageNameToScore
-}
-
-func extractCVEs(doc models.Document) []imageprinter.CVE {
-	cves := []imageprinter.CVE{}
-	for _, match := range doc.Matches {
-		cve := imageprinter.CVE{
-			ID:          match.Vulnerability.ID,
-			Severity:    match.Vulnerability.Severity,
-			Package:     match.Artifact.Name,
-			Version:     match.Artifact.Version,
-			FixVersions: match.Vulnerability.Fix.Versions,
-			FixedState:  match.Vulnerability.Fix.State,
-		}
-		cves = append(cves, cve)
-	}
-	return cves
-}
-
-func (pp *PrettyPrinter) PrintImageScan(ctx context.Context, presenterConfig *models.PresenterConfig) {
-	imageScanSummary, err := pp.convertToImageScanSummary(presenterConfig)
+func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
+	imageScanSummary, err := pp.convertToImageScanSummary(imageScanData)
 	if err != nil {
 		logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
 		return
@@ -147,7 +110,7 @@ func (pp *PrettyPrinter) PrintImageScan(ctx context.Context, presenterConfig *mo
 	pp.mainPrinter.PrintImageScanning(imageScanSummary)
 }
 
-func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData *models.PresenterConfig) {
+func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj != nil {
 		fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
 
@@ -173,8 +136,8 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 		pp.printAttackTracks(opaSessionObj)
 	}
 
-	if imageScanData != nil {
-		pp.PrintImageScan(context.Background(), imageScanData)
+	if len(imageScanData) > 0 {
+		pp.PrintImageScan(imageScanData)
 	}
 }
 

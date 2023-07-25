@@ -22,12 +22,12 @@ func NewWorkloadPrinter(writer *os.File) *WorkloadPrinter {
 
 var _ MainPrinter = &WorkloadPrinter{}
 
-func (wp *WorkloadPrinter) PrintImageScanning(*imageprinter.ImageScanSummary) {
+func (wp *WorkloadPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
 }
 
 func (wp *WorkloadPrinter) PrintNextSteps() {}
 
 func (wp *WorkloadPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	wp.categoriesTablePrinter.PrintCategoriesTable(wp.writer, summaryDetails, sortedControlIDs)
+	wp.categoriesTablePrinter.PrintCategoriesTables(wp.writer, summaryDetails, sortedControlIDs)
 
 }
