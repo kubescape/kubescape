@@ -18,7 +18,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.13
-	github.com/kubescape/k8s-interface v0.0.132
+	github.com/kubescape/k8s-interface v0.0.132-0.20230725092258-8716bd29a3b9
 	github.com/kubescape/opa-utils v0.0.257
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.289-rc.0
