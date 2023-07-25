@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -101,7 +101,7 @@ const (
 type PolicyIdentifier struct {
 	Identifier  string                        // policy Identifier e.g. c-0012 for control, nsa,mitre for frameworks
 	Kind        apisv1.NotificationPolicyKind // policy kind e.g. Framework,Control,Rule
-	Designators armotypes.PortalDesignator
+	Designators identifiers.PortalDesignator
 }
 
 type ScanInfo struct {

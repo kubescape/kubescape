@@ -2,12 +2,9 @@ module github.com/kubescape/kubescape/v2
 
 go 1.20
 
-// replace github.com/kubescape/regolibrary => /home/raziel/armo/go/src/regolibrary
-// replace github.com/kubescape/opa-utils => /home/raziel/armo/go/src/opa-utils
-
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
-	github.com/armosec/armoapi-go v0.0.202
+	github.com/armosec/armoapi-go v0.0.207
 	github.com/armosec/utils-go v0.0.14
 	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/briandowns/spinner v1.18.1
@@ -22,7 +19,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.132
-	github.com/kubescape/opa-utils v0.0.254-0.20230719084904-0b8953a7ceb6
+	github.com/kubescape/opa-utils v0.0.257
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.289-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -104,6 +101,7 @@ require (
 	github.com/alibabacloud-go/tea-utils v1.4.4 // indirect
 	github.com/alibabacloud-go/tea-xml v1.1.2 // indirect
 	github.com/aliyun/credentials-go v1.2.3 // indirect
+	github.com/armosec/gojay v1.2.15 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20210307081110-f21760c49a8d // indirect
 	github.com/aws/aws-sdk-go v1.44.114 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.17.3 // indirect
