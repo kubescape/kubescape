@@ -43,6 +43,10 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return fmt.Errorf("usage: <kind>/<name>")
 			}
 
+			if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
+				return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
+			}
+
 			wlIdentifier := strings.Split(args[0], "/")
 			if len(wlIdentifier) != 2 || wlIdentifier[0] == "" || wlIdentifier[1] == "" {
 				return fmt.Errorf("usage: <kind>/<name>")
@@ -66,11 +70,16 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			}
 
 			scanInfo.ScanAll = true
+			scanInfo.ScanType = cautils.ScanTypeWorkload
+			scanInfo.ScanImages = true
 
 			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)
-			print(results)
 			if err != nil {
+				logger.L().Fatal(err.Error())
+			}
+
+			if err = results.HandleResults(ctx); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 
@@ -78,6 +87,8 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		},
 	}
 	workloadCmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
+	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
+	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart.")
 
 	return workloadCmd
 }

@@ -142,6 +142,9 @@ type ScanInfo struct {
 	PrintAttackTree       bool                // true if print attack tree
 	WorkloadIdentifier    *WorkloadIdentifier // workload identifier for workload scan
 	ScanType              ScanTypes
+	ScanImages            bool
+	ChartPath             string
+	FilePath              string
 }
 
 type Getters struct {

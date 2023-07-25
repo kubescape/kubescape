@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"context"
+	"sort"
 
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/armosec/armoapi-go/armotypes"
@@ -31,6 +32,7 @@ const (
 	ScanTypeCluster    ScanTypes = "cluster"
 	ScanTypeRepo       ScanTypes = "repo"
 	ScanTypeImage      ScanTypes = "image"
+	ScanTypeWorkload   ScanTypes = "workload"
 )
 
 type OPASessionObj struct {
@@ -77,13 +79,26 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 func (sessionObj *OPASessionObj) SetTopWorkloads() {
 	count := 0
 
-	for key := range sessionObj.ResourcesPrioritized {
-		if count >= TopWorkloadsNumber {
+	topWorkloadsSorted := make([]prioritization.PrioritizedResource, 0)
+
+	for _, wl := range sessionObj.ResourcesPrioritized {
+		topWorkloadsSorted = append(topWorkloadsSorted, wl)
+	}
+
+	sort.Slice(topWorkloadsSorted, func(i, j int) bool {
+		if topWorkloadsSorted[i].Score == topWorkloadsSorted[j].Score {
+			return topWorkloadsSorted[i].ResourceID < topWorkloadsSorted[j].ResourceID
+		}
+		return topWorkloadsSorted[i].Score > topWorkloadsSorted[j].Score
+	})
+
+	for i := 0; i < TopWorkloadsNumber; i++ {
+		if i >= len(topWorkloadsSorted) {
 			break
 		}
 		wlObj := reportsummary.TopWorkload{
-			Workload:       sessionObj.AllResources[key],
-			ResourceSource: sessionObj.ResourceSource[key],
+			Workload:       sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
+			ResourceSource: sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID],
 		}
 		sessionObj.Report.SummaryDetails.TopWorkloadsByScore = append(sessionObj.Report.SummaryDetails.TopWorkloadsByScore, wlObj)
 		count++

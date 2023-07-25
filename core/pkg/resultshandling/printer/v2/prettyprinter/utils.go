@@ -18,7 +18,7 @@ const (
 	linkToHelm            = "https://github.com/kubescape/helm-charts"
 	linkToCICDSetup       = "https://hub.armosec.io/docs/integrations"
 	complianceScanRunText = "Run a compliance scan: '$ kubescape scan framework nsa,mitre'"
-	clusterScanRunText    = "Run a cluster scan: '$ kubescape scan cluster'"
+	clusterScanRunText    = "Run a cluster scan: '$ kubescape scan'"
 )
 
 var (
@@ -153,6 +153,8 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 			cautils.SimpleDisplay(writer, "  * %d %s\n", mapSeverityTSummary[k].NumberOfCVEs, k)
 		}
 	}
+
+	cautils.SimpleDisplay(writer, "\n")
 }
 
 func printNextSteps(writer *os.File, nextSteps []string) {

@@ -60,7 +60,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, designator *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, designator *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, map[string][]string, error) {
 	// get k8s resources
 	logger.L().Info("Accessing Kubernetes objects")
 
@@ -68,7 +68,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	workload, err := k8sHandler.findWorkloadToScan(k8sHandler.workloadIdentifier)
 	if err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 
 	resourceToControl := make(map[string][]string)
@@ -87,22 +87,11 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, namespace, labels)
 	if err != nil {
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, ksResourceMap, nil, err
+		return k8sResourcesMap, allResources, ksResourceMap, nil, nil, err
 	}
 
 	resourceIDToImages := make(map[string][]string, 0)
-	if isImageScan {
-		for _, workload := range allResources {
-			wlObj := workloadinterface.NewWorkloadObj(workload.GetObject())
-			containers, _ := wlObj.GetContainers()
-			for _, container := range containers {
-				resourceIDToImages[workload.GetID()] = append(resourceIDToImages[workload.GetID()], container.Image)
-			}
-		}
-	}
-
-	resourceIDToImages := make(map[string][]string, 0)
-	if isImageScan {
+	if scanInfo.ScanImages {
 		for _, workload := range allResources {
 			wlObj := workloadinterface.NewWorkloadObj(workload.GetObject())
 			containers, _ := wlObj.GetContainers()
@@ -184,8 +173,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		}
 	}
 
-	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
-	return k8sResourcesMap, allResources, ksResourceMap, resourceIDToImages, nil
+	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, resourceIDToImages, nil
 }
 
 func (k8sHandler *K8sResourceHandler) findWorkloadToScan(workloadIdentifier *cautils.WorkloadIdentifier) (workloadinterface.IWorkload, error) {
@@ -373,7 +361,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	}
 	return k8sResources, allResources, errs
 
-	return errs
+	// return errs
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {

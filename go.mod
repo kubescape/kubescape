@@ -2,8 +2,6 @@ module github.com/kubescape/kubescape/v2
 
 go 1.20
 
-replace github.com/kubescape/opa-utils => github.com/kubescape/opa-utils v0.0.255-0.20230720064723-b84bab720db2
-
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
 	github.com/anchore/grype v0.64.2
@@ -449,8 +447,10 @@ replace github.com/libgit2/git2go/v33 => ./git2go
 replace github.com/kubescape/opa-utils => /Users/danielgrunberger/armo/opa-utils
 
 replace (
+
 	// TODO(vladklokun): Since later versions (e.g. v0.40.0) that get used without the pin introduce weird packaging issues probably due to package renames, pin to last known good.
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.35.0
 
 	google.golang.org/grpc => google.golang.org/grpc v1.54.0
+	gorm.io/gorm => gorm.io/gorm v1.23.10
 )

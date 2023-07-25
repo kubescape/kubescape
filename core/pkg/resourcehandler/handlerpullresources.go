@@ -19,46 +19,8 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// PolicyHandler -
-type PolicyHandler struct {
-	resourceHandler resourcehandler.IResourceHandler
-	// we are listening on this chan in opaprocessor/processorhandler.go/ProcessRulesListener func
-	getters *cautils.Getters
-}
-
-// CreatePolicyHandler Create ws-handler obj
-func NewPolicyHandler(resourceHandler resourcehandler.IResourceHandler) *PolicyHandler {
-	return &PolicyHandler{
-		resourceHandler: resourceHandler,
-	}
-}
-
-func (policyHandler *PolicyHandler) CollectResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.OPASessionObj, error) {
-	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
-
-	// validate notification
-	// TODO
-	policyHandler.getters = &scanInfo.Getters
-
-	// get policies
-	if err := policyHandler.getPolicies(ctx, policyIdentifier, opaSessionObj); err != nil {
-		return opaSessionObj, err
-	}
-
-	err := policyHandler.getResources(ctx, policyIdentifier, opaSessionObj, progressListener, scanInfo.ScanImages)
-	if err != nil {
-		return opaSessionObj, err
-	}
-	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
-		return opaSessionObj, fmt.Errorf("empty list of resources")
-	}
-
-	// update channel
-	return opaSessionObj, nil
-}
-
-func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, isImageScan bool) error {
-	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getResources")
+func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) error {
+	ctx, span := otel.Tracer("").Start(ctx, "resourcehandler.CollectResources")
 	defer span.End()
 	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
 
@@ -67,8 +29,7 @@ func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIden
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
-	resourcesMap, allResources, ksResources, resourceIDToImages, err := policyHandler.resourceHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener, isImageScan)
+	resourcesMap, allResources, ksResources, excludedRulesMap, resourceIDToImages, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener, scanInfo)
 	if err != nil {
 		return err
 	}
@@ -77,11 +38,7 @@ func (policyHandler *PolicyHandler) getResources(ctx context.Context, policyIden
 	opaSessionObj.AllResources = allResources
 	opaSessionObj.KubescapeResource = ksResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
-	opaSessionObj.ArmoResource = ksResources
 	opaSessionObj.ResourceIDToImageMap = resourceIDToImages
-
-	return nil
-}
 
 	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.KubescapeResource == nil || len(opaSessionObj.KubescapeResource) == 0) {
 		return fmt.Errorf("empty list of resources")

@@ -1,7 +1,7 @@
 package containerscan
 
 import (
-	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
 	cautils "github.com/armosec/utils-k8s-go/armometadata"
 )
 
@@ -69,8 +69,8 @@ func (scanresult *ScanResultReport) Summarize() *ElasticContainerScanSummaryResu
 		ListOfDangerousArtifcats: scanresult.ListOfDangerousArtifcats,
 	}
 
-	summary.Cluster = designatorsObj.Attributes[armotypes.AttributeCluster]
-	summary.Namespace = designatorsObj.Attributes[armotypes.AttributeNamespace]
+	summary.Cluster = designatorsObj.Attributes[identifiers.AttributeCluster]
+	summary.Namespace = designatorsObj.Attributes[identifiers.AttributeNamespace]
 
 	imageInfo, e2 := cautils.ImageTagToImageInfo(scanresult.ImgTag)
 	if e2 == nil {

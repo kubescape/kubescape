@@ -96,6 +96,11 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		// scanInfo.HostSensor.SetBool(false)
 		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, scanInfo.WorkloadIdentifier)
 	}
+
+	if scanInfo.WorkloadIdentifier != nil && scanInfo.FilePath != "" {
+		return resourcehandler.NewFileResourceHandler(ctx, []string{scanInfo.FilePath}, scanInfo.WorkloadIdentifier)
+	}
+
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
 	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors, scanInfo.WorkloadIdentifier)

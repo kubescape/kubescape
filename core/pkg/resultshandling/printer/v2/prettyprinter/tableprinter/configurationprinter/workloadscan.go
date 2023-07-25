@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/olekukonko/tablewriter"
 )
 
 type WorkloadPrinter struct {
@@ -23,7 +24,7 @@ func (wp *WorkloadPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *r
 
 func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
-	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
+	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapWorkloadControlsToCategories)
 
 	for _, id := range categoriesDisplayOrder {
 		categoryControl, ok := categoriesToCategoryControls[id]
@@ -38,7 +39,7 @@ func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetail
 }
 
 func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
-	headers, columnAligments := initCategoryTableData(categoryType)
+	headers, columnAligments := wp.initCategoryTableData(categoryType)
 
 	table := getCategoryTableWriter(writer, headers, columnAligments)
 
@@ -60,28 +61,24 @@ func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, catego
 	}
 
 	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
+}
 
+func (wp *WorkloadPrinter) initCategoryTableData(categoryType CategoryType) ([]string, []int) {
+	if categoryType == TypeCounting {
+		return wp.getCategoryCountingTypeHeaders(), wp.getCountingTypeAlignments()
+	}
+	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
 }
 
 func (wp *WorkloadPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary) []string {
 
-	row := make([]string, 3)
+	row := make([]string, 2)
 
 	row[0] = controlSummary.GetName()
 
 	row[1] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 
-	row[2] = wp.generateTableNextSteps(controlSummary)
-
 	return row
-}
-
-func (wp *WorkloadPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary) string {
-	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
-}
-
-func (wp *WorkloadPrinter) getCategoriesTableHeaders() []string {
-	return getCategoryCountingTypeHeaders()
 }
 
 func (wp *WorkloadPrinter) getCategoriesColumnsAlignments() []int {
@@ -90,4 +87,16 @@ func (wp *WorkloadPrinter) getCategoriesColumnsAlignments() []int {
 
 func (wp *WorkloadPrinter) generateNextSteps(controlSummary reportsummary.IControlSummary) string {
 	return fmt.Sprintf("$ kubescape scan wokrload <ns>/<kind>/<name> %s", controlSummary.GetID())
+}
+
+func (wp *WorkloadPrinter) getCategoryCountingTypeHeaders() []string {
+	headers := make([]string, 2)
+	headers[0] = controlNameHeader
+	headers[1] = resourcesHeader
+
+	return headers
+}
+
+func (wp *WorkloadPrinter) getCountingTypeAlignments() []int {
+	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER}
 }

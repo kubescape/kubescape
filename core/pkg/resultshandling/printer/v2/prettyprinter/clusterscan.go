@@ -67,5 +67,5 @@ func (cp *ClusterPrinter) printTopWorkloads(summaryDetails *reportsummary.Summar
 }
 
 func (cp *ClusterPrinter) getWorkloadScanCommand(namespace, kind, name string) string {
-	return fmt.Sprintf("$ kubescape scan workload %s/%s/%s", namespace, kind, name)
+	return fmt.Sprintf("$ kubescape scan workload %s/%s --namespace %s", kind, name, namespace)
 }

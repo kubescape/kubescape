@@ -65,6 +65,8 @@ func (pp *PrettyPrinter) SetMainPrinter() {
 		pp.mainPrinter = prettyprinter.NewRepoPrinter(pp.writer, pp.inputPatterns)
 	case cautils.ScanTypeImage:
 		pp.mainPrinter = prettyprinter.NewImagePrinter(pp.writer, pp.verboseMode)
+	case cautils.ScanTypeWorkload:
+		pp.mainPrinter = prettyprinter.NewWorkloadPrinter(pp.writer)
 	default:
 		pp.mainPrinter = prettyprinter.NewSummaryPrinter(pp.writer, pp.verboseMode)
 	}

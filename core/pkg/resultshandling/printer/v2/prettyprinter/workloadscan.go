@@ -1,8 +1,10 @@
 package prettyprinter
 
 import (
+	"fmt"
 	"os"
 
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -23,9 +25,30 @@ func NewWorkloadPrinter(writer *os.File) *WorkloadPrinter {
 var _ MainPrinter = &WorkloadPrinter{}
 
 func (wp *WorkloadPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
+	wp.printImageScanningSummary(summary)
 }
 
-func (wp *WorkloadPrinter) PrintNextSteps() {}
+func (wp *WorkloadPrinter) printImageScanningSummary(summary *imageprinter.ImageScanSummary) {
+	printImageScanningSummary(wp.writer, *summary, false)
+
+	for _, img := range summary.Images {
+		cautils.InfoTextDisplay(wp.writer, fmt.Sprintf("Receive full report by running: 'kubescape scan image %s\n", img))
+	}
+
+	cautils.InfoTextDisplay(wp.writer, "\n")
+
+}
+
+func (wp *WorkloadPrinter) PrintNextSteps() {
+	printNextSteps(wp.writer, wp.getNextSteps())
+}
+
+func (wp *WorkloadPrinter) getNextSteps() []string {
+	return []string{
+		installHelmText,
+		CICDSetupText,
+	}
+}
 
 func (wp *WorkloadPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 	wp.categoriesTablePrinter.PrintCategoriesTables(wp.writer, summaryDetails, sortedControlIDs)

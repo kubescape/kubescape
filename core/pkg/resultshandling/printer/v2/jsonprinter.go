@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anchore/grype/grype/presenter"
 	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -103,16 +102,16 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, ctx conte
 }
 
 func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
-	presenterConfig, err := presenter.ValidatedConfig("json", "", false)
-	if err != nil {
-		return err
-	}
+	// presenterConfig, err := presenter.ValidatedConfig("json", "", false)
+	// if err != nil {
+	// 	return err
+	// }
 
-	pres := presenter.GetPresenter(presenterConfig, *scanResults)
+	// pres := presenter.GetPresenter(presenterConfig, *scanResults)
 
-	if err = pres.Present(jp.writer); err != nil {
-		return err
-	}
+	// if err = pres.Present(jp.writer); err != nil {
+	// 	return err
+	// }
 	return nil
 }
 
