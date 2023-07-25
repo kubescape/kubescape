@@ -135,8 +135,8 @@ jobs:
         if: matrix.os == 'ubuntu-20.04' && matrix.arch != ''
 
       - name: Install MSYS2 & libgit2 (Windows)
-        shell: cmd
-        run: .\build.bat all
+        shell: pwsh
+        run: .\build.ps1 all
         if: matrix.os == 'windows-latest'
 
       - name: Install pkg-config (macOS)

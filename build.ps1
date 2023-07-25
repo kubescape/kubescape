@@ -30,7 +30,7 @@ function Install {
 
         # Install MSYS
         Write-Host "Installing MSYS2..." -ForegroundColor Cyan
-        Start-Process -Filepath "$PSScriptRoot\temp_install\msys2-x86_64-20220603.exe" -ArgumentList @("install", "--root", "C:\MSYS64", "--confirm-command") -Wait -NoNewWindow
+        Start-Process -Filepath "$PSScriptRoot\temp_install\msys2-x86_64-20220603.exe" -ArgumentList @("install", "--root", "C:\MSYS64", "--confirm-command") -Wait
         Write-Host "MSYS2 install complete" -ForegroundColor Green
 
         # Set PATH
@@ -38,11 +38,11 @@ function Install {
 
         # Install MSYS packages
         Write-Host "Installing MSYS2 packages..." -ForegroundColor Cyan
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "make") -Wait -NoNewWindow
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-cmake") -Wait -NoNewWindow
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-gcc") -Wait -NoNewWindow
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-pkg-config") -Wait -NoNewWindow
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "msys2-w32api-runtime") -Wait -NoNewWindow
+        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "make") -Wait
+        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-cmake") -Wait
+        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-gcc") -Wait
+        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-pkg-config") -Wait
+        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "msys2-w32api-runtime") -Wait
         Write-Host "MSYS2 packages install complete" -ForegroundColor Green
         
         # Remove temp directory
