@@ -2,8 +2,11 @@ package cautils
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestConvertLabelsToString(t *testing.T) {
@@ -31,5 +34,104 @@ func TestConvertStringToLabels(t *testing.T) {
 	rstrMap := ConvertStringToLabels(str)
 	if fmt.Sprintf("%v", rstrMap) != fmt.Sprintf("%v", strMap) {
 		t.Errorf("%s != %s", fmt.Sprintf("%v", rstrMap), fmt.Sprintf("%v", strMap))
+	}
+}
+
+func TestParseIntEnvVar(t *testing.T) {
+	testCases := []struct {
+		expectedErr  string
+		name         string
+		varName      string
+		varValue     string
+		defaultValue int
+		expected     int
+	}{
+		{
+			name:         "Variable does not exist",
+			varName:      "DOES_NOT_EXIST",
+			varValue:     "",
+			defaultValue: 123,
+			expected:     123,
+			expectedErr:  "",
+		},
+		{
+			name:         "Variable exists and is a valid integer",
+			varName:      "MY_VAR",
+			varValue:     "456",
+			defaultValue: 123,
+			expected:     456,
+			expectedErr:  "",
+		},
+		{
+			name:         "Variable exists but is not a valid integer",
+			varName:      "MY_VAR",
+			varValue:     "not_an_integer",
+			defaultValue: 123,
+			expected:     123,
+			expectedErr:  "failed to parse MY_VAR env var as int",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.varValue != "" {
+				os.Setenv(tc.varName, tc.varValue)
+			} else {
+				os.Unsetenv(tc.varName)
+			}
+
+			actual, err := ParseIntEnvVar(tc.varName, tc.defaultValue)
+			if tc.expectedErr != "" {
+				assert.NotNil(t, err)
+				assert.ErrorContains(t, err, tc.expectedErr)
+			} else {
+				assert.Nil(t, err)
+			}
+
+			assert.Equalf(t, tc.expected, actual, "unexpected result")
+		})
+	}
+}
+
+func TestStringSlicesAreEqual(t *testing.T) {
+	tt := []struct {
+		name string
+		a    []string
+		b    []string
+		want bool
+	}{
+		{
+			name: "equal unsorted slices",
+			a:    []string{"foo", "bar", "baz"},
+			b:    []string{"baz", "foo", "bar"},
+			want: true,
+		},
+		{
+			name: "equal sorted slices",
+			a:    []string{"bar", "baz", "foo"},
+			b:    []string{"bar", "baz", "foo"},
+			want: true,
+		},
+		{
+			name: "unequal slices",
+			a:    []string{"foo", "bar", "baz"},
+			b:    []string{"foo", "bar", "qux"},
+			want: false,
+		},
+		{
+			name: "different length slices",
+			a:    []string{"foo", "bar", "baz"},
+			b:    []string{"foo", "bar"},
+			want: false,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			got := StringSlicesAreEqual(tc.a, tc.b)
+			if got != tc.want {
+				t.Errorf("StringSlicesAreEqual(%v, %v) = %v; want %v", tc.a, tc.b, got, tc.want)
+			}
+		})
 	}
 }

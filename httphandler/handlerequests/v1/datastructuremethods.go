@@ -56,22 +56,26 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		scanInfo.HostSensorEnabled = cautils.NewBoolPtr(scanRequest.HostScanner)
 	}
 
+	// workload scan
+	if scanRequest.Workload != nil {
+		scanInfo.WorkloadIdentifier = &cautils.WorkloadIdentifier{
+			Kind:       scanRequest.Workload.Kind,
+			Name:       scanRequest.Workload.Name,
+			Namespace:  scanRequest.Workload.Namespace,
+			ApiVersion: scanRequest.Workload.ApiVersion,
+		}
+	}
+
 	return scanInfo
 }
 
 func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cautils.ScanInfo) {
-	// remove empty targets from slice
-	scanRequest.TargetNames = slices.Filter(nil, scanRequest.TargetNames, func(e string) bool { return e != "" })
-
 	if scanRequest.TargetType != "" && len(scanRequest.TargetNames) > 0 {
 		if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindFramework)) {
 			scanRequest.TargetType = apisv1.KindFramework
 			scanInfo.FrameworkScan = true
-			scanInfo.ScanAll = false
-			if cautils.StringInSlice(scanRequest.TargetNames, "all") != cautils.ValueNotFound { // if scan all frameworks
-				scanRequest.TargetNames = []string{}
-				scanInfo.ScanAll = true
-			}
+			scanInfo.ScanAll = slices.Contains(scanRequest.TargetNames, "all") || slices.Contains(scanRequest.TargetNames, "")
+			scanRequest.TargetNames = slices.Filter(nil, scanRequest.TargetNames, func(e string) bool { return e != "" && e != "all" })
 		} else if strings.EqualFold(string(scanRequest.TargetType), string(apisv1.KindControl)) {
 			scanRequest.TargetType = apisv1.KindControl
 			scanInfo.ScanAll = false

@@ -27,9 +27,9 @@ type componentInterfaces struct {
 	tenantConfig      cautils.ITenantConfig
 	resourceHandler   resourcehandler.IResourceHandler
 	report            reporter.IReport
-	outputPrinters    []printer.IPrinter
 	uiPrinter         printer.IPrinter
 	hostSensorHandler hostsensorutils.IHostSensor
+	outputPrinters    []printer.IPrinter
 }
 
 func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInterfaces {
@@ -126,7 +126,6 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printe
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-
 	logger.L().Info("Kubescape scanner starting")
 
 	// ===================== Initialization =====================
@@ -161,15 +160,24 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter, nil)
 
-	// ===================== policies & resources =====================
-	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies & resources")
-	policyHandler := policyhandler.NewPolicyHandler(interfaces.resourceHandler)
-	scanData, err := policyHandler.CollectResources(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo, cautils.NewProgressHandler(""))
+	// ===================== policies =====================
+	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
+	policyHandler := policyhandler.NewPolicyHandler()
+	scanData, err := policyHandler.CollectPolicies(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
 	}
 	spanPolicies.End()
+
+	// ===================== resources =====================
+	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
+	err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanInfo.PolicyIdentifier, scanData, cautils.NewProgressHandler(""))
+	if err != nil {
+		spanInit.End()
+		return resultsHandling, err
+	}
+	spanResources.End()
 	spanInit.End()
 
 	// ========================= opa testing =====================

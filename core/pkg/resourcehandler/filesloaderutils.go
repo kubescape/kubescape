@@ -34,9 +34,7 @@ func cloneGitRepo(path *string) (string, error) {
 }
 
 // build resources map
-func mapResources(workloads []workloadinterface.IMetadata) map[string][]workloadinterface.IMetadata {
-
-	allResources := map[string][]workloadinterface.IMetadata{}
+func updateResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
 		if err != nil {
@@ -58,8 +56,6 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
 		}
 	}
-	return allResources
-
 }
 
 /* unused for now

@@ -6,10 +6,7 @@ replace github.com/kubescape/opa-utils => /Users/danielgrunberger/armo/opa-utils
 
 require (
 	cloud.google.com/go/containeranalysis v0.9.0
-	github.com/anchore/grype v0.63.1
-	github.com/anchore/stereoscope v0.0.0-20230627195312-cd49355d934e
-	github.com/anchore/syft v0.84.1
-	github.com/armosec/armoapi-go v0.0.173
+	github.com/armosec/armoapi-go v0.0.202
 	github.com/armosec/utils-go v0.0.14
 	github.com/armosec/utils-k8s-go v0.0.13
 	github.com/briandowns/spinner v1.18.1
@@ -24,7 +21,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.13
 	github.com/kubescape/k8s-interface v0.0.116
-	github.com/kubescape/opa-utils v0.0.250
+	github.com/kubescape/opa-utils v0.0.256-0.20230720131313-796d89cc623c
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.286-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -401,13 +398,13 @@ require (
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
-	golang.org/x/crypto v0.10.0 // indirect
-	golang.org/x/exp v0.0.0-20230519143937-03e91628a987 // indirect
-	golang.org/x/net v0.11.0 // indirect
-	golang.org/x/oauth2 v0.7.0 // indirect
-	golang.org/x/sys v0.9.0 // indirect
-	golang.org/x/term v0.9.0 // indirect
-	golang.org/x/text v0.10.0 // indirect
+	golang.org/x/crypto v0.5.0 // indirect
+	golang.org/x/exp v0.0.0-20230711023510-fffb14384f22 // indirect
+	golang.org/x/net v0.10.0 // indirect
+	golang.org/x/oauth2 v0.6.0 // indirect
+	golang.org/x/sys v0.8.0 // indirect
+	golang.org/x/term v0.8.0 // indirect
+	golang.org/x/text v0.9.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.8.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
@@ -444,9 +441,4 @@ require (
 
 replace github.com/libgit2/git2go/v33 => ./git2go
 
-replace (
-	// TODO(vladklokun): Since later versions (e.g. v0.40.0) that get used without the pin introduce weird packaging issues probably due to package renames, pin to last known good.
-	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.35.0
-
-	google.golang.org/grpc => google.golang.org/grpc v1.54.0
-)
+replace google.golang.org/grpc => google.golang.org/grpc v1.54.0
