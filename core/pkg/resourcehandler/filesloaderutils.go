@@ -33,8 +33,7 @@ func cloneGitRepo(path *string) (string, error) {
 	return clonedDir, nil
 }
 
-// build resources map
-func updateResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
+func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
 		if err != nil {
@@ -81,3 +80,36 @@ func addCommitData(input string, workloadIDToSource map[string]reporthandling.So
 	}
 }
 */
+
+func findWorkloadToScan(mappedResources map[string][]workloadinterface.IMetadata, workloadIdentifier *cautils.WorkloadIdentifier) (workloadinterface.IWorkload, error) {
+	if workloadIdentifier == nil {
+		return nil, nil
+	}
+
+	wls := []workloadinterface.IWorkload{}
+	for _, resources := range mappedResources {
+		for _, r := range resources {
+			if r.GetKind() == workloadIdentifier.Kind && r.GetName() == workloadIdentifier.Name {
+				if workloadIdentifier.Namespace != "" && workloadIdentifier.Namespace != r.GetNamespace() {
+					continue
+				}
+				if workloadIdentifier.ApiVersion != "" && workloadIdentifier.ApiVersion != r.GetApiVersion() {
+					continue
+				}
+
+				if k8sinterface.IsTypeWorkload(r.GetObject()) {
+					wl := workloadinterface.NewWorkloadObj(r.GetObject())
+					wls = append(wls, wl)
+				}
+			}
+		}
+	}
+
+	if len(wls) == 0 {
+		return nil, fmt.Errorf("workload '%s' not found", workloadIdentifier.String())
+	} else if len(wls) > 1 {
+		return nil, fmt.Errorf("more than one workload found for '%s'", workloadIdentifier.String())
+	}
+
+	return wls[0], nil
+}

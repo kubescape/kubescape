@@ -182,7 +182,7 @@ func (k8sHandler *K8sResourceHandler) findWorkloadToScan(workloadIdentifier *cau
 		return nil, err
 	}
 
-	result, err := k8sHandler.pullSingleResource(&gvr, workloadIdentifier.Namespace, nil, fmt.Sprintf("metadata.name=%s", workloadIdentifier.Name))
+	result, err := k8sHandler.pullSingleResource(&gvr, workloadIdentifier.Namespace, nil, getNameSelector(workloadIdentifier.Name))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", workloadIdentifier.String(), err)
 	}
@@ -358,7 +358,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 	fieldSelectors := k8sHandler.fieldSelector.GetNamespacesSelectors(resource)
 	for i := range fieldSelectors {
 		if fieldSelectors[i] != "" {
-			listOptions.FieldSelector = CombineFieldSelectors(fieldSelectors[i], fields)
+			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)
 		} else if fields != "" {
 			listOptions.FieldSelector = fields
 		}

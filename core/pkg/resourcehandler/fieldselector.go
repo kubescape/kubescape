@@ -84,6 +84,10 @@ func getNamespacesSelector(resource *schema.GroupVersionResource, ns, operator s
 
 }
 
-func CombineFieldSelectors(selectors ...string) string {
+func getNameSelector(resourceName string) string {
+	return fmt.Sprintf("metadata.name=%s", resourceName)
+}
+
+func combineFieldSelectors(selectors ...string) string {
 	return strings.Join(selectors, ",")
 }

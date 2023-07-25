@@ -40,7 +40,7 @@ func (qr *QueryableResource) AddFieldSelector(fieldSelector string) {
 		return
 	}
 
-	qr.FieldSelectors = CombineFieldSelectors(qr.FieldSelectors, fieldSelector)
+	qr.FieldSelectors = combineFieldSelectors(qr.FieldSelectors, fieldSelector)
 }
 
 func (qrm QueryableResources) ToK8sResourceMap() cautils.K8SResources {

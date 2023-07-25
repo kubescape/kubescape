@@ -21,7 +21,7 @@ func TestString(t *testing.T) {
 		},
 		{
 			name:   "Non-empty field selectors",
-			input:  QueryableResource{GroupVersionResourceTriplet: "gvr1", FieldSelectors: "fs1"},
+			input:  QueryableResource{GroupVersionResourceTriplet: "/v1/pods", FieldSelectors: "fs1"},
 			output: "/v1/pods/fs1",
 		},
 	}
