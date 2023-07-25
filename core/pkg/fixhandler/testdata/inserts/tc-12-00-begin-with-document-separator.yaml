@@ -1,0 +1,10 @@
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: begin-with-document-separator
+
+spec:
+  containers:
+  - name: nginx_container
+    image: nginx
