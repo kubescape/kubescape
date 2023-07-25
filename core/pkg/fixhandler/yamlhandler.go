@@ -23,8 +23,6 @@ func decodeDocumentRoots(yamlAsString string) ([]yaml.Node, error) {
 		var node yaml.Node
 		err := dec.Decode(&node)
 
-		nodes = append(nodes, node)
-
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -32,6 +30,8 @@ func decodeDocumentRoots(yamlAsString string) ([]yaml.Node, error) {
 			return nil, fmt.Errorf("Cannot Decode File as YAML")
 
 		}
+
+		nodes = append(nodes, node)
 	}
 
 	return nodes, nil
