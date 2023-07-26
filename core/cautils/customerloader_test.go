@@ -330,3 +330,155 @@ func TestGetConfigMapNamespace(t *testing.T) {
 		})
 	}
 }
+
+const (
+	anyString       string = "anyString"
+	shouldNotUpdate string = "shouldNotUpdate"
+	shouldUpdate    string = "shouldUpdate"
+)
+
+func checkIsUpdateCorrectly(t *testing.T, beforeField string, afterField string) {
+	switch beforeField {
+	case anyString:
+		assert.Equal(t, anyString, afterField)
+	case "":
+		assert.Equal(t, shouldUpdate, afterField)
+	}
+}
+
+func TestUpdateEmptyFields(t *testing.T) {
+
+	tests := []struct {
+		inCo  *ConfigObj
+		outCo *ConfigObj
+	}{
+		{
+			outCo: &ConfigObj{
+				AccountID:          "",
+				ClientID:           "",
+				SecretKey:          "",
+				CustomerGUID:       "",
+				Token:              "",
+				CustomerAdminEMail: "",
+				ClusterName:        "",
+				CloudReportURL:     "",
+				CloudAPIURL:        "",
+				CloudUIURL:         "",
+				CloudAuthURL:       "",
+			},
+			inCo: &ConfigObj{
+				AccountID:          shouldUpdate,
+				ClientID:           shouldUpdate,
+				SecretKey:          shouldUpdate,
+				CustomerGUID:       shouldUpdate,
+				Token:              shouldUpdate,
+				CustomerAdminEMail: shouldUpdate,
+				ClusterName:        shouldUpdate,
+				CloudReportURL:     shouldUpdate,
+				CloudAPIURL:        shouldUpdate,
+				CloudUIURL:         shouldUpdate,
+				CloudAuthURL:       shouldUpdate,
+			},
+		},
+		{
+			outCo: &ConfigObj{
+				AccountID:          anyString,
+				ClientID:           anyString,
+				SecretKey:          anyString,
+				CustomerGUID:       anyString,
+				Token:              anyString,
+				CustomerAdminEMail: "",
+				ClusterName:        "",
+				CloudReportURL:     "",
+				CloudAPIURL:        "",
+				CloudUIURL:         "",
+				CloudAuthURL:       "",
+			},
+			inCo: &ConfigObj{
+				AccountID:          shouldNotUpdate,
+				ClientID:           shouldNotUpdate,
+				SecretKey:          shouldNotUpdate,
+				CustomerGUID:       shouldNotUpdate,
+				Token:              shouldNotUpdate,
+				CustomerAdminEMail: shouldUpdate,
+				ClusterName:        shouldUpdate,
+				CloudReportURL:     shouldUpdate,
+				CloudAPIURL:        shouldUpdate,
+				CloudUIURL:         shouldUpdate,
+				CloudAuthURL:       shouldUpdate,
+			},
+		},
+		{
+			outCo: &ConfigObj{
+				AccountID:          "",
+				ClientID:           "",
+				SecretKey:          "",
+				CustomerGUID:       "",
+				Token:              "",
+				CustomerAdminEMail: anyString,
+				ClusterName:        anyString,
+				CloudReportURL:     anyString,
+				CloudAPIURL:        anyString,
+				CloudUIURL:         anyString,
+				CloudAuthURL:       anyString,
+			},
+			inCo: &ConfigObj{
+				AccountID:          shouldUpdate,
+				ClientID:           shouldUpdate,
+				SecretKey:          shouldUpdate,
+				CustomerGUID:       shouldUpdate,
+				Token:              shouldUpdate,
+				CustomerAdminEMail: shouldNotUpdate,
+				ClusterName:        shouldNotUpdate,
+				CloudReportURL:     shouldNotUpdate,
+				CloudAPIURL:        shouldNotUpdate,
+				CloudUIURL:         shouldNotUpdate,
+				CloudAuthURL:       shouldNotUpdate,
+			},
+		},
+		{
+			outCo: &ConfigObj{
+				AccountID:          anyString,
+				ClientID:           "",
+				SecretKey:          anyString,
+				CustomerGUID:       "",
+				Token:              anyString,
+				CustomerAdminEMail: "",
+				ClusterName:        anyString,
+				CloudReportURL:     "",
+				CloudAPIURL:        anyString,
+				CloudUIURL:         "",
+				CloudAuthURL:       anyString,
+			},
+			inCo: &ConfigObj{
+				AccountID:          shouldNotUpdate,
+				ClientID:           shouldUpdate,
+				SecretKey:          shouldNotUpdate,
+				CustomerGUID:       shouldUpdate,
+				Token:              shouldNotUpdate,
+				CustomerAdminEMail: shouldUpdate,
+				ClusterName:        shouldNotUpdate,
+				CloudReportURL:     shouldUpdate,
+				CloudAPIURL:        shouldNotUpdate,
+				CloudUIURL:         shouldUpdate,
+				CloudAuthURL:       shouldNotUpdate,
+			},
+		},
+	}
+
+	for i := range tests {
+		beforeChangesOutCO := tests[i].outCo
+		tests[i].outCo.UpdateEmptyFields(tests[i].inCo)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.AccountID, tests[i].outCo.AccountID)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClientID, tests[i].outCo.ClientID)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAPIURL, tests[i].outCo.CloudAPIURL)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAuthURL, tests[i].outCo.CloudAuthURL)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudReportURL, tests[i].outCo.CloudReportURL)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudUIURL, tests[i].outCo.CloudUIURL)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClusterName, tests[i].outCo.ClusterName)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CustomerAdminEMail, tests[i].outCo.CustomerAdminEMail)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CustomerGUID, tests[i].outCo.CustomerGUID)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.SecretKey, tests[i].outCo.SecretKey)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.Token, tests[i].outCo.Token)
+	}
+}
