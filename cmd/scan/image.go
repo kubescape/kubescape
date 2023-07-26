@@ -14,11 +14,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-type imageScanInfo struct {
-	Username string
-	Password string
-}
-
 // TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
@@ -31,7 +26,7 @@ var (
 )
 
 // imageCmd represents the image command
-func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *imageScanInfo) *cobra.Command {
+func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "image <IMAGE_NAME>",
 		Short:   "Scans an image for vulnerabilities",
@@ -53,8 +48,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			svc := imagescan.NewScanService(dbCfg)
 
 			creds := imagescan.RegistryCredentials{
-				Username: imgScanInfo.Username,
-				Password: imgScanInfo.Password,
+				Username: scanInfo.ImageScanInfo.Username,
+				Password: scanInfo.ImageScanInfo.Password,
 			}
 
 			userInput := args[0]
@@ -71,6 +66,13 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 
 			resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter, scanResults)
 
+			resultsHandler.ImageScanData = []cautils.ImageScanData{
+				{
+					PresenterConfig: scanResults,
+					Image:           userInput,
+				},
+			}
+
 			resultsHandler.HandleResults(ctx)
 
 			if !scanInfo.VerboseMode {
@@ -85,8 +87,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 		},
 	}
 
-	cmd.PersistentFlags().StringVarP(&imgScanInfo.Username, "username", "u", "", "Username for registry login")
-	cmd.PersistentFlags().StringVarP(&imgScanInfo.Password, "password", "p", "", "Password for registry login")
+	cmd.PersistentFlags().StringVarP(&scanInfo.ImageScanInfo.Username, "username", "u", "", "Username for registry login")
+	cmd.PersistentFlags().StringVarP(&scanInfo.ImageScanInfo.Password, "password", "p", "", "Password for registry login")
 
 	return cmd
 }

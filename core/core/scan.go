@@ -228,16 +228,21 @@ func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx
 
 	for _, imgs := range scanData.ResourceIDToImageMap {
 		for _, img := range imgs {
-			scanSingleImage(ctx, img, svc, resultsHandling)
+			scanSingleImage(ctx, img, svc, resultsHandling, *scanInfo)
 		}
 	}
 	logger.L().Ctx(ctx).Success("Finished scanning images")
 }
 
-func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) {
+func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler, scanInfo cautils.ScanInfo) {
 	logger.L().Ctx(ctx).Debug(fmt.Sprintf("Scanning image: %s", img))
 
-	scanResults, err := svc.Scan(ctx, img)
+	registryCredentials := imagescan.RegistryCredentials{
+		Username: scanInfo.ImageScanInfo.Username,
+		Password: scanInfo.ImageScanInfo.Password,
+	}
+
+	scanResults, err := svc.Scan(ctx, img, registryCredentials)
 	if err != nil {
 		logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to scan image: %s", img), helpers.Error(err))
 		return
