@@ -70,6 +70,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	sessionObj.ScannedWorkload = workload
 
 	resourceToControl := make(map[string][]string)
 	// build resources map

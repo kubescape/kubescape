@@ -67,6 +67,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
+	sessionObj.ScannedWorkload = inputWorkload
 
 	// build a resources map, based on the policies
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
