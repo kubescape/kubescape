@@ -28,7 +28,6 @@ import (
 	k8slabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
-	"k8s.io/client-go/dynamic"
 )
 
 type cloudResourceGetter func(string, string) (workloadinterface.IMetadata, error)
@@ -79,13 +78,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// get namespace and labels from designator (ignore cluster labels)
-	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
+	_, _, labels := armotypes.DigestPortalDesignator(designator)
 
 	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	// pull k8s resources
-	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, namespace, labels)
+	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, labels)
 	if err != nil {
 		cautils.StopSpinner()
 		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
@@ -183,7 +182,11 @@ func (k8sHandler *K8sResourceHandler) findWorkloadToScan(workloadIdentifier *cau
 		return nil, err
 	}
 
-	result, err := k8sHandler.pullSingleResource(&gvr, workloadIdentifier.Namespace, nil, getNameFieldSelector(workloadIdentifier.Name, "="))
+	fieldSelectors := getNameFieldSelectorString(workloadIdentifier.Name, "=")
+	if workloadIdentifier.Namespace != "" && k8sinterface.IsNamespaceScope(&gvr) {
+		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(workloadIdentifier.Namespace, "="))
+	}
+	result, err := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", workloadIdentifier.String(), err)
 	}
@@ -316,7 +319,7 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
-func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, namespace string, labels map[string]string) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, labels map[string]string) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
 
@@ -324,7 +327,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	for _, qr := range queryableResources {
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels, qr.FieldSelectors)
+		result, err := k8sHandler.pullSingleResource(&gvr, labels, qr.FieldSelectors)
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
 				// handle error
@@ -366,7 +369,7 @@ func (k8sHandler *K8sResourceHandler) GetWorkloadParentKind(workload workloadint
 	return ""
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {
 	resourceList := []unstructured.Unstructured{}
 	// set labels
 	listOptions := metav1.ListOptions{}
@@ -384,21 +387,12 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 		}
 
 		// set dynamic object
-		var clientResource dynamic.ResourceInterface
-		if namespace != "" {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
-		} else if k8sinterface.IsNamespaceScope(resource) {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
-		} else if k8sHandler.fieldSelector.GetClusterScope(resource) {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
-		} else {
-			continue
-		}
+		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
 
 		// list resources
 		result, err := clientResource.List(context.Background(), listOptions)
 		if err != nil || result == nil {
-			return nil, fmt.Errorf("failed to get resource: %v, namespace: %s, labelSelector: %v, reason: %v", resource, namespace, listOptions.LabelSelector, err)
+			return nil, fmt.Errorf("failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %v", resource, listOptions.LabelSelector, listOptions.FieldSelector, err)
 		}
 
 		resourceList = append(resourceList, result.Items...)
