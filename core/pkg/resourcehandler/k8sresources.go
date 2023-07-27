@@ -20,8 +20,6 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
-	"github.com/armosec/armoapi-go/armotypes"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -59,7 +57,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
 	// get k8s resources
 	logger.L().Info("Accessing Kubernetes objects")
 
@@ -77,14 +75,11 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(k8sHandler, sessionObj.Policies, workload)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
-	// get namespace and labels from designator (ignore cluster labels)
-	_, _, labels := armotypes.DigestPortalDesignator(designator)
-
 	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	// pull k8s resources
-	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, labels)
+	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources)
 	if err != nil {
 		cautils.StopSpinner()
 		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
@@ -319,7 +314,7 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
-func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, labels map[string]string) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
 
@@ -327,7 +322,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	for _, qr := range queryableResources {
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := k8sHandler.pullSingleResource(&gvr, labels, qr.FieldSelectors)
+		result, err := k8sHandler.pullSingleResource(&gvr, nil, qr.FieldSelectors)
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
 				// handle error
