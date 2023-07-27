@@ -357,8 +357,13 @@ func (k8sHandler *K8sResourceHandler) GetWorkloadParentKind(workload workloadint
 		return ""
 	}
 
-	kind, _, _ := k8sHandler.k8s.CalculateWorkloadParentRecursive(workload)
-	return kind
+	// CalculateWorkloadParentRecursive return the kind of the parent workload
+	// In case the given workload has no parent, it will return the kind and name of the workload itself
+	// We return the parent kind only if it is different from the workload kind
+	if kind, name, _ := k8sHandler.k8s.CalculateWorkloadParentRecursive(workload); kind != workload.GetKind() && name != workload.GetName() {
+		return kind
+	}
+	return ""
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {
