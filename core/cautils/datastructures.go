@@ -57,6 +57,7 @@ type OPASessionObj struct {
 	OmitRawResources      bool                               // omit raw resources from output
 	ScanType              ScanTypes                          // scan type
 	ResourceIDToImageMap  map[string][]string
+	ScannedWorkload       workloadinterface.IWorkload // single workload scan
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {

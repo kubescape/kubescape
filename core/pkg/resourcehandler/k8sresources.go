@@ -70,11 +70,12 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	if err != nil {
 		return nil, nil, nil, nil, nil, err
 	}
+	sessionObj.ScannedWorkload = workload
 
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, workload)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(k8sHandler, sessionObj.Policies, workload)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// get namespace and labels from designator (ignore cluster labels)
@@ -193,7 +194,7 @@ func (k8sHandler *K8sResourceHandler) findWorkloadToScan(workloadIdentifier *cau
 		return nil, err
 	}
 
-	result, err := k8sHandler.pullSingleResource(&gvr, workloadIdentifier.Namespace, nil, fmt.Sprintf("metadata.name=%s", workloadIdentifier.Name))
+	result, err := k8sHandler.pullSingleResource(&gvr, workloadIdentifier.Namespace, nil, getNameFieldSelector(workloadIdentifier.Name, "="))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", workloadIdentifier.String(), err)
 	}
@@ -364,6 +365,15 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	// return errs
 }
 
+func (k8sHandler *K8sResourceHandler) GetWorkloadParentKind(workload workloadinterface.IWorkload) string {
+	if workload == nil {
+		return ""
+	}
+
+	kind, _, _ := k8sHandler.k8s.CalculateWorkloadParentRecursive(workload)
+	return kind
+}
+
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {
 	resourceList := []unstructured.Unstructured{}
 	// set labels
@@ -371,7 +381,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 	fieldSelectors := k8sHandler.fieldSelector.GetNamespacesSelectors(resource)
 	for i := range fieldSelectors {
 		if fieldSelectors[i] != "" {
-			listOptions.FieldSelector = CombineFieldSelectors(fieldSelectors[i], fields)
+			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)
 		} else if fields != "" {
 			listOptions.FieldSelector = fields
 		}

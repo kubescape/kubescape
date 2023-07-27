@@ -6,6 +6,16 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
+type QueryableResources map[string]QueryableResource
+
+// QueryableResource is a struct that holds a representation of a resource we would like to query (from the K8S API, or from other sources)
+type QueryableResource struct {
+	// <api group/api version/resource>
+	GroupVersionResourceTriplet string
+	// metadata.name==<resource name>, metadata.namespace==<resource namespace> etc.
+	FieldSelectors string
+}
+
 func (qr *QueryableResource) String() string {
 	if qr.FieldSelectors == "" {
 		return qr.GroupVersionResourceTriplet
@@ -30,7 +40,7 @@ func (qr *QueryableResource) AddFieldSelector(fieldSelector string) {
 		return
 	}
 
-	qr.FieldSelectors = CombineFieldSelectors(qr.FieldSelectors, fieldSelector)
+	qr.FieldSelectors = combineFieldSelectors(qr.FieldSelectors, fieldSelector)
 }
 
 func (qrm QueryableResources) ToK8sResourceMap() cautils.K8SResources {

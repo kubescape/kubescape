@@ -57,6 +57,23 @@ func TestToScanInfo(t *testing.T) {
 		s := ToScanInfo(req)
 		assert.True(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
+		assert.Nil(t, s.WorkloadIdentifier)
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			Workload: &apisv1.WorkloadScan{
+				ApiVersion: "apps/v1",
+				Kind:       "Deployment",
+				Name:       "nginx",
+				Namespace:  "ns1",
+			},
+		}
+		s := ToScanInfo(req)
+		assert.NotNil(t, s.WorkloadIdentifier)
+		assert.Equal(t, "apps/v1", s.WorkloadIdentifier.ApiVersion)
+		assert.Equal(t, "Deployment", s.WorkloadIdentifier.Kind)
+		assert.Equal(t, "nginx", s.WorkloadIdentifier.Name)
+		assert.Equal(t, "ns1", s.WorkloadIdentifier.Namespace)
 	}
 }
 

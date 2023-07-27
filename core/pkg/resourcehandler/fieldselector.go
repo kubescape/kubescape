@@ -54,7 +54,7 @@ func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 	fieldSelectors := ""
 	for _, n := range strings.Split(es.namespace, ",") {
 		if n != "" {
-			fieldSelectors += getNamespacesSelector(resource, n, "!=") + ","
+			fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespacesSelector(resource.Resource, n, "!="))
 		}
 	}
 	return []string{fieldSelectors}
@@ -65,25 +65,38 @@ func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 	fieldSelectors := []string{}
 	for _, n := range strings.Split(is.namespace, ",") {
 		if n != "" {
-			fieldSelectors = append(fieldSelectors, getNamespacesSelector(resource, n, "=="))
+			fieldSelectors = append(fieldSelectors, getNamespacesSelector(resource.Resource, n, "=="))
 		}
 	}
 	return fieldSelectors
 }
 
-func getNamespacesSelector(resource *schema.GroupVersionResource, ns, operator string) string {
-	fieldSelector := "metadata."
-	if resource.Resource == "namespaces" {
-		fieldSelector += "name"
-	} else if k8sinterface.IsResourceInNamespaceScope(resource.Resource) {
-		fieldSelector += "namespace"
-	} else {
+func getNamespacesSelector(kind, ns, operator string) string {
+	if ns == "" {
 		return ""
 	}
-	return fmt.Sprintf("%s%s%s", fieldSelector, operator, ns)
 
+	if kind == "namespaces" || kind == "Namespace" {
+		return getNameFieldSelector(ns, operator)
+	}
+
+	if k8sinterface.IsResourceInNamespaceScope(kind) {
+		return fmt.Sprintf("metadata.namespace%s%s", operator, ns)
+	}
+
+	return ""
 }
 
-func CombineFieldSelectors(selectors ...string) string {
-	return strings.Join(selectors, ",")
+func getNameFieldSelector(resourceName, operator string) string {
+	return fmt.Sprintf("metadata.name%s%s", operator, resourceName)
+}
+
+func combineFieldSelectors(selectors ...string) string {
+	var nonEmptyStrings []string
+	for i := range selectors {
+		if selectors[i] != "" {
+			nonEmptyStrings = append(nonEmptyStrings, selectors[i])
+		}
+	}
+	return strings.Join(nonEmptyStrings, ",")
 }

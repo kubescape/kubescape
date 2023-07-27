@@ -21,8 +21,8 @@ require (
 	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.25
-	github.com/kubescape/go-logger v0.0.11
-	github.com/kubescape/k8s-interface v0.0.116
+	github.com/kubescape/go-logger v0.0.13
+	github.com/kubescape/k8s-interface v0.0.134
 	github.com/kubescape/opa-utils v0.0.256-0.20230720131313-796d89cc623c
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.286-rc.0

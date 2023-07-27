@@ -11,7 +11,7 @@ require (
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/go-logger v0.0.13
-	github.com/kubescape/k8s-interface v0.0.116
+	github.com/kubescape/k8s-interface v0.0.134
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
 	github.com/kubescape/opa-utils v0.0.256-0.20230720131313-796d89cc623c
 	github.com/stretchr/testify v1.8.3
@@ -129,8 +129,8 @@ require (
 	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
-	github.com/docker/cli v23.0.5+incompatible // indirect
-	github.com/docker/distribution v2.8.2+incompatible // indirect
+	github.com/docker/cli v20.10.21+incompatible // indirect
+	github.com/docker/distribution v2.8.1+incompatible // indirect
 	github.com/docker/docker v24.0.2+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
