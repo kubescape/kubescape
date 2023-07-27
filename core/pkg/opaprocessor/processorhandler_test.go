@@ -185,7 +185,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opaSessionObj.Policies = frameworks
 
-	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "")
+	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "", nil)
 	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Policies, policies)
 
 	opaSessionObj.K8SResources = k8sResources

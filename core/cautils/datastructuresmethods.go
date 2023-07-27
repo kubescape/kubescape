@@ -15,7 +15,7 @@ func NewPolicies() *Policies {
 	}
 }
 
-func (policies *Policies) Set(frameworks []reporthandling.Framework, version string) {
+func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool) {
 	for i := range frameworks {
 		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
 			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
@@ -23,6 +23,13 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}
 			for r := range frameworks[i].Controls[j].Rules {
+				if excludedRules != nil {
+					ruleName := frameworks[i].Controls[j].Rules[r].Name
+					if _, exclude := excludedRules[ruleName]; exclude {
+						continue
+					}
+				}
+
 				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}

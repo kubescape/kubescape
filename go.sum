@@ -813,8 +813,8 @@ github.com/docker/cli v20.10.21+incompatible h1:qVkgyYUnOLQ98LtXBrwd/duVqPT2X4SH
 github.com/docker/cli v20.10.21+incompatible/go.mod h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=
 github.com/docker/distribution v2.8.1+incompatible h1:Q50tZOPR6T/hjNsyc9g8/syEs6bk8XXApsHjKukMl68=
 github.com/docker/distribution v2.8.1+incompatible/go.mod h1:J2gT2udsDAN96Uj4KfcMRqY0/ypR+oyYUYmja8H+y+w=
-github.com/docker/docker v20.10.24+incompatible h1:Ugvxm7a8+Gz6vqQYQQ2W7GYq5EUPaAiuPgIfVyI3dYE=
-github.com/docker/docker v20.10.24+incompatible/go.mod h1:eEKB0N0r5NX/I1kEveEz05bcu8tLC/8azJZsviup8Sk=
+github.com/docker/docker v24.0.2+incompatible h1:eATx+oLz9WdNVkQrr0qjQ8HvRJ4bOOxfzEo8R+dA3cg=
+github.com/docker/docker v24.0.2+incompatible/go.mod h1:eEKB0N0r5NX/I1kEveEz05bcu8tLC/8azJZsviup8Sk=
 github.com/docker/docker-credential-helpers v0.6.3/go.mod h1:WRaJzqw3CTB9bk10avuGsjVBZsD05qeibJ1/TYlvc0Y=
 github.com/docker/docker-credential-helpers v0.7.0 h1:xtCHsjxogADNZcdv1pKUHXryefjlVRqWqIhk/uXJp0A=
 github.com/docker/docker-credential-helpers v0.7.0/go.mod h1:rETQfLdHNT3foU5kuNkFR1R1V12OJRRO5lzt2D1b5X0=
@@ -1382,8 +1382,8 @@ github.com/kubescape/go-git-url v0.0.25 h1:i7SSSC1+1m/Dg+4LV3erp0YklnWj1Z0cVlRxC
 github.com/kubescape/go-git-url v0.0.25/go.mod h1:IbVT7Wsxlghsa+YxI5KOx4k9VQJaa3z0kTaQz5D3nKM=
 github.com/kubescape/go-logger v0.0.13 h1:Rio+grBhpcdExZIVT+HcBVcgbvwrU/aVSV99iKP1NNM=
 github.com/kubescape/go-logger v0.0.13/go.mod h1:Tod++iNn5kofkhjpfwjUrqie2YHkLZNoH0Pq0+KldMo=
-github.com/kubescape/k8s-interface v0.0.116 h1:Sn76gsMLAArc5kbHZVoRMS6QlM4mOz9Dolpym9BOul8=
-github.com/kubescape/k8s-interface v0.0.116/go.mod h1:ENpA9SkkS6E3PIT+AaMu/JGkuyE04aUamY+a7WLqsJQ=
+github.com/kubescape/k8s-interface v0.0.134 h1:dbXNGM0GH+xj8NadMu5pp1ZPFR90E+62DvWnyU0bdnA=
+github.com/kubescape/k8s-interface v0.0.134/go.mod h1:JHRoGqyMJaALx9mVXfYhOnCDxlEAn9Aw8EIqZOFED80=
 github.com/kubescape/opa-utils v0.0.256-0.20230720131313-796d89cc623c h1:ae+aMhlE8pD22Rn5b1CaXe1bTRMNemqJF9cUULezTDs=
 github.com/kubescape/opa-utils v0.0.256-0.20230720131313-796d89cc623c/go.mod h1:SkNqbhUGipSYVE+oAUaHko6aggp8XVVbDChoNg48lao=
 github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnGnhMhJw=

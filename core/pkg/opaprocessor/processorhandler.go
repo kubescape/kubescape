@@ -59,7 +59,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
-	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber)
+	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber, opap.ExcludedRules)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
@@ -227,11 +227,6 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 	allResources := make(map[string]workloadinterface.IMetadata, heuristicAllocResources)
 
 	for i := range control.Rules {
-		if opap.ExcludedRules != nil {
-			if _, exclude := opap.ExcludedRules[control.Rules[i].Name]; exclude {
-				continue
-			}
-		}
 		resourceAssociatedRule, allResourcesFromRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(err.Error())

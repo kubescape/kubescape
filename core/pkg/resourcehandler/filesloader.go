@@ -70,7 +70,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	// build a resources map, based on the policies
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, inputWorkload)
+	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(fileHandler, sessionObj.Policies, inputWorkload)
 	k8sResources := resourceToQuery.ToK8sResourceMap()
 
 	// save only relevant resources
@@ -264,4 +264,8 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo(_ context.Context) *version.Info {
 	return nil
+}
+
+func (fileHandler *FileResourceHandler) GetWorkloadParentKind(resource workloadinterface.IWorkload) string {
+	return ""
 }
