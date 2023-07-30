@@ -99,6 +99,6 @@ func TestIsControlFitToScanning(t *testing.T) {
 			expected_res: false,
 		}}
 	for i := range tests {
-		assert.Equal(t, isControlFitToScanning(tests[i].Control, getScanningScope(tests[i].scanInfo)), tests[i].expected_res, fmt.Sprintf("tests_true index %d", i))
+		assert.Equal(t, isControlFitToScanScope(tests[i].Control, GetScanningScope(tests[i].scanInfo)), tests[i].expected_res, fmt.Sprintf("tests_true index %d", i))
 	}
 }

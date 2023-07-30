@@ -16,9 +16,9 @@ import (
 )
 
 // ConvertFrameworksToPolicies convert list of frameworks to list of policies
-func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, ScanInfo *cautils.ScanInfo) *cautils.Policies {
+func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, scanningScope reporthandling.ScanningScopeType) *cautils.Policies {
 	policies := cautils.NewPolicies()
-	policies.Set(frameworks, version, ScanInfo)
+	policies.Set(frameworks, version, scanningScope)
 	return policies
 }
 

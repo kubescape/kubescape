@@ -17,8 +17,7 @@ func NewPolicies() *Policies {
 	}
 }
 
-func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, scanInfo *ScanInfo) {
-	scanScope := getScanningScope(scanInfo)
+func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, scanningScope reporthandling.ScanningScopeType) {
 	for i := range frameworks {
 		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
 			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
@@ -26,7 +25,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}
 			for r := range frameworks[i].Controls[j].Rules {
-				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanning(frameworks[i].Controls[j], scanScope) {
+				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
@@ -93,7 +92,7 @@ func getCloudType(scanInfo *ScanInfo) (bool, reporthandling.ScanningScopeType) {
 	return false, ""
 }
 
-func getScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
+func GetScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
 	var result reporthandling.ScanningScopeType
 
 	switch scanInfo.GetScanningContext() {
@@ -101,8 +100,9 @@ func getScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
 		isCloud, cloudType := getCloudType(scanInfo)
 		if isCloud {
 			result = cloudType
+		} else {
+			result = reporthandling.ScopeCluster
 		}
-		result = reporthandling.ScopeCluster
 	default:
 		result = reporthandling.ScopeFile
 	}
@@ -144,8 +144,4 @@ func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches re
 		}
 	}
 	return false
-}
-
-func isControlFitToScanning(control reporthandling.Control, scanScope reporthandling.ScanningScopeType) bool {
-	return isControlFitToScanScope(control, scanScope)
 }
