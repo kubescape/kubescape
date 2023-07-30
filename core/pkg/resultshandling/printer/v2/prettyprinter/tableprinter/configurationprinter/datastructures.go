@@ -30,12 +30,21 @@ const (
 	nodeEscapeCategoryID         = "Cat-9"
 )
 
-var categoriesDisplayOrder = []string{
+var clusterCategoriesDisplayOrder = []string{
 	controlPlaneCategoryID,
 	accessControlCategoryID,
 	secretsCategoryID,
 	networkCategoryID,
 	workloadsCategoryID,
+}
+
+var workloadCategoriesDisplayOrder = []string{
+	supplyChainCategoryID,
+	resourceManagementCategoryID,
+	storageCategoryID,
+	secretsCategoryID,
+	networkCategoryID,
+	nodeEscapeCategoryID,
 }
 
 var mapCategoryToType = map[string]CategoryType{

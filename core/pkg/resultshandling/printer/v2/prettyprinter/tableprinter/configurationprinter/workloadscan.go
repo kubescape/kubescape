@@ -26,7 +26,7 @@ func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetail
 
 	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapWorkloadControlsToCategories)
 
-	for _, id := range categoriesDisplayOrder {
+	for _, id := range workloadCategoriesDisplayOrder {
 		categoryControl, ok := categoriesToCategoryControls[id]
 		if !ok {
 			continue

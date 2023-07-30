@@ -65,13 +65,13 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanningContext cautils.ScanningContext) reporter.IReport {
+func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanInfo cautils.ScanInfo) reporter.IReport {
 	_, span := otel.Tracer("").Start(ctx, "getReporter")
 	defer span.End()
 
 	if submit {
 		submitData := reporterv2.SubmitContextScan
-		if scanningContext != cautils.ContextCluster {
+		if scanInfo.GetScanningContext() != cautils.ContextCluster {
 			submitData = reporterv2.SubmitContextRepository
 		}
 		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID, submitData)
@@ -81,7 +81,8 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 		return reporterv2.NewReportMock("", "")
 	}
 	var message string
-	if !fwScan {
+
+	if !fwScan && scanInfo.ScanType != cautils.ScanTypeWorkload {
 		message = "Kubescape does not submit scan results when scanning controls"
 	}
 

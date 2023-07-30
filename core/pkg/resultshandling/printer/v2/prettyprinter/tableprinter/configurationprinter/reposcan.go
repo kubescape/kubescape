@@ -30,7 +30,7 @@ func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *r
 
 	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
 
-	for _, id := range categoriesDisplayOrder {
+	for _, id := range clusterCategoriesDisplayOrder {
 		categoryControl, ok := categoriesToCategoryControls[id]
 		if !ok {
 			continue

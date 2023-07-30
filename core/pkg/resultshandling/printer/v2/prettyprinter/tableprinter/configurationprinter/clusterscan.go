@@ -24,7 +24,7 @@ func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails
 
 	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
 
-	for _, id := range categoriesDisplayOrder {
+	for _, id := range clusterCategoriesDisplayOrder {
 		categoryControl, ok := categoriesToCategoryControls[id]
 		if !ok {
 			continue

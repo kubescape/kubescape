@@ -127,6 +127,10 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 			}
 		}
 
+		if pp.scanType == cautils.ScanTypeWorkload {
+			cautils.InfoDisplay(pp.writer, "Workload: %s/%s/%s\n", opaSessionObj.ScannedWorkload.GetNamespace(), opaSessionObj.ScannedWorkload.GetKind(), opaSessionObj.ScannedWorkload.GetName())
+		}
+
 		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 
 		// When writing to Stdout, we aren’t really writing to an output file,

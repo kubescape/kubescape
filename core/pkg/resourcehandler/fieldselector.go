@@ -77,18 +77,22 @@ func getNamespacesSelector(kind, ns, operator string) string {
 	}
 
 	if kind == "namespaces" || kind == "Namespace" {
-		return getNameFieldSelector(ns, operator)
+		return getNameFieldSelectorString(ns, operator)
 	}
 
 	if k8sinterface.IsResourceInNamespaceScope(kind) {
-		return fmt.Sprintf("metadata.namespace%s%s", operator, ns)
+		return getNamespaceFieldSelectorString(ns, operator)
 	}
 
 	return ""
 }
 
-func getNameFieldSelector(resourceName, operator string) string {
+func getNameFieldSelectorString(resourceName, operator string) string {
 	return fmt.Sprintf("metadata.name%s%s", operator, resourceName)
+}
+
+func getNamespaceFieldSelectorString(namespace, operator string) string {
+	return fmt.Sprintf("metadata.namespace%s%s", operator, namespace)
 }
 
 func combineFieldSelectors(selectors ...string) string {

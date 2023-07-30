@@ -7,6 +7,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
@@ -94,7 +95,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	// ================== setup reporter & printer objects ======================================
 
 	// reporting behavior - setup reporter
-	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, scanInfo.GetScanningContext())
+	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, *scanInfo)
 
 	// setup printers
 	outputPrinters := GetOutputPrinters(scanInfo, ctx)
@@ -193,7 +194,6 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	}
 
 	// ======================== prioritization ===================
-	scanInfo.ScanType = cautils.ScanTypeRepo
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
 		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
@@ -207,7 +207,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 		spanPrioritization.End()
 	}
 
-	if scanInfo.ScanImages && len(scanData.ResourceIDToImageMap) > 0 {
+	if scanInfo.ScanImages {
 		scanImages(scanInfo, scanData, ctx, resultsHandling)
 	}
 	// ========================= results handling =====================
@@ -221,17 +221,29 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 }
 
 func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler) {
-	logger.L().Ctx(ctx).Info("Scanning images")
+	logger.L().Info("Scanning images")
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)
 
-	for _, imgs := range scanData.ResourceIDToImageMap {
-		for _, img := range imgs {
-			scanSingleImage(ctx, img, svc, resultsHandling, *scanInfo)
+	if scanInfo.ScanType == cautils.ScanTypeWorkload {
+		wlObj := workloadinterface.NewWorkloadObj(scanData.ScannedWorkload.GetObject())
+		scanSingleWorkload(wlObj, ctx, svc, resultsHandling, scanInfo)
+	} else {
+		for _, workload := range scanData.AllResources {
+			wlObj := workloadinterface.NewWorkloadObj(workload.GetObject())
+			scanSingleWorkload(wlObj, ctx, svc, resultsHandling, scanInfo)
 		}
 	}
-	logger.L().Ctx(ctx).Success("Finished scanning images")
+
+	logger.L().Success("Finished scanning images")
+}
+
+func scanSingleWorkload(wlObj *workloadinterface.Workload, ctx context.Context, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) {
+	containers, _ := wlObj.GetContainers()
+	for _, container := range containers {
+		scanSingleImage(ctx, container.Image, svc, resultsHandling, *scanInfo)
+	}
 }
 
 func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler, scanInfo cautils.ScanInfo) {

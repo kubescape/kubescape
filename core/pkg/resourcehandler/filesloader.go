@@ -32,13 +32,12 @@ func NewFileResourceHandler(_ context.Context, inputPatterns []string, workloadI
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, map[string][]string, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 	ksResources := cautils.KSResources{}
-	resourceIDToImages := map[string][]string{}
 
 	if len(fileHandler.inputPatterns) == 0 {
-		return nil, nil, nil, nil, nil, fmt.Errorf("missing input")
+		return nil, nil, nil, nil, fmt.Errorf("missing input")
 	}
 
 	logger.L().Info("Accessing local objects")
@@ -56,27 +55,11 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		} else {
 			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, fileHandler.inputPatterns[path])
 			if err != nil {
-				return nil, allResources, nil, nil, nil, err
+				return nil, allResources, nil, nil, err
 			}
 		}
 		if len(workloads) == 0 {
 			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", fileHandler.inputPatterns[path]))
-		}
-
-		if scanInfo.ScanImages {
-			for i := range workloads {
-				wlObj := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
-				containers, err := wlObj.GetContainers()
-				if err != nil {
-
-				}
-				for _, container := range containers {
-					if _, ok := resourceIDToImages[workloads[i].GetID()]; !ok {
-						resourceIDToImages[workloads[i].GetID()] = []string{}
-					}
-					resourceIDToImages[workloads[i].GetID()] = append(resourceIDToImages[workloads[i].GetID()], container.Image)
-				}
-			}
 		}
 
 		for k, v := range workloadIDToSource {
@@ -90,7 +73,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	// locate input workload in the mapped resources - if not found or not a valid workload, return error
 	inputWorkload, err := findWorkloadToScan(mappedResources, fileHandler.workloadIdentifier)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	sessionObj.ScannedWorkload = inputWorkload
 
@@ -117,7 +100,113 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")
 
-	return k8sResources, allResources, ksResources, excludedRulesMap, resourceIDToImages, nil
+	return k8sResources, allResources, ksResources, excludedRulesMap, nil
+}
+
+func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+	clonedRepo, err := cloneGitRepo(&helmPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if clonedRepo != "" {
+		defer os.RemoveAll(clonedRepo)
+	}
+
+	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
+
+	wlSource, _ := helmSourceToWorkloads[workloadPath]
+
+	// Get repo root
+	repoRoot, gitRepo := extractGitRepo(helmPath)
+
+	helmChartName := helmSourceToChartName[workloadPath]
+
+	relSource, err := filepath.Rel(repoRoot, helmPath)
+	if err == nil {
+		helmPath = relSource
+	}
+
+	var lastCommit reporthandling.LastCommit
+	if gitRepo != nil {
+		commitInfo, _ := gitRepo.GetFileLastCommit(helmPath)
+		if commitInfo != nil {
+			lastCommit = reporthandling.LastCommit{
+				Hash:           commitInfo.SHA,
+				Date:           commitInfo.Author.Date,
+				CommitterName:  commitInfo.Author.Name,
+				CommitterEmail: commitInfo.Author.Email,
+				Message:        commitInfo.Message,
+			}
+		}
+	}
+
+	workloadSource := reporthandling.Source{
+		RelativePath:  helmPath,
+		FileType:      reporthandling.SourceTypeHelmChart,
+		HelmChartName: helmChartName,
+		LastCommit:    lastCommit,
+	}
+	workloadIDToSource := make(map[string]reporthandling.Source, 0)
+	workloadIDToSource[wlSource[0].GetID()] = workloadSource
+
+	workloads := []workloadinterface.IMetadata{}
+	workloads = append(workloads, wlSource...)
+
+	return workloadIDToSource, workloads, nil
+
+}
+
+func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+	clonedRepo, err := cloneGitRepo(&helmPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	if clonedRepo != "" {
+		defer os.RemoveAll(clonedRepo)
+	}
+
+	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
+
+	wlSource, _ := helmSourceToWorkloads[workloadPath]
+
+	// Get repo root
+	repoRoot, gitRepo := extractGitRepo(helmPath)
+
+	helmChartName := helmSourceToChartName[workloadPath]
+
+	relSource, err := filepath.Rel(repoRoot, helmPath)
+	if err == nil {
+		helmPath = relSource
+	}
+
+	var lastCommit reporthandling.LastCommit
+	if gitRepo != nil {
+		commitInfo, _ := gitRepo.GetFileLastCommit(helmPath)
+		if commitInfo != nil {
+			lastCommit = reporthandling.LastCommit{
+				Hash:           commitInfo.SHA,
+				Date:           commitInfo.Author.Date,
+				CommitterName:  commitInfo.Author.Name,
+				CommitterEmail: commitInfo.Author.Email,
+				Message:        commitInfo.Message,
+			}
+		}
+	}
+
+	workloadSource := reporthandling.Source{
+		RelativePath:  helmPath,
+		FileType:      reporthandling.SourceTypeHelmChart,
+		HelmChartName: helmChartName,
+		LastCommit:    lastCommit,
+	}
+	workloadIDToSource := make(map[string]reporthandling.Source, 0)
+	workloadIDToSource[wlSource[0].GetID()] = workloadSource
+
+	workloads := []workloadinterface.IMetadata{}
+	workloads = append(workloads, wlSource...)
+
+	return workloadIDToSource, workloads, nil
+
 }
 
 func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {

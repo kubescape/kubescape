@@ -133,7 +133,7 @@ func mockWorkload(apiVersion, kind, namespace, name, ownerReferenceKind string) 
 type ResourceHandlerMock struct {
 }
 
-func (mock *ResourceHandlerMock) GetResources(context.Context, *cautils.OPASessionObj, *armotypes.PortalDesignator, opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (mock *ResourceHandlerMock) GetResources(context.Context, *cautils.OPASessionObj, opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
 	return nil, nil, nil, nil, nil
 }
 

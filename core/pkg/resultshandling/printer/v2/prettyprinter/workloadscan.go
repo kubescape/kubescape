@@ -32,7 +32,7 @@ func (wp *WorkloadPrinter) printImageScanningSummary(summary *imageprinter.Image
 	printImageScanningSummary(wp.writer, *summary, false)
 
 	for _, img := range summary.Images {
-		cautils.InfoTextDisplay(wp.writer, fmt.Sprintf("Receive full report by running: 'kubescape scan image %s\n", img))
+		cautils.SimpleDisplay(wp.writer, fmt.Sprintf("Receive full report by running: 'kubescape scan image %s'\n", img))
 	}
 
 	cautils.InfoTextDisplay(wp.writer, "\n")

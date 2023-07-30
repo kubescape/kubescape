@@ -29,7 +29,7 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, excludedRulesMap, resourceIDToImages, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener, scanInfo)
+	resourcesMap, allResources, ksResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener, scanInfo)
 	if err != nil {
 		return err
 	}
@@ -38,7 +38,6 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 	opaSessionObj.AllResources = allResources
 	opaSessionObj.KubescapeResource = ksResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
-	opaSessionObj.ResourceIDToImageMap = resourceIDToImages
 
 	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.KubescapeResource == nil || len(opaSessionObj.KubescapeResource) == 0) {
 		return fmt.Errorf("empty list of resources")
