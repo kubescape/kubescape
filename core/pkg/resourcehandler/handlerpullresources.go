@@ -29,7 +29,7 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener, scanInfo)
+	resourcesMap, allResources, ksResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, progressListener, scanInfo)
 	if err != nil {
 		return err
 	}

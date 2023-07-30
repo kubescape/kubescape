@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
@@ -72,17 +73,20 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 		rows[0] = controlSummary.GetName()
 	}
 
-	// skipped is shown as action required
-	if status.IsSkipped() {
-		rows[1] = fmt.Sprintf("%s %s", "action required", GetInfoColumn(controlSummary, infoToPrintInfo))
-	} else {
-		rows[1] = string(controlSummary.GetStatus().Status())
-	}
+	rows[1] = getStatus(status, controlSummary, infoToPrintInfo)
 
 	rows[2] = getDocsForControl(controlSummary)
 
 	return rows
 
+}
+
+func getStatus(status apis.IStatus, controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
+	// skipped is shown as action required
+	if status.IsSkipped() {
+		return fmt.Sprintf("%s %s", "action required", GetInfoColumn(controlSummary, infoToPrintInfo))
+	}
+	return string(controlSummary.GetStatus().Status())
 }
 
 func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments []int) *tablewriter.Table {
@@ -95,7 +99,7 @@ func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments 
 }
 
 func renderSingleCategory(writer io.Writer, categoryName string, table *tablewriter.Table, rows [][]string, infoToPrintInfo []utils.InfoStars) {
-	cautils.InfoTextDisplay(writer, "\n"+categoryName+"\n")
+	cautils.InfoTextDisplay(writer, categoryName+"\n")
 
 	table.ClearRows()
 	table.AppendBulk(rows)
@@ -103,7 +107,7 @@ func renderSingleCategory(writer io.Writer, categoryName string, table *tablewri
 	table.Render()
 
 	if len(infoToPrintInfo) > 0 {
-		utils.PrintInfo(writer, infoToPrintInfo)
+		printCategoryInfo(writer, infoToPrintInfo)
 	}
 
 	cautils.SimpleDisplay(writer, "\n")

@@ -30,13 +30,13 @@ func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails
 			continue
 		}
 
-		infoToPrintInfo := utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries)
-
-		cp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, infoToPrintInfo)
+		cp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
 	}
 }
 
 func (cp *ClusterPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
+	sortControlSummaries(controlSummaries)
+
 	headers, columnAligments := initCategoryTableData(categoryType)
 
 	table := getCategoryTableWriter(writer, headers, columnAligments)

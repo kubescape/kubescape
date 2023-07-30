@@ -15,16 +15,18 @@ import (
 )
 
 const (
-	linkToHelm            = "https://github.com/kubescape/helm-charts"
-	linkToCICDSetup       = "https://hub.armosec.io/docs/integrations"
-	complianceScanRunText = "Run a compliance scan: '$ kubescape scan framework nsa,mitre'"
-	clusterScanRunText    = "Run a cluster scan: '$ kubescape scan'"
+	linkToHelm               = "https://github.com/kubescape/helm-charts"
+	linkToCICDSetup          = "https://hub.armosec.io/docs/integrations"
+	configScanVerboseRunText = "Run with '--verbose'/'-v' flag for detailed resources view"
+	imageScanVerboseRunText  = "Run with '--verbose'/'-v' flag for detailed vulnerabilities view"
+	clusterScanRunText       = "Run a cluster scan: '$ kubescape scan'"
 )
 
 var (
 	installHelmText      = fmt.Sprintf("Install helm for continuos monitoring: %s", linkToHelm)
 	CICDSetupText        = fmt.Sprintf("Add Kubescape to CICD: %s", linkToCICDSetup)
 	complianceFrameworks = []string{"nsa", "mitre"}
+	cveSeverities        = []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
 )
 
 func filterComplianceFrameworks(frameworks []reportsummary.IFrameworkSummary) []reportsummary.IFrameworkSummary {
@@ -59,10 +61,10 @@ func getTopWorkloadsTitle(topWLsLen int) string {
 }
 
 // getSeverityToSummaryMap returns a map of severity to summary, if shouldMerge is true, it will merge Low, Negligible and Unknown to Other
-func getSeverityToSummaryMap(summary imageprinter.ImageScanSummary, shouldMerge bool) map[string]*imageprinter.SeveritySummary {
+func getSeverityToSummaryMap(summary imageprinter.ImageScanSummary, verboseMode bool) map[string]*imageprinter.SeveritySummary {
 	tempMap := map[string]*imageprinter.SeveritySummary{}
 	for severity, severitySummary := range summary.MapsSeverityToSummary {
-		if shouldMerge {
+		if !verboseMode {
 			if severity == "Low" || severity == "Negligible" || severity == "Unknown" {
 				severity = "Other"
 			}
@@ -73,7 +75,26 @@ func getSeverityToSummaryMap(summary imageprinter.ImageScanSummary, shouldMerge 
 		tempMap[severity].NumberOfCVEs += severitySummary.NumberOfCVEs
 		tempMap[severity].NumberOfFixableCVEs += severitySummary.NumberOfFixableCVEs
 	}
+
+	addEmptySeverities(tempMap, verboseMode)
+
 	return tempMap
+}
+
+func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySummary, verboseMode bool) {
+	if verboseMode {
+		for _, severity := range cveSeverities {
+			if _, ok := mapSeverityTSummary[severity]; !ok {
+				mapSeverityTSummary[severity] = &imageprinter.SeveritySummary{}
+			}
+		}
+	} else {
+		for _, severity := range []string{"Critical", "High"} {
+			if _, ok := mapSeverityTSummary[severity]; !ok {
+				mapSeverityTSummary[severity] = &imageprinter.SeveritySummary{}
+			}
+		}
+	}
 }
 
 // filterCVEsBySeverities returns a list of CVEs only with the severities that are in the severities list
@@ -123,8 +144,8 @@ func printTopVulnerabilities(writer *os.File, summary imageprinter.ImageScanSumm
 	cautils.InfoTextDisplay(writer, "\nMost vulnerable components:\n")
 
 	topVulnerablePackages := sortTopVulnerablePackages(summary.PackageScores)
-	for k, v := range topVulnerablePackages {
-		cautils.SimpleDisplay(writer, "  * %s (%s)\n", k, v.Version)
+	for _, v := range topVulnerablePackages {
+		cautils.SimpleDisplay(writer, "  * %s (%s)\n", v.Name, v.Version)
 	}
 
 	cautils.SimpleDisplay(writer, "\n")
@@ -133,7 +154,7 @@ func printTopVulnerabilities(writer *os.File, summary imageprinter.ImageScanSumm
 }
 
 func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSummary, verboseMode bool) {
-	mapSeverityTSummary := getSeverityToSummaryMap(summary, !verboseMode)
+	mapSeverityTSummary := getSeverityToSummaryMap(summary, verboseMode)
 
 	// sort keys by severity
 	keys := make([]string, 0, len(mapSeverityTSummary))
@@ -144,7 +165,12 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 		return utils.ImageSeverityToInt(keys[i]) > utils.ImageSeverityToInt(keys[j])
 	})
 
-	cautils.InfoTextDisplay(writer, "Summary - %d vulnerabilities found:\n", len(summary.CVEs))
+	if len(summary.CVEs) == 0 {
+		cautils.InfoTextDisplay(writer, "Vulnerability summary - no vulnerabilities were found!\n\n")
+		return
+	}
+
+	cautils.InfoTextDisplay(writer, "Vulnerability summary - %d vulnerabilities found:\n", len(summary.CVEs))
 
 	for _, k := range keys {
 		if k == "Other" {
@@ -154,7 +180,17 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 		}
 	}
 
-	cautils.SimpleDisplay(writer, "\n")
+}
+
+func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary) {
+	cautils.SimpleDisplay(writer, "(Scanned images: %s)\n", strings.Join(summary.Images, ", "))
+
+	for _, img := range summary.Images {
+		imgWithoutTag := strings.Split(img, ":")[0]
+		cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: '$ kubescape scan image %s'\n", imgWithoutTag, img))
+	}
+
+	cautils.InfoTextDisplay(writer, "\n")
 }
 
 func printNextSteps(writer *os.File, nextSteps []string) {
@@ -162,7 +198,6 @@ func printNextSteps(writer *os.File, nextSteps []string) {
 	for _, ns := range nextSteps {
 		cautils.SimpleDisplay(writer, "- "+ns+"\n")
 	}
-	cautils.SimpleDisplay(writer, "\n")
 }
 
 func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
@@ -171,7 +206,7 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 		cautils.SimpleDisplay(writer, "* %s: %.2f%%\n", fw.GetName(), fw.GetComplianceScore())
 	}
 
-	cautils.SimpleDisplay(writer, "View full compliance report by running: $ kubescape scan framework nsa,mitre\n")
+	cautils.SimpleDisplay(writer, "View full compliance report by running:'$ kubescape scan framework nsa,mitre'\n")
 
 	cautils.InfoTextDisplay(writer, "\n")
 }

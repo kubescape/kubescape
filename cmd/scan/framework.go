@@ -119,7 +119,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err = results.HandleResults(ctx); err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			if !scanInfo.VerboseMode {
+			if !scanInfo.VerboseMode && scanInfo.ScanType == "" {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {

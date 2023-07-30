@@ -28,6 +28,7 @@ var _ MainPrinter = &RepoPrinter{}
 
 func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
 	printImageScanningSummary(rp.writer, *summary, false)
+	printImagesCommands(rp.writer, *summary)
 	printTopVulnerabilities(rp.writer, *summary)
 }
 
@@ -47,6 +48,7 @@ func (rp *RepoPrinter) PrintNextSteps() {
 
 func (rp *RepoPrinter) getNextSteps() []string {
 	return []string{
+		configScanVerboseRunText,
 		clusterScanRunText,
 		CICDSetupText,
 		installHelmText,
@@ -72,10 +74,11 @@ func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source repo
 	if ns == "" {
 		cmd = fmt.Sprintf("$ kubescape scan workload %s/%s", kind, name)
 	}
+
 	if source.FileType == reporthandling.SourceTypeHelmChart {
-		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.Path, source.RelativePath)
+		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, fmt.Sprintf("%s/%s", source.Path, source.HelmPath), fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
 
 	} else {
-		return fmt.Sprintf("%s --file-path=%s", cmd, source.RelativePath)
+		return fmt.Sprintf("%s --file-path=%s", cmd, fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
 	}
 }

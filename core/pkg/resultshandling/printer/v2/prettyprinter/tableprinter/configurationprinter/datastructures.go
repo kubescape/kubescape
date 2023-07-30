@@ -18,12 +18,16 @@ const (
 	TypeCounting CategoryType = "COUNTING"
 	TypeStatus   CategoryType = "STATUS"
 
+	// Categories to show are hardcoded by ID, so their names are not important. We also want full control over the categories and their order, so a new release of the security checks will not affect the output
+
+	// cluster scan categories
 	controlPlaneCategoryID  = "Cat-1"
 	accessControlCategoryID = "Cat-2"
 	secretsCategoryID       = "Cat-3"
 	networkCategoryID       = "Cat-4"
 	workloadsCategoryID     = "Cat-5"
 
+	// workload scan categories
 	supplyChainCategoryID        = "Cat-6"
 	resourceManagementCategoryID = "Cat-7"
 	storageCategoryID            = "Cat-8"
@@ -47,6 +51,7 @@ var workloadCategoriesDisplayOrder = []string{
 	nodeEscapeCategoryID,
 }
 
+// map categories to table type. Each table type has a different display
 var mapCategoryToType = map[string]CategoryType{
 	controlPlaneCategoryID:  TypeStatus,
 	accessControlCategoryID: TypeCounting,

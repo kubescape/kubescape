@@ -2,8 +2,12 @@ package configurationprinter
 
 import (
 	"fmt"
+	"io"
+	"sort"
 	"strings"
 
+	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -68,4 +72,16 @@ func getDocsForControl(controlSummary reportsummary.IControlSummary) string {
 // returns run command with verbose for control
 func getRunCommandForControl(controlSummary reportsummary.IControlSummary) string {
 	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
+}
+
+func sortControlSummaries(controlSummaries []reportsummary.IControlSummary) {
+	sort.Slice(controlSummaries, func(i, j int) bool {
+		return controlSummaries[i].GetName() < controlSummaries[j].GetName()
+	})
+}
+
+func printCategoryInfo(writer io.Writer, infoToPrintInfo []utils.InfoStars) {
+	for i := range infoToPrintInfo {
+		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
+	}
 }

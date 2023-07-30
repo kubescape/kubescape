@@ -36,14 +36,14 @@ func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *r
 			continue
 		}
 
-		infoToPrintInfo := utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries)
-
-		rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, infoToPrintInfo)
+		rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
 	}
 
 }
 
 func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
+	sortControlSummaries(controlSummaries)
+
 	headers, columnAligments := initCategoryTableData(categoryType)
 
 	table := getCategoryTableWriter(writer, headers, columnAligments)

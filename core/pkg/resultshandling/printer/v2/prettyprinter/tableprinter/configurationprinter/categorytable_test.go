@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_initCategoryTableData(t *testing.T) {
+func TestInitCategoryTableData(t *testing.T) {
 	tests := []struct {
 		name               string
 		categoryType       CategoryType
@@ -46,7 +46,7 @@ func Test_initCategoryTableData(t *testing.T) {
 	}
 }
 
-func Test_generateCategoryStatusRow(t *testing.T) {
+func TestGenerateCategoryStatusRow(t *testing.T) {
 	tests := []struct {
 		name            string
 		controlSummary  reportsummary.IControlSummary

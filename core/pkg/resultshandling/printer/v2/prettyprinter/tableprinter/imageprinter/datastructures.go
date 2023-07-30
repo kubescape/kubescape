@@ -22,6 +22,7 @@ type CVE struct {
 }
 
 type PackageScore struct {
+	Name    string
 	Version string
 	Score   int
 }

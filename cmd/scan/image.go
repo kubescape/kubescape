@@ -75,10 +75,6 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 
 			resultsHandler.HandleResults(ctx)
 
-			if !scanInfo.VerboseMode {
-				logger.L().Info("Run with '--verbose'/'-v' for the full report\n")
-			}
-
 			if imagescan.ExceedsSeverityThreshold(scanResults, failOnSeverity) {
 				terminateOnExceedingSeverity(scanInfo, logger.L())
 			}

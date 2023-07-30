@@ -53,10 +53,6 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 	return prettyPrinter
 }
 
-func (pp *PrettyPrinter) PrintNextSteps() {
-	pp.mainPrinter.PrintNextSteps()
-}
-
 func (pp *PrettyPrinter) SetMainPrinter() {
 	switch pp.scanType {
 	case cautils.ScanTypeCluster:
@@ -70,6 +66,10 @@ func (pp *PrettyPrinter) SetMainPrinter() {
 	default:
 		pp.mainPrinter = prettyprinter.NewSummaryPrinter(pp.writer, pp.verboseMode)
 	}
+}
+
+func (pp *PrettyPrinter) PrintNextSteps() {
+	pp.mainPrinter.PrintNextSteps()
 }
 
 // convertToImageScanSummary takes a list of image scan data and converts it to a single image scan summary
@@ -90,14 +90,11 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 			continue
 		}
 
-		cves := extractCVEs(doc)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, cves...)
+		imageScanSummary.CVEs = extractCVEs(doc.Matches)
 
-		mapPackageNameToScore := extractPkgNameToScore(doc)
-		insertPackageScoresIntoMap(mapPackageNameToScore, imageScanSummary)
+		imageScanSummary.PackageScores = extractPkgNameToScoreMap(doc.Matches)
 
-		mapSeverityToSummary := extractSeverityToSummaryMap(cves)
-		insertSeveritiesSummariesIntoMap(mapSeverityToSummary, imageScanSummary)
+		imageScanSummary.MapsSeverityToSummary = extractSeverityToSummaryMap(imageScanSummary.CVEs)
 	}
 
 	return &imageScanSummary, nil
@@ -127,9 +124,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 			}
 		}
 
-		if pp.scanType == cautils.ScanTypeWorkload {
-			cautils.InfoDisplay(pp.writer, "Workload: %s/%s/%s\n", opaSessionObj.ScannedWorkload.GetNamespace(), opaSessionObj.ScannedWorkload.GetKind(), opaSessionObj.ScannedWorkload.GetName())
-		}
+		pp.printOverview(opaSessionObj, pp.verboseMode)
 
 		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
 
@@ -144,6 +139,23 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 	if len(imageScanData) > 0 {
 		pp.PrintImageScan(imageScanData)
+	}
+}
+
+func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, printExtraLine bool) {
+	if printExtraLine {
+		fmt.Fprintf(pp.writer, "\n")
+	}
+
+	if pp.scanType == cautils.ScanTypeCluster || pp.scanType == cautils.ScanTypeRepo {
+		cautils.InfoDisplay(pp.writer, "\nSecurity Overview\n\n")
+	} else if pp.scanType == cautils.ScanTypeWorkload {
+		ns := opaSessionObj.ScannedWorkload.GetNamespace()
+		if ns == "" {
+			cautils.InfoDisplay(pp.writer, "Workload - Kind: %s, Name: %s\n\n", opaSessionObj.ScannedWorkload.GetKind(), opaSessionObj.ScannedWorkload.GetName())
+		} else {
+			cautils.InfoDisplay(pp.writer, "Workload - Namespace: %s, Kind: %s, Name: %s\n\n", opaSessionObj.ScannedWorkload.GetNamespace(), opaSessionObj.ScannedWorkload.GetKind(), opaSessionObj.ScannedWorkload.GetName())
+		}
 	}
 }
 
@@ -195,6 +207,7 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 	cautils.DescriptionDisplay(prettyPrinter.writer, "\n")
 
 }
+
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
 	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
 	statusDetails := ""
@@ -214,6 +227,7 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
 	}
 }
+
 func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)

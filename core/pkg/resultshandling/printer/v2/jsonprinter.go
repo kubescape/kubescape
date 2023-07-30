@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 const (
@@ -48,35 +46,9 @@ func (jp *JsonPrinter) Score(score float32) {
 
 }
 
-func printImageAndConfigurationScanning(output io.Writer, imageScanData *models.PresenterConfig, opaSessionObj *cautils.OPASessionObj) error {
-	type Document struct {
-		*models.Document                `json:",omitempty"`
-		*reporthandlingv2.PostureReport `json:",omitempty"`
-	}
-
-	doc, err := models.NewDocument(imageScanData.Packages, imageScanData.Context, imageScanData.Matches, imageScanData.IgnoredMatches, imageScanData.MetadataProvider,
-		imageScanData.AppConfig, imageScanData.DBStatus)
-	if err != nil {
-		return err
-	}
-
-	docForJson := Document{
-		&doc,
-		FinalizeResults(opaSessionObj),
-	}
-
-	enc := json.NewEncoder(output)
-	// prevent > and < from being escaped in the payload
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", " ")
-	return enc.Encode(&docForJson)
-}
-
 func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	var err error
-	if opaSessionObj != nil && imageScanData != nil {
-		err = printImageAndConfigurationScanning(jp.writer, imageScanData[0].PresenterConfig, opaSessionObj)
-	} else if opaSessionObj != nil {
+	if opaSessionObj != nil {
 		err = printConfigurationsScanning(opaSessionObj, ctx, jp)
 	} else if imageScanData != nil {
 		err = jp.PrintImageScan(ctx, imageScanData[0].PresenterConfig)

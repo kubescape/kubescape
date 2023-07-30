@@ -26,6 +26,7 @@ var _ MainPrinter = &ClusterPrinter{}
 
 func (cp *ClusterPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
 	printImageScanningSummary(cp.writer, *summary, false)
+	printImagesCommands(cp.writer, *summary)
 }
 
 func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
@@ -46,7 +47,7 @@ func (cp *ClusterPrinter) PrintNextSteps() {
 
 func (cp *ClusterPrinter) getNextSteps() []string {
 	return []string{
-		complianceScanRunText,
+		configScanVerboseRunText,
 		installHelmText,
 	}
 }

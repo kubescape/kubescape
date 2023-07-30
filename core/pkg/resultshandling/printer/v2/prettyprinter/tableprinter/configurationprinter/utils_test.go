@@ -8,7 +8,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-func Test_mapCategoryToSummary(t *testing.T) {
+func TestMapCategoryToSummary(t *testing.T) {
 
 	tests := []struct {
 		name                       string
@@ -329,7 +329,7 @@ func Test_mapCategoryToSummary(t *testing.T) {
 	}
 }
 
-func Test_buildCategoryToControlsMap(t *testing.T) {
+func TestBuildCategoryToControlsMap(t *testing.T) {
 	tests := []struct {
 		name                       string
 		mapCategoriesToCtrlSummary map[string][]reportsummary.ControlSummary
@@ -503,7 +503,7 @@ func Test_buildCategoryToControlsMap(t *testing.T) {
 	}
 }
 
-func Test_getDocsForControl(t *testing.T) {
+func TestGetDocsForControl(t *testing.T) {
 	tests := []struct {
 		name             string
 		controlSummary   reportsummary.IControlSummary
@@ -536,7 +536,7 @@ func Test_getDocsForControl(t *testing.T) {
 	}
 }
 
-func Test_getRunCommandForControl(t *testing.T) {
+func TestGetRunCommandForControl(t *testing.T) {
 	tests := []struct {
 		name            string
 		controlSummary  reportsummary.IControlSummary

@@ -87,38 +87,14 @@ func finalizeResources(results []resourcesresults.Result, allResources map[strin
 	return resources
 }
 
-func insertSeveritiesSummariesIntoMap(mapSeverityToSummary map[string]*imageprinter.SeveritySummary, imageScanSummary imageprinter.ImageScanSummary) {
-	for k, v := range mapSeverityToSummary {
-		severitySummary, ok := imageScanSummary.MapsSeverityToSummary[k]
-		if !ok {
-			imageScanSummary.MapsSeverityToSummary[k] = v
-			continue
-		}
-		severitySummary.NumberOfCVEs = severitySummary.NumberOfCVEs + v.NumberOfCVEs
-		severitySummary.NumberOfFixableCVEs = severitySummary.NumberOfFixableCVEs + v.NumberOfFixableCVEs
-		imageScanSummary.MapsSeverityToSummary[k] = severitySummary
-	}
-}
-
-func insertPackageScoresIntoMap(mapPackageNameToScore map[string]*imageprinter.PackageScore, imageScanSummary imageprinter.ImageScanSummary) {
-	for k, v := range mapPackageNameToScore {
-		pkgScore, ok := imageScanSummary.PackageScores[k]
-		if !ok {
-			imageScanSummary.PackageScores[k] = v
-			continue
-		}
-		pkgScore.Score = pkgScore.Score + v.Score
-		imageScanSummary.PackageScores[k] = pkgScore
-	}
-}
-
+// returns map of severity to summary
 func extractSeverityToSummaryMap(cves []imageprinter.CVE) map[string]*imageprinter.SeveritySummary {
 	mapSeverityToSummary := map[string]*imageprinter.SeveritySummary{}
 	for _, cve := range cves {
 		if _, ok := mapSeverityToSummary[cve.Severity]; !ok {
 			mapSeverityToSummary[cve.Severity] = &imageprinter.SeveritySummary{}
 		}
-		mapSeverityToSummary[cve.Severity].NumberOfCVEs = mapSeverityToSummary[cve.Severity].NumberOfCVEs + 1
+		mapSeverityToSummary[cve.Severity].NumberOfCVEs += 1
 		if cve.FixedState == string(v5.FixedState) {
 			mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs = mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs + 1
 		}
@@ -126,32 +102,34 @@ func extractSeverityToSummaryMap(cves []imageprinter.CVE) map[string]*imageprint
 	return mapSeverityToSummary
 }
 
-func extractPkgNameToScore(doc models.Document) map[string]*imageprinter.PackageScore {
+// returns a map of package name + version to score (we can have multiple matches for the same package with different versions)
+func extractPkgNameToScoreMap(matches []models.Match) map[string]*imageprinter.PackageScore {
 	mapPackageNameToScore := make(map[string]*imageprinter.PackageScore, 0)
-	for _, cve := range doc.Matches {
-		if _, ok := mapPackageNameToScore[cve.Artifact.Name]; !ok {
-			mapPackageNameToScore[cve.Artifact.Name] = &imageprinter.PackageScore{
-				Score: 0,
+	for i := range matches {
+		key := matches[i].Artifact.Name + matches[i].Artifact.Version
+		if _, ok := mapPackageNameToScore[key]; !ok {
+			mapPackageNameToScore[key] = &imageprinter.PackageScore{
+				Version: matches[i].Artifact.Version,
+				Name:    matches[i].Artifact.Name,
 			}
 		}
-		mapPackageNameToScore[cve.Artifact.Name].Score = mapPackageNameToScore[cve.Artifact.Name].Score + utils.ImageSeverityToInt(cve.Vulnerability.Severity)
-		mapPackageNameToScore[cve.Artifact.Name].Version = cve.Artifact.Version
+		mapPackageNameToScore[key].Score = mapPackageNameToScore[key].Score + utils.ImageSeverityToInt(matches[i].Vulnerability.Severity)
 	}
 	return mapPackageNameToScore
 }
 
-func extractCVEs(doc models.Document) []imageprinter.CVE {
-	cves := []imageprinter.CVE{}
-	for _, match := range doc.Matches {
+func extractCVEs(matches []models.Match) []imageprinter.CVE {
+	CVEs := []imageprinter.CVE{}
+	for i := range matches {
 		cve := imageprinter.CVE{
-			ID:          match.Vulnerability.ID,
-			Severity:    match.Vulnerability.Severity,
-			Package:     match.Artifact.Name,
-			Version:     match.Artifact.Version,
-			FixVersions: match.Vulnerability.Fix.Versions,
-			FixedState:  match.Vulnerability.Fix.State,
+			ID:          matches[i].Vulnerability.ID,
+			Severity:    matches[i].Vulnerability.Severity,
+			Package:     matches[i].Artifact.Name,
+			Version:     matches[i].Artifact.Version,
+			FixVersions: matches[i].Vulnerability.Fix.Versions,
+			FixedState:  matches[i].Vulnerability.Fix.State,
 		}
-		cves = append(cves, cve)
+		CVEs = append(CVEs, cve)
 	}
-	return cves
+	return CVEs
 }

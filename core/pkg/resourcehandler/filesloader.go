@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
-	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
@@ -32,7 +32,7 @@ func NewFileResourceHandler(_ context.Context, inputPatterns []string, workloadI
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 	ksResources := cautils.KSResources{}
 
@@ -112,12 +112,12 @@ func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string
 		defer os.RemoveAll(clonedRepo)
 	}
 
+	// Get repo root
+	repoRoot, gitRepo := extractGitRepo(helmPath)
+
 	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
 
 	wlSource, _ := helmSourceToWorkloads[workloadPath]
-
-	// Get repo root
-	repoRoot, gitRepo := extractGitRepo(helmPath)
 
 	helmChartName := helmSourceToChartName[workloadPath]
 
@@ -141,64 +141,14 @@ func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string
 	}
 
 	workloadSource := reporthandling.Source{
+		Path:          repoRoot,
+		HelmPath:      strings.TrimPrefix(workloadPath, fmt.Sprintf("%s/", repoRoot)),
 		RelativePath:  helmPath,
 		FileType:      reporthandling.SourceTypeHelmChart,
 		HelmChartName: helmChartName,
 		LastCommit:    lastCommit,
 	}
-	workloadIDToSource := make(map[string]reporthandling.Source, 0)
-	workloadIDToSource[wlSource[0].GetID()] = workloadSource
 
-	workloads := []workloadinterface.IMetadata{}
-	workloads = append(workloads, wlSource...)
-
-	return workloadIDToSource, workloads, nil
-
-}
-
-func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
-	clonedRepo, err := cloneGitRepo(&helmPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	if clonedRepo != "" {
-		defer os.RemoveAll(clonedRepo)
-	}
-
-	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
-
-	wlSource, _ := helmSourceToWorkloads[workloadPath]
-
-	// Get repo root
-	repoRoot, gitRepo := extractGitRepo(helmPath)
-
-	helmChartName := helmSourceToChartName[workloadPath]
-
-	relSource, err := filepath.Rel(repoRoot, helmPath)
-	if err == nil {
-		helmPath = relSource
-	}
-
-	var lastCommit reporthandling.LastCommit
-	if gitRepo != nil {
-		commitInfo, _ := gitRepo.GetFileLastCommit(helmPath)
-		if commitInfo != nil {
-			lastCommit = reporthandling.LastCommit{
-				Hash:           commitInfo.SHA,
-				Date:           commitInfo.Author.Date,
-				CommitterName:  commitInfo.Author.Name,
-				CommitterEmail: commitInfo.Author.Email,
-				Message:        commitInfo.Message,
-			}
-		}
-	}
-
-	workloadSource := reporthandling.Source{
-		RelativePath:  helmPath,
-		FileType:      reporthandling.SourceTypeHelmChart,
-		HelmChartName: helmChartName,
-		LastCommit:    lastCommit,
-	}
 	workloadIDToSource := make(map[string]reporthandling.Source, 0)
 	workloadIDToSource[wlSource[0].GetID()] = workloadSource
 
@@ -275,6 +225,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		}
 
 		workloadSource := reporthandling.Source{
+			Path:         repoRoot,
 			RelativePath: relSource,
 			FileType:     filetype,
 			LastCommit:   lastCommit,
@@ -315,6 +266,8 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		}
 
 		workloadSource := reporthandling.Source{
+			Path:          repoRoot,
+			HelmPath:      strings.TrimPrefix(path, fmt.Sprintf("%s/", repoRoot)),
 			RelativePath:  source,
 			FileType:      reporthandling.SourceTypeHelmChart,
 			HelmChartName: helmChartName,

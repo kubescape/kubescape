@@ -32,13 +32,13 @@ func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetail
 			continue
 		}
 
-		infoToPrintInfo := utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries)
-
-		wp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, infoToPrintInfo)
+		wp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
 	}
 }
 
 func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
+	sortControlSummaries(controlSummaries)
+
 	headers, columnAligments := wp.initCategoryTableData(categoryType)
 
 	table := getCategoryTableWriter(writer, headers, columnAligments)
@@ -47,7 +47,7 @@ func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, catego
 	for _, ctrls := range controlSummaries {
 		var row []string
 		if categoryType == TypeCounting {
-			row = wp.generateCountingCategoryRow(ctrls)
+			row = wp.generateCountingCategoryRow(ctrls, infoToPrintInfo)
 		} else {
 			row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
 		}
@@ -70,13 +70,15 @@ func (wp *WorkloadPrinter) initCategoryTableData(categoryType CategoryType) ([]s
 	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
 }
 
-func (wp *WorkloadPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary) []string {
+func (wp *WorkloadPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) []string {
 
-	row := make([]string, 2)
+	row := make([]string, 3)
 
 	row[0] = controlSummary.GetName()
 
-	row[1] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
+	row[1] = getStatus(controlSummary.GetStatus(), controlSummary, infoToPrintInfo)
+
+	row[2] = getDocsForControl(controlSummary)
 
 	return row
 }
@@ -90,13 +92,14 @@ func (wp *WorkloadPrinter) generateNextSteps(controlSummary reportsummary.IContr
 }
 
 func (wp *WorkloadPrinter) getCategoryCountingTypeHeaders() []string {
-	headers := make([]string, 2)
+	headers := make([]string, 3)
 	headers[0] = controlNameHeader
-	headers[1] = resourcesHeader
+	headers[1] = statusHeader
+	headers[2] = docsHeader
 
 	return headers
 }
 
 func (wp *WorkloadPrinter) getCountingTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER}
+	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT}
 }

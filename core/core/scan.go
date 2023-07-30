@@ -221,29 +221,36 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 }
 
 func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler) {
+	imagesToScan := []string{}
+
+	if scanInfo.ScanType == cautils.ScanTypeWorkload {
+		containers, _ := workloadinterface.NewWorkloadObj(scanData.ScannedWorkload.GetObject()).GetContainers()
+		for _, container := range containers {
+			imagesToScan = append(imagesToScan, container.Image)
+		}
+	} else {
+		for _, workload := range scanData.AllResources {
+			containers, _ := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
+			for _, container := range containers {
+				imagesToScan = append(imagesToScan, container.Image)
+			}
+		}
+	}
+	progressListener := cautils.NewProgressHandler("")
+	progressListener.Start(len(imagesToScan))
+	defer progressListener.Stop()
+
 	logger.L().Info("Scanning images")
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)
 
-	if scanInfo.ScanType == cautils.ScanTypeWorkload {
-		wlObj := workloadinterface.NewWorkloadObj(scanData.ScannedWorkload.GetObject())
-		scanSingleWorkload(wlObj, ctx, svc, resultsHandling, scanInfo)
-	} else {
-		for _, workload := range scanData.AllResources {
-			wlObj := workloadinterface.NewWorkloadObj(workload.GetObject())
-			scanSingleWorkload(wlObj, ctx, svc, resultsHandling, scanInfo)
-		}
+	for _, img := range imagesToScan {
+		scanSingleImage(ctx, img, svc, resultsHandling, *scanInfo)
+		progressListener.ProgressJob(1, fmt.Sprintf("image name: %s", img))
 	}
 
 	logger.L().Success("Finished scanning images")
-}
-
-func scanSingleWorkload(wlObj *workloadinterface.Workload, ctx context.Context, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) {
-	containers, _ := wlObj.GetContainers()
-	for _, container := range containers {
-		scanSingleImage(ctx, container.Image, svc, resultsHandling, *scanInfo)
-	}
 }
 
 func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler, scanInfo cautils.ScanInfo) {

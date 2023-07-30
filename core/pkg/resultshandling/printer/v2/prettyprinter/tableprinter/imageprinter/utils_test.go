@@ -6,7 +6,7 @@ import (
 	v5 "github.com/anchore/grype/grype/db/v5"
 )
 
-func Test_generateRows(t *testing.T) {
+func TestGenerateRows(t *testing.T) {
 	test := []struct {
 		name         string
 		summary      ImageScanSummary
@@ -92,7 +92,7 @@ func Test_generateRows(t *testing.T) {
 	}
 }
 
-func Test_generateRow(t *testing.T) {
+func TestGenerateRow(t *testing.T) {
 	tests := []struct {
 		name string
 		cve  CVE
@@ -136,7 +136,7 @@ func Test_generateRow(t *testing.T) {
 	}
 }
 
-func Test_getImageScanningHeaders(t *testing.T) {
+func TestGetImageScanningHeaders(t *testing.T) {
 	headers := getImageScanningHeaders()
 
 	expectedHeaders := []string{"SEVERITY", "NAME", "COMPONENT", "VERSION", "FIXED IN"}
