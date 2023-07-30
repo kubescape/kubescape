@@ -308,7 +308,7 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	}{
 		{
 			name: "no env",
-			want: "default",
+			want: "kubescape",
 		},
 		{
 			name: "default ns",
