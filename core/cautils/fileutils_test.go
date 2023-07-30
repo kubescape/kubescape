@@ -2,7 +2,6 @@ package cautils
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,11 +22,6 @@ func helmChartPath() string {
 	return filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
 }
 
-func emptyDirectory() string {
-	o, _ := os.Getwd()
-	return filepath.Join(filepath.Dir(o), ".", "cautils", "testdata", "emptyDirectory")
-}
-
 func TestListFiles(t *testing.T) {
 
 	filesPath := onlineBoutiquePath()
@@ -35,13 +29,6 @@ func TestListFiles(t *testing.T) {
 	files, errs := listFiles(filesPath)
 	assert.Equal(t, 0, len(errs))
 	assert.Equal(t, 12, len(files))
-}
-
-func TestLoadResourcesFromFilesEmptyFiles(t *testing.T) {
-	expectedError := errors.New(fmt.Sprintf(ErrNoFilesToScan, emptyDirectory())).Error()
-	_, err := LoadResourcesFromFiles(context.TODO(), emptyDirectory(), "")
-	assert.NotEqual(t, err, nil)
-	assert.Equal(t, err.Error(), expectedError)
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
@@ -57,6 +44,13 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 			assert.Equal(t, "/v1//Service/adservice", getRelativePath(w[1].GetID()))
 		}
 	}
+
+	// check case for empty directory
+	emptyDirectoryPath := filepath.Join("testdata", "emptyDirectory")
+	expectedError := fmt.Sprintf(ErrNoFilesToScan, emptyDirectoryPath)
+	_, err = LoadResourcesFromFiles(context.TODO(), emptyDirectoryPath, "")
+	assert.NotEqual(t, err, nil)
+	assert.Equal(t, err.Error(), expectedError)
 }
 
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
