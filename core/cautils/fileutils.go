@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,7 +108,7 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) (map[st
 	}
 	if len(files) == 0 {
 		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
-		return nil, errors.New(fmt.Sprintf(ErrNoFilesToScan, input))
+		return nil, fmt.Errorf(ErrNoFilesToScan, input)
 	}
 
 	workloads, errs := loadFiles(rootPath, files)
