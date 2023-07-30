@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIsControlFitToScanning(t *testing.T) {
+func TestIsControlFitToScanScope(t *testing.T) {
 	tests := []struct {
 		scanInfo     *ScanInfo
 		Control      reporthandling.Control
