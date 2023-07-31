@@ -4,9 +4,9 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	objectsenvelopes "github.com/kubescape/opa-utils/objectsenvelopes"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
+	objectsenvelopes "github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -58,7 +58,7 @@ func TestToScanInfo(t *testing.T) {
 		s := ToScanInfo(req)
 		assert.True(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
-		assert.Nil(t, s.WorkloadIdentifier)
+		assert.Nil(t, s.ScanObject)
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
@@ -72,11 +72,11 @@ func TestToScanInfo(t *testing.T) {
 			},
 		}
 		s := ToScanInfo(req)
-		assert.NotNil(t, s.WorkloadIdentifier)
-		assert.Equal(t, "apps/v1", s.WorkloadIdentifier.ApiVersion)
-		assert.Equal(t, "Deployment", s.WorkloadIdentifier.Kind)
-		assert.Equal(t, "nginx", s.WorkloadIdentifier.Name)
-		assert.Equal(t, "ns1", s.WorkloadIdentifier.Namespace)
+		assert.NotNil(t, s.ScanObject)
+		assert.Equal(t, "apps/v1", s.ScanObject.GetApiVersion())
+		assert.Equal(t, "Deployment", s.ScanObject.GetKind())
+		assert.Equal(t, "nginx", s.ScanObject.GetName())
+		assert.Equal(t, "ns1", s.ScanObject.GetNamespace())
 	}
 }
 

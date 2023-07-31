@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 )
 
 // Clone git repository
@@ -81,19 +82,20 @@ func addCommitData(input string, workloadIDToSource map[string]reporthandling.So
 }
 */
 
-func findWorkloadToScan(mappedResources map[string][]workloadinterface.IMetadata, workloadIdentifier *cautils.WorkloadIdentifier) (workloadinterface.IWorkload, error) {
-	if workloadIdentifier == nil {
+// findScanObjectResource finds the requested k8s object to be scanned in the resources map
+func findScanObjectResource(mappedResources map[string][]workloadinterface.IMetadata, resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
+	if resource == nil {
 		return nil, nil
 	}
 
 	wls := []workloadinterface.IWorkload{}
 	for _, resources := range mappedResources {
 		for _, r := range resources {
-			if r.GetKind() == workloadIdentifier.Kind && r.GetName() == workloadIdentifier.Name {
-				if workloadIdentifier.Namespace != "" && workloadIdentifier.Namespace != r.GetNamespace() {
+			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
+				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
 					continue
 				}
-				if workloadIdentifier.ApiVersion != "" && workloadIdentifier.ApiVersion != r.GetApiVersion() {
+				if resource.GetApiVersion() != "" && resource.GetApiVersion() != r.GetApiVersion() {
 					continue
 				}
 
@@ -106,9 +108,9 @@ func findWorkloadToScan(mappedResources map[string][]workloadinterface.IMetadata
 	}
 
 	if len(wls) == 0 {
-		return nil, fmt.Errorf("workload '%s' not found", workloadIdentifier.String())
+		return nil, fmt.Errorf("k8s resource '%s' not found", resource.GetID())
 	} else if len(wls) > 1 {
-		return nil, fmt.Errorf("more than one workload found for '%s'", workloadIdentifier.String())
+		return nil, fmt.Errorf("more than one k8s resource found for '%s'", resource.GetID())
 	}
 
 	return wls[0], nil

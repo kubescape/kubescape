@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 
@@ -19,15 +20,15 @@ import (
 
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
-	workloadIdentifier *cautils.WorkloadIdentifier
+	singleResourceScan *objectsenvelopes.ScanObject
 	inputPatterns      []string
 }
 
-func NewFileResourceHandler(_ context.Context, inputPatterns []string, workloadIdentifier *cautils.WorkloadIdentifier) *FileResourceHandler {
+func NewFileResourceHandler(_ context.Context, inputPatterns []string, singleResourceScan *objectsenvelopes.ScanObject) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
 		inputPatterns:      inputPatterns,
-		workloadIdentifier: workloadIdentifier,
+		singleResourceScan: singleResourceScan,
 	}
 }
 
@@ -61,16 +62,15 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		addWorkloadsToResourcesMap(mappedResources, workloads)
 	}
 
-	// locate input workload in the mapped resources - if not found or not a valid workload, return error
-	inputWorkload, err := findWorkloadToScan(mappedResources, fileHandler.workloadIdentifier)
-	if err != nil {
+	// locate input k8s object in the mapped resources - if not found or not a valid resource, return error
+	var err error
+	if sessionObj.SingleResourceScan, err = findScanObjectResource(mappedResources, fileHandler.singleResourceScan); err != nil {
 		return nil, nil, nil, nil, err
 	}
-	sessionObj.ScannedWorkload = inputWorkload
 
 	// build a resources map, based on the policies
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(fileHandler, sessionObj.Policies, inputWorkload)
+	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(fileHandler, sessionObj.Policies, sessionObj.SingleResourceScan)
 	k8sResources := resourceToQuery.ToK8sResourceMap()
 
 	// save only relevant resources
@@ -85,8 +85,8 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		}
 	}
 
-	// save input workload in resource maps
-	addWorkloadToResourceMaps(k8sResources, allResources, inputWorkload)
+	// save input resource in resource maps
+	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan)
 
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")

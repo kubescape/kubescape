@@ -8,7 +8,7 @@ import (
 )
 
 // utils which are common to all resource handlers
-func addWorkloadToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
+func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
 	if wl == nil {
 		return
 	}

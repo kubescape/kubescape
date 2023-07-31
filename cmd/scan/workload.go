@@ -8,6 +8,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 
 	"github.com/spf13/cobra"
 )
@@ -59,11 +60,11 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				logger.L().Fatal(err.Error())
 			}
 
-			scanInfo.WorkloadIdentifier = &cautils.WorkloadIdentifier{
-				Namespace: namespace,
-				Kind:      kind,
-				Name:      name,
-			}
+			scanInfo.ScanObject = &objectsenvelopes.ScanObject{}
+			scanInfo.ScanObject.SetNamespace(namespace)
+			scanInfo.ScanObject.SetKind(kind)
+			scanInfo.ScanObject.SetName(name)
+			// todo: add api version if provided
 
 			scanInfo.ScanAll = true
 

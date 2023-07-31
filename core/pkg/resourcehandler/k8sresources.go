@@ -43,31 +43,31 @@ type K8sResourceHandler struct {
 	fieldSelector      IFieldSelector
 	rbacObjectsAPI     *cautils.RBACObjects
 	registryAdaptors   *RegistryAdaptors
-	workloadIdentifier *cautils.WorkloadIdentifier
+	singleResourceScan *objectsenvelopes.ScanObject
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors, workloadIdentifier *cautils.WorkloadIdentifier) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors, singleResourceScan *objectsenvelopes.ScanObject) *K8sResourceHandler {
 	return &K8sResourceHandler{
 		k8s:                k8s,
 		fieldSelector:      fieldSelector,
 		hostSensorHandler:  hostSensorHandler,
 		rbacObjectsAPI:     rbacObjects,
 		registryAdaptors:   registryAdaptors,
-		workloadIdentifier: workloadIdentifier,
+		singleResourceScan: singleResourceScan,
 	}
 }
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
-	workload, err := k8sHandler.findWorkloadToScan(k8sHandler.workloadIdentifier)
+	var err error
+	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(k8sHandler.singleResourceScan)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
-	sessionObj.ScannedWorkload = workload
 
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(k8sHandler, sessionObj.Policies, workload)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(k8sHandler, sessionObj.Policies, sessionObj.SingleResourceScan)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// map of Kubescape resources to control_ids
@@ -80,8 +80,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
 	}
 
-	// add workload to k8s resources map (for single workload scan)
-	addWorkloadToResourceMaps(k8sResourcesMap, allResources, workload)
+	// add single resource to k8s resources map (for single resource scan)
+	addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
@@ -155,16 +155,17 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
 }
 
-func (k8sHandler *K8sResourceHandler) findWorkloadToScan(workloadIdentifier *cautils.WorkloadIdentifier) (workloadinterface.IWorkload, error) {
-	if workloadIdentifier == nil {
+// findScanObjectResource pulls the requested k8s object to be scanned from the api server
+func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource workloadinterface.IMetadata) (workloadinterface.IWorkload, error) {
+	if resource == nil {
 		return nil, nil
 	}
 
 	var wlIdentifierString string
-	if workloadIdentifier.ApiVersion != "" {
-		wlIdentifierString = fmt.Sprintf("%s/%s", workloadIdentifier.ApiVersion, workloadIdentifier.Kind)
+	if resource.GetApiVersion() != "" {
+		wlIdentifierString = fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind())
 	} else {
-		wlIdentifierString = workloadIdentifier.Kind
+		wlIdentifierString = resource.GetKind()
 	}
 
 	gvr, err := k8sinterface.GetGroupVersionResource(wlIdentifierString)
@@ -172,26 +173,26 @@ func (k8sHandler *K8sResourceHandler) findWorkloadToScan(workloadIdentifier *cau
 		return nil, err
 	}
 
-	fieldSelectors := getNameFieldSelectorString(workloadIdentifier.Name, "=")
-	if workloadIdentifier.Namespace != "" && k8sinterface.IsNamespaceScope(&gvr) {
-		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(workloadIdentifier.Namespace, "="))
+	fieldSelectors := getNameFieldSelectorString(resource.GetName(), "=")
+	if resource.GetNamespace() != "" && k8sinterface.IsNamespaceScope(&gvr) {
+		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), "="))
 	}
 	result, err := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resource %s, reason: %v", workloadIdentifier.String(), err)
+		return nil, fmt.Errorf("failed to get resource %s, reason: %v", resource.GetID(), err)
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("%s was not found", workloadIdentifier.String())
+		return nil, fmt.Errorf("%s was not found", resource.GetID())
 	}
 
 	if len(result) > 1 {
-		return nil, fmt.Errorf("more than one resource found for %s", workloadIdentifier.String())
+		return nil, fmt.Errorf("more than one resource found for %s", resource.GetID())
 	}
 
 	metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
 	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
-		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", workloadIdentifier.String())
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", resource.GetID())
 	}
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())

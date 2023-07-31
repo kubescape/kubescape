@@ -56,14 +56,9 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		scanInfo.HostSensorEnabled = cautils.NewBoolPtr(scanRequest.HostScanner)
 	}
 
-	// workload scan
+	// single resource scan
 	if scanRequest.ScanObject != nil {
-		scanInfo.WorkloadIdentifier = &cautils.WorkloadIdentifier{
-			Kind:       scanRequest.ScanObject.GetKind(),
-			Name:       scanRequest.ScanObject.GetName(),
-			Namespace:  scanRequest.ScanObject.GetNamespace(),
-			ApiVersion: scanRequest.ScanObject.GetApiVersion(),
-		}
+		scanInfo.ScanObject = scanRequest.ScanObject
 	}
 
 	return scanInfo

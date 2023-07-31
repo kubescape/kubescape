@@ -94,11 +94,11 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
 		// scanInfo.HostSensor.SetBool(false)
-		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, scanInfo.WorkloadIdentifier)
+		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, scanInfo.ScanObject)
 	}
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors, scanInfo.WorkloadIdentifier)
+	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors, scanInfo.ScanObject)
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.
@@ -188,8 +188,8 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	// do not submit workload scanning
-	if scanInfo.WorkloadIdentifier != nil {
+	// do not submit single resource scan to BE
+	if scanInfo.ScanObject != nil {
 		scanInfo.Submit = false
 		return
 	}
