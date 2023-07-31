@@ -1,15 +1,14 @@
 package configurationprinter
 
-import "github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+import (
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+)
 
 type CategoryControls struct {
 	CategoryName     string
 	controlSummaries []reportsummary.IControlSummary
-}
-
-type Category struct {
-	Name string
-	Type CategoryType
+	Status           apis.ScanningStatus
 }
 
 type CategoryType string
@@ -40,6 +39,13 @@ var clusterCategoriesDisplayOrder = []string{
 	secretsCategoryID,
 	networkCategoryID,
 	workloadsCategoryID,
+}
+
+var repoCategoriesDisplayOrder = []string{
+	workloadsCategoryID,
+	accessControlCategoryID,
+	secretsCategoryID,
+	networkCategoryID,
 }
 
 var workloadCategoriesDisplayOrder = []string{
@@ -116,4 +122,27 @@ var mapWorkloadControlsToCategories = map[string]string{
 	"C-0017": nodeEscapeCategoryID,
 	"C-0055": nodeEscapeCategoryID,
 	"C-0057": nodeEscapeCategoryID,
+}
+
+var mapRepoControlsToCategories = map[string]string{
+	"C-0015": accessControlCategoryID,
+	"C-0002": accessControlCategoryID,
+	"C-0007": accessControlCategoryID,
+	"C-0063": accessControlCategoryID,
+	"C-0036": accessControlCategoryID,
+	"C-0039": accessControlCategoryID,
+	"C-0035": accessControlCategoryID,
+	"C-0188": accessControlCategoryID,
+	"C-0187": accessControlCategoryID,
+
+	"C-0012": secretsCategoryID,
+
+	"C-0260": networkCategoryID,
+	"C-0256": networkCategoryID,
+
+	"C-0038": workloadsCategoryID,
+	"C-0041": workloadsCategoryID,
+	"C-0048": workloadsCategoryID,
+	"C-0057": workloadsCategoryID,
+	"C-0013": workloadsCategoryID,
 }

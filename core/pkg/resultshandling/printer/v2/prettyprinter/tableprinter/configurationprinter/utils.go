@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -31,6 +32,7 @@ func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapD
 			if _, ok := mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID]; !ok {
 				mapCategoryIDToName[controlSummaries[i].GetCategory().ID] = controlSummaries[i].GetCategory().Name // set category name
 				mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID] = []reportsummary.IControlSummary{}
+
 			}
 			mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID] = append(mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID], controlSummaries[i])
 			continue
@@ -55,10 +57,19 @@ func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapD
 func buildCategoryToControlsMap(mapCategoriesToCtrlSummary map[string][]reportsummary.IControlSummary, mapCategoryIDToName map[string]string) map[string]CategoryControls {
 	mapCategoryToControls := make(map[string]CategoryControls)
 	for categoryID, ctrls := range mapCategoriesToCtrlSummary {
+		status := apis.StatusPassed
+		for _, ctrl := range ctrls {
+			if ctrl.GetStatus().Status() == apis.StatusFailed {
+				status = apis.StatusFailed
+				break
+			}
+		}
+
 		categoryName := mapCategoryIDToName[categoryID]
 		mapCategoryToControls[categoryID] = CategoryControls{
 			CategoryName:     categoryName,
 			controlSummaries: ctrls,
+			Status:           status,
 		}
 	}
 	return mapCategoryToControls

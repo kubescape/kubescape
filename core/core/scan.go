@@ -226,28 +226,27 @@ func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx
 	if scanInfo.ScanType == cautils.ScanTypeWorkload {
 		containers, _ := workloadinterface.NewWorkloadObj(scanData.ScannedWorkload.GetObject()).GetContainers()
 		for _, container := range containers {
+			// if !slices.Contains(imagesToScan, container.Image) {
 			imagesToScan = append(imagesToScan, container.Image)
+			// }
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
 			containers, _ := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
 			for _, container := range containers {
+				// if !slices.Contains(imagesToScan, container.Image) {
 				imagesToScan = append(imagesToScan, container.Image)
+				// }
 			}
 		}
 	}
 	logger.L().Info("Scanning images")
-
-	progressListener := cautils.NewProgressHandler("")
-	progressListener.Start(len(imagesToScan))
-	defer progressListener.Stop()
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)
 
 	for _, img := range imagesToScan {
 		scanSingleImage(ctx, img, svc, resultsHandling, *scanInfo)
-		progressListener.ProgressJob(1, fmt.Sprintf("image name: %s\n", img))
 	}
 
 	logger.L().Success("Finished scanning images")

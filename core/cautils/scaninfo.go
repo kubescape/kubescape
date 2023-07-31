@@ -149,6 +149,7 @@ type ScanInfo struct {
 	ChartPath             string
 	FilePath              string
 	ImageScanInfo         ImageScanInfo
+	IsNewOutputFormat     bool
 }
 
 type Getters struct {
@@ -221,6 +222,9 @@ func (scanInfo *ScanInfo) Formats() []string {
 }
 
 func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
+	if !scanInfo.IsNewOutputFormat {
+		return
+	}
 	scanInfo.ScanType = scanType
 }
 

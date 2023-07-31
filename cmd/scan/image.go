@@ -63,6 +63,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 			logger.L().Success("Image scan completed successfully")
 
+			scanInfo.IsNewOutputFormat = true
 			scanInfo.SetScanType(cautils.ScanTypeImage)
 
 			outputPrinters := core.GetOutputPrinters(scanInfo, ctx)

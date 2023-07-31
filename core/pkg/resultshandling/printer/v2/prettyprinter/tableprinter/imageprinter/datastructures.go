@@ -22,7 +22,8 @@ type CVE struct {
 }
 
 type PackageScore struct {
-	Name    string
-	Version string
-	Score   int
+	Name                    string
+	Version                 string
+	Score                   int
+	MapSeverityToCVEsNumber map[string]int
 }

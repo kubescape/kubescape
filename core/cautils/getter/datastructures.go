@@ -8,7 +8,7 @@ import (
 )
 
 // NativeFrameworks identifies all pre-built, native frameworks.
-var NativeFrameworks = []string{"clusterscan", "mitre", "nsa"}
+var NativeFrameworks = []string{"mitre", "nsa"}
 
 // var NativeFrameworks = []string{"clusterscan"}
 

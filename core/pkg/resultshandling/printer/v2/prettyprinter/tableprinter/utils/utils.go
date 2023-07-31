@@ -111,3 +111,31 @@ func PrintInfo(writer io.Writer, infoToPrintInfo []InfoStars) {
 		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
 	}
 }
+
+func GetStatusColor(status apis.ScanningStatus) color.Attribute {
+	switch status {
+	case apis.StatusPassed:
+		return color.FgGreen
+	case apis.StatusFailed:
+		return color.FgRed
+	case apis.StatusSkipped:
+		return color.FgCyan
+	default:
+		return color.FgWhite
+	}
+}
+
+func getColor(controlSeverity int) color.Attribute {
+	switch controlSeverity {
+	case apis.SeverityCritical:
+		return color.FgRed
+	case apis.SeverityHigh:
+		return color.FgYellow
+	case apis.SeverityMedium:
+		return color.FgCyan
+	case apis.SeverityLow:
+		return color.FgWhite
+	default:
+		return color.FgWhite
+	}
+}

@@ -60,7 +60,7 @@ func (cp *ClusterPrinter) printTopWorkloads(summaryDetails *reportsummary.Summar
 		ns := wl.Workload.GetNamespace()
 		name := wl.Workload.GetName()
 		kind := wl.Workload.GetKind()
-		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s - '%s'\n", i+1, ns, name, kind, cp.getWorkloadScanCommand(ns, kind, name)))
+		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s - '%s'\n", i+1, ns, name, kind, getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name))))
 	}
 
 	cautils.SimpleDisplay(cp.writer, "Read more about the most risky workloads here: https://docs.io/most-risky-workloads\n")

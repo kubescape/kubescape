@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -68,7 +69,12 @@ func (cp *ClusterPrinter) generateCountingCategoryRow(controlSummary reportsumma
 
 	row[0] = controlSummary.GetName()
 
-	row[1] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
+	failedResources := controlSummary.NumberOfResources().Failed()
+	if failedResources > 0 {
+		row[1] = string(color.New(color.FgYellow, color.Bold).SprintFunc()(fmt.Sprintf("%d", failedResources)))
+	} else {
+		row[1] = fmt.Sprintf("%d", failedResources)
+	}
 
 	row[2] = cp.generateTableNextSteps(controlSummary)
 

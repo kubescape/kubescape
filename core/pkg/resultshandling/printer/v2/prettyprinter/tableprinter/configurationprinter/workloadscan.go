@@ -46,11 +46,7 @@ func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, catego
 	var rows [][]string
 	for _, ctrls := range controlSummaries {
 		var row []string
-		if categoryType == TypeCounting {
-			row = wp.generateCountingCategoryRow(ctrls, infoToPrintInfo)
-		} else {
-			row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
-		}
+		row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
 		if len(row) > 0 {
 			rows = append(rows, row)
 		}

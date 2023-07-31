@@ -109,9 +109,15 @@ func extractPkgNameToScoreMap(matches []models.Match) map[string]*imageprinter.P
 		key := matches[i].Artifact.Name + matches[i].Artifact.Version
 		if _, ok := mapPackageNameToScore[key]; !ok {
 			mapPackageNameToScore[key] = &imageprinter.PackageScore{
-				Version: matches[i].Artifact.Version,
-				Name:    matches[i].Artifact.Name,
+				Version:                 matches[i].Artifact.Version,
+				Name:                    matches[i].Artifact.Name,
+				MapSeverityToCVEsNumber: make(map[string]int, 0),
 			}
+		}
+		if _, ok := mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity]; !ok {
+			mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = 1
+		} else {
+			mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] + 1
 		}
 		mapPackageNameToScore[key].Score = mapPackageNameToScore[key].Score + utils.ImageSeverityToInt(matches[i].Vulnerability.Severity)
 	}

@@ -87,6 +87,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				if cautils.StringInSlice(frameworks, "all") != cautils.ValueNotFound {
 					scanInfo.ScanAll = true
 					frameworks = getter.NativeFrameworks
+
 				}
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
@@ -109,6 +110,10 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				}
 			}
 			scanInfo.FrameworkScan = true
+
+			if (scanInfo.IsNewOutputFormat) && (scanInfo.ScanType == cautils.ScanTypeRepo || scanInfo.ScanType == cautils.ScanTypeCluster) {
+				frameworks = append(frameworks, "clusterscan")
+			}
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 

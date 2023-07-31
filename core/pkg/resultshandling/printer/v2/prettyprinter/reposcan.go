@@ -62,7 +62,7 @@ func (rp *RepoPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDe
 		name := wl.Workload.GetName()
 		kind := wl.Workload.GetKind()
 		cmdPrefix := getWorkloadPrefixForCmd(ns, kind, name)
-		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s - '%s'\n", i+1, cmdPrefix, rp.getWorkloadScanCommand(ns, kind, name, wl.ResourceSource)))
+		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s - '%s'\n", i+1, cmdPrefix, getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, wl.ResourceSource))))
 	}
 
 	cautils.InfoTextDisplay(rp.writer, "\n")

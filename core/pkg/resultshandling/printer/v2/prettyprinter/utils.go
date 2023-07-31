@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
@@ -19,10 +20,10 @@ const (
 	linkToCICDSetup          = "https://hub.armosec.io/docs/integrations"
 	configScanVerboseRunText = "Run with '--verbose'/'-v' flag for detailed resources view"
 	imageScanVerboseRunText  = "Run with '--verbose'/'-v' flag for detailed vulnerabilities view"
-	clusterScanRunText       = "Run a cluster scan: '$ kubescape scan'"
 )
 
 var (
+	clusterScanRunText   = fmt.Sprintf("Run a cluster scan: %s", getCallToActionString("'$ kubescape scan'"))
 	installHelmText      = fmt.Sprintf("Install helm for continuos monitoring: %s", linkToHelm)
 	CICDSetupText        = fmt.Sprintf("Add Kubescape to CICD: %s", linkToCICDSetup)
 	complianceFrameworks = []string{"nsa", "mitre"}
@@ -127,9 +128,10 @@ func sortTopVulnerablePackages(pkgScores map[string]*imageprinter.PackageScore) 
 
 	for i := 0; i < len(ss) && i < TopPackagesNumber; i++ {
 		sortedMap[ss[i]] = &imageprinter.PackageScore{
-			Name:    pkgScores[ss[i]].Name,
-			Score:   pkgScores[ss[i]].Score,
-			Version: pkgScores[ss[i]].Version,
+			Name:                    pkgScores[ss[i]].Name,
+			Score:                   pkgScores[ss[i]].Score,
+			Version:                 pkgScores[ss[i]].Version,
+			MapSeverityToCVEsNumber: pkgScores[ss[i]].MapSeverityToCVEsNumber,
 		}
 	}
 
@@ -145,8 +147,15 @@ func printTopVulnerabilities(writer *os.File, summary imageprinter.ImageScanSumm
 	cautils.InfoTextDisplay(writer, "\nMost vulnerable components:\n")
 
 	topVulnerablePackages := sortTopVulnerablePackages(summary.PackageScores)
+
 	for _, v := range topVulnerablePackages {
-		cautils.SimpleDisplay(writer, "  * %s (%s)\n", v.Name, v.Version)
+		output := fmt.Sprintf("  * %s (%s) -", v.Name, v.Version)
+		for severity, numberOfCVEs := range v.MapSeverityToCVEsNumber {
+			output += fmt.Sprintf(" %d %s,", numberOfCVEs, severity)
+		}
+		output = output[:len(output)-1]
+
+		cautils.SimpleDisplay(writer, output+"\n")
 	}
 
 	cautils.SimpleDisplay(writer, "\n")
@@ -192,7 +201,7 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary) {
 	for _, img := range summary.Images {
 		imgWithoutTag := strings.Split(img, ":")[0]
-		cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: '$ kubescape scan image %s'\n", imgWithoutTag, img))
+		cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
 	}
 
 	cautils.InfoTextDisplay(writer, "\n")
@@ -214,7 +223,11 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 		cautils.SimpleDisplay(writer, "* %s: %.2f%%\n", fw.GetName(), fw.GetComplianceScore())
 	}
 
-	cautils.SimpleDisplay(writer, "View full compliance report by running:'$ kubescape scan framework nsa,mitre'\n")
+	cautils.SimpleDisplay(writer, fmt.Sprintf("View full compliance report by running: %s\n", getCallToActionString("'$ kubescape scan framework nsa,mitre'")))
 
 	cautils.InfoTextDisplay(writer, "\n")
+}
+
+func getCallToActionString(action string) string {
+	return color.New(color.Bold, color.FgHiBlue).SprintFunc()(action)
 }

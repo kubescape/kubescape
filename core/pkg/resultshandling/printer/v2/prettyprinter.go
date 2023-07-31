@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -81,7 +82,9 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 	}
 
 	for _, imageScan := range imageScanData {
-		imageScanSummary.Images = append(imageScanSummary.Images, imageScan.Image)
+		if !slices.Contains(imageScanSummary.Images, imageScan.Image) {
+			imageScanSummary.Images = append(imageScanSummary.Images, imageScan.Image)
+		}
 
 		presenterConfig := imageScan.PresenterConfig
 		doc, err := models.NewDocument(presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)

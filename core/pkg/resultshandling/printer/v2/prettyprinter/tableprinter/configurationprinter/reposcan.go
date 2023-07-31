@@ -5,8 +5,10 @@ import (
 	"io"
 	"strings"
 
+	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -28,11 +30,15 @@ func (rp *RepoPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *repor
 
 func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
-	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
+	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapRepoControlsToCategories)
 
-	for _, id := range clusterCategoriesDisplayOrder {
+	for _, id := range repoCategoriesDisplayOrder {
 		categoryControl, ok := categoriesToCategoryControls[id]
 		if !ok {
+			continue
+		}
+
+		if categoryControl.Status != apis.StatusFailed {
 			continue
 		}
 
@@ -50,6 +56,10 @@ func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryTy
 
 	var rows [][]string
 	for _, ctrls := range controlSummaries {
+		if ctrls.NumberOfResources().Failed() == 0 {
+			continue
+		}
+
 		var row []string
 		if categoryType == TypeCounting {
 			row = rp.generateCountingCategoryRow(ctrls, rp.inputPatterns)
@@ -73,7 +83,12 @@ func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.
 
 	rows[0] = controlSummary.GetName()
 
-	rows[1] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
+	failedResources := controlSummary.NumberOfResources().Failed()
+	if failedResources > 0 {
+		rows[1] = string(color.New(color.FgYellow, color.Bold).SprintFunc()(fmt.Sprintf("%d", failedResources)))
+	} else {
+		rows[1] = fmt.Sprintf("%d", failedResources)
+	}
 
 	rows[2] = rp.generateTableNextSteps(controlSummary, inputPatterns)
 
