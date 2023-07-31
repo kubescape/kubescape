@@ -109,12 +109,6 @@ rm -f $OUTPUT
 echo
 echo -e "\033[32mFinished Installation."
 
-echo -e "\033[0m"
-$KUBESCAPE_EXEC version
-echo
-
-echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan"
-
 if [ "$(id -u)" -ne 0 ]; then
   echo -e "\nRemember to add the Kubescape CLI to your path with:"
   echo -e "  export PATH=\$PATH:$BASE_DIR/bin"
@@ -122,3 +116,6 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 echo -e "\033[0m"
+echo -e "\033[32mExecuting Kubescape."
+echo
+$KUBESCAPE_EXEC scan --create-account
