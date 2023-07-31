@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	objectsenvelopes "github.com/kubescape/opa-utils/objectsenvelopes"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"github.com/stretchr/testify/assert"
@@ -61,11 +62,13 @@ func TestToScanInfo(t *testing.T) {
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{
-			Workload: &apisv1.WorkloadScan{
+			ScanObject: &objectsenvelopes.ScanObject{
 				ApiVersion: "apps/v1",
 				Kind:       "Deployment",
-				Name:       "nginx",
-				Namespace:  "ns1",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "nginx",
+					Namespace: "ns1",
+				},
 			},
 		}
 		s := ToScanInfo(req)

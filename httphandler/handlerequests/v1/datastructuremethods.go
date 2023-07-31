@@ -57,12 +57,12 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	}
 
 	// workload scan
-	if scanRequest.Workload != nil {
+	if scanRequest.ScanObject != nil {
 		scanInfo.WorkloadIdentifier = &cautils.WorkloadIdentifier{
-			Kind:       scanRequest.Workload.Kind,
-			Name:       scanRequest.Workload.Name,
-			Namespace:  scanRequest.Workload.Namespace,
-			ApiVersion: scanRequest.Workload.ApiVersion,
+			Kind:       scanRequest.ScanObject.GetKind(),
+			Name:       scanRequest.ScanObject.GetName(),
+			Namespace:  scanRequest.ScanObject.GetNamespace(),
+			ApiVersion: scanRequest.ScanObject.GetApiVersion(),
 		}
 	}
 
