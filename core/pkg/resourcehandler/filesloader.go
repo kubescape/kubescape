@@ -68,9 +68,13 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		return nil, nil, nil, nil, err
 	}
 
+	if sessionObj.SingleResourceScan != nil && k8sinterface.WorkloadHasParent(sessionObj.SingleResourceScan) {
+		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
+	}
+
 	// build a resources map, based on the policies
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(fileHandler, sessionObj.Policies, sessionObj.SingleResourceScan)
+	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan)
 	k8sResources := resourceToQuery.ToK8sResourceMap()
 
 	// save only relevant resources
@@ -264,8 +268,4 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo(_ context.Context) *version.Info {
 	return nil
-}
-
-func (fileHandler *FileResourceHandler) GetWorkloadParentKind(resource workloadinterface.IWorkload) string {
-	return ""
 }

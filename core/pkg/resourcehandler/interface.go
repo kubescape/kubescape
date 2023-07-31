@@ -12,5 +12,4 @@ import (
 type IResourceHandler interface {
 	GetResources(context.Context, *cautils.OPASessionObj, opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error)
 	GetClusterAPIServerInfo(ctx context.Context) *version.Info
-	GetWorkloadParentKind(workloadinterface.IWorkload) string
 }

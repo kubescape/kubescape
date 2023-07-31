@@ -88,6 +88,8 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 		return nil, nil
 	}
 
+	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
+
 	wls := []workloadinterface.IWorkload{}
 	for _, resources := range mappedResources {
 		for _, r := range resources {

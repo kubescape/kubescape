@@ -9,8 +9,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func mockWorkloadWithSource(apiVersion, kind, namespace, name, ownerReferenceKind, source string) workloadinterface.IMetadata {
-	wl := mockWorkload(apiVersion, kind, namespace, name, ownerReferenceKind)
+func mockWorkloadWithSource(apiVersion, kind, namespace, name, source string) workloadinterface.IMetadata {
+	wl := mockWorkload(apiVersion, kind, namespace, name)
 	resource := reporthandling.NewResourceIMetadata(wl)
 	resource.SetSource(&reporthandling.Source{
 		Path:         source,
@@ -23,9 +23,9 @@ func mockWorkloadWithSource(apiVersion, kind, namespace, name, ownerReferenceKin
 func TestFindScanObjectResource(t *testing.T) {
 	mappedResources := map[string][]workloadinterface.IMetadata{
 		"/v1/pods": {
-			mockWorkloadWithSource("v1", "Pod", "default", "nginx", "", "/fileA.yaml"),
-			mockWorkloadWithSource("v1", "Pod", "default", "nginx", "", "/fileB.yaml"),
-			mockWorkloadWithSource("v1", "Pod", "", "mariadb", "", "/fileB.yaml"),
+			mockWorkloadWithSource("v1", "Pod", "default", "nginx", "/fileA.yaml"),
+			mockWorkloadWithSource("v1", "Pod", "default", "nginx", "/fileB.yaml"),
+			mockWorkloadWithSource("v1", "Pod", "", "mariadb", "/fileB.yaml"),
 		},
 	}
 	tt := []struct {

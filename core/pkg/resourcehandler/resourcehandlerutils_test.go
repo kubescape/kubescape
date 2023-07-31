@@ -1,7 +1,6 @@
 package resourcehandler
 
 import (
-	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -9,12 +8,8 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/version"
 )
 
 func mockMatch(i int) reporthandling.RuleMatchObjects {
@@ -107,48 +102,18 @@ func mockFramework(frameworkName string, controls []reporthandling.Control) *rep
 	}
 }
 
-func mockWorkload(apiVersion, kind, namespace, name, ownerReferenceKind string) workloadinterface.IWorkload {
+func mockWorkload(apiVersion, kind, namespace, name string) workloadinterface.IWorkload {
 	mock := workloadinterface.NewWorkloadMock(nil)
 	mock.SetKind(kind)
 	mock.SetApiVersion(apiVersion)
 	mock.SetName(name)
 	mock.SetNamespace(namespace)
 
-	if ownerReferenceKind != "" {
-		ownerreferences := []metav1.OwnerReference{
-			{
-				Kind: ownerReferenceKind,
-			},
-		}
-		workloadinterface.SetInMap(mock.GetWorkload(), []string{"metadata"}, "ownerReferences", ownerreferences)
-	}
-
 	if ok := k8sinterface.IsTypeWorkload(mock.GetObject()); !ok {
 		panic("mocked object is not a valid workload")
 	}
 
 	return mock
-}
-
-type ResourceHandlerMock struct {
-}
-
-func (mock *ResourceHandlerMock) GetResources(context.Context, *cautils.OPASessionObj, opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
-	return nil, nil, nil, nil, nil
-}
-
-func (mock *ResourceHandlerMock) GetClusterAPIServerInfo(ctx context.Context) *version.Info {
-	return nil
-}
-
-func (mock *ResourceHandlerMock) GetWorkloadParentKind(wl workloadinterface.IWorkload) string {
-	if wl == nil {
-		return ""
-	}
-	if owners, err := wl.GetOwnerReferences(); err == nil && len(owners) > 0 {
-		return owners[0].Kind
-	}
-	return ""
 }
 
 func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
@@ -187,27 +152,8 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 			},
 		},
 		{
-			name:     "workload - pod with parent deployment",
-			workload: mockWorkload("apps/v1", "Pod", "default", "nginx", "Deployment"),
-			controls: []reporthandling.Control{
-				mockControl("1", []reporthandling.PolicyRule{
-					mockRule("rule-a", []reporthandling.RuleMatchObjects{
-						mockMatch(1), mockMatch(2), mockMatch(3), mockMatch(4),
-					}, ""),
-					mockRule("rule-b", []reporthandling.RuleMatchObjects{
-						mockMatch(6),
-					}, ""),
-				}),
-			},
-			expectedExcludedRules: []string{
-				"rule-b",
-				"rule-a",
-			},
-			expectedResourceGroups: []string{},
-		},
-		{
 			name:     "workload - Namespace",
-			workload: mockWorkload("v1", "Namespace", "", "ns1", ""),
+			workload: mockWorkload("v1", "Namespace", "", "ns1"),
 			controls: []reporthandling.Control{
 				mockControl("1", []reporthandling.PolicyRule{
 					mockRule("rule-a", []reporthandling.RuleMatchObjects{
@@ -230,7 +176,7 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 		},
 		{
 			name:     "workload - Deployment",
-			workload: mockWorkload("apps/v1", "Deployment", "ns1", "deploy1", ""),
+			workload: mockWorkload("apps/v1", "Deployment", "ns1", "deploy1"),
 			controls: []reporthandling.Control{
 				mockControl("1", []reporthandling.PolicyRule{
 					mockRule("rule-b", []reporthandling.RuleMatchObjects{
@@ -247,7 +193,7 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 		},
 		{
 			name:     "workload - Node",
-			workload: mockWorkload("v1", "Node", "", "node1", ""),
+			workload: mockWorkload("v1", "Node", "", "node1"),
 			controls: []reporthandling.Control{
 				mockControl("1", []reporthandling.PolicyRule{
 					mockRule("rule-b", []reporthandling.RuleMatchObjects{
@@ -266,7 +212,7 @@ func TestGetQueryableResourceMapFromPolicies(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			resourceGroups, excludedRulesMap := getQueryableResourceMapFromPolicies(&ResourceHandlerMock{}, []reporthandling.Framework{*mockFramework("test", testCase.controls)}, testCase.workload) // TODO check second param
+			resourceGroups, excludedRulesMap := getQueryableResourceMapFromPolicies([]reporthandling.Framework{*mockFramework("test", testCase.controls)}, testCase.workload) // TODO check second param
 			assert.Equalf(t, len(testCase.expectedExcludedRules), len(excludedRulesMap), "excludedRulesMap length is not as expected")
 			for _, expectedExcludedRuleName := range testCase.expectedExcludedRules {
 				assert.Contains(t, excludedRulesMap, expectedExcludedRuleName, "excludedRulesMap does not contain expected rule name")
@@ -401,16 +347,14 @@ func TestUpdateQueryableResourcesMapFromRuleMatchObject(t *testing.T) {
 	}
 }
 
-func TestFilterRuleMatchesForWorkload(t *testing.T) {
+func TestFilterRuleMatchesForResource(t *testing.T) {
 	testCases := []struct {
-		workloadKind       string
-		ownerReferenceKind string
-		matchResources     []string
-		expectedMap        map[string]bool
+		resourceKind   string
+		matchResources []string
+		expectedMap    map[string]bool
 	}{
 		{
-			workloadKind:       "Pod",
-			ownerReferenceKind: "",
+			resourceKind: "Pod",
 			matchResources: []string{
 				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
 			},
@@ -427,8 +371,7 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 			},
 		},
 		{
-			workloadKind:       "Deployment",
-			ownerReferenceKind: "",
+			resourceKind: "Deployment",
 			matchResources: []string{
 				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
 			},
@@ -445,8 +388,7 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 			},
 		},
 		{
-			workloadKind:       "Deployment",
-			ownerReferenceKind: "",
+			resourceKind: "Deployment",
 			matchResources: []string{
 				"Deployment", "ReplicaSet",
 			},
@@ -456,24 +398,7 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 			},
 		},
 		{
-			workloadKind:       "Pod",
-			ownerReferenceKind: "Deployment",
-			matchResources: []string{
-				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
-			},
-			expectedMap: nil, // rule does not apply to workload
-		},
-		{
-			workloadKind:       "ReplicaSet",
-			ownerReferenceKind: "Deployment",
-			matchResources: []string{
-				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
-			},
-			expectedMap: nil, // rule does not apply to workload
-		},
-		{
-			workloadKind:       "ReplicaSet",
-			ownerReferenceKind: "",
+			resourceKind: "ReplicaSet",
 			matchResources: []string{
 				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
 			},
@@ -490,16 +415,14 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 			},
 		},
 		{
-			workloadKind:       "ClusterRole",
-			ownerReferenceKind: "",
+			resourceKind: "ClusterRole",
 			matchResources: []string{
 				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
 			},
 			expectedMap: nil, // rule does not apply to workload
 		},
 		{
-			workloadKind:       "Node",
-			ownerReferenceKind: "",
+			resourceKind: "Node",
 			matchResources: []string{
 				"Node", "Pod", "DaemonSet", "Deployment", "ReplicaSet", "StatefulSet", "CronJob", "Job", "PodSecurityPolicy",
 			},
@@ -516,8 +439,7 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 			},
 		},
 		{
-			workloadKind:       "Pod",
-			ownerReferenceKind: "",
+			resourceKind: "Pod",
 			matchResources: []string{
 				"PodSecurityPolicy", "Pod",
 			},
@@ -527,19 +449,7 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 			},
 		},
 		{
-			workloadKind:       "Pod",
-			ownerReferenceKind: "Deployment",
-			matchResources: []string{
-				"PodSecurityPolicy", "Pod",
-			},
-			expectedMap: map[string]bool{
-				"PodSecurityPolicy": true,
-				"Pod":               false,
-			},
-		},
-		{
-			workloadKind:       "Pod",
-			ownerReferenceKind: "Deployment",
+			resourceKind: "Pod",
 			matchResources: []string{
 				"PodSecurityPolicy", "Pod", "ReplicaSet",
 			},
@@ -550,16 +460,14 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 			},
 		},
 		{
-			workloadKind:       "Deployment",
-			ownerReferenceKind: "",
+			resourceKind: "Deployment",
 			matchResources: []string{
 				"PodSecurityPolicy", "Pod",
 			},
 			expectedMap: nil, // rule does not apply to workload
 		},
 		{
-			workloadKind:       "PodSecurityPolicy",
-			ownerReferenceKind: "",
+			resourceKind: "PodSecurityPolicy",
 			matchResources: []string{
 				"PodSecurityPolicy", "Pod",
 			},
@@ -577,9 +485,9 @@ func TestFilterRuleMatchesForWorkload(t *testing.T) {
 				},
 			}
 
-			result := filterRuleMatchesForWorkload(testCase.workloadKind, testCase.ownerReferenceKind, matches)
+			result := filterRuleMatchesForResource(testCase.resourceKind, matches)
 			if testCase.expectedMap == nil {
-				assert.Nil(t, result, "expected nil (rule does not apply to workload)")
+				assert.Nil(t, result, "expected nil (rule does not apply to the resource)")
 				return
 			}
 

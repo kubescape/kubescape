@@ -19,7 +19,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) error {
+func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) error {
 	ctx, span := otel.Tracer("").Start(ctx, "resourcehandler.CollectResources")
 	defer span.End()
 	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
@@ -52,6 +52,9 @@ func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 		return
 	}
 	cloudMetadata := reportv2.NewCloudMetadata(iCloudMetadata)
+	if opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
+		opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reportv2.ClusterMetadata{}
+	}
 	opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata = cloudMetadata
 	opaSessionObj.Metadata.ClusterMetadata.CloudMetadata = cloudMetadata             // deprecated - fallback
 	opaSessionObj.Report.ClusterCloudProvider = iCloudMetadata.Provider().ToString() // deprecated - fallback

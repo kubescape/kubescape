@@ -64,10 +64,15 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		return nil, nil, nil, nil, err
 	}
 
+	// we don't scan resources which have a parent
+	if sessionObj.SingleResourceScan != nil && k8sinterface.WorkloadHasParent(sessionObj.SingleResourceScan) {
+		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
+	}
+
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(k8sHandler, sessionObj.Policies, sessionObj.SingleResourceScan)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// map of Kubescape resources to control_ids
@@ -156,10 +161,12 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 }
 
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
-func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource workloadinterface.IMetadata) (workloadinterface.IWorkload, error) {
+func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
 	if resource == nil {
 		return nil, nil
 	}
+
+	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
 	var wlIdentifierString string
 	if resource.GetApiVersion() != "" {
@@ -344,20 +351,6 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		}
 	}
 	return k8sResources, allResources, errs
-}
-
-func (k8sHandler *K8sResourceHandler) GetWorkloadParentKind(workload workloadinterface.IWorkload) string {
-	if workload == nil {
-		return ""
-	}
-
-	// CalculateWorkloadParentRecursive return the kind of the parent workload
-	// In case the given workload has no parent, it will return the kind and name of the workload itself
-	// We return the parent kind only if it is different from the workload kind
-	if kind, name, _ := k8sHandler.k8s.CalculateWorkloadParentRecursive(workload); kind != workload.GetKind() && name != workload.GetName() {
-		return kind
-	}
-	return ""
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {
