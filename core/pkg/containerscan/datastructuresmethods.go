@@ -3,7 +3,7 @@ package containerscan
 import (
 	"strings"
 
-	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/armosec/armoapi-go/armotypes"
 )
 
 func (layer *ScanResultLayer) GetFilesByPackage(pkgname string) (files *PkgFiles) {
@@ -24,11 +24,11 @@ func (layer *ScanResultLayer) GetPackagesNames() []string {
 	return pkgsNames
 }
 
-func (scanresult *ScanResultReport) GetDesignatorsNContext() (*identifiers.PortalDesignator, []identifiers.ArmoContext) {
-	designatorsObj := identifiers.AttributesDesignatorsFromWLID(scanresult.WLID)
+func (scanresult *ScanResultReport) GetDesignatorsNContext() (*armotypes.PortalDesignator, []armotypes.ArmoContext) {
+	designatorsObj := armotypes.AttributesDesignatorsFromWLID(scanresult.WLID)
 	designatorsObj.Attributes["containerName"] = scanresult.ContainerName
 	designatorsObj.Attributes["customerGUID"] = scanresult.CustomerGUID
-	contextObj := identifiers.DesignatorToArmoContext(designatorsObj, "designators")
+	contextObj := armotypes.DesignatorToArmoContext(designatorsObj, "designators")
 	return designatorsObj, contextObj
 }
 

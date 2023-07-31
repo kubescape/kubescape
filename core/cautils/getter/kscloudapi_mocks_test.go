@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/armosec/armoapi-go/identifiers"
 	jsoniter "github.com/json-iterator/go"
 	"github.com/kubescape/kubescape/v2/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -153,7 +152,7 @@ func mockExceptions() []armotypes.PostureExceptionPolicy {
 			Actions: []armotypes.PostureExceptionPolicyActions{
 				"alertOnly",
 			},
-			Resources: []identifiers.PortalDesignator{
+			Resources: []armotypes.PortalDesignator{
 				{
 					DesignatorType: "Attributes",
 					Attributes: map[string]string{
@@ -188,7 +187,7 @@ func mockExceptions() []armotypes.PostureExceptionPolicy {
 			Actions: []armotypes.PostureExceptionPolicyActions{
 				"alertOnly",
 			},
-			Resources: []identifiers.PortalDesignator{
+			Resources: []armotypes.PortalDesignator{
 				{
 					DesignatorType: "Attributes",
 					Attributes: map[string]string{
@@ -238,7 +237,7 @@ func mockCustomerConfig(cluster, scope string) func() *armotypes.CustomerConfig 
 			Attributes: map[string]interface{}{
 				"label": "value",
 			},
-			Scope: identifiers.PortalDesignator{
+			Scope: armotypes.PortalDesignator{
 				DesignatorType: "Attributes",
 				Attributes: map[string]string{
 					"kind":  "Cluster",

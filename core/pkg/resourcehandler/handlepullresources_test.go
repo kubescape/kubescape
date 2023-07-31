@@ -211,7 +211,7 @@ func Test_isAKS(t *testing.T) {
 /* unused for now.
 type iResourceHandlerMock struct{}
 
-func (*iResourceHandlerMock) GetResources(*cautils.OPASessionObj, *identifiers.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (*iResourceHandlerMock) GetResources(*cautils.OPASessionObj, *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 	return nil, nil, nil, nil
 }
 func (*iResourceHandlerMock) GetClusterAPIServerInfo() *version.Info {
