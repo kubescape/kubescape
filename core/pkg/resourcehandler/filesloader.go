@@ -224,11 +224,21 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 			}
 		}
 
-		workloadSource := reporthandling.Source{
-			Path:         repoRoot,
-			RelativePath: relSource,
-			FileType:     filetype,
-			LastCommit:   lastCommit,
+		var workloadSource reporthandling.Source
+		if clonedRepo != "" {
+			workloadSource = reporthandling.Source{
+				Path:         "",
+				RelativePath: relSource,
+				FileType:     filetype,
+				LastCommit:   lastCommit,
+			}
+		} else {
+			workloadSource = reporthandling.Source{
+				Path:         repoRoot,
+				RelativePath: relSource,
+				FileType:     filetype,
+				LastCommit:   lastCommit,
+			}
 		}
 
 		for i := range ws {

@@ -89,7 +89,7 @@ func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySum
 			}
 		}
 	} else {
-		for _, severity := range []string{"Critical", "High"} {
+		for _, severity := range []string{"Critical", "High", "Other"} {
 			if _, ok := mapSeverityTSummary[severity]; !ok {
 				mapSeverityTSummary[severity] = &imageprinter.SeveritySummary{}
 			}
@@ -127,6 +127,7 @@ func sortTopVulnerablePackages(pkgScores map[string]*imageprinter.PackageScore) 
 
 	for i := 0; i < len(ss) && i < TopPackagesNumber; i++ {
 		sortedMap[ss[i]] = &imageprinter.PackageScore{
+			Name:    pkgScores[ss[i]].Name,
 			Score:   pkgScores[ss[i]].Score,
 			Version: pkgScores[ss[i]].Version,
 		}
@@ -193,10 +194,13 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 	cautils.InfoTextDisplay(writer, "\n")
 }
 
-func printNextSteps(writer *os.File, nextSteps []string) {
+func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 	cautils.InfoTextDisplay(writer, "Follow-up steps:\n")
 	for _, ns := range nextSteps {
 		cautils.SimpleDisplay(writer, "- "+ns+"\n")
+	}
+	if addLine {
+		cautils.SimpleDisplay(writer, "\n")
 	}
 }
 

@@ -94,5 +94,5 @@ func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source repo
 }
 
 func (rp *RepoPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary, inputPatterns []string) string {
-	return fmt.Sprintf("$ kubescape scan control %s %s", controlSummary.GetID(), strings.Join(inputPatterns, ","))
+	return fmt.Sprintf("$ kubescape scan control %s %s -v", controlSummary.GetID(), strings.Join(inputPatterns, ","))
 }

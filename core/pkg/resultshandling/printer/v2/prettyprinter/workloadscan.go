@@ -28,7 +28,7 @@ func (wp *WorkloadPrinter) PrintImageScanning(summary *imageprinter.ImageScanSum
 }
 
 func (wp *WorkloadPrinter) PrintNextSteps() {
-	printNextSteps(wp.writer, wp.getNextSteps())
+	printNextSteps(wp.writer, wp.getNextSteps(), true)
 }
 
 func (wp *WorkloadPrinter) getNextSteps() []string {

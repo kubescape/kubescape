@@ -42,13 +42,14 @@ func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsumm
 }
 
 func (cp *ClusterPrinter) PrintNextSteps() {
-	printNextSteps(cp.writer, cp.getNextSteps())
+	printNextSteps(cp.writer, cp.getNextSteps(), false)
 }
 
 func (cp *ClusterPrinter) getNextSteps() []string {
 	return []string{
 		configScanVerboseRunText,
 		installHelmText,
+		CICDSetupText,
 	}
 }
 

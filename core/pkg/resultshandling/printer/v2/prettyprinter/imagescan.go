@@ -48,5 +48,5 @@ func (ip *ImagePrinter) PrintConfigurationsScanning(summaryDetails *reportsummar
 }
 
 func (ip *ImagePrinter) PrintNextSteps() {
-	printNextSteps(ip.writer, []string{imageScanVerboseRunText, CICDSetupText, installHelmText})
+	printNextSteps(ip.writer, []string{imageScanVerboseRunText, CICDSetupText, installHelmText}, true)
 }

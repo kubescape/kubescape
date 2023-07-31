@@ -80,6 +80,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			if len(args) == 0 { // scan all frameworks
 				scanInfo.ScanAll = true
+				scanInfo.SetScanType(cautils.ScanTypeFramework)
 			} else {
 				// Read frameworks from input args
 				frameworks = strings.Split(args[0], ",")
@@ -89,7 +90,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				}
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
-						scanInfo.ScanType = cautils.ScanTypeRepo
+						scanInfo.SetScanType(cautils.ScanTypeRepo)
 						scanInfo.InputPatterns = args[1:]
 						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 					} else { // store stdin to file - do NOT move to separate function !!
@@ -103,6 +104,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 							return err
 						}
 						scanInfo.InputPatterns = []string{tempFile.Name()}
+						scanInfo.SetScanType(cautils.ScanTypeFramework)
 					}
 				}
 			}
@@ -119,7 +121,8 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err = results.HandleResults(ctx); err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			if !scanInfo.VerboseMode && scanInfo.ScanType == "" {
+
+			if !scanInfo.VerboseMode && scanInfo.ScanType == cautils.ScanTypeFramework {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {

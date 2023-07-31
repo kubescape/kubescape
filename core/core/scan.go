@@ -247,7 +247,7 @@ func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx
 
 	for _, img := range imagesToScan {
 		scanSingleImage(ctx, img, svc, resultsHandling, *scanInfo)
-		progressListener.ProgressJob(1, fmt.Sprintf("image name: %s", img))
+		progressListener.ProgressJob(1, fmt.Sprintf("image name: %s\n", img))
 	}
 
 	logger.L().Success("Finished scanning images")

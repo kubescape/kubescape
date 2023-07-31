@@ -42,8 +42,7 @@ func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary
 }
 
 func (rp *RepoPrinter) PrintNextSteps() {
-	printNextSteps(rp.writer, rp.getNextSteps())
-
+	printNextSteps(rp.writer, rp.getNextSteps(), false)
 }
 
 func (rp *RepoPrinter) getNextSteps() []string {
@@ -70,7 +69,7 @@ func (rp *RepoPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDe
 }
 
 func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source reporthandling.Source) string {
-	cmd := fmt.Sprintf("$ kubescape scan workload %s/%s/%s", ns, kind, name)
+	cmd := fmt.Sprintf("$ kubescape scan workload %s/%s --namespace %s", kind, name, ns)
 	if ns == "" {
 		cmd = fmt.Sprintf("$ kubescape scan workload %s/%s", kind, name)
 	}

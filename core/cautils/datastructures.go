@@ -33,6 +33,7 @@ const (
 	ScanTypeRepo       ScanTypes = "repo"
 	ScanTypeImage      ScanTypes = "image"
 	ScanTypeWorkload   ScanTypes = "workload"
+	ScanTypeFramework  ScanTypes = "framework"
 )
 
 type OPASessionObj struct {
@@ -76,11 +77,13 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 	}
 }
 
+// SetTopWorkloads sets the top workloads by score
 func (sessionObj *OPASessionObj) SetTopWorkloads() {
 	count := 0
 
 	topWorkloadsSorted := make([]prioritization.PrioritizedResource, 0)
 
+	// create list in order to sort
 	for _, wl := range sessionObj.ResourcesPrioritized {
 		topWorkloadsSorted = append(topWorkloadsSorted, wl)
 	}
@@ -92,6 +95,7 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 		return topWorkloadsSorted[i].Score > topWorkloadsSorted[j].Score
 	})
 
+	// set top workloads according to number of top workloads
 	for i := 0; i < TopWorkloadsNumber; i++ {
 		if i >= len(topWorkloadsSorted) {
 			break

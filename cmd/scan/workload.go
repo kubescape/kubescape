@@ -8,6 +8,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
+	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
 	"github.com/spf13/cobra"
 )
@@ -72,6 +73,9 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			scanInfo.ScanAll = true
 			scanInfo.ScanType = cautils.ScanTypeWorkload
 			scanInfo.ScanImages = true
+			scanInfo.UseFrom = []string{"/Users/danielgrunberger/armo/merge/release/workloadscan.json"}
+
+			scanInfo.SetPolicyIdentifiers([]string{"workloadscan"}, v1.KindFramework)
 
 			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)
