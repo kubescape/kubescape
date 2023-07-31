@@ -116,7 +116,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.L().Info("Kubescape scanner starting")
+	logger.L().Info(cautils.BoldDisplay("Kubescape") + " scanner starting")
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info

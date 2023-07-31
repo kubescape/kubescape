@@ -7,7 +7,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.202
 	github.com/armosec/utils-go v0.0.14
 	github.com/armosec/utils-k8s-go v0.0.13
-	github.com/briandowns/spinner v1.18.1
+	github.com/briandowns/spinner v1.23.0
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.15.0
 	github.com/francoispqt/gojay v1.2.13
@@ -17,7 +17,7 @@ require (
 	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.25
-	github.com/kubescape/go-logger v0.0.13
+	github.com/kubescape/go-logger v0.0.16
 	github.com/kubescape/k8s-interface v0.0.116
 	github.com/kubescape/opa-utils v0.0.253
 	github.com/kubescape/rbac-utils v0.0.20
@@ -291,8 +291,8 @@ require (
 	github.com/tjfoc/gmsm v1.3.2 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
 	github.com/transparency-dev/merkle v0.0.1 // indirect
-	github.com/uptrace/opentelemetry-go-extra/otelutil v0.2.1 // indirect
-	github.com/uptrace/opentelemetry-go-extra/otelzap v0.2.1 // indirect
+	github.com/uptrace/opentelemetry-go-extra/otelutil v0.2.2 // indirect
+	github.com/uptrace/opentelemetry-go-extra/otelzap v0.2.2 // indirect
 	github.com/uptrace/uptrace-go v1.16.0 // indirect
 	github.com/urfave/cli v1.22.7 // indirect
 	github.com/vbatts/tar-split v0.11.2 // indirect

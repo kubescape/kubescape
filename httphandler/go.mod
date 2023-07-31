@@ -10,7 +10,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
-	github.com/kubescape/go-logger v0.0.13
+	github.com/kubescape/go-logger v0.0.16
 	github.com/kubescape/k8s-interface v0.0.116
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
 	github.com/kubescape/opa-utils v0.0.253
@@ -109,7 +109,7 @@ require (
 	github.com/bgentry/speakeasy v0.1.0 // indirect
 	github.com/blang/semver v3.5.1+incompatible // indirect
 	github.com/boombuler/barcode v1.0.1 // indirect
-	github.com/briandowns/spinner v1.18.1 // indirect
+	github.com/briandowns/spinner v1.23.0 // indirect
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/census-instrumentation/opencensus-proto v0.4.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -297,8 +297,8 @@ require (
 	github.com/tjfoc/gmsm v1.3.2 // indirect
 	github.com/tmc/grpc-websocket-proxy v0.0.0-20201229170055-e5319fda7802 // indirect
 	github.com/transparency-dev/merkle v0.0.1 // indirect
-	github.com/uptrace/opentelemetry-go-extra/otelutil v0.2.1 // indirect
-	github.com/uptrace/opentelemetry-go-extra/otelzap v0.2.1 // indirect
+	github.com/uptrace/opentelemetry-go-extra/otelutil v0.2.2 // indirect
+	github.com/uptrace/opentelemetry-go-extra/otelzap v0.2.2 // indirect
 	github.com/uptrace/uptrace-go v1.16.0 // indirect
 	github.com/urfave/cli v1.22.7 // indirect
 	github.com/vbatts/tar-split v0.11.2 // indirect

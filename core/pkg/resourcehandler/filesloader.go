@@ -43,8 +43,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		return nil, nil, nil, fmt.Errorf("missing input")
 	}
 
-	logger.L().Info("Accessing local objects")
-	cautils.StartSpinner()
+	logger.L().Start("Accessing local objects")
 
 	for path := range fileHandler.inputPatterns {
 		workloadIDToSource, workloads, err := getResourcesFromPath(ctx, fileHandler.inputPatterns[path])
@@ -76,8 +75,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	}
 
-	cautils.StopSpinner()
-	logger.L().Success("Done accessing local objects")
+	logger.L().StopSuccess("Done accessing local objects")
 
 	return k8sResources, allResources, ksResources, nil
 }
@@ -136,9 +134,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		if gitRepo != nil {
 			commitInfo, err := gitRepo.GetFileLastCommit(source)
 			if err != nil && !warnIssued {
-				cautils.StopSpinner()
-				logger.L().Ctx(ctx).Warning("git scan skipped", helpers.Error(err))
-				cautils.StartSpinner()
+				logger.L().Ctx(ctx).Warning("Git scan skipped", helpers.Error(err))
 				warnIssued = true // croak only once
 			}
 
