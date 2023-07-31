@@ -58,11 +58,6 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 }
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
-	// get k8s resources
-	logger.L().Info("Accessing Kubernetes objects")
-
-	cautils.StartSpinner()
-
 	workload, err := k8sHandler.findWorkloadToScan(k8sHandler.workloadIdentifier)
 	if err != nil {
 		return nil, nil, nil, nil, err
