@@ -236,11 +236,11 @@ func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx
 			}
 		}
 	}
+	logger.L().Info("Scanning images")
+
 	progressListener := cautils.NewProgressHandler("")
 	progressListener.Start(len(imagesToScan))
 	defer progressListener.Stop()
-
-	logger.L().Info("Scanning images")
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)

@@ -173,6 +173,12 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 
 	cautils.InfoTextDisplay(writer, "Vulnerability summary - %d vulnerabilities found:\n", len(summary.CVEs))
 
+	if len(summary.Images) == 1 {
+		cautils.SimpleDisplay(writer, "Image: %s\n", summary.Images[0])
+	} else {
+		cautils.SimpleDisplay(writer, "Images: %s\n", strings.Join(summary.Images, ", "))
+	}
+
 	for _, k := range keys {
 		if k == "Other" {
 			cautils.SimpleDisplay(writer, "  * %d %s \n", mapSeverityTSummary[k].NumberOfCVEs, k)
@@ -184,8 +190,6 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 }
 
 func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary) {
-	cautils.SimpleDisplay(writer, "(Scanned images: %s)\n", strings.Join(summary.Images, ", "))
-
 	for _, img := range summary.Images {
 		imgWithoutTag := strings.Split(img, ":")[0]
 		cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: '$ kubescape scan image %s'\n", imgWithoutTag, img))

@@ -31,8 +31,13 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
+type Chart struct {
+	Name string
+	Path string
+}
+
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]Chart) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -42,7 +47,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 	}
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
-	sourceToChartName := map[string]string{}
+	sourceToChart := make(map[string]Chart, 0)
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
@@ -55,11 +60,14 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 			chartName := chart.GetName()
 			for k, v := range wls {
 				sourceToWorkloads[k] = v
-				sourceToChartName[k] = chartName
+				sourceToChart[k] = Chart{
+					Name: chartName,
+					Path: helmDir,
+				}
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChartName
+	return sourceToWorkloads, sourceToChart
 }
 
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will

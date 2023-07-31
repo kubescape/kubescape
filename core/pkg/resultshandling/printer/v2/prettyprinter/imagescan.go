@@ -48,5 +48,9 @@ func (ip *ImagePrinter) PrintConfigurationsScanning(summaryDetails *reportsummar
 }
 
 func (ip *ImagePrinter) PrintNextSteps() {
+	if ip.verboseMode {
+		printNextSteps(ip.writer, []string{CICDSetupText, installHelmText}, true)
+		return
+	}
 	printNextSteps(ip.writer, []string{imageScanVerboseRunText, CICDSetupText, installHelmText}, true)
 }

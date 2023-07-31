@@ -75,7 +75,7 @@ func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source repo
 	}
 
 	if source.FileType == reporthandling.SourceTypeHelmChart {
-		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, fmt.Sprintf("%s/%s", source.Path, source.HelmPath), fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
+		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.HelmPath, fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
 
 	} else {
 		return fmt.Sprintf("%s --file-path=%s", cmd, fmt.Sprintf("%s/%s", source.Path, source.RelativePath))

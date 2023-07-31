@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -115,11 +114,11 @@ func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(helmPath)
 
-	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
+	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
 
 	wlSource, _ := helmSourceToWorkloads[workloadPath]
 
-	helmChartName := helmSourceToChartName[workloadPath]
+	helmChart := helmSourceToChart[workloadPath]
 
 	relSource, err := filepath.Rel(repoRoot, helmPath)
 	if err == nil {
@@ -142,10 +141,10 @@ func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string
 
 	workloadSource := reporthandling.Source{
 		Path:          repoRoot,
-		HelmPath:      strings.TrimPrefix(workloadPath, fmt.Sprintf("%s/", repoRoot)),
+		HelmPath:      helmChart.Path,
 		RelativePath:  helmPath,
 		FileType:      reporthandling.SourceTypeHelmChart,
-		HelmChartName: helmChartName,
+		HelmChartName: helmChart.Name,
 		LastCommit:    lastCommit,
 	}
 
@@ -251,10 +250,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 	}
 
 	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChartName := cautils.LoadResourcesFromHelmCharts(ctx, path)
+	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, path)
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
-		helmChartName := helmSourceToChartName[source]
+		helmChart := helmSourceToChart[source]
 
 		relSource, err := filepath.Rel(repoRoot, source)
 		if err == nil {
@@ -277,10 +276,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 
 		workloadSource := reporthandling.Source{
 			Path:          repoRoot,
-			HelmPath:      strings.TrimPrefix(path, fmt.Sprintf("%s/", repoRoot)),
+			HelmPath:      helmChart.Path,
 			RelativePath:  source,
 			FileType:      reporthandling.SourceTypeHelmChart,
-			HelmChartName: helmChartName,
+			HelmChartName: helmChart.Name,
 			LastCommit:    lastCommit,
 		}
 
