@@ -4,6 +4,10 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -20,6 +24,11 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
+
+func emptyDirectory() string {
+	o, _ := os.Getwd()
+	return filepath.Join(filepath.Dir(o), ".", "cautils", "testdata", "emptyDirectory")
+}
 
 var (
 	//go:embed testdata/kubeconfig_mock.json
@@ -257,4 +266,11 @@ func Test_CollectResources(t *testing.T) {
 		CollectResources(context.TODO(), resourceHandler, policyIdentifier, objSession, cautils.NewProgressHandler(""))
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
+}
+
+func Test_getResourcesFromPath(t *testing.T) {
+	expectedError := errors.New(fmt.Sprintf(cautils.ErrNoFilesToScan, emptyDirectory())).Error()
+	_, _, err := getResourcesFromPath(context.TODO(), emptyDirectory())
+	assert.NotEqual(t, err, nil)
+	assert.Contains(t, err.Error(), expectedError)
 }

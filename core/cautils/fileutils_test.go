@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,7 +32,8 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(context.TODO(), onlineBoutiquePath(), "")
+	workloads, err := LoadResourcesFromFiles(context.TODO(), onlineBoutiquePath(), "")
+	assert.Equal(t, err, nil)
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -42,6 +44,13 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 			assert.Equal(t, "/v1//Service/adservice", getRelativePath(w[1].GetID()))
 		}
 	}
+
+	// check case for empty directory
+	emptyDirectoryPath := filepath.Join("testdata", "emptyDirectory")
+	expectedError := fmt.Sprintf(ErrNoFilesToScan, emptyDirectoryPath)
+	_, err = LoadResourcesFromFiles(context.TODO(), emptyDirectoryPath, "")
+	assert.NotEqual(t, err, nil)
+	assert.Equal(t, err.Error(), expectedError)
 }
 
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
