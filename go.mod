@@ -9,13 +9,13 @@ require (
 	github.com/armosec/utils-k8s-go v0.0.16
 	github.com/briandowns/spinner v1.18.1
 	github.com/enescakir/emoji v1.0.0
-	github.com/fatih/color v1.15.0
 	github.com/francoispqt/gojay v1.2.13
 	github.com/go-git/go-git/v5 v5.5.2
 	github.com/google/go-containerregistry v0.13.0
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
+	github.com/jwalton/gchalk v1.3.0
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.15
 	github.com/kubescape/k8s-interface v0.0.135
@@ -158,6 +158,7 @@ require (
 	github.com/envoyproxy/go-control-plane v0.10.3 // indirect
 	github.com/envoyproxy/protoc-gen-validate v0.9.1 // indirect
 	github.com/evanphx/json-patch v5.6.0+incompatible // indirect
+	github.com/fatih/color v1.15.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/fullstorydev/grpcurl v1.8.7 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
@@ -226,6 +227,7 @@ require (
 	github.com/jonboulle/clockwork v0.3.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
+	github.com/jwalton/go-supportscolor v1.1.0 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/klauspost/compress v1.16.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect

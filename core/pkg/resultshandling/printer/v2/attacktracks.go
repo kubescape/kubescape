@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/gotree"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -47,14 +47,12 @@ func (prettyPrinter *PrettyPrinter) createFailedControlList(node v1alpha1.IAttac
 func (prettyPrinter *PrettyPrinter) buildTreeFromAttackTrackStep(tree gotree.Tree, node v1alpha1.IAttackTrackStep) gotree.Tree {
 	nodeName := node.GetName()
 	if len(node.GetControls()) > 0 {
-		red := color.New(color.Bold, color.FgRed).SprintFunc()
-		nodeName = red(nodeName)
+		nodeName = gchalk.WithRed().Bold(nodeName)
 	}
 
 	controlText := prettyPrinter.createFailedControlList(node)
 	if len(controlText) > 0 {
-		controlStyle := color.New(color.FgWhite, color.Faint).SprintFunc()
-		controlText = controlStyle(fmt.Sprintf(" (%s)", controlText))
+		controlText = gchalk.WithWhite().Dim(fmt.Sprintf(" (%s)", controlText))
 	}
 
 	subTree := gotree.New(nodeName + controlText)
