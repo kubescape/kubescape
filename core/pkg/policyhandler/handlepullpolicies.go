@@ -2,6 +2,7 @@ package policyhandler
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -104,7 +105,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyI
 		// check if the cached policies are the same as the requested policies, otherwise download the policies
 		if cachedIdentifiers, identifiersExist := policyHandler.cachedPolicyIdentifiers.Get(); identifiersExist && cautils.StringSlicesAreEqual(cachedIdentifiers, policyIdentifiersSlice) {
 			logger.L().Info("Using cached policies")
-			return cachedPolicies, nil
+			return deepCopyPolicies(cachedPolicies)
 		}
 
 		logger.L().Debug("Cached policies are not the same as the requested policies")
@@ -119,6 +120,20 @@ func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyI
 	}
 
 	return policies, err
+}
+
+func deepCopyPolicies(src []reporthandling.Framework) ([]reporthandling.Framework, error) {
+	data, err := json.Marshal(src)
+	if err != nil {
+		return nil, err
+	}
+	var dst []reporthandling.Framework
+	err = json.Unmarshal(data, &dst)
+	if err != nil {
+		return nil, err
+	}
+
+	return dst, nil
 }
 
 func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) ([]reporthandling.Framework, error) {

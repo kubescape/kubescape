@@ -146,8 +146,8 @@ type (
 	// mockableOPASessionObj reproduces OPASessionObj with concrete types instead of interfaces.
 	// It may be unmarshaled from a JSON fixture.
 	mockableOPASessionObj struct {
-		K8SResources          *cautils.K8SResources
-		ArmoResource          *cautils.KSResources
+		K8SResources          cautils.K8SResources
+		KubescapeResource     cautils.KSResources
 		AllPolicies           *cautils.Policies
 		AllResources          map[string]*workloadinterface.Workload
 		ResourcesResult       map[string]resourcesresults.Result
@@ -193,9 +193,9 @@ func mockOPASessionObj(t testing.TB) *cautils.OPASessionObj {
 	)
 
 	o := cautils.OPASessionObj{
-		K8SResources: v.K8SResources,
-		ArmoResource: v.ArmoResource,
-		AllPolicies:  v.AllPolicies,
+		K8SResources:      v.K8SResources,
+		KubescapeResource: v.KubescapeResource,
+		AllPolicies:       v.AllPolicies,
 		//AllResources          map[string]*workloadinterface.Workload        // all scanned resources, map[<resource ID>]<resource>
 		ResourcesResult:      v.ResourcesResult,
 		ResourceSource:       v.ResourceSource,

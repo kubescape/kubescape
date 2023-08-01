@@ -19,8 +19,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// CollectResources uses the provided resource handler to collect resources and returns an updated OPASessionObj
-func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) error {
+func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) error {
 	ctx, span := otel.Tracer("").Start(ctx, "resourcehandler.CollectResources")
 	defer span.End()
 	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
@@ -30,16 +29,17 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, err := rsrcHandler.GetResources(ctx, opaSessionObj, &policyIdentifier[0].Designators, progressListener)
+	resourcesMap, allResources, ksResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, progressListener)
 	if err != nil {
 		return err
 	}
 
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
-	opaSessionObj.ArmoResource = ksResources
+	opaSessionObj.KubescapeResource = ksResources
+	opaSessionObj.ExcludedRules = excludedRulesMap
 
-	if (opaSessionObj.K8SResources == nil || len(*opaSessionObj.K8SResources) == 0) && (opaSessionObj.ArmoResource == nil || len(*opaSessionObj.ArmoResource) == 0) {
+	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.KubescapeResource == nil || len(opaSessionObj.KubescapeResource) == 0) {
 		return fmt.Errorf("empty list of resources")
 	}
 
@@ -52,6 +52,9 @@ func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 		return
 	}
 	cloudMetadata := reportv2.NewCloudMetadata(iCloudMetadata)
+	if opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
+		opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reportv2.ClusterMetadata{}
+	}
 	opaSessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudMetadata = cloudMetadata
 	opaSessionObj.Metadata.ClusterMetadata.CloudMetadata = cloudMetadata             // deprecated - fallback
 	opaSessionObj.Report.ClusterCloudProvider = iCloudMetadata.Provider().ToString() // deprecated - fallback

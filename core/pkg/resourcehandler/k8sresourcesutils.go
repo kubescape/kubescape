@@ -52,7 +52,7 @@ var (
 )
 
 func isEmptyImgVulns(ksResourcesMap cautils.KSResources) bool {
-	imgVulnResources := cautils.MapImageVulnResources(&ksResourcesMap)
+	imgVulnResources := cautils.MapImageVulnResources(ksResourcesMap)
 	for _, resource := range imgVulnResources {
 		if val, ok := ksResourcesMap[resource]; ok {
 			if len(val) > 0 {
@@ -63,23 +63,7 @@ func isEmptyImgVulns(ksResourcesMap cautils.KSResources) bool {
 	return true
 }
 
-func setK8sResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResources {
-	k8sResources := make(cautils.K8SResources)
-	complexMap := setComplexK8sResourceMap(frameworks)
-	for group := range complexMap {
-		for version := range complexMap[group] {
-			for resource := range complexMap[group][version] {
-				groupResources := k8sinterface.ResourceGroupToString(group, version, resource)
-				for _, groupResource := range groupResources {
-					k8sResources[groupResource] = nil
-				}
-			}
-		}
-	}
-	return &k8sResources
-}
-
-func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) *cautils.KSResources {
+func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) cautils.KSResources {
 	ksResources := make(cautils.KSResources)
 	complexMap := setComplexKSResourceMap(frameworks, resourceToControl)
 	for group := range complexMap {
@@ -92,21 +76,7 @@ func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl m
 			}
 		}
 	}
-	return &ksResources
-}
-
-func setComplexK8sResourceMap(frameworks []reporthandling.Framework) map[string]map[string]map[string]interface{} {
-	k8sResources := make(map[string]map[string]map[string]interface{})
-	for _, framework := range frameworks {
-		for _, control := range framework.Controls {
-			for _, rule := range control.Rules {
-				for _, match := range rule.Match {
-					insertResources(k8sResources, match)
-				}
-			}
-		}
-	}
-	return k8sResources
+	return ksResources
 }
 
 // [group][versionn][resource]
@@ -147,24 +117,6 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 		} else {
 			if !slices.Contains(resourceToControl[r], control.ControlID) {
 				resourceToControl[r] = append(resourceToControl[r], control.ControlID)
-			}
-		}
-	}
-}
-
-func insertResources(k8sResources map[string]map[string]map[string]interface{}, match reporthandling.RuleMatchObjects) {
-	for _, apiGroup := range match.APIGroups {
-		if v, ok := k8sResources[apiGroup]; !ok || v == nil {
-			k8sResources[apiGroup] = make(map[string]map[string]interface{})
-		}
-		for _, apiVersions := range match.APIVersions {
-			if v, ok := k8sResources[apiGroup][apiVersions]; !ok || v == nil {
-				k8sResources[apiGroup][apiVersions] = make(map[string]interface{})
-			}
-			for _, resource := range match.Resources {
-				if _, ok := k8sResources[apiGroup][apiVersions][resource]; !ok {
-					k8sResources[apiGroup][apiVersions][resource] = nil
-				}
 			}
 		}
 	}

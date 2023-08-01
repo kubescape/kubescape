@@ -40,7 +40,7 @@ func NewRegistryAdaptors() (*RegistryAdaptors, error) {
 	return registryAdaptors, nil
 }
 
-func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
+func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResourcesMap cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, ksResourceMap cautils.KSResources) error {
 	logger.L().Debug("Collecting images vulnerabilities")
 
 	if len(registryAdaptors.adaptors) == 0 {
@@ -80,7 +80,7 @@ func (registryAdaptors *RegistryAdaptors) collectImagesVulnerabilities(k8sResour
 	for i := range metaObjs {
 		allResources[metaObjs[i].GetID()] = metaObjs[i]
 	}
-	(*ksResourceMap)[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
+	ksResourceMap[k8sinterface.JoinResourceTriplets(ImagevulnerabilitiesObjectGroup, ImagevulnerabilitiesObjectVersion, ImagevulnerabilitiesObjectKind)] = workloadinterface.ListMetaIDs(metaObjs)
 
 	return nil
 }
@@ -106,9 +106,9 @@ func vulnerabilityToIMetadata(imageTag string, vulnerabilities []registryvulnera
 }
 
 // list all images tags
-func listImagesTags(k8sResourcesMap *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) []string {
+func listImagesTags(k8sResourcesMap cautils.K8SResources, allResources map[string]workloadinterface.IMetadata) []string {
 	images := []string{}
-	for _, resources := range *k8sResourcesMap {
+	for _, resources := range k8sResourcesMap {
 		for j := range resources {
 			if resource, ok := allResources[resources[j]]; ok {
 				if resource.GetObjectType() == workloadinterface.TypeWorkloadObject {
