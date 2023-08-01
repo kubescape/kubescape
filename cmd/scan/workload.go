@@ -65,7 +65,6 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				logger.L().Fatal(err.Error())
 			}
 
-			scanInfo.ScanAll = true
 			scanInfo.SetScanType(cautils.ScanTypeWorkload)
 			scanInfo.ScanImages = true
 

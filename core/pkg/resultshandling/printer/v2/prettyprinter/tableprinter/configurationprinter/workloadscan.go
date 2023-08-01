@@ -1,12 +1,10 @@
 package configurationprinter
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/olekukonko/tablewriter"
 )
 
 type WorkloadPrinter struct {
@@ -60,9 +58,6 @@ func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, catego
 }
 
 func (wp *WorkloadPrinter) initCategoryTableData(categoryType CategoryType) ([]string, []int) {
-	if categoryType == TypeCounting {
-		return wp.getCategoryCountingTypeHeaders(), wp.getCountingTypeAlignments()
-	}
 	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
 }
 
@@ -77,25 +72,4 @@ func (wp *WorkloadPrinter) generateCountingCategoryRow(controlSummary reportsumm
 	row[2] = getDocsForControl(controlSummary)
 
 	return row
-}
-
-func (wp *WorkloadPrinter) getCategoriesColumnsAlignments() []int {
-	return getCountingTypeAlignments()
-}
-
-func (wp *WorkloadPrinter) generateNextSteps(controlSummary reportsummary.IControlSummary) string {
-	return fmt.Sprintf("$ kubescape scan wokrload <ns>/<kind>/<name> %s", controlSummary.GetID())
-}
-
-func (wp *WorkloadPrinter) getCategoryCountingTypeHeaders() []string {
-	headers := make([]string, 3)
-	headers[0] = controlNameHeader
-	headers[1] = statusHeader
-	headers[2] = docsHeader
-
-	return headers
-}
-
-func (wp *WorkloadPrinter) getCountingTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT}
 }
