@@ -111,7 +111,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			}
 			scanInfo.FrameworkScan = true
 
-			if (scanInfo.IsNewOutputFormat) && (scanInfo.ScanType == cautils.ScanTypeRepo || scanInfo.ScanType == cautils.ScanTypeCluster) {
+			if (scanInfo.IsSecurityView) && (scanInfo.ScanType == cautils.ScanTypeRepo || scanInfo.ScanType == cautils.ScanTypeCluster) {
 				frameworks = append(frameworks, "clusterscan")
 			}
 

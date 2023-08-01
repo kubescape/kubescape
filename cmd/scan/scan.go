@@ -94,7 +94,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.OmitRawResources, "omit-raw-resources", "", false, "Omit raw resources from the output. By default the raw resources are included in the output")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan images")
-	scanCmd.PersistentFlags().BoolVarP(&scanInfo.IsNewOutputFormat, "new-output", "", false, "Show new output")
+	scanCmd.PersistentFlags().BoolVarP(&scanInfo.IsSecurityView, "new-output", "", false, "Show new output")
 
 	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")

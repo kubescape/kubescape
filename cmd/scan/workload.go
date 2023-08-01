@@ -71,7 +71,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			}
 
 			scanInfo.ScanAll = true
-			scanInfo.IsNewOutputFormat = true
+			scanInfo.IsSecurityView = true
 			scanInfo.SetScanType(cautils.ScanTypeWorkload)
 			scanInfo.ScanImages = true
 			scanInfo.UseFrom = []string{"/Users/danielgrunberger/armo/merge/release/workloadscan.json"}

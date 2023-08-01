@@ -81,23 +81,23 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
 	}
 
-	for _, imageScan := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScan.Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScan.Image)
+	for i := range imageScanData {
+		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
+			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
 		}
 
-		presenterConfig := imageScan.PresenterConfig
+		presenterConfig := imageScanData[i].PresenterConfig
 		doc, err := models.NewDocument(presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
 		if err != nil {
-			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScan.Image), helpers.Error(err))
+			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
 			continue
 		}
 
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, extractCVEs(doc.Matches)...)
 
-		extractPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
+		setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
 
-		extractSeverityToSummaryMap(imageScanSummary.CVEs, imageScanSummary.MapsSeverityToSummary)
+		setSeverityToSummaryMap(imageScanSummary.CVEs, imageScanSummary.MapsSeverityToSummary)
 	}
 
 	return &imageScanSummary, nil

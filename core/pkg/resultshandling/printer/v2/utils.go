@@ -87,23 +87,25 @@ func finalizeResources(results []resourcesresults.Result, allResources map[strin
 	return resources
 }
 
-// returns map of severity to summary
-func extractSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[string]*imageprinter.SeveritySummary) {
+func setSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[string]*imageprinter.SeveritySummary) {
 	for _, cve := range cves {
 		if _, ok := mapSeverityToSummary[cve.Severity]; !ok {
 			mapSeverityToSummary[cve.Severity] = &imageprinter.SeveritySummary{}
 		}
+
 		mapSeverityToSummary[cve.Severity].NumberOfCVEs += 1
+
 		if cve.FixedState == string(v5.FixedState) {
 			mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs = mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs + 1
 		}
 	}
 }
 
-// returns a map of package name + version to score (we can have multiple matches for the same package with different versions)
-func extractPkgNameToScoreMap(matches []models.Match, pkgScores map[string]*imageprinter.PackageScore) {
+func setPkgNameToScoreMap(matches []models.Match, pkgScores map[string]*imageprinter.PackageScore) {
 	for i := range matches {
+		// key is pkg name + version to avoid version conflicts
 		key := matches[i].Artifact.Name + matches[i].Artifact.Version
+
 		if _, ok := pkgScores[key]; !ok {
 			pkgScores[key] = &imageprinter.PackageScore{
 				Version:                 matches[i].Artifact.Version,
@@ -111,12 +113,14 @@ func extractPkgNameToScoreMap(matches []models.Match, pkgScores map[string]*imag
 				MapSeverityToCVEsNumber: make(map[string]int, 0),
 			}
 		}
+
 		if _, ok := pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity]; !ok {
 			pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = 1
 		} else {
-			pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] + 1
+			pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] += 1
 		}
-		pkgScores[key].Score = pkgScores[key].Score + utils.ImageSeverityToInt(matches[i].Vulnerability.Severity)
+
+		pkgScores[key].Score += utils.ImageSeverityToInt(matches[i].Vulnerability.Severity)
 	}
 }
 

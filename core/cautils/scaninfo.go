@@ -104,11 +104,6 @@ type WorkloadIdentifier struct {
 	Name       string
 }
 
-type ImageScanInfo struct {
-	Username string
-	Password string
-}
-
 type ScanInfo struct {
 	Getters                                   // TODO - remove from object
 	PolicyIdentifier      []PolicyIdentifier  // TODO - remove from object
@@ -148,8 +143,7 @@ type ScanInfo struct {
 	ScanImages            bool
 	ChartPath             string
 	FilePath              string
-	ImageScanInfo         ImageScanInfo
-	IsNewOutputFormat     bool
+	IsSecurityView        bool
 }
 
 type Getters struct {
@@ -222,8 +216,11 @@ func (scanInfo *ScanInfo) Formats() []string {
 }
 
 func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
-	if !scanInfo.IsNewOutputFormat {
-		return
+	if scanType == ScanTypeCluster || scanType == ScanTypeRepo {
+		// these scan types are only relevant for security view
+		if !scanInfo.IsSecurityView {
+			return
+		}
 	}
 	scanInfo.ScanType = scanType
 }

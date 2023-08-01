@@ -29,7 +29,7 @@ var _ MainPrinter = &RepoPrinter{}
 func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
 	printImageScanningSummary(rp.writer, *summary, false)
 	printImagesCommands(rp.writer, *summary)
-	printTopVulnerabilities(rp.writer, *summary)
+	printTopComponents(rp.writer, *summary)
 }
 
 func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {

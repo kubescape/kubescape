@@ -54,8 +54,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			svc := imagescan.NewScanService(dbCfg)
 
 			creds := imagescan.RegistryCredentials{
-				Username: scanInfo.ImageScanInfo.Username,
-				Password: scanInfo.ImageScanInfo.Password,
+				Username: imgScanInfo.Username,
+				Password: imgScanInfo.Password,
 			}
 
 			userInput := args[0]
@@ -68,7 +68,6 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			}
 			logger.L().Success("Image scan completed successfully")
 
-			scanInfo.IsNewOutputFormat = true
 			scanInfo.SetScanType(cautils.ScanTypeImage)
 
 			outputPrinters := core.GetOutputPrinters(scanInfo, ctx)

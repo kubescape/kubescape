@@ -5,11 +5,12 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
 const (
-	TopPackagesNumber = 5
+	TopPackagesNumber = 5 // number of top packages to display
 )
 
 type ImagePrinter struct {
@@ -31,13 +32,13 @@ var _ MainPrinter = &ImagePrinter{}
 func (ip *ImagePrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
 	ip.PrintImageScanningTable(*summary)
 	printImageScanningSummary(ip.writer, *summary, ip.verboseMode)
-	printTopVulnerabilities(ip.writer, *summary)
+	printTopComponents(ip.writer, *summary)
 }
 
 func (ip *ImagePrinter) PrintImageScanningTable(summary imageprinter.ImageScanSummary) {
 	if !ip.verboseMode {
 		// filter out vulnerabilities with severity lower than High
-		summary.CVEs = filterCVEsBySeverities(summary.CVEs, []string{"Critical", "High"})
+		summary.CVEs = filterCVEsBySeverities(summary.CVEs, []string{apis.SeverityCriticalString, apis.SeverityHighString})
 	}
 
 	ip.imageTablePrinter.PrintImageScanningTable(ip.writer, summary)

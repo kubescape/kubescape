@@ -4,6 +4,9 @@ import (
 	"testing"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
+	"github.com/fatih/color"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/olekukonko/tablewriter"
 )
 
 func TestGenerateRows(t *testing.T) {
@@ -145,5 +148,70 @@ func TestGetImageScanningHeaders(t *testing.T) {
 		if headers[i] != expectedHeaders[i] {
 			t.Errorf("expected %s, got %s", expectedHeaders[i], headers[i])
 		}
+	}
+}
+
+func TestGetImageScanningColumnsAlignments(t *testing.T) {
+	alignments := getImageScanningColumnsAlignments()
+
+	expectedAlignments := []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT}
+
+	for i := range alignments {
+		if alignments[i] != expectedAlignments[i] {
+			t.Errorf("expected %d, got %d", expectedAlignments[i], alignments[i])
+		}
+	}
+}
+
+func TestGetColor(t *testing.T) {
+	tests := []struct {
+		name     string
+		severity string
+		want     color.Attribute
+	}{
+		{
+			name:     "check color for Critical",
+			severity: apis.SeverityCriticalString,
+			want:     color.FgRed,
+		},
+		{
+			name:     "check color for High",
+			severity: apis.SeverityHighString,
+			want:     color.FgYellow,
+		},
+		{
+			name:     "check color for Medium",
+			severity: apis.SeverityMediumString,
+			want:     color.FgCyan,
+		},
+		{
+			name:     "check color for Low",
+			severity: apis.SeverityLowString,
+			want:     color.FgBlue,
+		},
+		{
+			name:     "check color for Negligible",
+			severity: apis.SeverityNegligibleString,
+			want:     color.FgMagenta,
+		},
+		{
+			name:     "check color for Unknown",
+			severity: apis.SeverityUnknownString,
+			want:     color.FgWhite,
+		},
+		{
+			name:     "check color for Other",
+			severity: "Other",
+			want:     color.FgWhite,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actualColor := getColor(tt.severity)
+			if actualColor != tt.want {
+				t.Errorf("expected %v, got %v", tt.want, actualColor)
+			}
+		})
 	}
 }

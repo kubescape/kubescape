@@ -282,87 +282,70 @@ func Test_filterCVEsBySeverities(t *testing.T) {
 
 }
 
-func Test_sortTopVulnerablePackages(t *testing.T) {
+func TestGetSortPackageScores(t *testing.T) {
 	tests := []struct {
-		name              string
-		pkgScores         map[string]*imageprinter.PackageScore
-		expectedPkgScores map[string]*imageprinter.PackageScore
+		name           string
+		pkgScores      map[string]*imageprinter.PackageScore
+		expectedResult []string
 	}{
 		{
-			name: "change order",
+			name: "Non-empty input",
 			pkgScores: map[string]*imageprinter.PackageScore{
-				"pkg1": {
-					Version: "1.0.0",
-					Score:   10,
+				"packageA": {
+					Name:                    "packageA",
+					Version:                 "1.0",
+					Score:                   10,
+					MapSeverityToCVEsNumber: map[string]int{},
 				},
-				"pkg2": {
-					Version: "2.0.0",
-					Score:   20,
+				"packageB": {
+					Name:                    "packageB",
+					Version:                 "2.0",
+					Score:                   5,
+					MapSeverityToCVEsNumber: map[string]int{},
 				},
-				"pkg3": {
-					Version: "3.0.0",
-					Score:   15,
-				},
-			},
-			expectedPkgScores: map[string]*imageprinter.PackageScore{
-				"pkg2": {
-					Version: "2.0.0",
-					Score:   20,
-				},
-				"pkg3": {
-					Version: "3.0.0",
-					Score:   15,
-				},
-				"pkg1": {
-					Version: "1.0.0",
-					Score:   10,
+				"packageC": {
+					Name:                    "packageC",
+					Version:                 "3.0",
+					Score:                   8,
+					MapSeverityToCVEsNumber: map[string]int{},
 				},
 			},
+			expectedResult: []string{"packageA", "packageC", "packageB"},
 		},
 		{
-			name: "keep order",
-			pkgScores: map[string]*imageprinter.PackageScore{
-				"pkg1": {
-					Version: "1.0.0",
-					Score:   30,
-				},
-				"pkg2": {
-					Version: "2.0.0",
-					Score:   20,
-				},
-				"pkg3": {
-					Version: "3.0.0",
-					Score:   10,
-				},
-			},
-			expectedPkgScores: map[string]*imageprinter.PackageScore{
-				"pkg1": {
-					Version: "1.0.0",
-					Score:   30,
-				},
-				"pkg2": {
-					Version: "2.0.0",
-					Score:   20,
-				},
-				"pkg3": {
-					Version: "3.0.0",
-					Score:   10,
-				},
-			},
+			name:           "Empty input",
+			pkgScores:      map[string]*imageprinter.PackageScore{},
+			expectedResult: []string{},
 		},
 		{
-			name:              "empty",
-			pkgScores:         map[string]*imageprinter.PackageScore{},
-			expectedPkgScores: map[string]*imageprinter.PackageScore{},
+			name: "Non-empty input, same score",
+			pkgScores: map[string]*imageprinter.PackageScore{
+				"packageA": {
+					Name:                    "packageA",
+					Version:                 "1.0",
+					Score:                   10,
+					MapSeverityToCVEsNumber: map[string]int{},
+				},
+				"packageB": {
+					Name:                    "packageB",
+					Version:                 "2.0",
+					Score:                   10,
+					MapSeverityToCVEsNumber: map[string]int{},
+				},
+			},
+			expectedResult: []string{"packageA", "packageB"},
 		},
 	}
 
-	for _, tt := range tests {
-		actual := sortTopVulnerablePackages(tt.pkgScores)
-		for k, v := range actual {
-			if v.Version != tt.expectedPkgScores[k].Version || v.Score != tt.expectedPkgScores[k].Score {
-				t.Errorf("in test: %v, error for key %v, want: %v, have :%v", tt.name, k, tt.expectedPkgScores[k], v)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sortedNames := getSortPackageScores(tc.pkgScores)
+
+			for i := range sortedNames {
+				if sortedNames[i] != tc.expectedResult[i] {
+					t.Errorf("Expected: %v, Got: %v", tc.expectedResult, sortedNames)
+				}
 			}
-		}
+		})
 	}
 }

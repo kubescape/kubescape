@@ -3,7 +3,6 @@ package utils
 import (
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -70,17 +69,16 @@ func GetColor(severity int) color.Attribute {
 }
 
 func ImageSeverityToInt(severity string) int {
-	severity = strings.ToLower(severity)
 	switch severity {
-	case "critical":
+	case apis.SeverityCriticalString:
 		return 5
-	case "high":
+	case apis.SeverityHighString:
 		return 4
-	case "medium":
+	case apis.SeverityMediumString:
 		return 3
-	case "low":
+	case apis.SeverityLowString:
 		return 2
-	case "negligible":
+	case apis.SeverityNegligibleString:
 		return 1
 	default:
 		return 0

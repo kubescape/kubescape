@@ -209,7 +209,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	}
 
 	if scanInfo.ScanImages {
-		scanImages(scanInfo, scanData, ctx, resultsHandling)
+		scanImages(scanInfo.ScanType, scanData, ctx, resultsHandling)
 	}
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
@@ -221,10 +221,10 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	return resultsHandling, nil
 }
 
-func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler) {
+func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler) {
 	imagesToScan := []string{}
 
-	if scanInfo.ScanType == cautils.ScanTypeWorkload {
+	if scanType == cautils.ScanTypeWorkload {
 		containers, _ := workloadinterface.NewWorkloadObj(scanData.ScannedWorkload.GetObject()).GetContainers()
 		for _, container := range containers {
 			if !slices.Contains(imagesToScan, container.Image) {
@@ -247,21 +247,16 @@ func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx
 	svc := imagescan.NewScanService(dbCfg)
 
 	for _, img := range imagesToScan {
-		scanSingleImage(ctx, img, svc, resultsHandling, *scanInfo)
+		scanSingleImage(ctx, img, svc, resultsHandling)
 	}
 
 	logger.L().Success("Finished scanning images")
 }
 
-func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler, scanInfo cautils.ScanInfo) {
+func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) {
 	logger.L().Ctx(ctx).Debug(fmt.Sprintf("Scanning image: %s", img))
 
-	registryCredentials := imagescan.RegistryCredentials{
-		Username: scanInfo.ImageScanInfo.Username,
-		Password: scanInfo.ImageScanInfo.Password,
-	}
-
-	scanResults, err := svc.Scan(ctx, img, registryCredentials)
+	scanResults, err := svc.Scan(ctx, img, imagescan.RegistryCredentials{})
 	if err != nil {
 		logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to scan image: %s", img), helpers.Error(err))
 		return

@@ -113,35 +113,61 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 	return filteredCVEs
 }
 
-func printTopVulnerabilities(writer *os.File, summary imageprinter.ImageScanSummary) {
+// getSortPackageScores returns a slice of package names sorted by score
+func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []string {
+	var ss []string
+	for k := range pkgScores {
+		ss = append(ss, k)
+	}
+
+	// sort by score. If score is equal, sort by name
+	sort.Slice(ss, func(i, j int) bool {
+		if pkgScores[ss[i]].Score == pkgScores[ss[j]].Score {
+			return pkgScores[ss[i]].Name < pkgScores[ss[j]].Name
+		}
+		return pkgScores[ss[i]].Score > pkgScores[ss[j]].Score
+	})
+
+	return ss
+}
+
+func sortCVEsBySeverity(mapSeverityToCVEsNumber map[string]int) []string {
+	// sort topPkg.MapSeverityToCVEsNumber  by severity
+	ss := make([]string, 0, len(mapSeverityToCVEsNumber))
+	for k := range mapSeverityToCVEsNumber {
+		ss = append(ss, k)
+	}
+
+	sort.Slice(ss, func(i, j int) bool {
+		return utils.ImageSeverityToInt(ss[i]) > utils.ImageSeverityToInt(ss[j])
+	})
+
+	return ss
+
+}
+
+func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) {
 	if len(summary.PackageScores) == 0 {
 		return
 	}
 
 	cautils.InfoTextDisplay(writer, "\nMost vulnerable components:\n")
 
-	var ss []string
-	for k := range summary.PackageScores {
-		ss = append(ss, k)
-	}
+	sortedPkgScores := getSortPackageScores(summary.PackageScores)
 
-	sort.Slice(ss, func(i, j int) bool {
-		if summary.PackageScores[ss[i]].Score == summary.PackageScores[ss[j]].Score {
-			return summary.PackageScores[ss[i]].Name < summary.PackageScores[ss[j]].Name
-		}
-		return summary.PackageScores[ss[i]].Score > summary.PackageScores[ss[j]].Score
-	})
-
-	for i := 0; i < len(ss) && i < TopPackagesNumber; i++ {
-		topPkg := summary.PackageScores[ss[i]]
+	for i := 0; i < len(sortedPkgScores) && i < TopPackagesNumber; i++ {
+		topPkg := summary.PackageScores[sortedPkgScores[i]]
 		output := fmt.Sprintf("  * %s (%s) -", topPkg.Name, topPkg.Version)
-		for severity, numberOfCVEs := range topPkg.MapSeverityToCVEsNumber {
-			output += fmt.Sprintf(" %d %s,", numberOfCVEs, severity)
+
+		sortedCVEs := sortCVEsBySeverity(topPkg.MapSeverityToCVEsNumber)
+
+		for j := range sortedCVEs {
+			output += fmt.Sprintf(" %d %s,", topPkg.MapSeverityToCVEsNumber[sortedCVEs[j]], sortedCVEs[j])
 		}
+
 		output = output[:len(output)-1]
 
 		cautils.SimpleDisplay(writer, output+"\n")
-
 	}
 
 	cautils.SimpleDisplay(writer, "\n")
