@@ -98,9 +98,6 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 		SyftProviderConfig: pkg.SyftProviderConfig{
 			RegistryOptions:   regOpts,
 			CatalogingOptions: catOpts,
-			// Platform:               appConfig.Platform,
-			// Name:                   appConfig.Name,
-			// DefaultImagePullSource: appConfig.DefaultImagePullSource,
 		},
 		SynthesisConfig: pkg.SynthesisConfig{
 			GenerateMissingCPEs: true,
@@ -119,7 +116,7 @@ type Service struct {
 func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials) (*models.PresenterConfig, error) {
 	var err error
 
-	store, status, dbCloser, err := grype.LoadVulnerabilityDB(s.dbCfg, true)
+	store, status, dbCloser, err := NewVulnerabilityDB(s.dbCfg, true)
 	if err = validateDBLoad(err, status); err != nil {
 		return nil, err
 	}
@@ -132,8 +129,6 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 	if dbCloser != nil {
 		defer dbCloser.Close()
 	}
-
-	// applyDistroHint(packages, &pkgContext, appConfig)
 
 	matcher := grype.VulnerabilityMatcher{
 		Store:    *store,
