@@ -327,15 +327,14 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 }
 
 func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == v2.GitLocal {
+	switch opaSessionObj.Metadata.ScanMetadata.ScanningTarget {
+	case v2.GitLocal:
 		return opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
-	}
-
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == v2.Directory {
+	case v2.Directory:
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
+	default:
+		return ""
 	}
-
-	return ""
 }
 
 // generateRemediationMessage generates a remediation message for the given control summary

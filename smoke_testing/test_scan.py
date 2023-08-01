@@ -36,6 +36,30 @@ def scan_all(kubescape_exec: str):
     return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files])
 
 
+def scan_all_format_sarif(kubescape_exec: str):
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "sarif", "--output", "results"])
+
+
+def scan_all_format_json(kubescape_exec: str):
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "json", "--output", "results"])
+
+
+def scan_all_format_junit(kubescape_exec: str):
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "junit", "--output", "results"])
+
+
+def scan_all_format_pretty_printer(kubescape_exec: str):
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "pretty-printer", "--output", "results"])
+
+
+def scan_all_format_html(kubescape_exec: str):
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "html", "--output", "results"])
+
+
+def scan_all_format_pdf(kubescape_exec: str):
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "pdf", "--output", "results"])
+
+
 def scan_from_stdin(kubescape_exec: str):
     return smoke_utils.run_command(command=["cat", single_file, "|", kubescape_exec, "scan", "framework", "nsa", "-"])
 
@@ -67,6 +91,33 @@ def run(kubescape_exec: str):
 
     print("Testing scan all")
     msg = scan_all(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+
+    print("Testing scan_all_format_json")
+    msg = scan_all_format_json(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+    print("Testing scan_all_format_sarif")
+    msg = scan_all_format_sarif(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+    print("Testing scan_all_format_junit")
+    msg = scan_all_format_junit(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+    print("Testing scan_all_format_pretty_printer")
+    msg = scan_all_format_pretty_printer(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+
+    print("Testing scan_all_format_html")
+    msg = scan_all_format_html(kubescape_exec=kubescape_exec)
+    smoke_utils.assertion(msg)
+
+
+    print("Testing scan_all_format_pdf")
+    msg = scan_all_format_pdf(kubescape_exec=kubescape_exec)
     smoke_utils.assertion(msg)
 
     # TODO - fix test

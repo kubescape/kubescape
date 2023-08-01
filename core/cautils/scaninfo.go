@@ -337,6 +337,11 @@ func setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.C
 		}
 		contextMetadata.RepoContextMetadata = context
 	case ContextDir:
+		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
+			BasePath: getAbsPath(input),
+			HostName: getHostname(),
+		}
+		// add repo context for submitting
 		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
 			Provider:      "none",
 			Repo:          fmt.Sprintf("path@%s", getAbsPath(input)),
@@ -347,6 +352,11 @@ func setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.C
 		}
 
 	case ContextFile:
+		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
+			FilePath: getAbsPath(input),
+			HostName: getHostname(),
+		}
+		// add repo context for submitting
 		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
 			Provider:      "none",
 			Repo:          fmt.Sprintf("file@%s", getAbsPath(input)),
