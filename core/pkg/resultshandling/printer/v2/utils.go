@@ -88,8 +88,7 @@ func finalizeResources(results []resourcesresults.Result, allResources map[strin
 }
 
 // returns map of severity to summary
-func extractSeverityToSummaryMap(cves []imageprinter.CVE) map[string]*imageprinter.SeveritySummary {
-	mapSeverityToSummary := map[string]*imageprinter.SeveritySummary{}
+func extractSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[string]*imageprinter.SeveritySummary) {
 	for _, cve := range cves {
 		if _, ok := mapSeverityToSummary[cve.Severity]; !ok {
 			mapSeverityToSummary[cve.Severity] = &imageprinter.SeveritySummary{}
@@ -99,29 +98,26 @@ func extractSeverityToSummaryMap(cves []imageprinter.CVE) map[string]*imageprint
 			mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs = mapSeverityToSummary[cve.Severity].NumberOfFixableCVEs + 1
 		}
 	}
-	return mapSeverityToSummary
 }
 
 // returns a map of package name + version to score (we can have multiple matches for the same package with different versions)
-func extractPkgNameToScoreMap(matches []models.Match) map[string]*imageprinter.PackageScore {
-	mapPackageNameToScore := make(map[string]*imageprinter.PackageScore, 0)
+func extractPkgNameToScoreMap(matches []models.Match, pkgScores map[string]*imageprinter.PackageScore) {
 	for i := range matches {
 		key := matches[i].Artifact.Name + matches[i].Artifact.Version
-		if _, ok := mapPackageNameToScore[key]; !ok {
-			mapPackageNameToScore[key] = &imageprinter.PackageScore{
+		if _, ok := pkgScores[key]; !ok {
+			pkgScores[key] = &imageprinter.PackageScore{
 				Version:                 matches[i].Artifact.Version,
 				Name:                    matches[i].Artifact.Name,
 				MapSeverityToCVEsNumber: make(map[string]int, 0),
 			}
 		}
-		if _, ok := mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity]; !ok {
-			mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = 1
+		if _, ok := pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity]; !ok {
+			pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = 1
 		} else {
-			mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = mapPackageNameToScore[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] + 1
+			pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] + 1
 		}
-		mapPackageNameToScore[key].Score = mapPackageNameToScore[key].Score + utils.ImageSeverityToInt(matches[i].Vulnerability.Severity)
+		pkgScores[key].Score = pkgScores[key].Score + utils.ImageSeverityToInt(matches[i].Vulnerability.Severity)
 	}
-	return mapPackageNameToScore
 }
 
 func extractCVEs(matches []models.Match) []imageprinter.CVE {

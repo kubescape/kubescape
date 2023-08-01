@@ -21,6 +21,7 @@ import (
 	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/exp/slices"
 
 	"github.com/kubescape/opa-utils/resources"
 )
@@ -226,17 +227,17 @@ func scanImages(scanInfo *cautils.ScanInfo, scanData *cautils.OPASessionObj, ctx
 	if scanInfo.ScanType == cautils.ScanTypeWorkload {
 		containers, _ := workloadinterface.NewWorkloadObj(scanData.ScannedWorkload.GetObject()).GetContainers()
 		for _, container := range containers {
-			// if !slices.Contains(imagesToScan, container.Image) {
-			imagesToScan = append(imagesToScan, container.Image)
-			// }
+			if !slices.Contains(imagesToScan, container.Image) {
+				imagesToScan = append(imagesToScan, container.Image)
+			}
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
 			containers, _ := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
 			for _, container := range containers {
-				// if !slices.Contains(imagesToScan, container.Image) {
-				imagesToScan = append(imagesToScan, container.Image)
-				// }
+				if !slices.Contains(imagesToScan, container.Image) {
+					imagesToScan = append(imagesToScan, container.Image)
+				}
 			}
 		}
 	}
