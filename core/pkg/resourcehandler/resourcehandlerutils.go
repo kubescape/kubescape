@@ -8,7 +8,7 @@ import (
 )
 
 // utils which are common to all resource handlers
-func addWorkloadToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
+func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, wl workloadinterface.IWorkload) {
 	if wl == nil {
 		return
 	}
@@ -19,21 +19,19 @@ func addWorkloadToResourceMaps(k8sResources cautils.K8SResources, allResources m
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 
-func getQueryableResourceMapFromPolicies(handler IResourceHandler, frameworks []reporthandling.Framework, workload workloadinterface.IWorkload) (QueryableResources, map[string]bool) {
+func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload) (QueryableResources, map[string]bool) {
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
-
-	parentKind := handler.GetWorkloadParentKind(workload)
-	namespace := getScannedWorkloadNamespace(workload)
+	namespace := getScannedResourceNamespace(resource)
 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
 			for _, rule := range control.Rules {
 				var resourcesFilterMap map[string]bool = nil
-				// for workload scan, we need to filter the resources according to the given workload and its owner reference
-				if workload != nil {
-					if resourcesFilterMap = filterRuleMatchesForWorkload(workload.GetKind(), parentKind, rule.Match); resourcesFilterMap == nil {
-						// rule does not apply to this workload
+				// for single resource scan, we need to filter the rules and which resources to query according to the given resource
+				if resource != nil {
+					if resourcesFilterMap = filterRuleMatchesForResource(resource.GetKind(), rule.Match); resourcesFilterMap == nil {
+						// rule does not apply to this resource
 						excludedRulesMap[rule.Name] = false
 						continue
 					}
@@ -48,11 +46,11 @@ func getQueryableResourceMapFromPolicies(handler IResourceHandler, frameworks []
 	return queryableResources, excludedRulesMap
 }
 
-// getScannedWorkloadNamespace returns the namespace of the scanned workload.
-// If workload is nil (e.g. cluster scan), returns an empty string
-// If the workload is a namespaced or the Namespace iself, returns the namespace name
+// getScannedResourceNamespace returns the namespace of the scanned resource.
+// If input is nil (e.g. cluster scan), returns an empty string
+// If the resource is a namespaced or the Namespace itself, returns the namespace name
 // In all other cases, returns an empty string
-func getScannedWorkloadNamespace(workload workloadinterface.IWorkload) string {
+func getScannedResourceNamespace(workload workloadinterface.IWorkload) string {
 	if workload == nil {
 		return ""
 	}
@@ -67,10 +65,10 @@ func getScannedWorkloadNamespace(workload workloadinterface.IWorkload) string {
 	return ""
 }
 
-// filterRuleMatches returns a map, of which resources should be queried for a given workload and its owner reference
+// filterRuleMatchesForResource returns a map, of which resources should be queried for a given resource
 // The map is of the form: map[<resource>]bool (The bool value indicates whether the resource should be queried or not)
 // The function will return a nil map if the rule does not apply to the given workload
-func filterRuleMatchesForWorkload(workloadKind, ownerReferenceKind string, matchObjects []reporthandling.RuleMatchObjects) map[string]bool {
+func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthandling.RuleMatchObjects) map[string]bool {
 	resourceMap := make(map[string]bool)
 	for _, match := range matchObjects {
 		for _, resource := range match.Resources {
@@ -79,7 +77,7 @@ func filterRuleMatchesForWorkload(workloadKind, ownerReferenceKind string, match
 	}
 
 	// rule does not apply to this workload
-	if _, exists := resourceMap[workloadKind]; !exists {
+	if _, exists := resourceMap[resourceKind]; !exists {
 		return nil
 	}
 
@@ -93,19 +91,11 @@ func filterRuleMatchesForWorkload(workloadKind, ownerReferenceKind string, match
 		"Job":         false,
 	}
 
-	_, isInputResourceWorkload := workloadKinds[workloadKind]
-
-	//  has owner reference
-	if isInputResourceWorkload && ownerReferenceKind != "" {
-		// owner reference kind exists in the matches - that means the rule does not apply to the given workload
-		if _, exist := resourceMap[ownerReferenceKind]; exist {
-			return nil
-		}
-	}
+	_, isInputResourceWorkload := workloadKinds[resourceKind]
 
 	for r := range resourceMap {
 		// we don't need to query the same resource
-		if r == workloadKind {
+		if r == resourceKind {
 			continue
 		}
 
@@ -114,20 +104,6 @@ func filterRuleMatchesForWorkload(workloadKind, ownerReferenceKind string, match
 	}
 
 	return resourceMap
-}
-
-// getOwnerReferenceKind returns the kind of the first owner reference of the given object
-// If the object has no owner references or not a valid workload, returns an empty string
-func getOwnerReferenceKind(object workloadinterface.IMetadata) string {
-	if !k8sinterface.IsTypeWorkload(object.GetObject()) {
-		return ""
-	}
-	wl := workloadinterface.NewWorkloadObj(object.GetObject())
-	ownerReferences, err := wl.GetOwnerReferences()
-	if err != nil || len(ownerReferences) == 0 {
-		return ""
-	}
-	return ownerReferences[0].Kind
 }
 
 // updateQueryableResourcesMapFromMatch updates the queryableResources map with the relevant resources from the match object.

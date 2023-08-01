@@ -57,7 +57,7 @@ type OPASessionObj struct {
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	OmitRawResources      bool                               // omit raw resources from output
 	ScanType              ScanTypes                          // scan type
-	ScannedWorkload       workloadinterface.IWorkload        // single workload scan
+	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {

@@ -153,11 +153,11 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 	if pp.scanType == cautils.ScanTypeCluster || pp.scanType == cautils.ScanTypeRepo {
 		cautils.InfoDisplay(pp.writer, "\nSecurity Overview\n\n")
 	} else if pp.scanType == cautils.ScanTypeWorkload {
-		ns := opaSessionObj.ScannedWorkload.GetNamespace()
+		ns := opaSessionObj.SingleResourceScan.GetNamespace()
 		if ns == "" {
-			cautils.InfoDisplay(pp.writer, "Workload - Kind: %s, Name: %s\n\n", opaSessionObj.ScannedWorkload.GetKind(), opaSessionObj.ScannedWorkload.GetName())
+			cautils.InfoDisplay(pp.writer, "Workload - Kind: %s, Name: %s\n\n", opaSessionObj.SingleResourceScan.GetKind(), opaSessionObj.SingleResourceScan.GetName())
 		} else {
-			cautils.InfoDisplay(pp.writer, "Workload - Namespace: %s, Kind: %s, Name: %s\n\n", opaSessionObj.ScannedWorkload.GetNamespace(), opaSessionObj.ScannedWorkload.GetKind(), opaSessionObj.ScannedWorkload.GetName())
+			cautils.InfoDisplay(pp.writer, "Workload - Namespace: %s, Kind: %s, Name: %s\n\n", opaSessionObj.SingleResourceScan.GetNamespace(), opaSessionObj.SingleResourceScan.GetKind(), opaSessionObj.SingleResourceScan.GetName())
 		}
 	}
 }

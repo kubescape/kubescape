@@ -225,7 +225,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	imagesToScan := []string{}
 
 	if scanType == cautils.ScanTypeWorkload {
-		containers, _ := workloadinterface.NewWorkloadObj(scanData.ScannedWorkload.GetObject()).GetContainers()
+		containers, _ := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()
 		for _, container := range containers {
 			if !slices.Contains(imagesToScan, container.Image) {
 				imagesToScan = append(imagesToScan, container.Image)

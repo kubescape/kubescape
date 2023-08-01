@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 
 	"github.com/spf13/cobra"
 )
@@ -64,20 +65,18 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				logger.L().Fatal(err.Error())
 			}
 
-			scanInfo.WorkloadIdentifier = &cautils.WorkloadIdentifier{
-				Namespace: namespace,
-				Kind:      kind,
-				Name:      name,
-			}
-
 			scanInfo.ScanAll = true
-			scanInfo.IsSecurityView = true
 			scanInfo.SetScanType(cautils.ScanTypeWorkload)
 			scanInfo.ScanImages = true
-			scanInfo.UseFrom = []string{"/Users/danielgrunberger/armo/merge/release/workloadscan.json"}
+
+			scanInfo.ScanObject = &objectsenvelopes.ScanObject{}
+			scanInfo.ScanObject.SetNamespace(namespace)
+			scanInfo.ScanObject.SetKind(kind)
+			scanInfo.ScanObject.SetName(name)
 
 			scanInfo.SetPolicyIdentifiers([]string{"workloadscan"}, v1.KindFramework)
 
+			// todo: add api version if provided
 			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)
 			if err != nil {
