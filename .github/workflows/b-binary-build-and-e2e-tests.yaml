@@ -27,13 +27,19 @@ on:
         type: number
         default: 1
         required: false
+      OS:
+        type: string
+        required: false
+        default: '[ "ubuntu-20.04", "macos-latest", "windows-latest"]'
+      ARCH:
+        type: string
+        required: false
+        default: '[ "", "arm64"]'
       BINARY_TESTS:
         type: string
         required: false
         default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score" ]'
-      CHECKOUT_REPO:
-        required: false
-        type: string
+
   workflow_call:
     inputs:
       COMPONENT_NAME:
@@ -57,10 +63,14 @@ on:
       BINARY_TESTS:
         type: string
         default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score" ]'
-      CHECKOUT_REPO:
-        required: false
+      OS:
         type: string
-
+        required: false
+        default: '[ "ubuntu-20.04", "macos-latest", "windows-latest"]'
+      ARCH:
+        type: string
+        required: false
+        default: '[ "", "arm64"]'
 jobs:
   wf-preparation:
     name: secret-validator
@@ -81,24 +91,38 @@ jobs:
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: "echo \"is-secret-set=${{ env.CUSTOMER != '' && \n                        env.USERNAME != '' &&\n                        env.PASSWORD != '' &&\n                        env.CLIENT_ID != '' &&\n                        env.SECRET_KEY != '' &&\n                        env.REGISTRY_USERNAME != '' &&\n                        env.REGISTRY_PASSWORD != ''\n                      }}\" >> $GITHUB_OUTPUT\n"
 
+      - id: export_os_to_env
+        name: set test name
+        run: |
+          echo "OS=$input" >> $GITHUB_OUTPUT
+        env:
+          input: ${{ inputs.OS }}
+
       - id: export_tests_to_env
         name: set test name
         run: |
           echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
         env:
           input: ${{ inputs.BINARY_TESTS }}
-        
+      - id: export_arch_to_env
+        name: set test name
+        run: |
+          echo "ARCH=$input" >> $GITHUB_OUTPUT
+        env:
+          input: ${{ inputs.ARCH }}
+      
 
   binary-build:
     name: Create cross-platform build
+    needs: wf-preparation
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GOARCH: ${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-20.04, macos-latest, windows-latest]
-        arch: ["", arm64]
+        os: ${{ fromJson(needs.wf-preparation.outputs.OS) }}
+        arch: ${{ fromJson(needs.wf-preparation.outputs.ARCH) }}
         exclude:
         - os: windows-latest
           arch: arm64
