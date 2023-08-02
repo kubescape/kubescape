@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -120,18 +121,45 @@ func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string
 
 	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
 
-	wlSource, _ := helmSourceToWorkloads[workloadPath]
+	if clonedRepo != "" {
+		workloadPath = clonedRepo + workloadPath
+	}
 
-	helmChart := helmSourceToChart[workloadPath]
+	wlSource, ok := helmSourceToWorkloads[workloadPath]
+	if !ok {
+		return nil, nil, fmt.Errorf("workload %s not found in chart %s", workloadPath, helmPath)
+	}
 
-	relSource, err := filepath.Rel(repoRoot, helmPath)
+	if len(wlSource) != 1 {
+		return nil, nil, fmt.Errorf("workload %s found multiple times in chart %s", workloadPath, helmPath)
+	}
+
+	helmChart, ok := helmSourceToChart[workloadPath]
+	if !ok {
+		return nil, nil, fmt.Errorf("helmChart not found for workload %s", workloadPath)
+	}
+
+	workloadSource := getWorkloadSourceHelmChart(repoRoot, helmPath, gitRepo, helmChart)
+
+	workloadIDToSource := make(map[string]reporthandling.Source, 1)
+	workloadIDToSource[wlSource[0].GetID()] = workloadSource
+
+	workloads := []workloadinterface.IMetadata{}
+	workloads = append(workloads, wlSource...)
+
+	return workloadIDToSource, workloads, nil
+
+}
+
+func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils.LocalGitRepository, helmChart cautils.Chart) reporthandling.Source {
+	relSource, err := filepath.Rel(repoRoot, source)
 	if err == nil {
-		helmPath = relSource
+		source = relSource
 	}
 
 	var lastCommit reporthandling.LastCommit
 	if gitRepo != nil {
-		commitInfo, _ := gitRepo.GetFileLastCommit(helmPath)
+		commitInfo, _ := gitRepo.GetFileLastCommit(source)
 		if commitInfo != nil {
 			lastCommit = reporthandling.LastCommit{
 				Hash:           commitInfo.SHA,
@@ -143,23 +171,14 @@ func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string
 		}
 	}
 
-	workloadSource := reporthandling.Source{
+	return reporthandling.Source{
 		Path:          repoRoot,
 		HelmPath:      helmChart.Path,
-		RelativePath:  helmPath,
+		RelativePath:  source,
 		FileType:      reporthandling.SourceTypeHelmChart,
 		HelmChartName: helmChart.Name,
 		LastCommit:    lastCommit,
 	}
-
-	workloadIDToSource := make(map[string]reporthandling.Source, 0)
-	workloadIDToSource[wlSource[0].GetID()] = workloadSource
-
-	workloads := []workloadinterface.IMetadata{}
-	workloads = append(workloads, wlSource...)
-
-	return workloadIDToSource, workloads, nil
-
 }
 
 func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
@@ -259,33 +278,18 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]
 
-		relSource, err := filepath.Rel(repoRoot, source)
-		if err == nil {
-			source = relSource
-		}
-
-		var lastCommit reporthandling.LastCommit
-		if gitRepo != nil {
-			commitInfo, _ := gitRepo.GetFileLastCommit(source)
-			if commitInfo != nil {
-				lastCommit = reporthandling.LastCommit{
-					Hash:           commitInfo.SHA,
-					Date:           commitInfo.Author.Date,
-					CommitterName:  commitInfo.Author.Name,
-					CommitterEmail: commitInfo.Author.Email,
-					Message:        commitInfo.Message,
-				}
+		if clonedRepo != "" {
+			url, err := gitRepo.GetRemoteUrl()
+			if err != nil {
+				logger.L().Warning("failed to get remote url", helpers.Error(err))
+				break
 			}
+			helmChart.Path = strings.TrimSuffix(url, ".git")
+			repoRoot = ""
+			source = strings.TrimPrefix(source, fmt.Sprintf("%s/", clonedRepo))
 		}
 
-		workloadSource := reporthandling.Source{
-			Path:          repoRoot,
-			HelmPath:      helmChart.Path,
-			RelativePath:  source,
-			FileType:      reporthandling.SourceTypeHelmChart,
-			HelmChartName: helmChart.Name,
-			LastCommit:    lastCommit,
-		}
+		workloadSource := getWorkloadSourceHelmChart(repoRoot, source, gitRepo, helmChart)
 
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = workloadSource

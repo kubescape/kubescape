@@ -87,12 +87,17 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 		topWorkloadsSorted = append(topWorkloadsSorted, wl)
 	}
 
+	// sort by score. If scores are equal, sort by resource ID
 	sort.Slice(topWorkloadsSorted, func(i, j int) bool {
 		if topWorkloadsSorted[i].Score == topWorkloadsSorted[j].Score {
 			return topWorkloadsSorted[i].ResourceID < topWorkloadsSorted[j].ResourceID
 		}
 		return topWorkloadsSorted[i].Score > topWorkloadsSorted[j].Score
 	})
+
+	if sessionObj.Report == nil {
+		sessionObj.Report = &reporthandlingv2.PostureReport{}
+	}
 
 	// set top workloads according to number of top workloads
 	for i := 0; i < TopWorkloadsNumber; i++ {
