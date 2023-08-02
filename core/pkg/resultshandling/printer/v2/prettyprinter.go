@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	prettyPrinterOutputFile = "report"
-	prettyPrinterOutputExt  = ".txt"
+	prettyPrinterOutputFile             = "report"
+	prettyPrinterOutputExt              = ".txt"
+	clusterScanningScopeInformationLink = "https://github.com/kubescape/regolibrary/tree/master#add-a-framework"
 )
 
 var _ printer.IPrinter = &PrettyPrinter{}
@@ -214,7 +215,7 @@ func (pp *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.Summary
 
 	if summaryDetails.NumberOfControls().All() == 0 {
 		if len(summaryDetails.ListFrameworks()) == 0 {
-			fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, no framework was matched to scanning scope, make sure the framework you choose is matched to your cluster scope\n")
+			fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, no framework was matched to scanning scope, make sure the framework you choose is matched to your cluster scope, for more information about cluster scanning scope: %s\n", clusterScanningScopeInformationLink)
 		} else {
 			fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
 		}
