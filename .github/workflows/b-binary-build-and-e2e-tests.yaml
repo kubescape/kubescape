@@ -77,6 +77,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
+      OS: ${{ steps.export_tests_to_env.outputs.OS }}
+      ARCH: ${{ steps.export_tests_to_env.outputs.ARCH }}
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
     steps:
       - name: check if the necessary secrets are set in github secrets
