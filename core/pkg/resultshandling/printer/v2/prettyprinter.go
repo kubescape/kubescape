@@ -150,6 +150,10 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 		fmt.Fprintf(pp.writer, "\n")
 	}
 
+	pp.printHeader(opaSessionObj)
+}
+
+func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 	if pp.scanType == cautils.ScanTypeCluster || pp.scanType == cautils.ScanTypeRepo {
 		cautils.InfoDisplay(pp.writer, "\nSecurity Overview\n\n")
 	} else if pp.scanType == cautils.ScanTypeWorkload {

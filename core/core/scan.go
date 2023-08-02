@@ -69,7 +69,6 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== version testing ======================================
 
-	// move this
 	v := cautils.NewIVersionCheckHandler(ctx)
 	v.CheckLatestVersion(ctx, cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
 
@@ -161,7 +160,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 		}
 	}()
 
-	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter, nil)
+	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
 
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
@@ -225,7 +224,11 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	imagesToScan := []string{}
 
 	if scanType == cautils.ScanTypeWorkload {
-		containers, _ := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()
+		containers, err := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()
+		if err != nil {
+			logger.L().Error("failed to get containers", helpers.Error(err))
+			return
+		}
 		for _, container := range containers {
 			if !slices.Contains(imagesToScan, container.Image) {
 				imagesToScan = append(imagesToScan, container.Image)
@@ -233,7 +236,11 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
-			containers, _ := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
+			containers, err := workloadinterface.NewWorkloadObj(workload.GetObject()).GetContainers()
+			if err != nil {
+				logger.L().Error(fmt.Sprintf("failed to get containers for kind: %s, name: %s, namespace: %s", workload.GetKind(), workload.GetName(), workload.GetNamespace()), helpers.Error(err))
+				continue
+			}
 			for _, container := range containers {
 				if !slices.Contains(imagesToScan, container.Image) {
 					imagesToScan = append(imagesToScan, container.Image)

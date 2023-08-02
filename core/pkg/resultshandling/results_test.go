@@ -46,7 +46,7 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 		},
 	}
 
-	rh := NewResultsHandler(reporter, printers, uiPrinter, nil)
+	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
 	rh.HandleResults(context.TODO())
@@ -70,7 +70,7 @@ func TestResultsHandlerHandleResultsPrintsScoreToUI(t *testing.T) {
 		},
 	}
 
-	rh := NewResultsHandler(reporter, printers, uiPrinter, nil)
+	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
 	rh.HandleResults(context.TODO())

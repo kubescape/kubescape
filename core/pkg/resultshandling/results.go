@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -24,7 +23,7 @@ type ResultsHandler struct {
 	ImageScanData []cautils.ImageScanData
 }
 
-func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter, imageScanData *models.PresenterConfig) *ResultsHandler {
+func NewResultsHandler(reporterObj reporter.IReport, printerObjs []printer.IPrinter, uiPrinter printer.IPrinter) *ResultsHandler {
 	return &ResultsHandler{
 		ReporterObj:   reporterObj,
 		PrinterObjs:   printerObjs,

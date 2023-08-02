@@ -74,7 +74,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 
 			uiPrinter := core.GetUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
 
-			resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter, scanResults)
+			resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 
 			resultsHandler.ImageScanData = []cautils.ImageScanData{
 				{

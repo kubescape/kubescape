@@ -78,9 +78,12 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			var frameworks []string
 
-			if len(args) == 0 { // scan all frameworks
-				scanInfo.ScanAll = true
-				scanInfo.SetScanType(cautils.ScanTypeFramework)
+			if len(args) == 0 {
+				if scanInfo.IsSecurityView {
+					scanInfo.SetScanType(cautils.ScanTypeFramework)
+				} else { // scan all frameworks
+					scanInfo.ScanAll = true
+				}
 			} else {
 				// Read frameworks from input args
 				frameworks = strings.Split(args[0], ",")

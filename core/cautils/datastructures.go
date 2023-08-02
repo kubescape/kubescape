@@ -55,7 +55,6 @@ type OPASessionObj struct {
 	Policies              []reporthandling.Framework         // list of frameworks to scan
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	OmitRawResources      bool                               // omit raw resources from output
-	ScanType              ScanTypes                          // scan type
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 }
 
