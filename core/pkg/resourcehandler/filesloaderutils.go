@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 )
 
 // Clone git repository
@@ -33,10 +34,7 @@ func cloneGitRepo(path *string) (string, error) {
 	return clonedDir, nil
 }
 
-// build resources map
-func mapResources(workloads []workloadinterface.IMetadata) map[string][]workloadinterface.IMetadata {
-
-	allResources := map[string][]workloadinterface.IMetadata{}
+func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
 		if err != nil {
@@ -58,8 +56,6 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
 		}
 	}
-	return allResources
-
 }
 
 /* unused for now
@@ -85,3 +81,39 @@ func addCommitData(input string, workloadIDToSource map[string]reporthandling.So
 	}
 }
 */
+
+// findScanObjectResource finds the requested k8s object to be scanned in the resources map
+func findScanObjectResource(mappedResources map[string][]workloadinterface.IMetadata, resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
+	if resource == nil {
+		return nil, nil
+	}
+
+	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
+
+	wls := []workloadinterface.IWorkload{}
+	for _, resources := range mappedResources {
+		for _, r := range resources {
+			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
+				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
+					continue
+				}
+				if resource.GetApiVersion() != "" && resource.GetApiVersion() != r.GetApiVersion() {
+					continue
+				}
+
+				if k8sinterface.IsTypeWorkload(r.GetObject()) {
+					wl := workloadinterface.NewWorkloadObj(r.GetObject())
+					wls = append(wls, wl)
+				}
+			}
+		}
+	}
+
+	if len(wls) == 0 {
+		return nil, fmt.Errorf("k8s resource '%s' not found", resource.GetID())
+	} else if len(wls) > 1 {
+		return nil, fmt.Errorf("more than one k8s resource found for '%s'", resource.GetID())
+	}
+
+	return wls[0], nil
+}

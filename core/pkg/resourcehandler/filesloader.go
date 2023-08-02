@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 
@@ -20,36 +20,35 @@ import (
 
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
-	inputPatterns []string
+	singleResourceScan *objectsenvelopes.ScanObject
+	inputPatterns      []string
 }
 
-func NewFileResourceHandler(_ context.Context, inputPatterns []string) *FileResourceHandler {
+func NewFileResourceHandler(_ context.Context, inputPatterns []string, singleResourceScan *objectsenvelopes.ScanObject) *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
 	return &FileResourceHandler{
-		inputPatterns: inputPatterns,
+		inputPatterns:      inputPatterns,
+		singleResourceScan: singleResourceScan,
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ *identifiers.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
-
-	//
-	// build resources map
-	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	k8sResources := setK8sResourceMap(sessionObj.Policies)
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
-	ksResources := &cautils.KSResources{}
+	ksResources := cautils.KSResources{}
 
 	if len(fileHandler.inputPatterns) == 0 {
-		return nil, nil, nil, fmt.Errorf("missing input")
+		return nil, nil, nil, nil, fmt.Errorf("missing input")
 	}
 
 	logger.L().Info("Accessing local objects")
 	cautils.StartSpinner()
 
+	// load resources from all input paths
+	mappedResources := map[string][]workloadinterface.IMetadata{}
 	for path := range fileHandler.inputPatterns {
 		workloadIDToSource, workloads, err := getResourcesFromPath(ctx, fileHandler.inputPatterns[path])
 		if err != nil {
-			return nil, allResources, nil, err
+			return nil, allResources, nil, nil, err
 		}
 		if len(workloads) == 0 {
 			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", fileHandler.inputPatterns[path]))
@@ -60,26 +59,43 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		}
 
 		// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
-		mappedResources := mapResources(workloads)
-
-		// save only relevant resources
-		for i := range mappedResources {
-			if _, ok := (*k8sResources)[i]; ok {
-				ids := []string{}
-				for j := range mappedResources[i] {
-					ids = append(ids, mappedResources[i][j].GetID())
-					allResources[mappedResources[i][j].GetID()] = mappedResources[i][j]
-				}
-				(*k8sResources)[i] = append((*k8sResources)[i], ids...)
-			}
-		}
-
+		addWorkloadsToResourcesMap(mappedResources, workloads)
 	}
+
+	// locate input k8s object in the mapped resources - if not found or not a valid resource, return error
+	var err error
+	if sessionObj.SingleResourceScan, err = findScanObjectResource(mappedResources, fileHandler.singleResourceScan); err != nil {
+		return nil, nil, nil, nil, err
+	}
+
+	if sessionObj.SingleResourceScan != nil && k8sinterface.WorkloadHasParent(sessionObj.SingleResourceScan) {
+		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
+	}
+
+	// build a resources map, based on the policies
+	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
+	resourceToQuery, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan)
+	k8sResources := resourceToQuery.ToK8sResourceMap()
+
+	// save only relevant resources
+	for i := range mappedResources {
+		if _, ok := k8sResources[i]; ok {
+			ids := []string{}
+			for j := range mappedResources[i] {
+				ids = append(ids, mappedResources[i][j].GetID())
+				allResources[mappedResources[i][j].GetID()] = mappedResources[i][j]
+			}
+			k8sResources[i] = append(k8sResources[i], ids...)
+		}
+	}
+
+	// save input resource in resource maps
+	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan)
 
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")
 
-	return k8sResources, allResources, ksResources, nil
+	return k8sResources, allResources, ksResources, excludedRulesMap, nil
 }
 
 func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
@@ -110,7 +126,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 	}
 
 	// load resource from local file system
-	sourceToWorkloads := cautils.LoadResourcesFromFiles(ctx, path, repoRoot)
+	sourceToWorkloads, err := cautils.LoadResourcesFromFiles(ctx, path, repoRoot)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// update workloads and workloadIDToSource
 	var warnIssued bool

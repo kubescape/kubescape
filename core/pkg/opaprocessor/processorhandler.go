@@ -60,7 +60,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient, ScanInfo *cautils.ScanInfo) error {
 	scanningScope := cautils.GetScanningScope(ScanInfo)
-	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber, scanningScope)
+	opap.OPASessionObj.AllPolicies = ConvertFrameworksToPolicies(opap.Policies, cautils.BuildNumber, opap.ExcludedRules, scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
@@ -272,7 +272,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 	inputResources, err := reporthandling.RegoResourcesAggregator(
 		rule,
-		getAllSupportedObjects(opap.K8SResources, opap.ArmoResource, opap.AllResources, rule), // NOTE: this uses the initial snapshot of AllResources
+		getAllSupportedObjects(opap.K8SResources, opap.KubescapeResource, opap.AllResources, rule), // NOTE: this uses the initial snapshot of AllResources
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error getting aggregated k8sObjects: %w", err)

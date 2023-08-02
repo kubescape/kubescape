@@ -18,9 +18,10 @@ type K8SResources map[string][]string
 type KSResources map[string][]string
 
 type OPASessionObj struct {
-	K8SResources          *K8SResources                                 // input k8s objects
-	ArmoResource          *KSResources                                  // input ARMO objects
+	K8SResources          K8SResources                                  // input k8s objects
+	KubescapeResource     KSResources                                   // input Kubescape objects
 	AllPolicies           *Policies                                     // list of all frameworks
+	ExcludedRules         map[string]bool                               // rules to exclude map[rule name>]X
 	AllResources          map[string]workloadinterface.IMetadata        // all scanned resources, map[<resource ID>]<resource>
 	ResourcesResult       map[string]resourcesresults.Result            // resources scan results, map[<resource ID>]<resource result>
 	ResourceSource        map[string]reporthandling.Source              // resources sources, map[<resource ID>]<resource result>
@@ -36,9 +37,10 @@ type OPASessionObj struct {
 	Policies              []reporthandling.Framework         // list of frameworks to scan
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	OmitRawResources      bool                               // omit raw resources from output
+	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 }
 
-func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources *K8SResources, scanInfo *ScanInfo) *OPASessionObj {
+func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
 	return &OPASessionObj{
 		Report:                &reporthandlingv2.PostureReport{},
 		Policies:              frameworks,
