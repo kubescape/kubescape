@@ -22,7 +22,7 @@ func TestIsControlFitToScanScope(t *testing.T) {
 				},
 			},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeFile,
 					},
@@ -37,7 +37,7 @@ func TestIsControlFitToScanScope(t *testing.T) {
 				},
 			},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCluster,
@@ -50,7 +50,7 @@ func TestIsControlFitToScanScope(t *testing.T) {
 		{
 			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCluster,
@@ -66,7 +66,7 @@ func TestIsControlFitToScanScope(t *testing.T) {
 				},
 			},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCloudGKE,
@@ -78,7 +78,7 @@ func TestIsControlFitToScanScope(t *testing.T) {
 		{
 			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCloudEKS,
@@ -90,7 +90,7 @@ func TestIsControlFitToScanScope(t *testing.T) {
 		{
 			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCloud,
 					},
