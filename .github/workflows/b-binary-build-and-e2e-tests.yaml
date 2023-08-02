@@ -1,5 +1,39 @@
 name: b-binary-build-and-e2e-tests
+
 on:
+  workflow_dispatch:
+    inputs:
+      COMPONENT_NAME:
+        required: false
+        type: string
+        default: "kubescape"
+      RELEASE:
+        required: false
+        type: string
+        default: ""
+      CLIENT:
+        required: false
+        type: string
+        default: "test"
+      GO_VERSION:
+        required: false
+        type: string
+        default: "1.20"
+      GO111MODULE:
+        required: false
+        type: string
+        default: ""
+      CGO_ENABLED:
+        type: number
+        default: 1
+        required: false
+      BINARY_TESTS:
+        type: string
+        required: false
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score" ]'
+      CHECKOUT_REPO:
+        required: false
+        type: string
   workflow_call:
     inputs:
       COMPONENT_NAME:
@@ -26,8 +60,6 @@ on:
       CHECKOUT_REPO:
         required: false
         type: string
-
-
 
 jobs:
   wf-preparation:
@@ -74,7 +106,6 @@ jobs:
 
       - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
         with:
-          repository: ${{inputs.CHECKOUT_REPO}}
           fetch-depth: 0
           submodules: recursive
 
