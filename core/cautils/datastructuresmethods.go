@@ -19,8 +19,10 @@ func NewPolicies() *Policies {
 
 func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, scanningScope reporthandling.ScanningScopeType) {
 	for i := range frameworks {
-		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
+		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 && isFrameworkFitToScanScope(frameworks[i], scanningScope) {
 			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
+		} else {
+			continue
 		}
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}
@@ -135,11 +137,30 @@ func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeTy
 
 func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches reporthandling.ScanningScopeType) bool {
 	// for backward compatibility - case: kubescape with scope(new one) and regolibrary without scope(old one)
+	if control.ScanningScope == nil {
+		return true
+	}
 	if len(control.ScanningScope.Matches) == 0 {
 		return true
 	}
 	for i := range control.ScanningScope.Matches {
 		if isScanningScopeMatchToControlScope(scanScopeMatches, control.ScanningScope.Matches[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFrameworkFitToScanScope(framework reporthandling.Framework, scanScopeMatches reporthandling.ScanningScopeType) bool {
+	// for backward compatibility - case: kubescape with scope(new one) and regolibrary without scope(old one)
+	if framework.ScanningScope == nil {
+		return true
+	}
+	if len(framework.ScanningScope.Matches) == 0 {
+		return true
+	}
+	for i := range framework.ScanningScope.Matches {
+		if isScanningScopeMatchToControlScope(scanScopeMatches, framework.ScanningScope.Matches[i]) {
 			return true
 		}
 	}
