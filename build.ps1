@@ -33,21 +33,22 @@ function Install {
         Start-Process -Filepath "$PSScriptRoot\temp_install\msys2-x86_64-20220603.exe" -ArgumentList @("install", "--root", "C:\MSYS64", "--confirm-command") -Wait
         Write-Host "MSYS2 install complete" -ForegroundColor Green
 
-        # Set PATH
-        $env:Path = "C:\MSYS64\mingw64\bin;C:\MSYS64\usr\bin;" + $env:Path
-
-        # Install MSYS packages
-        Write-Host "Installing MSYS2 packages..." -ForegroundColor Cyan
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "make") -Wait
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-cmake") -Wait
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-gcc") -Wait
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-pkg-config") -Wait
-        Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "msys2-w32api-runtime") -Wait
-        Write-Host "MSYS2 packages install complete" -ForegroundColor Green
-        
         # Remove temp directory
         Remove-Item "$PSScriptRoot\temp_install" -Recurse
     }
+
+    # Set PATH
+    $env:Path = "C:\MSYS64\mingw64\bin;C:\MSYS64\usr\bin;" + $env:Path
+
+    # Install MSYS packages
+    Write-Host "Installing MSYS2 packages..." -ForegroundColor Cyan
+    Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "make") -Wait
+    Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-cmake") -Wait
+    Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-gcc") -Wait
+    Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "mingw-w64-x86_64-pkg-config") -Wait
+    Start-Process -Filepath "pacman" -ArgumentList @("-S", "--needed", "--noconfirm", "msys2-w32api-runtime") -Wait
+    Write-Host "MSYS2 packages install complete" -ForegroundColor Green
+
     Write-Host "Install complete" -ForegroundColor Green
 }
 
