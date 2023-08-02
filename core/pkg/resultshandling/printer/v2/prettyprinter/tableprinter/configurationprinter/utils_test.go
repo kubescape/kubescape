@@ -22,7 +22,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName1": {
 					ControlID: "ctrlID1",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
 					},
@@ -30,7 +30,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName2": {
 					ControlID: "ctrlID2",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
 					},
@@ -38,7 +38,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName3": {
 					ControlID: "ctrlID3",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category2",
 						ID:   "catID2",
 					},
@@ -77,7 +77,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName1": {
 					ControlID: "ctrlID1",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
 					},
@@ -85,7 +85,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName2": {
 					ControlID: "ctrlID2",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
 					},
@@ -93,7 +93,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName3": {
 					ControlID: "ctrlID3",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category2",
 						ID:   "catID2",
 					},
@@ -108,7 +108,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName1": {
 					ControlID: "ctrlID1",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
 					},
@@ -116,7 +116,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName2": {
 					ControlID: "ctrlID2",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
 					},
@@ -124,7 +124,7 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName3": {
 					ControlID: "ctrlID3",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category2",
 						ID:   "catID2",
 					},
@@ -150,10 +150,10 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName1": {
 					ControlID: "ctrlID1",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
-						SubCategory: reporthandling.SubCategory{
+						SubCategory: &reporthandling.SubCategory{
 							Name: "subCategory1",
 							ID:   "subCatID1",
 						},
@@ -162,10 +162,10 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName2": {
 					ControlID: "ctrlID2",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
-						SubCategory: reporthandling.SubCategory{
+						SubCategory: &reporthandling.SubCategory{
 							Name: "subCategory1",
 							ID:   "subCatID1",
 						},
@@ -174,10 +174,10 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName3": {
 					ControlID: "ctrlID3",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category2",
 						ID:   "catID2",
-						SubCategory: reporthandling.SubCategory{
+						SubCategory: &reporthandling.SubCategory{
 							Name: "subCategory2",
 							ID:   "subCatID2",
 						},
@@ -217,10 +217,10 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName1": {
 					ControlID: "ctrlID1",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
-						SubCategory: reporthandling.SubCategory{
+						SubCategory: &reporthandling.SubCategory{
 							Name: "subCategory1",
 							ID:   "subCatID1",
 						},
@@ -229,10 +229,10 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName2": {
 					ControlID: "ctrlID2",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category1",
 						ID:   "catID1",
-						SubCategory: reporthandling.SubCategory{
+						SubCategory: &reporthandling.SubCategory{
 							Name: "subCategory1",
 							ID:   "subCatID1",
 						},
@@ -241,10 +241,10 @@ func TestMapCategoryToSummary(t *testing.T) {
 				"controlName3": {
 					ControlID: "ctrlID3",
 					Status:    apis.StatusFailed,
-					Category: reporthandling.Category{
+					Category: &reporthandling.Category{
 						Name: "category2",
 						ID:   "catID2",
-						SubCategory: reporthandling.SubCategory{
+						SubCategory: &reporthandling.SubCategory{
 							Name: "subCategory2",
 							ID:   "subCatID2",
 						},
@@ -282,6 +282,34 @@ func TestMapCategoryToSummary(t *testing.T) {
 					},
 				},
 			},
+		},
+		{
+			name: "nil category",
+			ctrlSummaries: map[string]reportsummary.ControlSummary{
+				"controlName1": {
+					ControlID: "ctrlID1",
+					Status:    apis.StatusFailed,
+				}},
+			mapDisplayCtrlIDToCategory: map[string]string{
+				"ctrlID1": "catID1",
+			},
+			expected: map[string]CategoryControls{},
+		},
+		{
+			name: "nil sub category",
+			ctrlSummaries: map[string]reportsummary.ControlSummary{
+				"controlName1": {
+					ControlID: "ctrlID1",
+					Status:    apis.StatusFailed,
+					Category: &reporthandling.Category{
+						Name: "category1",
+						ID:   "catID1",
+					},
+				}},
+			mapDisplayCtrlIDToCategory: map[string]string{
+				"ctrlID1": "subCatID1",
+			},
+			expected: map[string]CategoryControls{},
 		},
 	}
 

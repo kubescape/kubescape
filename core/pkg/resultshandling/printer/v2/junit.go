@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -111,9 +110,6 @@ func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) {
 
 func (jp *JunitPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
-}
-
-func (jp *JunitPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
 func (jp *JunitPrinter) PrintNextSteps() {

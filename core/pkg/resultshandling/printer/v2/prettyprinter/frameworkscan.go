@@ -26,12 +26,9 @@ func NewSummaryPrinter(writer *os.File, verboseMode bool) *SummaryPrinter {
 
 var _ MainPrinter = &RepoPrinter{}
 
-func (sp *SummaryPrinter) PrintImageScanning(*imageprinter.ImageScanSummary) {
-}
+func (sp *SummaryPrinter) PrintImageScanning(*imageprinter.ImageScanSummary) {}
 
-func (sp *SummaryPrinter) PrintNextSteps() {
-
-}
+func (sp *SummaryPrinter) PrintNextSteps() {}
 
 func (sp *SummaryPrinter) getVerboseMode() bool {
 	return sp.verboseMode

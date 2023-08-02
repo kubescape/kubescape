@@ -53,11 +53,11 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	} else if imageScanData != nil {
 		err = jp.PrintImageScan(ctx, imageScanData[0].PresenterConfig)
 	} else {
-		err = fmt.Errorf("failed to print results, no data provided")
+		err = fmt.Errorf("failed to write results, no data provided")
 	}
 
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to print results", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
 		return
 	}
 

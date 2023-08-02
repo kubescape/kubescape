@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"k8s.io/utils/strings/slices"
@@ -53,10 +54,10 @@ func getWorkloadPrefixForCmd(namespace, kind, name string) string {
 
 func getTopWorkloadsTitle(topWLsLen int) string {
 	if topWLsLen > 1 {
-		return "Your most risky workloads:\n"
+		return "Your highest stake workloads:\n"
 	}
 	if topWLsLen > 0 {
-		return "Your most risky workload:\n"
+		return "Your highest stake workload:\n"
 	}
 	return ""
 }
@@ -82,15 +83,18 @@ func getSeverityToSummaryMap(summary imageprinter.ImageScanSummary, verboseMode 
 	return tempMap
 }
 
+// addEmptySeverities adds empty severities to the map
 func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySummary, verboseMode bool) {
 	if verboseMode {
+		// add all severities
 		for _, severity := range cveSeverities {
 			if _, ok := mapSeverityTSummary[severity]; !ok {
 				mapSeverityTSummary[severity] = &imageprinter.SeveritySummary{}
 			}
 		}
 	} else {
-		for _, severity := range []string{"Critical", "High", "Other"} {
+		// add only Critical, High and Other
+		for _, severity := range []string{apis.SeverityCriticalString, apis.SeverityHighString, "Other"} {
 			if _, ok := mapSeverityTSummary[severity]; !ok {
 				mapSeverityTSummary[severity] = &imageprinter.SeveritySummary{}
 			}
@@ -131,8 +135,8 @@ func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []str
 	return ss
 }
 
-func sortCVEsBySeverity(mapSeverityToCVEsNumber map[string]int) []string {
-	// sort topPkg.MapSeverityToCVEsNumber  by severity
+// getSortedCVEsBySeverity returns a slice of CVEs sorted by severity
+func getSortedCVEsBySeverity(mapSeverityToCVEsNumber map[string]int) []string {
 	ss := make([]string, 0, len(mapSeverityToCVEsNumber))
 	for k := range mapSeverityToCVEsNumber {
 		ss = append(ss, k)
@@ -159,7 +163,7 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 		topPkg := summary.PackageScores[sortedPkgScores[i]]
 		output := fmt.Sprintf("  * %s (%s) -", topPkg.Name, topPkg.Version)
 
-		sortedCVEs := sortCVEsBySeverity(topPkg.MapSeverityToCVEsNumber)
+		sortedCVEs := getSortedCVEsBySeverity(topPkg.MapSeverityToCVEsNumber)
 
 		for j := range sortedCVEs {
 			output += fmt.Sprintf(" %d %s,", topPkg.MapSeverityToCVEsNumber[sortedCVEs[j]], sortedCVEs[j])

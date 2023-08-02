@@ -26,7 +26,8 @@ type SpyPrinter struct {
 }
 
 func (sp *SpyPrinter) SetWriter(_ context.Context, outputFile string) {}
-func (sp *SpyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (sp *SpyPrinter) PrintNextSteps()                                {}
+func (sp *SpyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) {
 	sp.ActionPrintCalls += 1
 }
 func (sp *SpyPrinter) Score(score float32) {
@@ -45,7 +46,7 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 		},
 	}
 
-	rh := NewResultsHandler(reporter, printers, uiPrinter)
+	rh := NewResultsHandler(reporter, printers, uiPrinter, nil)
 	rh.SetData(fakeScanData)
 
 	rh.HandleResults(context.TODO())
@@ -69,7 +70,7 @@ func TestResultsHandlerHandleResultsPrintsScoreToUI(t *testing.T) {
 		},
 	}
 
-	rh := NewResultsHandler(reporter, printers, uiPrinter)
+	rh := NewResultsHandler(reporter, printers, uiPrinter, nil)
 	rh.SetData(fakeScanData)
 
 	rh.HandleResults(context.TODO())

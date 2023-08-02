@@ -351,7 +351,3 @@ func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
 func (fileHandler *FileResourceHandler) GetClusterAPIServerInfo(_ context.Context) *version.Info {
 	return nil
 }
-
-func (fileHandler *FileResourceHandler) GetWorkloadParentKind(resource workloadinterface.IWorkload) string {
-	return ""
-}

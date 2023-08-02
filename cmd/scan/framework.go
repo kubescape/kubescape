@@ -92,6 +92,8 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
 						scanInfo.SetScanType(cautils.ScanTypeRepo)
+						scanInfo.UseFrom = []string{"/Users/danielgrunberger/armo/merge/release/clusterscan.json", "/Users/danielgrunberger/armo/merge/release/nsa.json",
+							"/Users/danielgrunberger/armo/merge/release/mitre.json"}
 						scanInfo.InputPatterns = args[1:]
 						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 					} else { // store stdin to file - do NOT move to separate function !!

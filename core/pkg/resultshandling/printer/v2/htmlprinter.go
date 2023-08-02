@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -50,9 +49,6 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 		outputFile = outputFile + htmlOutputExt
 	}
 	hp.writer = printer.GetWriter(ctx, outputFile)
-}
-
-func (hp *HtmlPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {

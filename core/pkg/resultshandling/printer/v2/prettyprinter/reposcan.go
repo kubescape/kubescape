@@ -58,11 +58,11 @@ func (rp *RepoPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDe
 	cautils.InfoTextDisplay(rp.writer, getTopWorkloadsTitle(len(summaryDetails.TopWorkloadsByScore)))
 
 	for i, wl := range summaryDetails.TopWorkloadsByScore {
-		ns := wl.Workload.GetNamespace()
-		name := wl.Workload.GetName()
-		kind := wl.Workload.GetKind()
+		ns := wl.GetNamespace()
+		name := wl.GetName()
+		kind := wl.GetKind()
 		cmdPrefix := getWorkloadPrefixForCmd(ns, kind, name)
-		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s - '%s'\n", i+1, cmdPrefix, getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, wl.ResourceSource))))
+		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s - '%s'\n", i+1, cmdPrefix, getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
 	}
 
 	cautils.InfoTextDisplay(rp.writer, "\n")

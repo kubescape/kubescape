@@ -84,7 +84,3 @@ func (cp *ClusterPrinter) generateCountingCategoryRow(controlSummary reportsumma
 func (cp *ClusterPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary) string {
 	return fmt.Sprintf("%s %s -v", scanControlPrefix, controlSummary.GetID())
 }
-
-func (cp *ClusterPrinter) generateNextSteps(controlSummary reportsummary.IControlSummary) string {
-	return fmt.Sprintf("$ kubescape scan control %s", controlSummary.GetID())
-}

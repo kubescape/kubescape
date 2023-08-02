@@ -27,6 +27,10 @@ func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapD
 			continue
 		}
 
+		if controlSummaries[i].GetCategory() == nil {
+			continue
+		}
+
 		// the category on the map can be either category or subcategory, so we need to check both
 		if controlSummaries[i].GetCategory().ID == category {
 			if _, ok := mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID]; !ok {
@@ -35,6 +39,10 @@ func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapD
 
 			}
 			mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID] = append(mapCategoriesToCtrlSummary[controlSummaries[i].GetCategory().ID], controlSummaries[i])
+			continue
+		}
+
+		if controlSummaries[i].GetCategory().SubCategory == nil {
 			continue
 		}
 

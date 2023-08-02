@@ -52,6 +52,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 			if len(args) == 0 {
 				scanInfo.SetScanType(cautils.ScanTypeCluster)
+				scanInfo.UseFrom = []string{"/Users/danielgrunberger/armo/merge/release/clusterscan.json", "/Users/danielgrunberger/armo/merge/release/nsa.json",
+					"/Users/danielgrunberger/armo/merge/release/mitre.json"}
 				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{strings.Join(getter.NativeFrameworks, ",")})
 			}
 			return nil

@@ -11,7 +11,6 @@ import (
 	apis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
-	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
@@ -100,10 +99,12 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 		if i >= len(topWorkloadsSorted) {
 			break
 		}
-		wlObj := reportsummary.TopWorkload{
-			Workload:       sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
-			ResourceSource: sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID],
+		source := sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID]
+		wlObj := &reporthandling.Resource{
+			IMetadata: sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
+			Source:    &source,
 		}
+
 		sessionObj.Report.SummaryDetails.TopWorkloadsByScore = append(sessionObj.Report.SummaryDetails.TopWorkloadsByScore, wlObj)
 		count++
 	}

@@ -81,7 +81,7 @@ func Test_getUIPrinter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			logger.L().SetLevel(tt.args.loggerLevel.String())
-			got := getUIPrinter(tt.args.ctx, tt.args.verboseMode, tt.args.formatVersion, tt.args.printAttack, tt.args.viewType)
+			got := GetUIPrinter(tt.args.ctx, tt.args.verboseMode, tt.args.formatVersion, tt.args.printAttack, tt.args.viewType, "", []string{})
 
 			assert.Equal(t, tt.want.structType, reflect.TypeOf(got).String())
 

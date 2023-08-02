@@ -46,6 +46,86 @@ func TestInitCategoryTableData(t *testing.T) {
 	}
 }
 
+func TestGetCategoryStatusTypeHeaders(t *testing.T) {
+	headers := getCategoryStatusTypeHeaders()
+
+	if len(headers) != 3 {
+		t.Errorf("Expected 3 headers, got %d", len(headers))
+	}
+
+	if headers[0] != controlNameHeader {
+		t.Errorf("Expected %s, got %s", controlNameHeader, headers[0])
+	}
+
+	if headers[1] != statusHeader {
+		t.Errorf("Expected %s, got %s", statusHeader, headers[1])
+	}
+
+	if headers[2] != docsHeader {
+		t.Errorf("Expected %s, got %s", docsHeader, headers[2])
+	}
+}
+
+func TestGetCategoryCountingTypeHeaders(t *testing.T) {
+	headers := getCategoryCountingTypeHeaders()
+
+	if len(headers) != 3 {
+		t.Errorf("Expected 3 headers, got %d", len(headers))
+	}
+
+	if headers[0] != controlNameHeader {
+		t.Errorf("Expected %s, got %s", controlNameHeader, headers[0])
+	}
+
+	if headers[1] != resourcesHeader {
+		t.Errorf("Expected %s, got %s", resourcesHeader, headers[1])
+	}
+
+	if headers[2] != runHeader {
+		t.Errorf("Expected %s, got %s", runHeader, headers[2])
+	}
+}
+
+func TestGetStatusTypeAlignments(t *testing.T) {
+	alignments := getStatusTypeAlignments()
+
+	if len(alignments) != 3 {
+		t.Errorf("Expected 3 alignments, got %d", len(alignments))
+	}
+
+	if alignments[0] != tablewriter.ALIGN_LEFT {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_LEFT, alignments[0])
+	}
+
+	if alignments[1] != tablewriter.ALIGN_CENTER {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_CENTER, alignments[1])
+	}
+
+	if alignments[2] != tablewriter.ALIGN_CENTER {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_CENTER, alignments[2])
+	}
+}
+
+func TestGetCountingTypeAlignments(t *testing.T) {
+	alignments := getCountingTypeAlignments()
+
+	if len(alignments) != 3 {
+		t.Errorf("Expected 3 alignments, got %d", len(alignments))
+	}
+
+	if alignments[0] != tablewriter.ALIGN_LEFT {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_LEFT, alignments[0])
+	}
+
+	if alignments[1] != tablewriter.ALIGN_CENTER {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_CENTER, alignments[1])
+	}
+
+	if alignments[2] != tablewriter.ALIGN_LEFT {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_LEFT, alignments[2])
+	}
+}
+
 func TestGenerateCategoryStatusRow(t *testing.T) {
 	tests := []struct {
 		name            string

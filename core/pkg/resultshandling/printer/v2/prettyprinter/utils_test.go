@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func Test_filterComplianceFrameworks(t *testing.T) {
+func TestFilterComplianceFrameworks(t *testing.T) {
 	tests := []struct {
 		name                   string
 		summaryDetails         *reportsummary.SummaryDetails
@@ -51,7 +51,7 @@ func Test_filterComplianceFrameworks(t *testing.T) {
 	}
 }
 
-func Test_getWorkloadPrefixForCmd(t *testing.T) {
+func TestGetWorkloadPrefixForCmd(t *testing.T) {
 	tests := []struct {
 		name      string
 		namespace string
@@ -83,21 +83,21 @@ func Test_getWorkloadPrefixForCmd(t *testing.T) {
 	}
 }
 
-func Test_getTopWorkloadsTitle(t *testing.T) {
+func TestGetTopWorkloadsTitle(t *testing.T) {
 	title := getTopWorkloadsTitle(0)
 	assert.Equal(t, "", title)
 
 	title = getTopWorkloadsTitle(1)
-	assert.Equal(t, "Your most risky workload:\n", title)
+	assert.Equal(t, "Your highest stake workload:\n", title)
 
 	title = getTopWorkloadsTitle(2)
-	assert.Equal(t, "Your most risky workloads:\n", title)
+	assert.Equal(t, "Your highest stake workloads:\n", title)
 
 	title = getTopWorkloadsTitle(10)
-	assert.Equal(t, "Your most risky workloads:\n", title)
+	assert.Equal(t, "Your highest stake workloads:\n", title)
 }
 
-func Test_getSeverityToSummaryMap(t *testing.T) {
+func TestGetSeverityToSummaryMap(t *testing.T) {
 	tests := []struct {
 		name           string
 		summaryDetails imageprinter.ImageScanSummary
@@ -199,7 +199,7 @@ func Test_getSeverityToSummaryMap(t *testing.T) {
 	}
 }
 
-func Test_filterCVEsBySeverities(t *testing.T) {
+func TestFilterCVEsBySeverities(t *testing.T) {
 	test := []struct {
 		name         string
 		cves         []imageprinter.CVE
@@ -344,6 +344,192 @@ func TestGetSortPackageScores(t *testing.T) {
 			for i := range sortedNames {
 				if sortedNames[i] != tc.expectedResult[i] {
 					t.Errorf("Expected: %v, Got: %v", tc.expectedResult, sortedNames)
+				}
+			}
+		})
+	}
+}
+
+func TestAddEmptySeverities(t *testing.T) {
+	tests := []struct {
+		name           string
+		summaryDetails map[string]*imageprinter.SeveritySummary
+		expectedResult map[string]*imageprinter.SeveritySummary
+		verboseMode    bool
+	}{
+		{
+			name:        "Non-empty input",
+			verboseMode: true,
+			summaryDetails: map[string]*imageprinter.SeveritySummary{
+				"High": {
+					NumberOfCVEs:        10,
+					NumberOfFixableCVEs: 2,
+				},
+				"Low": {
+					NumberOfCVEs:        5,
+					NumberOfFixableCVEs: 1,
+				},
+			},
+			expectedResult: map[string]*imageprinter.SeveritySummary{
+				"Critical": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"High": {
+					NumberOfCVEs:        10,
+					NumberOfFixableCVEs: 2,
+				},
+				"Medium": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Low": {
+					NumberOfCVEs:        5,
+					NumberOfFixableCVEs: 1,
+				},
+				"Negligible": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Unknown": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+			},
+		},
+		{
+			name:           "Empty input",
+			verboseMode:    true,
+			summaryDetails: map[string]*imageprinter.SeveritySummary{},
+			expectedResult: map[string]*imageprinter.SeveritySummary{
+				"Critical": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"High": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Medium": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Low": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Negligible": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Unknown": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+			},
+		},
+		{
+			name:        "Non-empty input, non-verbose mode",
+			verboseMode: false,
+			summaryDetails: map[string]*imageprinter.SeveritySummary{
+				"Critical": {
+					NumberOfCVEs:        1,
+					NumberOfFixableCVEs: 2,
+				},
+			},
+			expectedResult: map[string]*imageprinter.SeveritySummary{
+				"Critical": {
+					NumberOfCVEs:        1,
+					NumberOfFixableCVEs: 2,
+				},
+				"High": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Medium": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Other": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+			},
+		},
+		{
+			name:           "Empty input, non-verbose mode",
+			verboseMode:    false,
+			summaryDetails: map[string]*imageprinter.SeveritySummary{},
+			expectedResult: map[string]*imageprinter.SeveritySummary{
+				"Critical": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"High": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Medium": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+				"Other": {
+					NumberOfCVEs:        0,
+					NumberOfFixableCVEs: 0,
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			addEmptySeverities(tc.summaryDetails, tc.verboseMode)
+
+			for k, v := range tc.summaryDetails {
+				if v.NumberOfCVEs != tc.expectedResult[k].NumberOfCVEs || v.NumberOfFixableCVEs != tc.expectedResult[k].NumberOfFixableCVEs {
+					t.Errorf("in test: %v, error for key %v, want: %v, have :%v", tc.name, k, tc.expectedResult[k], v)
+				}
+			}
+		})
+	}
+}
+
+func TestGetSortedCVEsBySeverity(t *testing.T) {
+	tests := []struct {
+		name           string
+		severityToCVEs map[string]int
+		expectedResult []string
+	}{
+		{
+			name: "Unsorted input",
+			severityToCVEs: map[string]int{
+				"Critical": 2,
+				"Medium":   2,
+				"High":     2,
+				"Unknown":  2,
+				"Low":      2,
+			},
+			expectedResult: []string{"Critical", "High", "Medium", "Low", "Unknown"},
+		},
+		{
+			name: "Sorted input",
+			severityToCVEs: map[string]int{
+				"Critical": 1,
+				"High":     2,
+				"Medium":   3,
+				"Low":      4,
+			},
+			expectedResult: []string{"Critical", "High", "Medium", "Low"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sortedCVEs := getSortedCVEsBySeverity(tc.severityToCVEs)
+
+			for i := range sortedCVEs {
+				if sortedCVEs[i] != tc.expectedResult[i] {
+					t.Errorf("Expected: %v, Got: %v", tc.expectedResult, sortedCVEs)
 				}
 			}
 		})

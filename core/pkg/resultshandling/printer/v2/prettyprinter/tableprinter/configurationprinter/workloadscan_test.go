@@ -33,7 +33,8 @@ func TestWorkloadScan_InitCategoryTableData(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actualHeader, actualAlign := initCategoryTableData(tt.categoryType)
+			workloadPrinter := NewWorkloadPrinter()
+			actualHeader, actualAlign := workloadPrinter.initCategoryTableData(tt.categoryType)
 			assert.True(t, reflect.DeepEqual(actualHeader, tt.expectedHeader))
 			assert.True(t, reflect.DeepEqual(actualAlign, tt.expectedAlign))
 		})

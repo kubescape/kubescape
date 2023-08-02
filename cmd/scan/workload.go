@@ -75,6 +75,10 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			scanInfo.SetPolicyIdentifiers([]string{"workloadscan"}, v1.KindFramework)
 
+			if scanInfo.FilePath != "" {
+				scanInfo.InputPatterns = []string{scanInfo.FilePath}
+			}
+
 			// todo: add api version if provided
 			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)

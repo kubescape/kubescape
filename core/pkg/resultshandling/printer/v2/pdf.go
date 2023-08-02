@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -84,9 +83,6 @@ func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.Summ
 		}
 	}
 
-}
-
-func (pp *PdfPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
 func (pp *PdfPrinter) PrintNextSteps() {

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
@@ -41,9 +40,6 @@ func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string
 
 func (jsonPrinter *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
-}
-
-func (jsonPrinter *JsonPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
 func (jsonPrinter *JsonPrinter) PrintNextSteps() {
