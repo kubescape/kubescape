@@ -47,7 +47,7 @@ def main():
     client_var = "github.com/kubescape/kubescape/v2/core/cautils.Client"
     client_name = os.getenv("CLIENT")
 
-    # Create build directory
+    # Create the build directory
     build_dir = get_build_dir()
 
     ks_file = os.path.join(build_dir, package_name)
