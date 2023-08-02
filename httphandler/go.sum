@@ -1397,12 +1397,12 @@ github.com/kubescape/go-logger v0.0.15 h1:iCzVFlXXF7KYLd1cZumGOtuAZbltV8QiZI+kTe
 github.com/kubescape/go-logger v0.0.15/go.mod h1:Al+yTE+vemECb/Myn2G9+2o2uFmMtphbkQmxf4OEHxE=
 github.com/kubescape/k8s-interface v0.0.135 h1:DrhaJO+RbRRj3ai3Oy8rchs/0XJqvFSv7798ckaCObc=
 github.com/kubescape/k8s-interface v0.0.135/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
-github.com/kubescape/opa-utils v0.0.260 h1:VwI9vTkPYaVKAfvRATUAX+DX13c0Y+BRVEMNzw4WUOU=
-github.com/kubescape/opa-utils v0.0.260/go.mod h1:0Be6E+vHqjavl/JneqgyC+oXOdfs6s+V6YnFvBkIAsA=
+github.com/kubescape/opa-utils v0.0.261 h1:NEASuRRHfbQRf/9wAEdm+7VV+UDg5tr+VgIfsedbdas=
+github.com/kubescape/opa-utils v0.0.261/go.mod h1:0Be6E+vHqjavl/JneqgyC+oXOdfs6s+V6YnFvBkIAsA=
 github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnGnhMhJw=
 github.com/kubescape/rbac-utils v0.0.20/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
-github.com/kubescape/regolibrary v1.0.289-rc.0 h1:lOLVe2A9lmKA6ACMksIVEJc6T4HCr+nNbGsJQ86qyLU=
-github.com/kubescape/regolibrary v1.0.289-rc.0/go.mod h1:2j47Snl7jbbR0GenKlnbIQ+dk1J3XpX3x5T/SWY3OJ0=
+github.com/kubescape/regolibrary v1.0.291-rc.0 h1:DztPS3NSKfiltO1wZvxRjuu5c99c6+dEgfTs6DcsVa8=
+github.com/kubescape/regolibrary v1.0.291-rc.0/go.mod h1:2j47Snl7jbbR0GenKlnbIQ+dk1J3XpX3x5T/SWY3OJ0=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/leodido/go-urn v1.2.0/go.mod h1:+8+nEpDfqqsY+g338gtMEUOtuK+4dEMhiQEgxpxOKII=
