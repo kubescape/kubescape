@@ -1,7 +1,7 @@
 package resourcehandler
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 )
@@ -20,7 +20,7 @@ func (qr *QueryableResource) String() string {
 	if qr.FieldSelectors == "" {
 		return qr.GroupVersionResourceTriplet
 	}
-	return fmt.Sprintf("%s/%s", qr.GroupVersionResourceTriplet, qr.FieldSelectors)
+	return strings.Join([]string{qr.GroupVersionResourceTriplet, qr.FieldSelectors}, "/")
 }
 
 func (qr *QueryableResource) Copy() QueryableResource {

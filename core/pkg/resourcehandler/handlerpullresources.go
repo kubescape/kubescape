@@ -29,17 +29,17 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, progressListener, scanInfo)
+	resourcesMap, allResources, externalResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, progressListener, scanInfo)
 	if err != nil {
 		return err
 	}
 
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
-	opaSessionObj.KubescapeResource = ksResources
+	opaSessionObj.ExternalResources = externalResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
 
-	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.KubescapeResource == nil || len(opaSessionObj.KubescapeResource) == 0) {
+	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.ExternalResources == nil || len(opaSessionObj.ExternalResources) == 0) {
 		return fmt.Errorf("empty list of resources")
 	}
 

@@ -51,10 +51,10 @@ var (
 	}
 )
 
-func isEmptyImgVulns(ksResourcesMap cautils.KSResources) bool {
-	imgVulnResources := cautils.MapImageVulnResources(ksResourcesMap)
+func isEmptyImgVulns(externalResourcesMap cautils.ExternalResources) bool {
+	imgVulnResources := cautils.MapImageVulnResources(externalResourcesMap)
 	for _, resource := range imgVulnResources {
-		if val, ok := ksResourcesMap[resource]; ok {
+		if val, ok := externalResourcesMap[resource]; ok {
 			if len(val) > 0 {
 				return false
 			}
@@ -63,20 +63,20 @@ func isEmptyImgVulns(ksResourcesMap cautils.KSResources) bool {
 	return true
 }
 
-func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) cautils.KSResources {
-	ksResources := make(cautils.KSResources)
+func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) cautils.ExternalResources {
+	externalResources := make(cautils.ExternalResources)
 	complexMap := setComplexKSResourceMap(frameworks, resourceToControl)
 	for group := range complexMap {
 		for version := range complexMap[group] {
 			for resource := range complexMap[group][version] {
 				groupResources := k8sinterface.ResourceGroupToString(group, version, resource)
 				for _, groupResource := range groupResources {
-					ksResources[groupResource] = nil
+					externalResources[groupResource] = nil
 				}
 			}
 		}
 	}
-	return ksResources
+	return externalResources
 }
 
 // [group][versionn][resource]

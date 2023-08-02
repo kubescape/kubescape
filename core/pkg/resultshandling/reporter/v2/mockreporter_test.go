@@ -147,7 +147,7 @@ type (
 	// It may be unmarshaled from a JSON fixture.
 	mockableOPASessionObj struct {
 		K8SResources          cautils.K8SResources
-		KubescapeResource     cautils.KSResources
+		ExternalResources     cautils.ExternalResources
 		AllPolicies           *cautils.Policies
 		AllResources          map[string]*workloadinterface.Workload
 		ResourcesResult       map[string]resourcesresults.Result
@@ -194,7 +194,7 @@ func mockOPASessionObj(t testing.TB) *cautils.OPASessionObj {
 
 	o := cautils.OPASessionObj{
 		K8SResources:      v.K8SResources,
-		KubescapeResource: v.KubescapeResource,
+		ExternalResources: v.ExternalResources,
 		AllPolicies:       v.AllPolicies,
 		//AllResources          map[string]*workloadinterface.Workload        // all scanned resources, map[<resource ID>]<resource>
 		ResourcesResult:      v.ResourcesResult,

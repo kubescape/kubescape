@@ -33,9 +33,9 @@ func NewFileResourceHandler(_ context.Context, inputPatterns []string, singleRes
 	}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
-	ksResources := cautils.KSResources{}
+	externalResources := cautils.ExternalResources{}
 
 	if len(fileHandler.inputPatterns) == 0 {
 		return nil, nil, nil, nil, fmt.Errorf("missing input")
@@ -104,7 +104,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	cautils.StopSpinner()
 	logger.L().Success("Done accessing local objects")
 
-	return k8sResources, allResources, ksResources, excludedRulesMap, nil
+	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }
 
 func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {

@@ -11,6 +11,7 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"golang.org/x/exp/slices"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -83,7 +84,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			} else {
 				// Read frameworks from input args
 				frameworks = strings.Split(args[0], ",")
-				if cautils.StringInSlice(frameworks, "all") != cautils.ValueNotFound {
+				if slices.Contains(frameworks, "all") {
 					scanInfo.ScanAll = true
 					frameworks = getter.NativeFrameworks
 

@@ -1,11 +1,16 @@
 package resourcehandler
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+)
+
+const (
+	FieldSelectorsSeparator         = ","
+	FieldSelectorsEqualsOperator    = "=="
+	FieldSelectorsNotEqualsOperator = "!="
 )
 
 type IFieldSelector interface {
@@ -52,9 +57,9 @@ func (is *IncludeSelector) GetClusterScope(resource *schema.GroupVersionResource
 
 func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	fieldSelectors := ""
-	for _, n := range strings.Split(es.namespace, ",") {
+	for _, n := range strings.Split(es.namespace, FieldSelectorsSeparator) {
 		if n != "" {
-			fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespacesSelector(resource.Resource, n, "!="))
+			fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespacesSelector(resource.Resource, n, FieldSelectorsNotEqualsOperator))
 		}
 	}
 	return []string{fieldSelectors}
@@ -63,9 +68,9 @@ func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 
 func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	fieldSelectors := []string{}
-	for _, n := range strings.Split(is.namespace, ",") {
+	for _, n := range strings.Split(is.namespace, FieldSelectorsSeparator) {
 		if n != "" {
-			fieldSelectors = append(fieldSelectors, getNamespacesSelector(resource.Resource, n, "=="))
+			fieldSelectors = append(fieldSelectors, getNamespacesSelector(resource.Resource, n, FieldSelectorsEqualsOperator))
 		}
 	}
 	return fieldSelectors
@@ -88,11 +93,11 @@ func getNamespacesSelector(kind, ns, operator string) string {
 }
 
 func getNameFieldSelectorString(resourceName, operator string) string {
-	return fmt.Sprintf("metadata.name%s%s", operator, resourceName)
+	return strings.Join([]string{"metadata.name", resourceName}, operator)
 }
 
 func getNamespaceFieldSelectorString(namespace, operator string) string {
-	return fmt.Sprintf("metadata.namespace%s%s", operator, namespace)
+	return strings.Join([]string{"metadata.namespace", namespace}, operator)
 }
 
 func combineFieldSelectors(selectors ...string) string {
@@ -102,5 +107,5 @@ func combineFieldSelectors(selectors ...string) string {
 			nonEmptyStrings = append(nonEmptyStrings, selectors[i])
 		}
 	}
-	return strings.Join(nonEmptyStrings, ",")
+	return strings.Join(nonEmptyStrings, FieldSelectorsSeparator)
 }
