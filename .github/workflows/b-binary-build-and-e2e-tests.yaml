@@ -71,6 +71,7 @@ on:
         type: string
         required: false
         default: '[ "", "arm64"]'
+  
 jobs:
   wf-preparation:
     name: secret-validator
@@ -80,6 +81,7 @@ jobs:
       OS_METRIX: ${{ steps.export_os_to_env.outputs.OS_METRIX }}
       ARCH_METRIX: ${{ steps.export_arch_to_env.outputs.ARCH_METRIX }}
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
+
     steps:
       - name: check if the necessary secrets are set in github secrets
         id: check-secret-set

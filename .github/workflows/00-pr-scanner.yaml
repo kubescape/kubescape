@@ -37,6 +37,6 @@ jobs:
       GO_VERSION: "1.20"
       RELEASE: ""
       CLIENT: test
-      ARCH_METRIX: ""
-      OS_METRIX: "ubuntu-20.04"
+      ARCH_METRIX: '[ "" ]'
+      OS_METRIX: '[ "ubuntu-20.04" ]'
     secrets: inherit
