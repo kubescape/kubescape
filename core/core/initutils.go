@@ -65,13 +65,13 @@ func getRBACHandler(tenantConfig cautils.ITenantConfig, k8s *k8sinterface.Kubern
 	return nil
 }
 
-func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanningContext cautils.ScanningContext) reporter.IReport {
+func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, reportID string, submit, fwScan bool, scanInfo cautils.ScanInfo) reporter.IReport {
 	_, span := otel.Tracer("").Start(ctx, "getReporter")
 	defer span.End()
 
 	if submit {
 		submitData := reporterv2.SubmitContextScan
-		if scanningContext != cautils.ContextCluster {
+		if scanInfo.GetScanningContext() != cautils.ContextCluster {
 			submitData = reporterv2.SubmitContextRepository
 		}
 		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID, submitData)
@@ -81,7 +81,8 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 		return reporterv2.NewReportMock("", "")
 	}
 	var message string
-	if !fwScan {
+
+	if !fwScan && scanInfo.ScanType != cautils.ScanTypeWorkload {
 		message = "Kubescape does not submit scan results when scanning controls"
 	}
 
@@ -96,6 +97,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		// scanInfo.HostSensor.SetBool(false)
 		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, scanInfo.ScanObject)
 	}
+
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
 	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors, scanInfo.ScanObject)
@@ -286,12 +288,12 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 }
 
 // getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
-func getUIPrinter(ctx context.Context, verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
+func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo) printer.IPrinter {
 	var p printer.IPrinter
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		p = &printerv2.SilentPrinter{}
 	} else {
-		p = printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType)
+		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
 
 		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
 		p.SetWriter(ctx, os.Stdout.Name())

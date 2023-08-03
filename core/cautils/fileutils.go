@@ -24,10 +24,6 @@ var (
 	JSON_PREFIX = []string{"json"}
 )
 
-var (
-	ErrNoFilesToScan string = "no files found to scan, input %s"
-)
-
 type FileFormat string
 
 const (
@@ -35,8 +31,13 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
+type Chart struct {
+	Name string
+	Path string
+}
+
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]Chart) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -46,7 +47,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 	}
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
-	sourceToChartName := map[string]string{}
+	sourceToChart := make(map[string]Chart, 0)
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
@@ -59,11 +60,14 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 			chartName := chart.GetName()
 			for k, v := range wls {
 				sourceToWorkloads[k] = v
-				sourceToChartName[k] = chartName
+				sourceToChart[k] = Chart{
+					Name: chartName,
+					Path: helmDir,
+				}
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChartName
+	return sourceToWorkloads, sourceToChart
 }
 
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
@@ -101,14 +105,14 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	return sourceToWorkloads, kustomizeDirectoryName
 }
 
-func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) (map[string][]workloadinterface.IMetadata, error) {
+func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
 	}
 	if len(files) == 0 {
 		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
-		return nil, fmt.Errorf(ErrNoFilesToScan, input)
+		return nil
 	}
 
 	workloads, errs := loadFiles(rootPath, files)
@@ -116,7 +120,7 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) (map[st
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
 	}
 
-	return workloads, nil
+	return workloads
 }
 
 func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterface.IMetadata, []error) {

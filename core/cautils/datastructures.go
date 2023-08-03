@@ -2,7 +2,9 @@ package cautils
 
 import (
 	"context"
+	"sort"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -16,6 +18,22 @@ import (
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
 type K8SResources map[string][]string
 type KSResources map[string][]string
+
+type ImageScanData struct {
+	PresenterConfig *models.PresenterConfig
+	Image           string
+}
+
+type ScanTypes string
+
+const (
+	TopWorkloadsNumber           = 5
+	ScanTypeCluster    ScanTypes = "cluster"
+	ScanTypeRepo       ScanTypes = "repo"
+	ScanTypeImage      ScanTypes = "image"
+	ScanTypeWorkload   ScanTypes = "workload"
+	ScanTypeFramework  ScanTypes = "framework"
+)
 
 type OPASessionObj struct {
 	K8SResources          K8SResources                                  // input k8s objects
@@ -54,6 +72,45 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		SessionID:             scanInfo.ScanID,
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
 		OmitRawResources:      scanInfo.OmitRawResources,
+	}
+}
+
+// SetTopWorkloads sets the top workloads by score
+func (sessionObj *OPASessionObj) SetTopWorkloads() {
+	count := 0
+
+	topWorkloadsSorted := make([]prioritization.PrioritizedResource, 0)
+
+	// create list in order to sort
+	for _, wl := range sessionObj.ResourcesPrioritized {
+		topWorkloadsSorted = append(topWorkloadsSorted, wl)
+	}
+
+	// sort by score. If scores are equal, sort by resource ID
+	sort.Slice(topWorkloadsSorted, func(i, j int) bool {
+		if topWorkloadsSorted[i].Score == topWorkloadsSorted[j].Score {
+			return topWorkloadsSorted[i].ResourceID < topWorkloadsSorted[j].ResourceID
+		}
+		return topWorkloadsSorted[i].Score > topWorkloadsSorted[j].Score
+	})
+
+	if sessionObj.Report == nil {
+		sessionObj.Report = &reporthandlingv2.PostureReport{}
+	}
+
+	// set top workloads according to number of top workloads
+	for i := 0; i < TopWorkloadsNumber; i++ {
+		if i >= len(topWorkloadsSorted) {
+			break
+		}
+		source := sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID]
+		wlObj := &reporthandling.Resource{
+			IMetadata: sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
+			Source:    &source,
+		}
+
+		sessionObj.Report.SummaryDetails.TopWorkloadsByScore = append(sessionObj.Report.SummaryDetails.TopWorkloadsByScore, wlObj)
+		count++
 	}
 }
 

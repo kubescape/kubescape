@@ -110,10 +110,26 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 	}
 
 	if len(wls) == 0 {
-		return nil, fmt.Errorf("k8s resource '%s' not found", resource.GetID())
+		return nil, fmt.Errorf("k8s resource '%s' not found", getReadableID(resource))
 	} else if len(wls) > 1 {
 		return nil, fmt.Errorf("more than one k8s resource found for '%s'", resource.GetID())
 	}
 
 	return wls[0], nil
+}
+
+// TODO: move this to k8s-interface
+func getReadableID(obj *objectsenvelopes.ScanObject) string {
+	var ID string
+	if obj.GetApiVersion() != "" {
+		ID += fmt.Sprintf("%s/", k8sinterface.JoinGroupVersion(k8sinterface.SplitApiVersion(obj.GetApiVersion())))
+	}
+
+	if obj.GetNamespace() != "" {
+		ID += fmt.Sprintf("%s/", obj.GetNamespace())
+	}
+
+	ID += fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
+
+	return ID
 }

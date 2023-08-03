@@ -17,7 +17,6 @@ if ($useBitTransfer)
     {
         Write-Information -MessageData 'Using a fallback BitTransfer method since you are running Windows PowerShell'
         Start-BitsTransfer -Source $fullUrl -Destination $BASE_DIR\kubescape.exe
-        
     }
     else
     {

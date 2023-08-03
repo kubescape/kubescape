@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
@@ -40,7 +41,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if resource.GetNamespace() != "" {
 			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", resource.GetNamespace())
 		}
-		fmt.Fprintf(prettyPrinter.writer, "\n"+controlCountersForResource(result.ListControlsIDs(nil))+"\n\n")
+		fmt.Fprintf(prettyPrinter.writer, "\n"+prettyprinter.ControlCountersForResource(result.ListControlsIDs(nil))+"\n\n")
 
 		summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 		summaryTable.SetAutoWrapText(true)
