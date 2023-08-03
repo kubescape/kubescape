@@ -12,39 +12,26 @@ import (
 )
 
 func TestWorkloadScan_InitCategoryTableData(t *testing.T) {
-	tests := []struct {
-		name           string
-		categoryType   CategoryType
-		expectedHeader []string
-		expectedAlign  []int
-	}{
-		{
-			name:           "status type",
-			categoryType:   TypeStatus,
-			expectedHeader: []string{"CONTROL NAME", "STATUS", "DOCS"},
-			expectedAlign:  []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER},
-		},
-		{
-			name:           "counting type",
-			categoryType:   TypeCounting,
-			expectedHeader: []string{"CONTROL NAME", "RESOURCES", "RUN"},
-			expectedAlign:  []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			workloadPrinter := NewWorkloadPrinter()
-			actualHeader, actualAlign := workloadPrinter.initCategoryTableData(tt.categoryType)
 
-			for i := range actualHeader {
-				assert.Equal(t, tt.expectedHeader[i], actualHeader[i])
-			}
+	expectedHeader := []string{"CONTROL NAME", "STATUS", "DOCS"}
+	expectedAlign := []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
 
-			for i := range actualAlign {
-				assert.Equal(t, tt.expectedAlign[i], actualAlign[i])
-			}
-		})
+	workloadPrinter := NewWorkloadPrinter()
+
+	headers, columnAligments := workloadPrinter.initCategoryTableData()
+
+	for i := range headers {
+		if headers[i] != expectedHeader[i] {
+			t.Errorf("Expected header %s, got %s", expectedHeader[i], headers[i])
+		}
 	}
+
+	for i := range columnAligments {
+		if columnAligments[i] != expectedAlign[i] {
+			t.Errorf("Expected column alignment %d, got %d", expectedAlign[i], columnAligments[i])
+		}
+	}
+
 }
 
 func TestWorkloadScan_GenerateCountingCategoryRow(t *testing.T) {
