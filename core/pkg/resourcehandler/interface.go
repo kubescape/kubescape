@@ -10,6 +10,6 @@ import (
 )
 
 type IResourceHandler interface {
-	GetResources(context.Context, *cautils.OPASessionObj, opaprocessor.IJobProgressNotificationClient, cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error)
+	GetResources(context.Context, *cautils.OPASessionObj, opaprocessor.IJobProgressNotificationClient, *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error)
 	GetClusterAPIServerInfo(ctx context.Context) *version.Info
 }

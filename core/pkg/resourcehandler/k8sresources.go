@@ -38,28 +38,26 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 }
 
 type K8sResourceHandler struct {
-	k8s                *k8sinterface.KubernetesApi
-	hostSensorHandler  hostsensorutils.IHostSensor
-	fieldSelector      IFieldSelector
-	rbacObjectsAPI     *cautils.RBACObjects
-	registryAdaptors   *RegistryAdaptors
-	singleResourceScan *objectsenvelopes.ScanObject
+	k8s               *k8sinterface.KubernetesApi
+	hostSensorHandler hostsensorutils.IHostSensor
+	rbacObjectsAPI    *cautils.RBACObjects
+	registryAdaptors  *RegistryAdaptors
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors, singleResourceScan *objectsenvelopes.ScanObject) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors) *K8sResourceHandler {
 	return &K8sResourceHandler{
-		k8s:                k8s,
-		fieldSelector:      fieldSelector,
-		hostSensorHandler:  hostSensorHandler,
-		rbacObjectsAPI:     rbacObjects,
-		registryAdaptors:   registryAdaptors,
-		singleResourceScan: singleResourceScan,
+		k8s:               k8s,
+		hostSensorHandler: hostSensorHandler,
+		rbacObjectsAPI:    rbacObjects,
+		registryAdaptors:  registryAdaptors,
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, _ cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
 	var err error
-	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(k8sHandler.singleResourceScan)
+
+	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
+	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -79,7 +77,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	// pull k8s resources
-	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources)
+	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
 	if err != nil {
 		cautils.StopSpinner()
 		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
@@ -161,7 +159,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 }
 
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
-func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
+func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
 	if resource == nil {
 		return nil, nil
 	}
@@ -184,7 +182,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 	if resource.GetNamespace() != "" && k8sinterface.IsNamespaceScope(&gvr) {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
-	result, err := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors)
+	result, err := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors, globalFieldSelector)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", resource.GetID(), err)
 	}
@@ -317,7 +315,7 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
-func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
 
@@ -325,7 +323,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	for i := range queryableResources {
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(queryableResources[i].GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors)
+		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors, globalFieldSelectors)
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
 				// handle error
@@ -353,11 +351,11 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	return k8sResources, allResources, errs
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string) ([]unstructured.Unstructured, error) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, error) {
 	resourceList := []unstructured.Unstructured{}
 	// set labels
 	listOptions := metav1.ListOptions{}
-	fieldSelectors := k8sHandler.fieldSelector.GetNamespacesSelectors(resource)
+	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource)
 	for i := range fieldSelectors {
 		if fieldSelectors[i] != "" {
 			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)

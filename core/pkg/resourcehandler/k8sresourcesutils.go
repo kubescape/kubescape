@@ -152,3 +152,14 @@ func getGroupNVersion(apiVersion string) (string, string) {
 	}
 	return group, version
 }
+
+func getFieldSelectorFromScanInfo(scanInfo *cautils.ScanInfo) IFieldSelector {
+	if scanInfo.IncludeNamespaces != "" {
+		return NewIncludeSelector(scanInfo.IncludeNamespaces)
+	}
+	if scanInfo.ExcludedNamespaces != "" {
+		return NewExcludeSelector(scanInfo.ExcludedNamespaces)
+	}
+
+	return &EmptySelector{}
+}
