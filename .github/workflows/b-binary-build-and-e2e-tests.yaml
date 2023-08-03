@@ -27,11 +27,11 @@ on:
         type: number
         default: 1
         required: false
-      OS_METRIX:
+      OS_MATRIX:
         type: string
         required: false
         default: '[ "ubuntu-20.04", "macos-latest", "windows-latest"]'
-      ARCH_METRIX:
+      ARCH_MATRIX:
         type: string
         required: false
         default: '[ "", "arm64"]'
@@ -63,11 +63,11 @@ on:
       BINARY_TESTS:
         type: string
         default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score" ]'
-      OS_METRIX:
+      OS_MATRIX:
         type: string
         required: false
         default: '[ "ubuntu-20.04", "macos-latest", "windows-latest"]'
-      ARCH_METRIX:
+      ARCH_MATRIX:
         type: string
         required: false
         default: '[ "", "arm64"]'
@@ -78,8 +78,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
-      OS_METRIX: ${{ steps.export_os_to_env.outputs.OS_METRIX }}
-      ARCH_METRIX: ${{ steps.export_arch_to_env.outputs.ARCH_METRIX }}
+      OS_MATRIX: ${{ steps.export_os_to_env.outputs.OS_MATRIX }}
+      ARCH_MATRIX: ${{ steps.export_arch_to_env.outputs.ARCH_MATRIX }}
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
 
     steps:
@@ -98,9 +98,9 @@ jobs:
       - id: export_os_to_env
         name: set test name
         run: |
-          echo "OS_METRIX=$input" >> $GITHUB_OUTPUT
+          echo "OS_MATRIX=$input" >> $GITHUB_OUTPUT
         env:
-          input: ${{ inputs.OS_METRIX }}
+          input: ${{ inputs.OS_MATRIX }}
 
       - id: export_tests_to_env
         name: set test name
@@ -112,9 +112,9 @@ jobs:
       - id: export_arch_to_env
         name: set test name
         run: |
-          echo "ARCH_METRIX=$input" >> $GITHUB_OUTPUT
+          echo "ARCH_MATRIX=$input" >> $GITHUB_OUTPUT
         env:
-          input: ${{ inputs.ARCH_METRIX }}
+          input: ${{ inputs.ARCH_MATRIX }}
       
 
   binary-build:
@@ -126,8 +126,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: ${{ fromJson(needs.wf-preparation.outputs.OS_METRIX) }}
-        arch: ${{ fromJson(needs.wf-preparation.outputs.ARCH_METRIX) }}
+        os: ${{ fromJson(needs.wf-preparation.outputs.OS_MATRIX) }}
+        arch: ${{ fromJson(needs.wf-preparation.outputs.ARCH_MATRIX) }}
         exclude:
         - os: windows-latest
           arch: arm64
