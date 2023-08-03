@@ -25,7 +25,7 @@ func TestRepoScan_GenerateCountingCategoryRow(t *testing.T) {
 				},
 			},
 			inputPatterns: []string{"file.yaml", "file2.yaml"},
-			expectedRow:   []string{"ctrl1", "5", "$ kubescape scan control ctrl1 file.yaml,file2.yaml"},
+			expectedRow:   []string{"ctrl1", "5", "$ kubescape scan control ctrl1 file.yaml,file2.yaml -v"},
 		},
 		{
 			name: "one file",
@@ -39,7 +39,7 @@ func TestRepoScan_GenerateCountingCategoryRow(t *testing.T) {
 				},
 			},
 			inputPatterns: []string{"file.yaml"},
-			expectedRow:   []string{"ctrl1", "5", "$ kubescape scan control ctrl1 file.yaml"},
+			expectedRow:   []string{"ctrl1", "5", "$ kubescape scan control ctrl1 file.yaml -v"},
 		},
 	}
 
@@ -76,7 +76,7 @@ func TestRepoScan_GenerateTableNextSteps(t *testing.T) {
 				ControlID: "ctrl1",
 			},
 			inputPatterns:     []string{"file.yaml"},
-			expectedNextSteps: "$ kubescape scan control ctrl1 file.yaml",
+			expectedNextSteps: "$ kubescape scan control ctrl1 file.yaml -v",
 		},
 		{
 			name: "multiple files",
@@ -84,7 +84,7 @@ func TestRepoScan_GenerateTableNextSteps(t *testing.T) {
 				ControlID: "ctrl1",
 			},
 			inputPatterns:     []string{"file.yaml", "file2.yaml"},
-			expectedNextSteps: "$ kubescape scan control ctrl1 file.yaml,file2.yaml",
+			expectedNextSteps: "$ kubescape scan control ctrl1 file.yaml,file2.yaml -v",
 		},
 	}
 

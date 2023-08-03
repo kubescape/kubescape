@@ -2,10 +2,10 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -30,6 +30,8 @@ var (
 
 
 `, cautils.ExecName())
+
+	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier")
 )
 
 var namespace string
@@ -49,45 +51,26 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
 			}
 
-			wlIdentifier := strings.Split(args[0], "/")
-			if len(wlIdentifier) != 2 || wlIdentifier[0] == "" || wlIdentifier[1] == "" {
-				return fmt.Errorf("usage: <kind>/<name>")
-			}
-
-			return nil
+			return validateWorkloadIdentifier(args[0])
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			var wlIdentifier string
 
-			wlIdentifier += args[0]
-			kind, name, err := parseWorkloadIdentifierString(wlIdentifier)
+			kind, name, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
-				logger.L().Fatal(err.Error())
+				return fmt.Errorf("invalid input: %s", err.Error())
 			}
 
-			scanInfo.SetScanType(cautils.ScanTypeWorkload)
-			scanInfo.ScanImages = true
-
-			scanInfo.ScanObject = &objectsenvelopes.ScanObject{}
-			scanInfo.ScanObject.SetNamespace(namespace)
-			scanInfo.ScanObject.SetKind(kind)
-			scanInfo.ScanObject.SetName(name)
-
-			scanInfo.SetPolicyIdentifiers([]string{"workloadscan"}, v1.KindFramework)
-
-			if scanInfo.FilePath != "" {
-				scanInfo.InputPatterns = []string{scanInfo.FilePath}
-			}
+			setWorkloadScanInfo(scanInfo, kind, name)
 
 			// todo: add api version if provided
 			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)
 			if err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 
 			if err = results.HandleResults(ctx); err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 
 			return nil
@@ -100,12 +83,38 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	return workloadCmd
 }
 
+func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
+	scanInfo.SetScanType(cautils.ScanTypeWorkload)
+	scanInfo.ScanImages = true
+
+	scanInfo.ScanObject = &objectsenvelopes.ScanObject{}
+	scanInfo.ScanObject.SetNamespace(namespace)
+	scanInfo.ScanObject.SetKind(kind)
+	scanInfo.ScanObject.SetName(name)
+
+	scanInfo.SetPolicyIdentifiers([]string{"workloadscan"}, v1.KindFramework)
+
+	if scanInfo.FilePath != "" {
+		scanInfo.InputPatterns = []string{scanInfo.FilePath}
+	}
+}
+
+func validateWorkloadIdentifier(workloadIdentifier string) error {
+	// workloadIdentifier is in the form of kind/name
+	x := strings.Split(workloadIdentifier, "/")
+	if len(x) != 2 || x[0] == "" || x[1] == "" {
+		return ErrInvalidWorkloadIdentifier
+	}
+
+	return nil
+}
+
 func parseWorkloadIdentifierString(workloadIdentifier string) (kind, name string, err error) {
 	// workloadIdentifier is in the form of namespace/kind/name
 	// example: default/Deployment/nginx-deployment
 	x := strings.Split(workloadIdentifier, "/")
 	if len(x) != 2 {
-		return "", "", fmt.Errorf("invalid workload identifier")
+		return "", "", ErrInvalidWorkloadIdentifier
 	}
 
 	return x[0], x[1], nil

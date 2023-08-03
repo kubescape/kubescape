@@ -288,12 +288,12 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 }
 
 // getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
-func GetUIPrinter(ctx context.Context, verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string) printer.IPrinter {
+func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo) printer.IPrinter {
 	var p printer.IPrinter
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		p = &printerv2.SilentPrinter{}
 	} else {
-		p = printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType, scanType, inputPatterns)
+		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
 
 		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
 		p.SetWriter(ctx, os.Stdout.Name())

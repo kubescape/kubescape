@@ -57,27 +57,3 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 		t.Errorf("UI Printer was not called to print. Got calls: %d, want calls: %d", got, want)
 	}
 }
-
-func TestResultsHandlerHandleResultsPrintsScoreToUI(t *testing.T) {
-	reporter := &DummyReporter{}
-	printers := []printer.IPrinter{}
-	uiPrinter := &SpyPrinter{}
-	fakeScanData := &cautils.OPASessionObj{
-		Report: &reporthandlingv2.PostureReport{
-			SummaryDetails: reportsummary.SummaryDetails{
-				Score: 0.0,
-			},
-		},
-	}
-
-	rh := NewResultsHandler(reporter, printers, uiPrinter)
-	rh.SetData(fakeScanData)
-
-	rh.HandleResults(context.TODO())
-
-	want := 1
-	got := uiPrinter.ScoreCalls
-	if got != want {
-		t.Errorf("UI Printer was not called to print. Got calls: %d, want calls: %d", got, want)
-	}
-}

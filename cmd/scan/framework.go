@@ -79,11 +79,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			var frameworks []string
 
 			if len(args) == 0 {
-				if scanInfo.IsSecurityView {
-					scanInfo.SetScanType(cautils.ScanTypeFramework)
-				} else { // scan all frameworks
-					scanInfo.ScanAll = true
-				}
+				scanInfo.ScanAll = true
 			} else {
 				// Read frameworks from input args
 				frameworks = strings.Split(args[0], ",")
@@ -94,7 +90,6 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				}
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
-						scanInfo.SetScanType(cautils.ScanTypeRepo)
 						scanInfo.InputPatterns = args[1:]
 						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 					} else { // store stdin to file - do NOT move to separate function !!
@@ -108,15 +103,11 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 							return err
 						}
 						scanInfo.InputPatterns = []string{tempFile.Name()}
-						scanInfo.SetScanType(cautils.ScanTypeFramework)
 					}
 				}
 			}
+			scanInfo.SetScanType(cautils.ScanTypeFramework)
 			scanInfo.FrameworkScan = true
-
-			if (scanInfo.IsSecurityView) && (scanInfo.ScanType == cautils.ScanTypeRepo || scanInfo.ScanType == cautils.ScanTypeCluster) {
-				frameworks = []string{"nsa", "mitre", "clusterscan"}
-			}
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 

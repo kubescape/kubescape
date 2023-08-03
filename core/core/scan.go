@@ -83,10 +83,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== setup registry adaptors ======================================
 
-	registryAdaptors, err := resourcehandler.NewRegistryAdaptors()
-	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to initialize registry adaptors", helpers.Error(err))
-	}
+	registryAdaptors, _ := resourcehandler.NewRegistryAdaptors()
 
 	// ================== setup resource collector object ======================================
 
@@ -100,7 +97,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	// setup printers
 	outputPrinters := GetOutputPrinters(scanInfo, ctx)
 
-	uiPrinter := GetUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
+	uiPrinter := GetUIPrinter(ctx, scanInfo)
 
 	// ================== return interface ======================================
 

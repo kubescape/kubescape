@@ -114,3 +114,27 @@ func Test_validateSeverity(t *testing.T) {
 		})
 	}
 }
+
+func Test_validateWorkloadIdentifier(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Input       string
+		Want        error
+	}{
+		{"valid workload identifier should be valid", "deployment/test", nil},
+		{"invalid workload identifier missing kind", "deployment", ErrInvalidWorkloadIdentifier},
+		{"invalid workload identifier with namespace", "ns/deployment/name", ErrInvalidWorkloadIdentifier},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.Description, func(t *testing.T) {
+			input := testCase.Input
+			want := testCase.Want
+			got := validateWorkloadIdentifier(input)
+
+			if got != want {
+				t.Errorf("got: %v, want: %v", got, want)
+			}
+		})
+	}
+}

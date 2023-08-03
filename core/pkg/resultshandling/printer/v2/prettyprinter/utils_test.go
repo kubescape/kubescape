@@ -102,7 +102,7 @@ func TestGetSeverityToSummaryMap(t *testing.T) {
 		name           string
 		summaryDetails imageprinter.ImageScanSummary
 		expected       map[string]imageprinter.SeveritySummary
-		shouldMerge    bool
+		verboseMode    bool
 	}{
 		{
 			name: "without merging",
@@ -122,7 +122,7 @@ func TestGetSeverityToSummaryMap(t *testing.T) {
 					},
 				},
 			},
-			shouldMerge: false,
+			verboseMode: true,
 			expected: map[string]imageprinter.SeveritySummary{
 				"High": {
 					NumberOfCVEs:        10,
@@ -164,7 +164,7 @@ func TestGetSeverityToSummaryMap(t *testing.T) {
 					},
 				},
 			},
-			shouldMerge: true,
+			verboseMode: false,
 			expected: map[string]imageprinter.SeveritySummary{
 				"Critical": {
 					NumberOfCVEs:        15,
@@ -188,7 +188,7 @@ func TestGetSeverityToSummaryMap(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sevToSummaryMap := getSeverityToSummaryMap(tt.summaryDetails, tt.shouldMerge)
+			sevToSummaryMap := getSeverityToSummaryMap(tt.summaryDetails, tt.verboseMode)
 
 			for k, v := range sevToSummaryMap {
 				if v.NumberOfCVEs != tt.expected[k].NumberOfCVEs || v.NumberOfFixableCVEs != tt.expected[k].NumberOfFixableCVEs {

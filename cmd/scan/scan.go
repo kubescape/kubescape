@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/meta"
+	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +43,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Long:    `The action you want to perform`,
 		Example: scanCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
+			// setting input patterns for framework scan is only relevancy for non-security view
+			if len(args) > 0 && !scanInfo.IsSecurityView {
 				if args[0] != "framework" && args[0] != "control" {
 					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
 				}
@@ -49,9 +52,13 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if scanInfo.IsSecurityView {
+				setSecurityViewScanInfo(args, &scanInfo)
+
+				return securityScan(scanInfo, ks)
+			}
 
 			if len(args) == 0 {
-				scanInfo.SetScanType(cautils.ScanTypeCluster)
 				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{strings.Join(getter.NativeFrameworks, ",")})
 			}
 			return nil
@@ -126,4 +133,32 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo, isi))
 
 	return scanCmd
+}
+
+func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
+	if len(args) > 0 {
+		scanInfo.SetScanType(cautils.ScanTypeRepo)
+		scanInfo.InputPatterns = args
+	} else {
+		scanInfo.SetScanType(cautils.ScanTypeCluster)
+	}
+	scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
+}
+
+func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
+
+	ctx := context.TODO()
+
+	results, err := ks.Scan(ctx, &scanInfo)
+	if err != nil {
+		return err
+	}
+
+	if err = results.HandleResults(ctx); err != nil {
+		return err
+	}
+
+	enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo, terminateOnExceedingSeverity)
+
+	return nil
 }

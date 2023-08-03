@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/core"
 	"github.com/kubescape/kubescape/v2/core/meta"
@@ -63,7 +62,6 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			logger.L().Info(fmt.Sprintf("Scanning image: %s", userInput))
 			scanResults, err := svc.Scan(ctx, userInput, creds)
 			if err != nil {
-				logger.L().Error("Image scan failed", helpers.Error(err))
 				return err
 			}
 			logger.L().Success("Image scan completed successfully")
@@ -72,7 +70,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 
 			outputPrinters := core.GetOutputPrinters(scanInfo, ctx)
 
-			uiPrinter := core.GetUIPrinter(ctx, scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
+			uiPrinter := core.GetUIPrinter(ctx, scanInfo)
 
 			resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 

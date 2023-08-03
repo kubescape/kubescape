@@ -53,7 +53,8 @@ func TestLoadResourcesFromHelmCharts(t *testing.T) {
 
 		w := workloads[0]
 		assert.True(t, localworkload.IsTypeLocalWorkload(w.GetObject()), "Expected localworkload as object type")
-		assert.Equal(t, "kubescape", sourceToChartName[file])
+		assert.Equal(t, "kubescape", sourceToChartName[file].Name)
+		assert.Equal(t, helmChartPath(), sourceToChartName[file].Path)
 
 		switch filepath.Base(file) {
 		case "serviceaccount.yaml":
