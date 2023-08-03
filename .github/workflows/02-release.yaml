@@ -14,7 +14,7 @@ jobs:
     with:
       client: "image-release"
       image_name: "quay.io/${{ github.repository_owner }}/kubescape"
-      image_tag: ${{ needs.retag.outputs.NEW_TAG }}
+      image_tag: ${{ github.ref_name }}
       support_platforms: false
       cosign: false
     secrets: inherit
