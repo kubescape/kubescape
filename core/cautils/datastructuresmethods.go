@@ -19,10 +19,11 @@ func NewPolicies() *Policies {
 
 func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) {
 	for i := range frameworks {
-		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 && isFrameworkFitToScanScope(frameworks[i], scanningScope) {
-			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
-		} else {
+		if !isFrameworkFitToScanScope(frameworks[i], scanningScope) {
 			continue
+		}
+		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
+			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
 		}
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}

@@ -214,8 +214,8 @@ func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
 func (pp *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 
 	if summaryDetails.NumberOfControls().All() == 0 {
-		if len(summaryDetails.ListFrameworks()) == 0 {
-			fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, no framework was matched to scanning scope, make sure the framework you choose is matched to your cluster scope, for more information about cluster scanning scope: %s\n", clusterScanningScopeInformationLink)
+		if summaryDetails.NumberOfResources().All() == 0 {
+			fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, no controls was matched to scanning scope, make sure the framework you choose is matched to your cluster scope, for more information about cluster scanning scope: %s\n", clusterScanningScopeInformationLink)
 		} else {
 			fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
 		}
