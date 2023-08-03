@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anchore/grype/grype/presenter"
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -41,17 +43,44 @@ func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
 
 func (jp *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
+
 }
 
-func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
-	r, err := json.Marshal(FinalizeResults(opaSessionObj))
-	if err != nil {
-		logger.L().Ctx(ctx).Fatal("failed to Marshal posture report object")
+func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	var err error
+	if opaSessionObj != nil {
+		err = printConfigurationsScanning(opaSessionObj, ctx, jp)
+	} else if imageScanData != nil {
+		err = jp.PrintImageScan(ctx, imageScanData[0].PresenterConfig)
+	} else {
+		err = fmt.Errorf("failed to write results, no data provided")
 	}
 
-	if _, err := jp.writer.Write(r); err != nil {
+	if err != nil {
 		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
 		return
 	}
+
 	printer.LogOutputFile(jp.writer.Name())
+}
+
+func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, ctx context.Context, jp *JsonPrinter) error {
+	r, err := json.Marshal(FinalizeResults(opaSessionObj))
+	if err != nil {
+		return err
+	}
+
+	_, err = jp.writer.Write(r)
+	return err
+}
+
+func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
+	presenterConfig, _ := presenter.ValidatedConfig("json", "", false)
+	pres := presenter.GetPresenter(presenterConfig, *scanResults)
+
+	return pres.Present(jp.writer)
+}
+
+func (jp *JsonPrinter) PrintNextSteps() {
+
 }

@@ -51,7 +51,11 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	hp.writer = printer.GetWriter(ctx, outputFile)
 }
 
-func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (hp *HtmlPrinter) PrintNextSteps() {
+
+}
+
+func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0

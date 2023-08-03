@@ -57,7 +57,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IField
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, _ cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
 	var err error
 	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(k8sHandler.singleResourceScan)
 	if err != nil {

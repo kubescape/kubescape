@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/meta"
+	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -41,7 +43,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Long:    `The action you want to perform`,
 		Example: scanCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if len(args) > 0 {
+			// setting input patterns for framework scan is only relevancy for non-security view
+			if len(args) > 0 && scanInfo.View != string(cautils.SecurityViewType) {
 				if args[0] != "framework" && args[0] != "control" {
 					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
 				}
@@ -49,6 +52,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if scanInfo.View == string(cautils.SecurityViewType) {
+				setSecurityViewScanInfo(args, &scanInfo)
+
+				return securityScan(scanInfo, ks)
+			}
 
 			if len(args) == 0 {
 				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{strings.Join(getter.NativeFrameworks, ",")})
@@ -90,6 +98,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Submit the scan results to Kubescape SaaS where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.OmitRawResources, "omit-raw-resources", "", false, "Omit raw resources from the output. By default the raw resources are included in the output")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
+	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 
 	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
@@ -117,9 +126,38 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
+	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
 
 	isi := &imageScanInfo{}
 	scanCmd.AddCommand(getImageCmd(ks, &scanInfo, isi))
 
 	return scanCmd
+}
+
+func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
+	if len(args) > 0 {
+		scanInfo.SetScanType(cautils.ScanTypeRepo)
+		scanInfo.InputPatterns = args
+	} else {
+		scanInfo.SetScanType(cautils.ScanTypeCluster)
+	}
+	scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
+}
+
+func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
+
+	ctx := context.TODO()
+
+	results, err := ks.Scan(ctx, &scanInfo)
+	if err != nil {
+		return err
+	}
+
+	if err = results.HandleResults(ctx); err != nil {
+		return err
+	}
+
+	enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo, terminateOnExceedingSeverity)
+
+	return nil
 }

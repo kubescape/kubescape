@@ -3,14 +3,14 @@ package scan
 import (
 	"context"
 	"fmt"
-	"os"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/core"
 	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 
-	"github.com/anchore/grype/grype/presenter"
 	"github.com/spf13/cobra"
 )
 
@@ -58,15 +58,30 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			}
 
 			userInput := args[0]
+
+			logger.L().Info(fmt.Sprintf("Scanning image: %s", userInput))
 			scanResults, err := svc.Scan(ctx, userInput, creds)
 			if err != nil {
 				return err
 			}
+			logger.L().Success("Image scan completed successfully")
 
-			presenterConfig, _ := presenter.ValidatedConfig("table", "", false)
-			pres := presenter.GetPresenter(presenterConfig, *scanResults)
+			scanInfo.SetScanType(cautils.ScanTypeImage)
 
-			pres.Present(os.Stdout)
+			outputPrinters := core.GetOutputPrinters(scanInfo, ctx)
+
+			uiPrinter := core.GetUIPrinter(ctx, scanInfo)
+
+			resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
+
+			resultsHandler.ImageScanData = []cautils.ImageScanData{
+				{
+					PresenterConfig: scanResults,
+					Image:           userInput,
+				},
+			}
+
+			resultsHandler.HandleResults(ctx)
 
 			if imagescan.ExceedsSeverityThreshold(scanResults, failOnSeverity) {
 				terminateOnExceedingSeverity(scanInfo, logger.L())

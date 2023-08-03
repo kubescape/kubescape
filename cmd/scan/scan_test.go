@@ -6,6 +6,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 
@@ -253,4 +254,107 @@ func Test_terminateOnExceedingSeverity(t *testing.T) {
 			},
 		)
 	}
+}
+
+func TestSetSecurityViewScanInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want *cautils.ScanInfo
+	}{
+		{
+			name: "no args",
+			args: []string{},
+			want: &cautils.ScanInfo{
+				InputPatterns: []string{},
+				ScanType:      cautils.ScanTypeCluster,
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "clusterscan",
+					},
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "mitre",
+					},
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "nsa",
+					},
+				},
+			},
+		},
+		{
+			name: "with args",
+			args: []string{
+				"file.yaml",
+				"file2.yaml",
+			},
+			want: &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeRepo,
+				InputPatterns: []string{
+					"file.yaml",
+					"file2.yaml",
+				},
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "clusterscan",
+					},
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "mitre",
+					},
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "nsa",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := &cautils.ScanInfo{
+				View: string(cautils.SecurityViewType),
+			}
+			setSecurityViewScanInfo(tt.args, got)
+
+			if len(tt.want.InputPatterns) != len(got.InputPatterns) {
+				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
+			}
+
+			if tt.want.ScanType != got.ScanType {
+				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.ScanType, tt.want.ScanType)
+			}
+
+			for i := range tt.want.InputPatterns {
+				found := false
+				for j := range tt.want.InputPatterns[i] {
+					if tt.want.InputPatterns[i][j] == got.InputPatterns[i][j] {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
+				}
+			}
+
+			for i := range tt.want.PolicyIdentifier {
+				found := false
+				for j := range got.PolicyIdentifier {
+					if tt.want.PolicyIdentifier[i].Kind == got.PolicyIdentifier[j].Kind && tt.want.PolicyIdentifier[i].Identifier == got.PolicyIdentifier[j].Identifier {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.PolicyIdentifier, tt.want.PolicyIdentifier)
+				}
+			}
+		})
+	}
+
 }

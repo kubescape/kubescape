@@ -90,6 +90,7 @@ type ViewTypes string
 
 const (
 	ResourceViewType ViewTypes = "resource"
+	SecurityViewType ViewTypes = "security"
 	ControlViewType  ViewTypes = "control"
 )
 
@@ -133,6 +134,10 @@ type ScanInfo struct {
 	OmitRawResources      bool                         // true if omit raw resources from the output
 	PrintAttackTree       bool                         // true if print attack tree
 	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
+	ScanType              ScanTypes
+	ScanImages            bool
+	ChartPath             string
+	FilePath              string
 }
 
 type Getters struct {
@@ -202,6 +207,10 @@ func (scanInfo *ScanInfo) Formats() []string {
 	} else {
 		return []string{}
 	}
+}
+
+func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
+	scanInfo.ScanType = scanType
 }
 
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {

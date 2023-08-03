@@ -18,6 +18,8 @@ const (
 	jsonOutputExt  = ".json"
 )
 
+var _ printer.IPrinter = &JsonPrinter{}
+
 type JsonPrinter struct {
 	writer *os.File
 }
@@ -40,7 +42,11 @@ func (jsonPrinter *JsonPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (jsonPrinter *JsonPrinter) PrintNextSteps() {
+
+}
+
+func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) {
 	report := cautils.ReportV2ToV1(opaSessionObj)
 
 	var postureReportStr []byte

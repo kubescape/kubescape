@@ -23,7 +23,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.15
 	github.com/kubescape/k8s-interface v0.0.135
-	github.com/kubescape/opa-utils v0.0.260
+	github.com/kubescape/opa-utils v0.0.261
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.286-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -40,7 +40,8 @@ require (
 	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.16.0
 	go.opentelemetry.io/otel/metric v1.16.0
-	golang.org/x/mod v0.11.0
+	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
+	golang.org/x/mod v0.12.0
 	golang.org/x/sync v0.3.0
 	google.golang.org/api v0.126.0
 	google.golang.org/genproto v0.0.0-20230530153820-e85fd2cbaebc
@@ -404,7 +405,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.24.0 // indirect
 	golang.org/x/crypto v0.11.0 // indirect
-	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691 // indirect
 	golang.org/x/net v0.12.0 // indirect
 	golang.org/x/oauth2 v0.10.0 // indirect
 	golang.org/x/sys v0.10.0 // indirect

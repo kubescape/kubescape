@@ -169,4 +169,3 @@ func NewScanService(dbCfg db.Config) Service {
 func ParseSeverity(severity string) vulnerability.Severity {
 	return vulnerability.ParseSeverity(severity)
 }
-
