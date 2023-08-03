@@ -11,6 +11,7 @@ import (
 
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"golang.org/x/exp/slices"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -292,11 +293,11 @@ func convertYamlToJson(i interface{}) interface{} {
 }
 
 func IsYaml(filePath string) bool {
-	return StringInSlice(YAML_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", "")) != ValueNotFound
+	return slices.Contains(YAML_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
 }
 
 func IsJson(filePath string) bool {
-	return StringInSlice(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", "")) != ValueNotFound
+	return slices.Contains(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
 }
 
 func glob(root, pattern string, onlyDirectories bool) ([]string, error) {

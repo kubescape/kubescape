@@ -95,12 +95,12 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {
 		// scanInfo.HostSensor.SetBool(false)
-		return resourcehandler.NewFileResourceHandler(ctx, scanInfo.InputPatterns, scanInfo.ScanObject)
+		return resourcehandler.NewFileResourceHandler()
 	}
 
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, getFieldSelector(scanInfo), hostSensorHandler, rbacObjects, registryAdaptors, scanInfo.ScanObject)
+	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, registryAdaptors)
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.
@@ -133,17 +133,6 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	default:
 		return hostsensorutils.NewHostSensorHandlerMock()
 	}
-}
-
-func getFieldSelector(scanInfo *cautils.ScanInfo) resourcehandler.IFieldSelector {
-	if scanInfo.IncludeNamespaces != "" {
-		return resourcehandler.NewIncludeSelector(scanInfo.IncludeNamespaces)
-	}
-	if scanInfo.ExcludedNamespaces != "" {
-		return resourcehandler.NewExcludeSelector(scanInfo.ExcludedNamespaces)
-	}
-
-	return &resourcehandler.EmptySelector{}
 }
 
 func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {

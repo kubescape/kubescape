@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	resources "github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/exp/slices"
 )
 
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
@@ -87,14 +88,14 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources cautils.K8SResources, ksResources cautils.KSResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
+func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
-	k8sObjects = append(k8sObjects, getKSObjects(ksResources, allResources, rule.DynamicMatch)...)
+	k8sObjects = append(k8sObjects, getKubenetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)...)
 	return k8sObjects
 }
 
-func getKSObjects(k8sResources cautils.KSResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getKubenetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 
 	for m := range match {
@@ -103,7 +104,7 @@ func getKSObjects(k8sResources cautils.KSResources, allResources map[string]work
 				for _, resource := range match[m].Resources {
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
-						if k8sObj, ok := k8sResources[groupResource]; ok {
+						if k8sObj, ok := externalResources[groupResource]; ok {
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
@@ -162,7 +163,7 @@ func filterOutChildResources(objects []workloadinterface.IMetadata, match []repo
 		ownerReferences, err := w.GetOwnerReferences()
 		if err != nil || len(ownerReferences) == 0 {
 			response = append(response, w)
-		} else if !k8sinterface.IsStringInSlice(owners, ownerReferences[0].Kind) {
+		} else if !slices.Contains(owners, ownerReferences[0].Kind) {
 			response = append(response, w)
 		}
 	}
