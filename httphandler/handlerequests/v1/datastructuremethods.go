@@ -56,6 +56,11 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		scanInfo.HostSensorEnabled = cautils.NewBoolPtr(scanRequest.HostScanner)
 	}
 
+	// single resource scan
+	if scanRequest.ScanObject != nil {
+		scanInfo.ScanObject = scanRequest.ScanObject
+	}
+
 	return scanInfo
 }
 

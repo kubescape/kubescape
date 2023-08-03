@@ -20,15 +20,12 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
-	"github.com/armosec/armoapi-go/armotypes"
-
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8slabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
-	"k8s.io/client-go/dynamic"
 )
 
 type cloudResourceGetter func(string, string) (workloadinterface.IMetadata, error)
@@ -43,46 +40,51 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 type K8sResourceHandler struct {
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
-	fieldSelector     IFieldSelector
 	rbacObjectsAPI    *cautils.RBACObjects
 	registryAdaptors  *RegistryAdaptors
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, fieldSelector IFieldSelector, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors) *K8sResourceHandler {
 	return &K8sResourceHandler{
 		k8s:               k8s,
-		fieldSelector:     fieldSelector,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
 		registryAdaptors:  registryAdaptors,
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, designator *armotypes.PortalDesignator, progressListener opaprocessor.IJobProgressNotificationClient) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
-	allResources := map[string]workloadinterface.IMetadata{}
+func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+	var err error
 
-	// get k8s resources
-	logger.L().Info("Accessing Kubernetes objects")
+	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
+	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
 
-	cautils.StartSpinner()
+	// we don't scan resources which have a parent
+	if sessionObj.SingleResourceScan != nil && k8sinterface.WorkloadHasParent(sessionObj.SingleResourceScan) {
+		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
+	}
+
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	k8sResourcesMap := setK8sResourceMap(sessionObj.Policies)
-
-	// get namespace and labels from designator (ignore cluster labels)
-	_, namespace, labels := armotypes.DigestPortalDesignator(designator)
-
-	// pull k8s recourses
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// map of Kubescape resources to control_ids
 	sessionObj.ResourceToControlsMap = resourceToControl
 
-	if err := k8sHandler.pullResources(k8sResourcesMap, allResources, namespace, labels); err != nil {
+	// pull k8s resources
+	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
+	if err != nil {
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, ksResourceMap, err
+		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
 	}
+
+	// add single resource to k8s resources map (for single resource scan)
+	addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
@@ -153,10 +155,56 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		}
 	}
 
-	return k8sResourcesMap, allResources, ksResourceMap, nil
+	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
 }
 
-func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
+// findScanObjectResource pulls the requested k8s object to be scanned from the api server
+func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
+	if resource == nil {
+		return nil, nil
+	}
+
+	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
+
+	var wlIdentifierString string
+	if resource.GetApiVersion() != "" {
+		wlIdentifierString = strings.Join([]string{resource.GetApiVersion(), resource.GetKind()}, "/")
+	} else {
+		wlIdentifierString = resource.GetKind()
+	}
+
+	gvr, err := k8sinterface.GetGroupVersionResource(wlIdentifierString)
+	if err != nil {
+		return nil, err
+	}
+
+	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
+	if resource.GetNamespace() != "" && k8sinterface.IsNamespaceScope(&gvr) {
+		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
+	}
+	result, err := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors, globalFieldSelector)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource %s, reason: %v", resource.GetID(), err)
+	}
+
+	if len(result) == 0 {
+		return nil, fmt.Errorf("%s was not found", resource.GetID())
+	}
+
+	if len(result) > 1 {
+		return nil, fmt.Errorf("more than one resource found for %s", resource.GetID())
+	}
+
+	metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", resource.GetID())
+	}
+
+	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())
+	return wl, nil
+}
+
+func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
 	clusterName := cautils.ClusterName
 	provider := cloudsupport.GetCloudProvider(clusterName)
 	if provider == "" {
@@ -197,13 +245,13 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		}
 
 		allResources[wl.GetID()] = wl
-		(*ksResourceMap)[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
+		externalResourceMap[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
 	logger.L().Success("Downloaded cloud resources")
 
 	// get api server info resource
 	if cloudResourceRequired(cloudResources, string(cloudsupport.TypeApiServerInfo)) {
-		if err := k8sHandler.collectAPIServerInfoResource(allResources, ksResourceMap); err != nil {
+		if err := k8sHandler.collectAPIServerInfoResource(allResources, externalResourceMap); err != nil {
 			logger.L().Ctx(ctx).Warning("failed to collect api server info resource", helpers.Error(err))
 
 			return err
@@ -222,14 +270,14 @@ func cloudResourceRequired(cloudResources []string, resource string) bool {
 	return false
 }
 
-func (k8sHandler *K8sResourceHandler) collectAPIServerInfoResource(allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) error {
+func (k8sHandler *K8sResourceHandler) collectAPIServerInfoResource(allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources) error {
 	clusterAPIServerInfo, err := k8sHandler.k8s.DiscoveryClient.ServerVersion()
 	if err != nil {
 		return err
 	}
 	resource := cloudsupport.NewApiServerVersionInfo(clusterAPIServerInfo)
 	allResources[resource.GetID()] = resource
-	(*ksResourceMap)[fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind())] = []string{resource.GetID()}
+	externalResourceMap[fmt.Sprintf("%s/%s", resource.GetApiVersion(), resource.GetKind())] = []string{resource.GetID()}
 
 	return nil
 }
@@ -267,13 +315,15 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
-func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, namespace string, labels map[string]string) error {
+func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+	k8sResources := queryableResources.ToK8sResourceMap()
+	allResources := map[string]workloadinterface.IMetadata{}
 
 	var errs error
-	for groupResource := range *k8sResources {
-		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(groupResource)
+	for i := range queryableResources {
+		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(queryableResources[i].GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := k8sHandler.pullSingleResource(&gvr, namespace, labels)
+		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors, globalFieldSelectors)
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
 				// handle error
@@ -290,19 +340,28 @@ func (k8sHandler *K8sResourceHandler) pullResources(k8sResources *cautils.K8SRes
 		for i := range metaObjs {
 			allResources[metaObjs[i].GetID()] = metaObjs[i]
 		}
-		(*k8sResources)[groupResource] = workloadinterface.ListMetaIDs(metaObjs)
+
+		key := queryableResources[i].GroupVersionResourceTriplet
+		if _, ok := k8sResources[key]; !ok {
+			k8sResources[key] = workloadinterface.ListMetaIDs(metaObjs)
+		} else {
+			k8sResources[key] = append(k8sResources[key], workloadinterface.ListMetaIDs(metaObjs)...)
+		}
 	}
-	return errs
+	return k8sResources, allResources, errs
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, namespace string, labels map[string]string) ([]unstructured.Unstructured, error) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, error) {
 	resourceList := []unstructured.Unstructured{}
 	// set labels
 	listOptions := metav1.ListOptions{}
-	fieldSelectors := k8sHandler.fieldSelector.GetNamespacesSelectors(resource)
+	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource)
 	for i := range fieldSelectors {
-
-		listOptions.FieldSelector = fieldSelectors[i]
+		if fieldSelectors[i] != "" {
+			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)
+		} else if fields != "" {
+			listOptions.FieldSelector = fields
+		}
 
 		if len(labels) > 0 {
 			set := k8slabels.Set(labels)
@@ -310,21 +369,12 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 		}
 
 		// set dynamic object
-		var clientResource dynamic.ResourceInterface
-		if namespace != "" {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
-		} else if k8sinterface.IsNamespaceScope(resource) {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource).Namespace(namespace)
-		} else if k8sHandler.fieldSelector.GetClusterScope(resource) {
-			clientResource = k8sHandler.k8s.DynamicClient.Resource(*resource)
-		} else {
-			continue
-		}
+		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
 
 		// list resources
 		result, err := clientResource.List(context.Background(), listOptions)
 		if err != nil || result == nil {
-			return nil, fmt.Errorf("failed to get resource: %v, namespace: %s, labelSelector: %v, reason: %v", resource, namespace, listOptions.LabelSelector, err)
+			return nil, fmt.Errorf("failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %v", resource, listOptions.LabelSelector, listOptions.FieldSelector, err)
 		}
 
 		resourceList = append(resourceList, result.Items...)
@@ -344,7 +394,7 @@ func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterf
 	return workloads
 }
 
-func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, ksResourceMap *cautils.KSResources) (map[string]apis.StatusInfo, error) {
+func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources) (map[string]apis.StatusInfo, error) {
 	logger.L().Debug("Collecting host scanner resources")
 	hostResources, infoMap, err := k8sHandler.hostSensorHandler.CollectResources(ctx)
 	if err != nil {
@@ -356,11 +406,11 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 		groupResource := k8sinterface.JoinResourceTriplets(group, version, hostResources[rscIdx].GetKind())
 		allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
 
-		grpResourceList, ok := (*ksResourceMap)[groupResource]
+		grpResourceList, ok := externalResourceMap[groupResource]
 		if !ok {
 			grpResourceList = make([]string, 0)
 		}
-		(*ksResourceMap)[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
+		externalResourceMap[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 	}
 	return infoMap, nil
 }

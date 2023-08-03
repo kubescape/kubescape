@@ -211,7 +211,7 @@ func Test_isAKS(t *testing.T) {
 /* unused for now.
 type iResourceHandlerMock struct{}
 
-func (*iResourceHandlerMock) GetResources(*cautils.OPASessionObj, *armotypes.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
+func (*iResourceHandlerMock) GetResources(*cautils.OPASessionObj, *identifiers.PortalDesignator) (*cautils.K8SResources, map[string]workloadinterface.IMetadata, *cautils.KSResources, error) {
 	return nil, nil, nil, nil
 }
 func (*iResourceHandlerMock) GetClusterAPIServerInfo() *version.Info {
@@ -232,7 +232,7 @@ func getResourceHandlerMock() *K8sResourceHandler {
 		Context:          context.Background(),
 	}
 
-	return NewK8sResourceHandler(k8s, &EmptySelector{}, nil, nil, nil)
+	return NewK8sResourceHandler(k8s, nil, nil, nil)
 }
 func Test_CollectResources(t *testing.T) {
 	resourceHandler := getResourceHandlerMock()
@@ -246,15 +246,14 @@ func Test_CollectResources(t *testing.T) {
 			ClusterAPIServerInfo: nil,
 		},
 	}
-	policyIdentifier := []cautils.PolicyIdentifier{{}}
 
 	assert.NotPanics(t, func() {
-		CollectResources(context.TODO(), resourceHandler, policyIdentifier, objSession, cautils.NewProgressHandler(""))
+		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
-		CollectResources(context.TODO(), resourceHandler, policyIdentifier, objSession, cautils.NewProgressHandler(""))
+		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }
