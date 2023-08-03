@@ -28,7 +28,6 @@ jobs:
     secrets: inherit
  
   binary-build:
-    if: ${{ contains( github.event.pull_request.labels.*.name, 'trigger-integration-test') }} ## run only if labeled as "trigger-integration-test"
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     needs: pr-scanner
     with:
