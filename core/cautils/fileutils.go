@@ -24,10 +24,6 @@ var (
 	JSON_PREFIX = []string{"json"}
 )
 
-var (
-	ErrNoFilesToScan string = "no files found to scan, input %s"
-)
-
 type FileFormat string
 
 const (
@@ -108,7 +104,6 @@ func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) (map[st
 	}
 	if len(files) == 0 {
 		logger.L().Ctx(ctx).Error("no files found to scan", helpers.String("input", input))
-		return nil, fmt.Errorf(ErrNoFilesToScan, input)
 	}
 
 	workloads, errs := loadFiles(rootPath, files)

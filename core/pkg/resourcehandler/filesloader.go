@@ -18,6 +18,10 @@ import (
 	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
 )
 
+var (
+	notMatchedAnyWorkloadToScanInPath string = "not found any match workload to scan in path: %s"
+)
+
 // FileResourceHandler handle resources from files and URLs
 type FileResourceHandler struct {
 	singleResourceScan *objectsenvelopes.ScanObject
@@ -264,6 +268,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = workloadSource
 		}
+	}
+
+	if len(workloads) == 0 {
+		return nil, nil, fmt.Errorf(notMatchedAnyWorkloadToScanInPath, path)
 	}
 
 	return workloadIDToSource, workloads, nil

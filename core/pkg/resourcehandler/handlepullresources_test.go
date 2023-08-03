@@ -4,7 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -268,7 +267,7 @@ func Test_CollectResources(t *testing.T) {
 }
 
 func Test_getResourcesFromPath(t *testing.T) {
-	expectedError := errors.New(fmt.Sprintf(cautils.ErrNoFilesToScan, emptyDirectory())).Error()
+	expectedError := fmt.Sprintf(notMatchedAnyWorkloadToScanInPath, emptyDirectory())
 	_, _, err := getResourcesFromPath(context.TODO(), emptyDirectory())
 	assert.NotEqual(t, err, nil)
 	assert.Contains(t, err.Error(), expectedError)
