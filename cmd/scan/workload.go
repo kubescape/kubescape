@@ -26,7 +26,7 @@ var (
   %[1]s scan workload <kind>/<name> --file-path <file path>
   
   # Scan an workload from a helm-chart template
-  %[1]s scan workload <kind>/<name> --chart-path <chart path>
+  %[1]s scan workload <kind>/<name> --chart-path <chart path> --file-path <file path>
 
 
 `, cautils.ExecName())
@@ -44,7 +44,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		Example: workloadExample,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("usage: <kind>/<name>")
+				return fmt.Errorf("usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]")
 			}
 
 			if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
@@ -78,7 +78,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 	}
 	workloadCmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
-	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart.")
+	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart the workload is part of. Must be used with --file-path.")
 
 	return workloadCmd
 }

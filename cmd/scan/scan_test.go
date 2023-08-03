@@ -317,7 +317,7 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := &cautils.ScanInfo{
-				IsSecurityView: true,
+				View: string(cautils.SecurityViewType),
 			}
 			setSecurityViewScanInfo(tt.args, got)
 

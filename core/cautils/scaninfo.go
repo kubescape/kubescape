@@ -90,6 +90,7 @@ type ViewTypes string
 
 const (
 	ResourceViewType ViewTypes = "resource"
+	SecurityViewType ViewTypes = "security"
 	ControlViewType  ViewTypes = "control"
 )
 
@@ -137,7 +138,6 @@ type ScanInfo struct {
 	ScanImages            bool
 	ChartPath             string
 	FilePath              string
-	IsSecurityView        bool
 }
 
 type Getters struct {
@@ -210,12 +210,6 @@ func (scanInfo *ScanInfo) Formats() []string {
 }
 
 func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
-	if scanType == ScanTypeCluster || scanType == ScanTypeRepo {
-		// these scan types are only relevant for security view
-		if !scanInfo.IsSecurityView {
-			return
-		}
-	}
 	scanInfo.ScanType = scanType
 }
 

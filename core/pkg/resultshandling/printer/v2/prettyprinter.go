@@ -93,11 +93,12 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 			continue
 		}
 
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, extractCVEs(doc.Matches)...)
+		CVEs := extractCVEs(doc.Matches)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
 
 		setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
 
-		setSeverityToSummaryMap(imageScanSummary.CVEs, imageScanSummary.MapsSeverityToSummary)
+		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
 	}
 
 	return &imageScanSummary, nil

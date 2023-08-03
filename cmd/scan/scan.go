@@ -44,7 +44,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Example: scanCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			// setting input patterns for framework scan is only relevancy for non-security view
-			if len(args) > 0 && !scanInfo.IsSecurityView {
+			if len(args) > 0 && scanInfo.View != string(cautils.SecurityViewType) {
 				if args[0] != "framework" && args[0] != "control" {
 					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
 				}
@@ -52,7 +52,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if scanInfo.IsSecurityView {
+			if scanInfo.View == string(cautils.SecurityViewType) {
 				setSecurityViewScanInfo(args, &scanInfo)
 
 				return securityScan(scanInfo, ks)
@@ -99,7 +99,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.OmitRawResources, "omit-raw-resources", "", false, "Omit raw resources from the output. By default the raw resources are included in the output")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
-	scanCmd.PersistentFlags().BoolVarP(&scanInfo.IsSecurityView, "security-view", "", false, "Show security view")
 
 	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
