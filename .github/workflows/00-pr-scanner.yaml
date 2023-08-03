@@ -29,7 +29,6 @@ jobs:
  
   binary-build:
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
-    needs: pr-scanner
     with:
       COMPONENT_NAME: kubescape
       CGO_ENABLED: 1
@@ -37,6 +36,6 @@ jobs:
       GO_VERSION: "1.20"
       RELEASE: ""
       CLIENT: test
-      ARCH_METRIX: ""
-      OS_METRIX: "ubuntu-20.04"
+      ARCH_MATRIX: '[ "" ]'
+      OS_MATRIX: '[ "ubuntu-20.04" ]'
     secrets: inherit
