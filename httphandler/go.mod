@@ -461,4 +461,7 @@ replace (
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.35.0
 
 	google.golang.org/grpc => google.golang.org/grpc v1.54.0
+
+	// TODO(vladklokun): armoapi-go requires gorm v1.24.6, but Grype depends on v1.23.10 and breaks on anything above. We can’t have both. Upstream changes to Grype?
+	gorm.io/gorm => gorm.io/gorm v1.23.10 // indirect
 )

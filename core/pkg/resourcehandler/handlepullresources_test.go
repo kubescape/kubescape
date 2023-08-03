@@ -232,7 +232,7 @@ func getResourceHandlerMock() *K8sResourceHandler {
 		Context:          context.Background(),
 	}
 
-	return NewK8sResourceHandler(k8s, &EmptySelector{}, nil, nil, nil, nil)
+	return NewK8sResourceHandler(k8s, nil, nil, nil)
 }
 func Test_CollectResources(t *testing.T) {
 	resourceHandler := getResourceHandlerMock()
@@ -248,12 +248,12 @@ func Test_CollectResources(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), cautils.ScanInfo{})
+		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
-		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), cautils.ScanInfo{})
+		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }

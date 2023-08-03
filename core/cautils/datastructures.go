@@ -17,7 +17,7 @@ import (
 
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
 type K8SResources map[string][]string
-type KSResources map[string][]string
+type ExternalResources map[string][]string
 
 type ImageScanData struct {
 	PresenterConfig *models.PresenterConfig
@@ -37,7 +37,7 @@ const (
 
 type OPASessionObj struct {
 	K8SResources          K8SResources                                  // input k8s objects
-	KubescapeResource     KSResources                                   // input Kubescape objects
+	ExternalResources     ExternalResources                             // input non-k8s objects (external resources)
 	AllPolicies           *Policies                                     // list of all frameworks
 	ExcludedRules         map[string]bool                               // rules to exclude map[rule name>]X
 	AllResources          map[string]workloadinterface.IMetadata        // all scanned resources, map[<resource ID>]<resource>

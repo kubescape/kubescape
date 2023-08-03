@@ -19,7 +19,7 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) error {
+func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyIdentifier []cautils.PolicyIdentifier, opaSessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) error {
 	ctx, span := otel.Tracer("").Start(ctx, "resourcehandler.CollectResources")
 	defer span.End()
 	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
@@ -29,17 +29,17 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 		setCloudMetadata(opaSessionObj)
 	}
 
-	resourcesMap, allResources, ksResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, progressListener, scanInfo)
+	resourcesMap, allResources, externalResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, progressListener, scanInfo)
 	if err != nil {
 		return err
 	}
 
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
-	opaSessionObj.KubescapeResource = ksResources
+	opaSessionObj.ExternalResources = externalResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
 
-	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.KubescapeResource == nil || len(opaSessionObj.KubescapeResource) == 0) {
+	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.ExternalResources == nil || len(opaSessionObj.ExternalResources) == 0) {
 		return fmt.Errorf("empty list of resources")
 	}
 

@@ -13,6 +13,7 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/topdown/builtins"
 	"github.com/open-policy-agent/opa/types"
+	"golang.org/x/exp/slices"
 )
 
 // ConvertFrameworksToPolicies convert list of frameworks to list of policies
@@ -50,7 +51,7 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 				summaryDetails.Controls[id] = c
 			}
 		}
-		if cautils.StringInSlice(policies.Frameworks, frameworks[i].Name) != cautils.ValueNotFound {
+		if slices.Contains(policies.Frameworks, frameworks[i].Name) {
 			summaryDetails.Frameworks = append(summaryDetails.Frameworks, reportsummary.FrameworkSummary{
 				Name:     frameworks[i].Name,
 				Controls: controls,

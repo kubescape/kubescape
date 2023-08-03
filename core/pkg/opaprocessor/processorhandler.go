@@ -272,7 +272,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 	inputResources, err := reporthandling.RegoResourcesAggregator(
 		rule,
-		getAllSupportedObjects(opap.K8SResources, opap.KubescapeResource, opap.AllResources, rule), // NOTE: this uses the initial snapshot of AllResources
+		getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule), // NOTE: this uses the initial snapshot of AllResources
 	)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error getting aggregated k8sObjects: %w", err)

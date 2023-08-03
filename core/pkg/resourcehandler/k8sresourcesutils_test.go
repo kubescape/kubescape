@@ -8,14 +8,14 @@ import (
 )
 
 func TestSsEmptyImgVulns(t *testing.T) {
-	ksResourcesMap := make(cautils.KSResources, 0)
-	ksResourcesMap["container.googleapis.com/v1"] = []string{"fsdfds"}
-	assert.Equal(t, true, isEmptyImgVulns(ksResourcesMap))
+	externalResourcesMap := make(cautils.ExternalResources, 0)
+	externalResourcesMap["container.googleapis.com/v1"] = []string{"fsdfds"}
+	assert.Equal(t, true, isEmptyImgVulns(externalResourcesMap))
 
-	ksResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{"dada"}
-	assert.Equal(t, false, isEmptyImgVulns(ksResourcesMap))
+	externalResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{"dada"}
+	assert.Equal(t, false, isEmptyImgVulns(externalResourcesMap))
 
-	ksResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{}
-	ksResourcesMap["bla"] = []string{"blu"}
-	assert.Equal(t, true, isEmptyImgVulns(ksResourcesMap))
+	externalResourcesMap["armo.vuln.images/v1/ImageVulnerabilities"] = []string{}
+	externalResourcesMap["bla"] = []string{"blu"}
+	assert.Equal(t, true, isEmptyImgVulns(externalResourcesMap))
 }
