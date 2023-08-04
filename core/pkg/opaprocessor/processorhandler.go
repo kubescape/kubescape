@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
-	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	logger "github.com/kubescape/go-logger"
@@ -195,7 +194,6 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	for k, v := range allResources {
 		opap.AllResources[k] = v
 	}
-	opap.Report.ReportGenerationTime = time.Now().UTC()
 
 	return nil
 }
@@ -267,85 +265,93 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 // NOTE: processRule no longer mutates the state of the current OPAProcessor instance,
 // and returns a map instead, to be merged by the caller.
 func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, map[string]workloadinterface.IMetadata, error) {
+	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
+	allResources := make(map[string]workloadinterface.IMetadata)
+
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ConfigInputs, fixedControlInputs)
 
-	inputResources, err := reporthandling.RegoResourcesAggregator(
-		rule,
-		getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule), // NOTE: this uses the initial snapshot of AllResources
-	)
-	if err != nil {
-		return nil, nil, fmt.Errorf("error getting aggregated k8sObjects: %w", err)
-	}
-
-	if len(inputResources) == 0 {
-		return nil, nil, nil // no resources found for testing
-	}
-
-	inputRawResources := workloadinterface.ListMetaToMap(inputResources)
-
-	// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
-	enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
-	resources := make(map[string]*resourcesresults.ResourceAssociatedRule, len(inputResources))
-	allResources := make(map[string]workloadinterface.IMetadata, len(inputResources))
-
-	for i, inputResource := range inputResources {
-		resources[inputResource.GetID()] = &resourcesresults.ResourceAssociatedRule{
-			Name:                  rule.Name,
-			ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
-			Status:                apis.StatusPassed,
+	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule)
+	for i := range resourcesPerNS {
+		resourceToScan := resourcesPerNS[i]
+		if _, ok := resourcesPerNS[""]; ok && i != "" {
+			resourceToScan = append(resourceToScan, resourcesPerNS[""]...)
 		}
-		allResources[inputResource.GetID()] = inputResources[i]
-	}
+		inputResources, err := reporthandling.RegoResourcesAggregator(
+			rule,
+			resourceToScan, // NOTE: this uses the initial snapshot of AllResources
+		)
+		if err != nil {
+			continue
+		}
 
-	ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
-	if err != nil {
-		return resources, allResources, err
-	}
+		if len(inputResources) == 0 {
+			continue // no resources found for testing
+		}
 
-	// ruleResponse to ruleResult
-	for _, ruleResponse := range ruleResponses {
-		failedResources := objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources())
-		for _, failedResource := range failedResources {
-			var ruleResult *resourcesresults.ResourceAssociatedRule
-			if r, found := resources[failedResource.GetID()]; found {
-				ruleResult = r
-			} else {
-				ruleResult = &resourcesresults.ResourceAssociatedRule{
-					Paths: make([]armotypes.PosturePaths, 0, len(ruleResponse.FailedPaths)+len(ruleResponse.FixPaths)+1),
-				}
+		inputRawResources := workloadinterface.ListMetaToMap(inputResources)
+
+		// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
+		enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources)
+		if err != nil {
+			continue
+		}
+
+		inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
+
+		for i, inputResource := range inputResources {
+			resources[inputResource.GetID()] = &resourcesresults.ResourceAssociatedRule{
+				Name:                  rule.Name,
+				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+				Status:                apis.StatusPassed,
 			}
+			allResources[inputResource.GetID()] = inputResources[i]
+		}
 
-			ruleResult.SetStatus(apis.StatusFailed, nil)
-			for _, failedPath := range ruleResponse.FailedPaths {
-				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: failedPath})
-			}
+		ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
+		if err != nil {
+			continue
+			// return resources, allResources, err
+		}
 
-			for _, fixPath := range ruleResponse.FixPaths {
-				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: fixPath})
-			}
-
-			if ruleResponse.FixCommand != "" {
-				ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixCommand: ruleResponse.FixCommand})
-			}
-			// if ruleResponse has relatedObjects, add it to ruleResult
-			if len(ruleResponse.RelatedObjects) > 0 {
-				for _, relatedObject := range ruleResponse.RelatedObjects {
-					wl := objectsenvelopes.NewObject(relatedObject.Object)
-					if wl != nil {
-						ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+		// ruleResponse to ruleResult
+		for _, ruleResponse := range ruleResponses {
+			failedResources := objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources())
+			for _, failedResource := range failedResources {
+				var ruleResult *resourcesresults.ResourceAssociatedRule
+				if r, found := resources[failedResource.GetID()]; found {
+					ruleResult = r
+				} else {
+					ruleResult = &resourcesresults.ResourceAssociatedRule{
+						Paths: make([]armotypes.PosturePaths, 0, len(ruleResponse.FailedPaths)+len(ruleResponse.FixPaths)+1),
 					}
 				}
-			}
 
-			resources[failedResource.GetID()] = ruleResult
+				ruleResult.SetStatus(apis.StatusFailed, nil)
+				for _, failedPath := range ruleResponse.FailedPaths {
+					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: failedPath})
+				}
+
+				for _, fixPath := range ruleResponse.FixPaths {
+					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: fixPath})
+				}
+
+				if ruleResponse.FixCommand != "" {
+					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixCommand: ruleResponse.FixCommand})
+				}
+				// if ruleResponse has relatedObjects, add it to ruleResult
+				if len(ruleResponse.RelatedObjects) > 0 {
+					for _, relatedObject := range ruleResponse.RelatedObjects {
+						wl := objectsenvelopes.NewObject(relatedObject.Object)
+						if wl != nil {
+							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+						}
+					}
+				}
+
+				resources[failedResource.GetID()] = ruleResult
+			}
 		}
 	}
-
 	return resources, allResources, nil
 }
 

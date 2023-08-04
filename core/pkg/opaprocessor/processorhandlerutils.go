@@ -88,10 +88,18 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
-	k8sObjects := []workloadinterface.IMetadata{}
-	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
-	k8sObjects = append(k8sObjects, getKubenetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)...)
+func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) map[string][]workloadinterface.IMetadata {
+	// k8sObjects := map[string][]workloadinterface.IMetadata{}
+	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
+	externalObjs := getKubenetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
+	if len(externalObjs) > 0 {
+		l, ok := k8sObjects[""]
+		if !ok {
+			l = []workloadinterface.IMetadata{}
+		}
+		l = append(l, externalObjs...)
+		k8sObjects[""] = l
+	}
 	return k8sObjects
 }
 
@@ -106,6 +114,9 @@ func getKubenetesObjectsFromExternalResources(externalResources cautils.External
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := externalResources[groupResource]; ok {
 							for i := range k8sObj {
+								if isChildResource(allResources[k8sObj[i]], match) {
+									continue
+								}
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
 						}
@@ -115,11 +126,11 @@ func getKubenetesObjectsFromExternalResources(externalResources cautils.External
 		}
 	}
 
-	return filterOutChildResources(k8sObjects, match)
+	return k8sObjects
 }
 
-func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
-	k8sObjects := []workloadinterface.IMetadata{}
+func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) map[string][]workloadinterface.IMetadata {
+	k8sObjects := map[string][]workloadinterface.IMetadata{}
 
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
@@ -128,13 +139,26 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := k8sResources[groupResource]; ok {
-							/*
-								if k8sObj == nil {
-									// logger.L().Debug("skipping", helpers.String("resource", groupResource))
-								}
-							*/
 							for i := range k8sObj {
-								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
+								obj := allResources[k8sObj[i]]
+								if isChildResource(obj, match) {
+									continue
+								}
+
+								ns := ""
+								// if the resource is in namespace scope, get the namespace
+								if k8sinterface.IsResourceInNamespaceScope(resource) {
+									ns = allResources[k8sObj[i]].GetNamespace()
+								}
+								if obj.GetKind() == "Namespace" {
+									ns = allResources[k8sObj[i]].GetName()
+								}
+								l, ok := k8sObjects[ns]
+								if !ok {
+									l = []workloadinterface.IMetadata{}
+								}
+								l = append(l, allResources[k8sObj[i]])
+								k8sObjects[ns] = l
 							}
 						}
 					}
@@ -143,32 +167,30 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 		}
 	}
 
-	return filterOutChildResources(k8sObjects, match)
+	return k8sObjects
+	// return filterOutChildResources(k8sObjects, match)
 }
 
 // filterOutChildResources filter out child resources if the parent resource is in the list
-func filterOutChildResources(objects []workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
-	response := []workloadinterface.IMetadata{}
+func isChildResource(obj workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) bool {
+
+	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
+		return false
+	}
+	w := workloadinterface.NewWorkloadObj(obj.GetObject())
+	ownerReferences, err := w.GetOwnerReferences()
+	if err != nil || len(ownerReferences) == 0 {
+		return false
+	}
+	if ownerReferences[0].Kind == "Node" {
+		return false
+	}
 	owners := []string{}
 	for m := range match {
 		owners = append(owners, match[m].Resources...)
 	}
 
-	for i := range objects {
-		if !k8sinterface.IsTypeWorkload(objects[i].GetObject()) {
-			response = append(response, objects[i])
-			continue
-		}
-		w := workloadinterface.NewWorkloadObj(objects[i].GetObject())
-		ownerReferences, err := w.GetOwnerReferences()
-		if err != nil || len(ownerReferences) == 0 {
-			response = append(response, w)
-		} else if !slices.Contains(owners, ownerReferences[0].Kind) {
-			response = append(response, w)
-		}
-	}
-
-	return response
+	return slices.Contains(owners, ownerReferences[0].Kind)
 }
 
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
