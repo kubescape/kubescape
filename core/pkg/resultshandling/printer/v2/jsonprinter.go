@@ -75,8 +75,8 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, ctx conte
 }
 
 func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
-	presenterConfig, _ := presenter.ValidatedConfig("json", "", false)
-	pres := presenter.GetPresenter(presenterConfig, *scanResults)
+	// presenterConfig, _ := presenter.ValidatedConfig("json", "", false)
+	pres := presenter.GetPresenter("json", "", false, *scanResults)
 
 	return pres.Present(jp.writer)
 }

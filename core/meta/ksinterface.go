@@ -30,4 +30,7 @@ type IKubescape interface {
 
 	// fix
 	Fix(ctx context.Context, fixInfo *metav1.FixInfo) error
+
+	// patch
+	Patch(ctx context.Context, patchInfo *metav1.PatchInfo) error
 }

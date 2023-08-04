@@ -27,6 +27,7 @@ var (
 	clusterScanRunText   = fmt.Sprintf("Run a cluster scan: %s", getCallToActionString("'$ kubescape scan'"))
 	installHelmText      = fmt.Sprintf("Install Kubescape in your cluster for continuous monitoring: %s", linkToHelm)
 	CICDSetupText        = fmt.Sprintf("Add Kubescape to your CI/CD pipeline: %s", linkToCICDSetup)
+	imagePatchText		 = fmt.Sprintf("Try patching your images with: %s", getCallToActionString("'$ kubescape patch'"))
 	complianceFrameworks = []string{"nsa", "mitre"}
 	cveSeverities        = []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
 )

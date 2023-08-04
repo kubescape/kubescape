@@ -93,7 +93,7 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 			continue
 		}
 
-		CVEs := extractCVEs(doc.Matches)
+		CVEs := ExtractCVEs(doc.Matches)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
 
 		setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)

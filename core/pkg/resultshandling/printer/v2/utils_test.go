@@ -134,7 +134,7 @@ func TestExtractCVEs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := extractCVEs(tt.matches)
+			actual := ExtractCVEs(tt.matches)
 			if len(actual) != len(tt.want) {
 				t.Errorf("extractCVEs() = %v, want %v", actual, tt.want)
 			}
