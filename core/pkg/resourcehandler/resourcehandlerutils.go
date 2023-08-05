@@ -12,6 +12,9 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 	if wl == nil {
 		return
 	}
+	// if k8sinterface.WorkloadHasParent(wl) {
+	// 	return
+	// }
 
 	allResources[wl.GetID()] = wl
 
