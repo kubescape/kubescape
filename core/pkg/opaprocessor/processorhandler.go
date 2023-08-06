@@ -201,8 +201,8 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule)
 	for i := range resourcesPerNS {
 		resourceToScan := resourcesPerNS[i]
-		if _, ok := resourcesPerNS[""]; ok && i != "" {
-			resourceToScan = append(resourceToScan, resourcesPerNS[""]...)
+		if _, ok := resourcesPerNS[clusterScope]; ok && i != clusterScope {
+			resourceToScan = append(resourceToScan, resourcesPerNS[clusterScope]...)
 		}
 		inputResources, err := reporthandling.RegoResourcesAggregator(
 			rule,

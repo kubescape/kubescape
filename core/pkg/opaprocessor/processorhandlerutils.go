@@ -17,6 +17,8 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+const clusterScope = "clusterScope"
+
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
 //
 // The function:
@@ -93,12 +95,12 @@ func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources
 	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
 	externalObjs := getKubenetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
 	if len(externalObjs) > 0 {
-		l, ok := k8sObjects[""]
+		l, ok := k8sObjects[clusterScope]
 		if !ok {
 			l = []workloadinterface.IMetadata{}
 		}
 		l = append(l, externalObjs...)
-		k8sObjects[""] = l
+		k8sObjects[clusterScope] = l
 	}
 	return k8sObjects
 }
@@ -145,7 +147,7 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 									continue
 								}
 
-								ns := ""
+								ns := clusterScope
 								// if the resource is in namespace scope, get the namespace
 								if k8sinterface.IsResourceInNamespaceScope(resource) {
 									ns = allResources[k8sObj[i]].GetNamespace()
@@ -182,9 +184,9 @@ func isChildResource(obj workloadinterface.IMetadata, match []reporthandling.Rul
 	if err != nil || len(ownerReferences) == 0 {
 		return false
 	}
-	if ownerReferences[0].Kind == "Node" {
-		return false
-	}
+	// if ownerReferences[0].Kind == "Node" {
+	// 	return false
+	// }
 	owners := []string{}
 	for m := range match {
 		owners = append(owners, match[m].Resources...)
