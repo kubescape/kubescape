@@ -22,7 +22,6 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/sync/errgroup"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -89,7 +88,6 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 	defer span.End()
 	opap.loggerStartScanning()
 	defer opap.loggerDoneScanning()
-
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
@@ -98,101 +96,31 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		defer progressListener.Stop()
 	}
 
-	// results to collect from controls being processed in parallel
-	type results struct {
-		resourceAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
-		allResources              map[string]workloadinterface.IMetadata
-	}
-
-	resultsChan := make(chan results)
-	controlsGroup, groupCtx := errgroup.WithContext(ctx)
-	controlsGroup.SetLimit(maxGoRoutines)
-
-	allResources := make(map[string]workloadinterface.IMetadata, max(len(opap.AllResources), heuristicAllocResources))
-	for k, v := range opap.AllResources {
-		allResources[k] = v
-	}
-
-	var resultsCollector sync.WaitGroup
-	resultsCollector.Add(1)
-	go func() {
-		// collects the results from processing all rules for all controls.
-		//
-		// NOTE: since policies.Controls is a map, iterating over it doesn't guarantee any
-		// specific ordering. Therefore, if a conflict is possible on resources, e.g. 2 rules,
-		// referencing the same resource, the eventual result of the merge is not guaranteed to be
-		// stable. This behavior is consistent with the previous (unparallelized) processing.
-		defer resultsCollector.Done()
-
-		for result := range resultsChan {
-			// merge both maps in parallel
-			var merger sync.WaitGroup
-			merger.Add(1)
-			go func() {
-				// merge all resources
-				defer merger.Done()
-				for k, v := range result.allResources {
-					allResources[k] = v
-				}
-			}()
-
-			merger.Add(1)
-			go func() {
-				defer merger.Done()
-				// update resources with latest results
-				for resourceID, controlResult := range result.resourceAssociatedControl {
-					result, found := opap.ResourcesResult[resourceID]
-					if !found {
-						result = resourcesresults.Result{ResourceID: resourceID}
-					}
-					result.AssociatedControls = append(result.AssociatedControls, controlResult)
-					opap.ResourcesResult[resourceID] = result
-				}
-			}()
-
-			merger.Wait()
-		}
-	}()
-
-	// processes rules for all controls in parallel
-	for _, controlToPin := range policies.Controls {
+	for _, toPin := range policies.Controls {
 		if progressListener != nil {
-			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", controlToPin.ControlID))
+			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
 		}
 
-		control := controlToPin
+		control := toPin
 
-		controlsGroup.Go(func() error {
-			resourceAssociatedControl, allResourcesFromControl, err := opap.processControl(groupCtx, &control)
-			if err != nil {
-				logger.L().Ctx(groupCtx).Warning(err.Error())
+		resourcesAssociatedControl, err := opap.processControl(ctx, &control)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning(err.Error())
+		}
+
+		if len(resourcesAssociatedControl) == 0 {
+			continue
+		}
+
+		// update resources with latest results
+		for resourceID, controlResult := range resourcesAssociatedControl {
+			if _, ok := opap.ResourcesResult[resourceID]; !ok {
+				opap.ResourcesResult[resourceID] = resourcesresults.Result{ResourceID: resourceID}
 			}
-
-			select {
-			case resultsChan <- results{
-				resourceAssociatedControl: resourceAssociatedControl,
-				allResources:              allResourcesFromControl,
-			}:
-			case <-groupCtx.Done(): // interrupted (NOTE: at this moment, this never happens since errors are muted)
-				return groupCtx.Err()
-			}
-
-			return nil
-		})
-	}
-
-	// wait for all results from all rules to be collected
-	err := controlsGroup.Wait()
-	close(resultsChan)
-	resultsCollector.Wait()
-
-	if err != nil {
-		return err
-	}
-
-	// merge the final result in resources
-	for k, v := range allResources {
-		opap.AllResources[k] = v
+			t := opap.ResourcesResult[resourceID]
+			t.AssociatedControls = append(t.AssociatedControls, controlResult)
+			opap.ResourcesResult[resourceID] = t
+		}
 	}
 
 	return nil
@@ -220,7 +148,7 @@ func (opap *OPAProcessor) loggerDoneScanning() {
 //
 // NOTE: the call to processControl no longer mutates the state of the current OPAProcessor instance,
 // but returns a map instead, to be merged by the caller.
-func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, map[string]workloadinterface.IMetadata, error) {
+func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
 	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl, heuristicAllocControls)
 	allResources := make(map[string]workloadinterface.IMetadata, heuristicAllocResources)
 
@@ -257,7 +185,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 		}
 	}
 
-	return resourcesAssociatedControl, allResources, nil
+	return resourcesAssociatedControl, nil
 }
 
 // processRule processes a single policy rule, with some extra fixed control inputs.
