@@ -24,7 +24,8 @@ const (
 )
 
 type IPrinter interface {
-	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj)
+	PrintNextSteps()
+	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData)
 	SetWriter(ctx context.Context, outputFile string)
 	Score(score float32)
 }

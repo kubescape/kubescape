@@ -64,7 +64,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
 	defer span.End()
 	report.reportTime = time.Now().UTC()
-
+  
 	if report.customerGUID == "" {
 		logger.L().Ctx(ctx).Error("failed to publish results. Reason: Unknown account ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
 		return nil

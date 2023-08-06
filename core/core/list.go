@@ -112,7 +112,7 @@ func jsonListFormat(_ context.Context, _ string, policies []string) {
 
 func prettyPrintControls(ctx context.Context, policies []string) {
 	controlsTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
-	controlsTable.SetAutoWrapText(true)
+	controlsTable.SetAutoWrapText(false)
 	controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
 	controlsTable.SetHeaderLine(true)
 	controlsTable.SetRowLine(true)
@@ -134,7 +134,7 @@ func generateControlRows(policies []string) [][]string {
 
 		docs := cautils.GetControlLink(id)
 
-		currentRow := []string{id, control, docs, framework}
+		currentRow := []string{id, control, docs, strings.Replace(framework, " ", "\n", -1)}
 
 		rows = append(rows, currentRow)
 	}

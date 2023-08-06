@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 )
@@ -73,11 +74,11 @@ func MockExceptionAllKinds(policy *armotypes.PosturePolicy) *armotypes.PostureEx
 	return &armotypes.PostureExceptionPolicy{
 		PosturePolicies: []armotypes.PosturePolicy{*policy},
 		Actions:         []armotypes.PostureExceptionPolicyActions{armotypes.AlertOnly},
-		Resources: []armotypes.PortalDesignator{
+		Resources: []identifiers.PortalDesignator{
 			{
-				DesignatorType: armotypes.DesignatorAttributes,
+				DesignatorType: identifiers.DesignatorAttributes,
 				Attributes: map[string]string{
-					armotypes.AttributeKind: ".*",
+					identifiers.AttributeKind: ".*",
 				},
 			},
 		},

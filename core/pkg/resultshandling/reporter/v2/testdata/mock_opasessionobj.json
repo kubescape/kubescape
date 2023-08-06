@@ -722,7 +722,7 @@
             "rbac.authorization.k8s.io/v1/kubescape/Role/ks-sa-roles"
         ]
     },
-    "ArmoResource": {
+    "KubescapeResource": {
         "container.googleapis.com/v1/ClusterDescribe": [
             "container.googleapis.com/v1/ClusterDescribe/cluster-mock"
         ],

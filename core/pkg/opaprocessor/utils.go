@@ -13,12 +13,13 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/topdown/builtins"
 	"github.com/open-policy-agent/opa/types"
+	"golang.org/x/exp/slices"
 )
 
 // ConvertFrameworksToPolicies convert list of frameworks to list of policies
-func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version string) *cautils.Policies {
+func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool) *cautils.Policies {
 	policies := cautils.NewPolicies()
-	policies.Set(frameworks, version)
+	policies.Set(frameworks, version, excludedRules)
 	return policies
 }
 
@@ -38,6 +39,7 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 					ScoreFactor: frameworks[i].Controls[j].BaseScore,
 					Description: frameworks[i].Controls[j].Description,
 					Remediation: frameworks[i].Controls[j].Remediation,
+					Category:    frameworks[i].Controls[j].Category,
 				}
 				if frameworks[i].Controls[j].GetActionRequiredAttribute() == string(apis.SubStatusManualReview) {
 					c.Status = apis.StatusSkipped
@@ -49,7 +51,7 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 				summaryDetails.Controls[id] = c
 			}
 		}
-		if cautils.StringInSlice(policies.Frameworks, frameworks[i].Name) != cautils.ValueNotFound {
+		if slices.Contains(policies.Frameworks, frameworks[i].Name) {
 			summaryDetails.Frameworks = append(summaryDetails.Frameworks, reportsummary.FrameworkSummary{
 				Name:     frameworks[i].Name,
 				Controls: controls,

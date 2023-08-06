@@ -2,12 +2,9 @@ name: 00-pr_scanner
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches:
-      - 'master'
-      - 'main'
-      - 'dev'
     paths-ignore:
       - '**.yaml'
+      - '**.yml'
       - '**.md'
       - '**.sh'
       - 'website/*'
@@ -28,4 +25,17 @@ jobs:
     with:
       RELEASE: ""
       CLIENT: test
+    secrets: inherit
+ 
+  binary-build:
+    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
+    with:
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 1
+      GO111MODULE: ""
+      GO_VERSION: "1.20"
+      RELEASE: ""
+      CLIENT: test
+      ARCH_MATRIX: '[ "" ]'
+      OS_MATRIX: '[ "ubuntu-20.04" ]'
     secrets: inherit

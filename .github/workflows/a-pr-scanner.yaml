@@ -87,15 +87,3 @@ jobs:
             - Credentials scan: ${{ steps.credentials-scan.outcome }}
             - Vulnerabilities scan: ${{ steps.vulnerabilities-scan.outcome }}
           reactions: 'eyes'
-  basic-tests:
-    needs: scanners
-    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
-    with:
-      COMPONENT_NAME: kubescape
-      CGO_ENABLED: 1
-      GO111MODULE: ""
-      GO_VERSION: "1.20"
-      RELEASE: ${{ inputs.RELEASE }}
-      CLIENT: ${{ inputs.CLIENT }}
-      CHECKOUT_REPO: ${{ github.repository }}
-    secrets: inherit

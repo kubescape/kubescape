@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 )
 
 var (
@@ -43,7 +44,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("policy type requeued, supported: %s", supported)
 			}
-			if cautils.StringInSlice(core.ListSupportActions(), args[0]) == cautils.ValueNotFound {
+			if !slices.Contains(core.ListSupportActions(), args[0]) {
 				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
 			}
 			return nil

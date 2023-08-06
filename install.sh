@@ -118,6 +118,7 @@ echo -e "\033[35mUsage: $ $KUBESCAPE_EXEC scan"
 if [ "$(id -u)" -ne 0 ]; then
   echo -e "\nRemember to add the Kubescape CLI to your path with:"
   echo -e "  export PATH=\$PATH:$BASE_DIR/bin"
+  export PATH=\$PATH:$BASE_DIR/bin
 fi
 
 echo -e "\033[0m"
