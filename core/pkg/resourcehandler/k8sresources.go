@@ -217,16 +217,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 	logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
 	logger.L().Info("Downloading cloud resources")
-	// start progressbar during pull of cloud resources (this can take a while).
-	if progressListener != nil {
-		progressListener.Start(len(cloudResources))
-		defer progressListener.Stop()
-	}
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
-		// set way to progress
-		if progressListener != nil {
-			progressListener.ProgressJob(1, fmt.Sprintf("Cloud Resource: %s", resourceKind))
-		}
 		if !cloudResourceRequired(cloudResources, resourceKind) {
 			continue
 		}
@@ -387,7 +378,16 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterface.IMetadata {
 	workloads := []workloadinterface.IMetadata{}
 	for i := range resourceMap {
-		if w := objectsenvelopes.NewObject(resourceMap[i]); w != nil {
+		r := resourceMap[i]
+
+		// skip workloads with parents. e.g. Pod with a ReplicaSet ownerReference. This will not skip resources with CRDs asa parents
+		if k8sinterface.IsTypeWorkload(r) {
+			if k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(r)) {
+				continue
+			}
+		}
+
+		if w := objectsenvelopes.NewObject(r); w != nil {
 			workloads = append(workloads, w)
 		}
 	}

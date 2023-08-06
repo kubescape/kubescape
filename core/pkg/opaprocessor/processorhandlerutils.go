@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	resources "github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/exp/slices"
 )
 
 const clusterScope = "clusterScope"
@@ -116,9 +115,6 @@ func getKubenetesObjectsFromExternalResources(externalResources cautils.External
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := externalResources[groupResource]; ok {
 							for i := range k8sObj {
-								if isChildResource(allResources[k8sObj[i]], match) {
-									continue
-								}
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
 						}
@@ -142,24 +138,15 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 					for _, groupResource := range groupResources {
 						if k8sObj, ok := k8sResources[groupResource]; ok {
 							for i := range k8sObj {
-								obj := allResources[k8sObj[i]]
-								if isChildResource(obj, match) {
-									continue
-								}
 
-								ns := clusterScope
-								// if the resource is in namespace scope, get the namespace
-								if k8sinterface.IsResourceInNamespaceScope(resource) {
-									ns = allResources[k8sObj[i]].GetNamespace()
-								}
-								if obj.GetKind() == "Namespace" {
-									ns = allResources[k8sObj[i]].GetName()
-								}
+								obj := allResources[k8sObj[i]]
+								ns := getNamespaceName(obj, len(allResources))
+
 								l, ok := k8sObjects[ns]
 								if !ok {
 									l = []workloadinterface.IMetadata{}
 								}
-								l = append(l, allResources[k8sObj[i]])
+								l = append(l, obj)
 								k8sObjects[ns] = l
 							}
 						}
@@ -172,29 +159,6 @@ func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[st
 	return k8sObjects
 	// return filterOutChildResources(k8sObjects, match)
 }
-
-// filterOutChildResources filter out child resources if the parent resource is in the list
-func isChildResource(obj workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) bool {
-
-	if !k8sinterface.IsTypeWorkload(obj.GetObject()) {
-		return false
-	}
-	w := workloadinterface.NewWorkloadObj(obj.GetObject())
-	ownerReferences, err := w.GetOwnerReferences()
-	if err != nil || len(ownerReferences) == 0 {
-		return false
-	}
-	// if ownerReferences[0].Kind == "Node" {
-	// 	return false
-	// }
-	owners := []string{}
-	for m := range match {
-		owners = append(owners, match[m].Resources...)
-	}
-
-	return slices.Contains(owners, ownerReferences[0].Kind)
-}
-
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {
@@ -264,4 +228,21 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
+}
+
+func getNamespaceName(obj workloadinterface.IMetadata, clusterSize int) string {
+
+	if clusterSize > 1 {
+		return clusterScope
+	}
+
+	// if the resource is in namespace scope, get the namespace
+	if k8sinterface.IsResourceInNamespaceScope(obj.GetKind()) {
+		return obj.GetNamespace()
+	}
+	if obj.GetKind() == "Namespace" {
+		return obj.GetName()
+	}
+
+	return clusterScope
 }

@@ -22,7 +22,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.15
-	github.com/kubescape/k8s-interface v0.0.135
+	github.com/kubescape/k8s-interface v0.0.136
 	github.com/kubescape/opa-utils v0.0.261
 	github.com/kubescape/rbac-utils v0.0.20
 	github.com/kubescape/regolibrary v1.0.286-rc.0
@@ -42,7 +42,6 @@ require (
 	go.opentelemetry.io/otel/metric v1.16.0
 	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
 	golang.org/x/mod v0.12.0
-	golang.org/x/sync v0.3.0
 	google.golang.org/api v0.126.0
 	google.golang.org/genproto v0.0.0-20230530153820-e85fd2cbaebc
 	google.golang.org/protobuf v1.31.0
@@ -407,6 +406,7 @@ require (
 	golang.org/x/crypto v0.11.0 // indirect
 	golang.org/x/net v0.12.0 // indirect
 	golang.org/x/oauth2 v0.10.0 // indirect
+	golang.org/x/sync v0.3.0 // indirect
 	golang.org/x/sys v0.10.0 // indirect
 	golang.org/x/term v0.10.0 // indirect
 	golang.org/x/text v0.11.0 // indirect

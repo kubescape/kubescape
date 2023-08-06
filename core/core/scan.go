@@ -125,7 +125,8 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printe
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.L().Info("Kubescape scanner starting")
+	logger.L().Info("Kubescape scanner initializing")
+	cautils.StartSpinner()
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info
@@ -156,6 +157,8 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 			logger.L().Ctx(ctx).Error("failed to tear down host scanner", helpers.Error(err))
 		}
 	}()
+
+	cautils.StopSpinner()
 
 	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
 
