@@ -232,7 +232,8 @@ func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 
 func getNamespaceName(obj workloadinterface.IMetadata, clusterSize int) string {
 
-	if clusterSize > 1 {
+	largeClusterSize, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", 0)
+	if clusterSize < largeClusterSize {
 		return clusterScope
 	}
 
