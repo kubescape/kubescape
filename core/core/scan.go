@@ -248,31 +248,40 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 			}
 		}
 	}
-	logger.L().Info("Scanning images")
+
+	pb := cautils.NewProgressHandler("scanning images...")
+	pb.Start(len(imagesToScan))
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)
 
-	for _, img := range imagesToScan {
-		scanSingleImage(ctx, img, svc, resultsHandling)
+	failedImages := []string{}
+	for i, img := range imagesToScan {
+		pb.ProgressJob(i, "Image: "+img+"...")
+		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
+			failedImages = append(failedImages, img)
+			logger.L().Ctx(ctx).Debug(fmt.Sprintf("failed to scan image: %s", img), helpers.Error(err))
+		}
 	}
+	pb.Stop()
 
-	logger.L().Success("Finished scanning images")
+	if len(failedImages) > 0 {
+		logger.L().Error("failed to scan some images, the error are available in debug mode", helpers.Int("number", len(failedImages)), helpers.Interface("images", failedImages))
+	}
 }
 
-func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) {
-	logger.L().Ctx(ctx).Debug(fmt.Sprintf("Scanning image: %s", img))
+func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) error {
 
 	scanResults, err := svc.Scan(ctx, img, imagescan.RegistryCredentials{})
 	if err != nil {
-		logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to scan image: %s", img), helpers.Error(err))
-		return
+		return err
 	}
 
 	resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, cautils.ImageScanData{
 		Image:           img,
 		PresenterConfig: scanResults,
 	})
+	return nil
 }
 
 func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
