@@ -16,6 +16,10 @@ import (
 
 var (
 	workloadExample = fmt.Sprintf(`
+  This command is still in BETA. Feel free to contact the kubescape maintainers for more information.
+
+  Scan a workload for misconfigurations and image vulnerabilities.
+
   # Scan an workload
   %[1]s scan workload <kind>/<name>
 	
@@ -40,7 +44,7 @@ var namespace string
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	workloadCmd := &cobra.Command{
 		Use:     "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]",
-		Short:   fmt.Sprint("The workload you wish to scan"),
+		Short:   "Scan a workload for misconfigurations and image vulnerabilities",
 		Example: workloadExample,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {

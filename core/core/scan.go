@@ -249,6 +249,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		}
 	}
 
+	cautils.StartSpinner()
 	pb := cautils.NewProgressHandler("scanning images...")
 	pb.Start(len(imagesToScan))
 
@@ -256,18 +257,20 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	svc := imagescan.NewScanService(dbCfg)
 
 	failedImages := []string{}
-	for i, img := range imagesToScan {
-		pb.ProgressJob(i, "Image: "+img+"...")
+	for _, img := range imagesToScan {
+		pb.ProgressJob(1, "Image: "+img)
 		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
 			failedImages = append(failedImages, img)
 			logger.L().Ctx(ctx).Debug(fmt.Sprintf("failed to scan image: %s", img), helpers.Error(err))
 		}
 	}
 	pb.Stop()
+	defer cautils.StopSpinner()
 
 	if len(failedImages) > 0 {
 		logger.L().Error("failed to scan some images, the error are available in debug mode", helpers.Int("number", len(failedImages)), helpers.Interface("images", failedImages))
 	}
+	logger.L().Success("Image scan completed successfully")
 }
 
 func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) error {
