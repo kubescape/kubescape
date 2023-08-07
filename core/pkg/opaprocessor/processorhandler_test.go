@@ -185,10 +185,11 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opaSessionObj.Policies = frameworks
 
-	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "", &cautils.ScanInfo{InputPatterns: []string{""}})
+	scanningScope := cautils.GetScanningScope(&cautils.ScanInfo{InputPatterns: []string{""}})
+	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "", nil, scanningScope)
 	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Policies, policies)
 
-	opaSessionObj.K8SResources = &k8sResources
+	opaSessionObj.K8SResources = k8sResources
 	opaSessionObj.AllResources[deployment.GetID()] = deployment
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())

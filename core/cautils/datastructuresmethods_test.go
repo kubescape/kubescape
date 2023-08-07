@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestIsControlFitToScanning(t *testing.T) {
+func TestIsControlFitToScanScope(t *testing.T) {
 	tests := []struct {
 		scanInfo     *ScanInfo
 		Control      reporthandling.Control
@@ -22,7 +22,7 @@ func TestIsControlFitToScanning(t *testing.T) {
 				},
 			},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeFile,
 					},
@@ -37,7 +37,7 @@ func TestIsControlFitToScanning(t *testing.T) {
 				},
 			},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCluster,
@@ -50,7 +50,7 @@ func TestIsControlFitToScanning(t *testing.T) {
 		{
 			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCluster,
@@ -66,7 +66,7 @@ func TestIsControlFitToScanning(t *testing.T) {
 				},
 			},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCloudGKE,
@@ -78,7 +78,7 @@ func TestIsControlFitToScanning(t *testing.T) {
 		{
 			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCloudEKS,
@@ -90,7 +90,7 @@ func TestIsControlFitToScanning(t *testing.T) {
 		{
 			scanInfo: &ScanInfo{},
 			Control: reporthandling.Control{
-				ScanningScope: reporthandling.ScanningScope{
+				ScanningScope: &reporthandling.ScanningScope{
 					Matches: []reporthandling.ScanningScopeType{
 						reporthandling.ScopeCloud,
 					},
@@ -99,6 +99,6 @@ func TestIsControlFitToScanning(t *testing.T) {
 			expected_res: false,
 		}}
 	for i := range tests {
-		assert.Equal(t, isControlFitToScanning(tests[i].Control, getScanningScope(tests[i].scanInfo)), tests[i].expected_res, fmt.Sprintf("tests_true index %d", i))
+		assert.Equal(t, isControlFitToScanScope(tests[i].Control, GetScanningScope(tests[i].scanInfo)), tests[i].expected_res, fmt.Sprintf("tests_true index %d", i))
 	}
 }

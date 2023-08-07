@@ -1,6 +1,8 @@
 package containerscan
 
-import "github.com/armosec/armoapi-go/identifiers"
+import (
+	"github.com/armosec/armoapi-go/identifiers"
+)
 
 type ElasticContainerVulnerabilityResult struct {
 	Designators identifiers.PortalDesignator `json:"designators"`

@@ -73,19 +73,17 @@ func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
-	if report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.GitLocal {
+
+	switch report.Metadata.ScanMetadata.ScanningTarget {
+	case reporthandlingv2.GitLocal:
 		return report.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
-	}
-
-	if report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Directory {
+	case reporthandlingv2.Directory:
 		return report.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
-	}
-
-	if report.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.File {
+	case reporthandlingv2.File:
 		return filepath.Dir(report.Metadata.ContextMetadata.FileContextMetadata.FilePath)
+	default:
+		return ""
 	}
-
-	return ""
 }
 
 func (h *FixHandler) buildResourcesMap() map[string]*reporthandling.Resource {

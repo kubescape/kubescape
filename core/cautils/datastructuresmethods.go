@@ -17,16 +17,25 @@ func NewPolicies() *Policies {
 	}
 }
 
-func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, scanInfo *ScanInfo) {
-	scanScope := getScanningScope(scanInfo)
+func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) {
 	for i := range frameworks {
+		if !isFrameworkFitToScanScope(frameworks[i], scanningScope) {
+			continue
+		}
 		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
 			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
 		}
 		for j := range frameworks[i].Controls {
 			compatibleRules := []reporthandling.PolicyRule{}
 			for r := range frameworks[i].Controls[j].Rules {
-				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanning(frameworks[i].Controls[j], scanScope) {
+				if excludedRules != nil {
+					ruleName := frameworks[i].Controls[j].Rules[r].Name
+					if _, exclude := excludedRules[ruleName]; exclude {
+						continue
+					}
+				}
+
+				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
@@ -93,7 +102,7 @@ func getCloudType(scanInfo *ScanInfo) (bool, reporthandling.ScanningScopeType) {
 	return false, ""
 }
 
-func getScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
+func GetScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
 	var result reporthandling.ScanningScopeType
 
 	switch scanInfo.GetScanningContext() {
@@ -101,8 +110,9 @@ func getScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
 		isCloud, cloudType := getCloudType(scanInfo)
 		if isCloud {
 			result = cloudType
+		} else {
+			result = reporthandling.ScopeCluster
 		}
-		result = reporthandling.ScopeCluster
 	default:
 		result = reporthandling.ScopeFile
 	}
@@ -135,6 +145,9 @@ func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeTy
 
 func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches reporthandling.ScanningScopeType) bool {
 	// for backward compatibility - case: kubescape with scope(new one) and regolibrary without scope(old one)
+	if control.ScanningScope == nil {
+		return true
+	}
 	if len(control.ScanningScope.Matches) == 0 {
 		return true
 	}
@@ -146,6 +159,18 @@ func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches re
 	return false
 }
 
-func isControlFitToScanning(control reporthandling.Control, scanScope reporthandling.ScanningScopeType) bool {
-	return isControlFitToScanScope(control, scanScope)
+func isFrameworkFitToScanScope(framework reporthandling.Framework, scanScopeMatches reporthandling.ScanningScopeType) bool {
+	// for backward compatibility - case: kubescape with scope(new one) and regolibrary without scope(old one)
+	if framework.ScanningScope == nil {
+		return true
+	}
+	if len(framework.ScanningScope.Matches) == 0 {
+		return true
+	}
+	for i := range framework.ScanningScope.Matches {
+		if isScanningScopeMatchToControlScope(scanScopeMatches, framework.ScanningScope.Matches[i]) {
+			return true
+		}
+	}
+	return false
 }

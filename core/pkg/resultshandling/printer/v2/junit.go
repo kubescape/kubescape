@@ -112,7 +112,11 @@ func (jp *JunitPrinter) Score(score float32) {
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 
-func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (jp *JunitPrinter) PrintNextSteps() {
+
+}
+
+func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	junitResult := testsSuites(opaSessionObj)
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {

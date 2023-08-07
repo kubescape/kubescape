@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -109,7 +110,14 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (sp *SARIFPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
+}
+
+func (sp *SARIFPrinter) PrintNextSteps() {
+
+}
+
+func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
 		panic(err)
@@ -327,15 +335,14 @@ func getDocIndex(opaSessionObj *cautils.OPASessionObj, resourceID string) (int, 
 }
 
 func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == v2.GitLocal {
+	switch opaSessionObj.Metadata.ScanMetadata.ScanningTarget {
+	case v2.GitLocal:
 		return opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
-	}
-
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == v2.Directory {
+	case v2.Directory:
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
+	default:
+		return ""
 	}
-
-	return ""
 }
 
 // generateRemediationMessage generates a remediation message for the given control summary

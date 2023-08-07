@@ -39,13 +39,13 @@ func MockFramework_0006_0013() *reporthandling.Framework {
 			Name: "framework-0006-0013",
 		},
 	}
-	c06 := &reporthandling.Control{ScanningScope: reporthandling.ScanningScope{
+	c06 := &reporthandling.Control{ScanningScope: &reporthandling.ScanningScope{
 		Matches: []reporthandling.ScanningScopeType{
 			reporthandling.ScopeCluster,
 		},
 	}}
 	json.Unmarshal([]byte(mockControl_0006), c06)
-	c13 := &reporthandling.Control{ScanningScope: reporthandling.ScanningScope{
+	c13 := &reporthandling.Control{ScanningScope: &reporthandling.ScanningScope{
 		Matches: []reporthandling.ScanningScopeType{
 			reporthandling.ScopeCluster,
 		},
@@ -62,7 +62,7 @@ func MockFramework_0044() *reporthandling.Framework {
 			Name: "framework-0044",
 		},
 	}
-	c44 := &reporthandling.Control{ScanningScope: reporthandling.ScanningScope{
+	c44 := &reporthandling.Control{ScanningScope: &reporthandling.ScanningScope{
 		Matches: []reporthandling.ScanningScopeType{
 			reporthandling.ScopeCluster,
 		},
