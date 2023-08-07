@@ -1,0 +1,34 @@
+name: build-image
+
+on:
+    workflow_dispatch:
+      inputs:
+        CLIENT:
+          required: false
+          type: string
+          default: "test"
+        IMAGE_TAG:
+          required: true
+          type: string
+        CO_SIGN:
+          type: boolean
+          required: false
+          default: false
+        PLATFORMS:
+            type: boolean
+            required: false
+            default: false
+jobs:
+  publish-image:
+    permissions:
+      id-token: write
+      packages: write
+      contents: read
+    uses: ./.github/workflows/d-publish-image.yaml
+    with:
+      client: ${{ inputs.CLIENT }}
+      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
+      image_tag: ${{ inputs.IMAGE_TAG }}
+      support_platforms: ${{ inputs.PLATFORMS }}
+      cosign: ${{ inputs.CO_SIGN }}
+    secrets: inherit
