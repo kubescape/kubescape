@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	prettyPrinterOutputFile = "report"
-	prettyPrinterOutputExt  = ".txt"
+	prettyPrinterOutputFile             = "report"
+	prettyPrinterOutputExt              = ".txt"
+	clusterScanningScopeInformationLink = "https://github.com/kubescape/regolibrary/tree/master#add-a-framework"
 )
 
 var _ printer.IPrinter = &PrettyPrinter{}

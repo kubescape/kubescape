@@ -265,7 +265,7 @@ require (
 	github.com/knqyf263/go-rpmdb v0.0.0-20230301153543-ba94b245509b // indirect
 	github.com/kubescape/go-git-url v0.0.25 // indirect
 	github.com/kubescape/rbac-utils v0.0.20 // indirect
-	github.com/kubescape/regolibrary v1.0.286-rc.0 // indirect
+	github.com/kubescape/regolibrary v1.0.291-rc.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20220929215747-76583552c2be // indirect

@@ -1,19 +1,14 @@
 package getter
 
 import (
-	"errors"
 	"fmt"
 	"io"
-	"log"
-	"math/rand"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,644 +60,644 @@ func TestFallBackGUID(t *testing.T) {
 	})
 }
 
-func TestKSCloudAPI(t *testing.T) {
-	// NOTE:
-	// (i)  mock handlers do not use "require" in order to let goroutines end normally upon failure.
-	// (ii) run with DEBUG_TEST=1 go test -v -run KSCloudAPI to get a trace of all HTTP traffic.
-
-	srv := mockAPIServer(t, withAPIAuth(true)) // assert that a token is passed as header
-	t.Cleanup(srv.Close)
-
-	ks := NewKSCloudAPICustomized(
-		srv.Root(), // BEURL: API URL
-		srv.Root(), // AUTHURL: Authentication URL
-		append(
-			testOptions,
-			WithReportURL(srv.Root()),
-		)...,
-	)
-	ks.SetAccountID("armo")
-	ks.SetClientID("armo")
-	ks.SetSecretKey("armo")
-	ks.SetInvitationToken("armo")
-	hdrs := map[string]string{"key": "value"}
-	body := []byte("body-post")
-
-	t.Run("with authenticated", func(t *testing.T) {
-		require.NoError(t, ks.Login())
-		require.True(t, ks.IsLoggedIn())
-
-		require.NotEmpty(t, ks.feToken.Token)
-		require.NotNil(t, ks.authCookie)
-
-		t.Run("with generic REST methods", func(t *testing.T) {
-			t.Run("should POST", func(t *testing.T) {
-				t.Parallel()
-
-				resp, err := ks.Post(srv.URL(pathTestPost), hdrs, body)
-				require.NoError(t, err)
-
-				require.EqualValues(t, string(body), resp)
-			})
-
-			t.Run("should POST (no headers)", func(t *testing.T) {
-				t.Parallel()
-
-				resp, err := ks.Post(srv.URL(pathTestPost), nil, body)
-				require.NoError(t, err)
-
-				require.EqualValues(t, string(body), resp)
-			})
-
-			t.Run("should DELETE", func(t *testing.T) {
-				t.Parallel()
-
-				resp, err := ks.Delete(srv.URL(pathTestDelete), hdrs)
-				require.NoError(t, err)
-
-				require.EqualValues(t, "body-delete", resp)
-			})
-
-			t.Run("should GET", func(t *testing.T) {
-				t.Parallel()
-
-				resp, err := ks.Get(srv.URL(pathTestGet), hdrs)
-				require.NoError(t, err)
-
-				require.EqualValues(t, "body-get", resp)
-			})
-		})
-
-		t.Run("should retrieve AttackTracks", func(t *testing.T) {
-			t.Parallel()
-
-			tracks, err := ks.GetAttackTracks()
-			require.NoError(t, err)
-			require.NotNil(t, tracks)
-
-			expected := mockAttackTracks()
-
-			// make sure controls don't leak
-			for i := range expected {
-				expected[i].Spec.Data.Controls = nil // doesn't pass the JSON marshal
-				for j := range expected[i].Spec.Data.SubSteps {
-					expected[i].Spec.Data.SubSteps[j].Controls = nil
-				}
-			}
-			require.EqualValues(t, expected, tracks)
-		})
-
-		t.Run("with frameworks", func(t *testing.T) {
-			t.Run("should retrieve Framework #1", func(t *testing.T) {
-				t.Parallel()
-
-				framework, err := ks.GetFramework("mock-1")
-				require.NoError(t, err)
-				require.NotNil(t, framework)
-
-				mocked := mockFrameworks()
-				expected := &mocked[0]
-				require.EqualValues(t, expected, framework)
-			})
-
-			t.Run("should retrieve Framework #2", func(t *testing.T) {
-				t.Parallel()
-
-				framework, err := ks.GetFramework("mock-2")
-				require.NoError(t, err)
-				require.NotNil(t, framework)
-
-				mocked := mockFrameworks()
-				expected := &mocked[1]
-				require.EqualValues(t, expected, framework)
-			})
-
-			t.Run("should retrieve native Framework", func(t *testing.T) {
-				t.Parallel()
-
-				const testFramework = "MITRE"
-				expected, err := os.ReadFile(testFrameworkFile(testFramework))
-				require.NoError(t, err)
-
-				framework, err := ks.GetFramework("miTrE")
-				require.NoError(t, err)
-				require.NotNil(t, framework)
-				jazon, err := json.Marshal(framework)
-				require.NoError(t, err)
-				require.JSONEq(t, string(expected), string(jazon))
-			})
-
-			t.Run("should retrieve all Frameworks", func(t *testing.T) {
-				t.Parallel()
-
-				// NOTE: MITRE fixture is not part of the base mock
-
-				expected := mockFrameworks()
-				frameworks, err := ks.GetFrameworks()
-				require.NoError(t, err)
-				require.Len(t, frameworks, 3)
-				require.EqualValues(t, expected, frameworks)
-			})
-
-			t.Run("should list all Frameworks", func(t *testing.T) {
-				t.Parallel()
-
-				mocks := mockFrameworks()
-				expected := make([]string, 0, 3)
-				for _, fw := range mocks {
-					expected = append(expected, fw.Name)
-				}
-
-				frameworkNames, err := ks.ListFrameworks()
-				require.NoError(t, err)
-				require.Len(t, frameworkNames, 3)
-				require.ElementsMatch(t, expected, frameworkNames)
-			})
-
-			t.Run("should list custom Frameworks", func(t *testing.T) {
-				t.Parallel()
-
-				mocks := mockFrameworks()
-				expected := make([]string, 0, 2)
-				for _, fw := range mocks[:len(mocks)-1] {
-					expected = append(expected, fw.Name)
-				}
-
-				frameworkNames, err := ks.ListCustomFrameworks()
-				require.NoError(t, err)
-				require.Len(t, frameworkNames, 2)
-				require.ElementsMatch(t, expected, frameworkNames)
-			})
-		})
-
-		t.Run("with controls", func(t *testing.T) {
-			t.Run("should NOT retrieve Control (not a public API)", func(t *testing.T) {
-				t.Parallel()
-
-				const id = "control-1"
-
-				control, err := ks.GetControl(id)
-				require.Error(t, err)
-				require.Nil(t, control)
-				require.Contains(t, err.Error(), "is not public")
-			})
-
-			t.Run("should NOT list Controls (not a public API)", func(t *testing.T) {
-				t.Parallel()
-
-				control, err := ks.ListControls()
-				require.Error(t, err)
-				require.Nil(t, control)
-				require.Contains(t, err.Error(), "is not public")
-			})
-		})
-
-		t.Run("with exceptions", func(t *testing.T) {
-			t.Run("should retrieve Exceptions", func(t *testing.T) {
-				t.Parallel()
-
-				expected := mockExceptions()
-				exceptions, err := ks.GetExceptions("")
-				require.NoError(t, err)
-				require.Len(t, exceptions, 2)
-				require.EqualValues(t, expected, exceptions)
-			})
-
-			t.Run("should POST Exceptions", func(t *testing.T) {
-				t.Parallel()
-
-				require.NoError(t,
-					ks.PostExceptions(mockExceptions()),
-				)
-			})
-
-			t.Run("DELETE Exception requires a name", func(t *testing.T) {
-				t.Parallel()
-
-				require.Error(t,
-					ks.DeleteException(""),
-				)
-			})
-
-			t.Run("should DELETE Exception", func(t *testing.T) {
-				t.Parallel()
-
-				require.NoError(t,
-					ks.DeleteException("mock"),
-				)
-			})
-		})
-
-		t.Run("should retrieve Tenant", func(t *testing.T) {
-			t.Parallel()
-
-			expected := mockTenantResponse()
-			tenant, err := ks.GetTenant()
-			require.NoError(t, err)
-			require.NotNil(t, tenant)
-			require.EqualValues(t, expected, tenant)
-		})
-
-		t.Run("with CustomerConfig", func(t *testing.T) {
-			t.Run("empty CustomerConfig", func(t *testing.T) {
-				t.Parallel()
-
-				kno := NewKSCloudAPICustomized(
-					"",
-					srv.Root(),
-				)
-
-				account, err := kno.GetAccountConfig("")
-				require.NoError(t, err)
-				require.NotNil(t, account)
-				require.Empty(t, *account)
-			})
-
-			t.Run("should retrieve CustomerConfig", func(t *testing.T) {
-				t.Parallel()
-
-				expected := mockCustomerConfig("", "")()
-				account, err := ks.GetAccountConfig("")
-				require.NoError(t, err)
-				require.NotNil(t, account)
-				require.EqualValues(t, expected, account)
-			})
-
-			t.Run("should retrieve CustomerConfig for cluster", func(t *testing.T) {
-				t.Parallel()
-
-				const cluster = "special-cluster"
-
-				expected := mockCustomerConfig(cluster, "")()
-				account, err := ks.GetAccountConfig(cluster)
-				require.NoError(t, err)
-				require.NotNil(t, account)
-				require.EqualValues(t, expected, account)
-			})
-
-			t.Run("should retrieve scoped CustomerConfig", func(t *testing.T) {
-				// NOTE: this is not directly exposed as an exported method of the API client,
-				// but called internally on some specific condition that is hard to reproduce in test.
-				t.Parallel()
-
-				mocks := mockCustomerConfig("", "customer")()
-				expected, err := json.Marshal(mocks)
-				require.NoError(t, err)
-
-				account, err := ks.Get(ks.getAccountConfigDefault(""), nil)
-				require.NoError(t, err)
-				require.NotNil(t, account)
-				require.JSONEq(t, string(expected), account)
-			})
-
-			t.Run("should retrieve scoped CustomerConfig for cluster", func(t *testing.T) {
-				// NOTE: same as above
-				t.Parallel()
-
-				const cluster = "special-cluster"
-
-				mocks := mockCustomerConfig(cluster, "customer")()
-				expected, err := json.Marshal(mocks)
-				require.NoError(t, err)
-
-				account, err := ks.Get(ks.getAccountConfigDefault(cluster), nil)
-				require.NoError(t, err)
-				require.NotNil(t, account)
-				require.JSONEq(t, string(expected), account)
-			})
-
-			t.Run("should retrieve ControlInputs", func(t *testing.T) {
-				t.Parallel()
-
-				config := mockCustomerConfig("", "")()
-				expected := config.Settings.PostureControlInputs
-
-				inputs, err := ks.GetControlsInputs("")
-				require.NoError(t, err)
-				require.NotNil(t, inputs)
-				require.EqualValues(t, expected, inputs)
-			})
-		})
-
-		t.Run("should submit report", func(t *testing.T) {
-			t.Parallel()
-
-			const (
-				cluster  = "special-cluster"
-				reportID = "5d817063-096f-4d91-b39b-8665240080af"
-			)
-
-			submitted := mockPostureReport(t, reportID, cluster)
-			require.NoError(t,
-				ks.SubmitReport(submitted),
-			)
-		})
-	})
-
-	t.Run("should POST with options", func(t *testing.T) {
-		// exercise some options of the client
-		t.Parallel()
-
-		log.SetOutput(io.Discard)
-		defer func() {
-			log.SetOutput(os.Stderr)
-		}()
-		kt := NewKSCloudAPICustomized(srv.Root(), srv.Root(),
-			WithHTTPClient(&http.Client{}),
-			WithTimeout(500*time.Millisecond),
-			WithTrace(true),
-		)
-		kt.SetAccountID("armo")
-		kt.SetClientID("armo")
-		kt.SetSecretKey("armo")
-
-		require.NoError(t, kt.Login())
-		require.True(t, kt.IsLoggedIn())
-
-		resp, err := kt.Post(srv.URL(pathTestPost), hdrs, body)
-		require.NoError(t, err)
-
-		require.EqualValues(t, string(body), resp)
-	})
-
-	t.Run("with login", func(t *testing.T) {
-		t.Run("login requires an account ID", func(t *testing.T) {
-			t.Parallel()
-
-			kno := NewKSCloudAPICustomized(
-				"",
-				srv.Root(),
-			)
-			kno.SetClientID("armo")
-			kno.SetSecretKey("armo")
-
-			err := kno.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "missing accountID")
-		})
-
-		t.Run("login requires a client ID", func(t *testing.T) {
-			t.Parallel()
-
-			kno := NewKSCloudAPICustomized(
-				"",
-				srv.Root(),
-			)
-			kno.SetAccountID("armo")
-			kno.SetSecretKey("armo")
-
-			err := kno.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "missing clientID")
-		})
-
-		t.Run("login requires a secret key", func(t *testing.T) {
-			t.Parallel()
-
-			kno := NewKSCloudAPICustomized(
-				"",
-				srv.Root(),
-			)
-			kno.SetAccountID("armo")
-			kno.SetClientID("armo")
-
-			err := kno.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "missing secretKey")
-		})
-	})
-
-	t.Run("with getters & setters", func(t *testing.T) {
-		t.Parallel()
-
-		kno := NewKSCloudAPICustomized(
-			"",
-			srv.Root(),
-		)
-
-		pickString := func() string {
-			return strconv.Itoa(rand.Intn(10000)) //nolint:gosec
-		}
-
-		t.Run("should get&set account", func(t *testing.T) {
-			str := pickString()
-			kno.SetAccountID(str)
-			require.Equal(t, str, kno.GetAccountID())
-		})
-
-		t.Run("should get&set client", func(t *testing.T) {
-			str := pickString()
-			kno.SetClientID(str)
-			require.Equal(t, str, kno.GetClientID())
-		})
-
-		t.Run("should get&set key", func(t *testing.T) {
-			str := pickString()
-			kno.SetSecretKey(str)
-			require.Equal(t, str, kno.GetSecretKey())
-		})
-
-		t.Run("should get&set invitation token", func(t *testing.T) {
-			str := pickString()
-			kno.SetInvitationToken(str)
-			require.Equal(t, str, kno.GetInvitationToken())
-		})
-
-		t.Run("should get&set report URL", func(t *testing.T) {
-			str := pickString()
-			kno.SetCloudReportURL(str)
-			require.Equal(t, str, kno.GetCloudReportURL())
-		})
-
-		t.Run("should get&set API URL", func(t *testing.T) {
-			str := pickString()
-			kno.SetCloudAPIURL(str)
-			require.Equal(t, str, kno.GetCloudAPIURL())
-		})
-
-		t.Run("should get&set UI URL", func(t *testing.T) {
-			str := pickString()
-			kno.SetCloudUIURL(str)
-			require.Equal(t, str, kno.GetCloudUIURL())
-		})
-
-		t.Run("should get&set auth URL", func(t *testing.T) {
-			str := pickString()
-			kno.SetCloudAuthURL(str)
-			require.Equal(t, str, kno.GetCloudAuthURL())
-		})
-	})
-
-	t.Run("with API errors", func(t *testing.T) {
-		// exercise the client when the API returns errors
-		t.Parallel()
-
-		errAPI := errors.New("test error")
-		errSrv := mockAPIServer(t, withAPIError(errAPI))
-		t.Cleanup(errSrv.Close)
-
-		ke := NewKSCloudAPICustomized(
-			errSrv.Root(),
-			errSrv.Root(),
-		)
-		ke.SetAccountID("armo")
-		ke.SetClientID("armo")
-		ke.SetSecretKey("armo")
-
-		hdrs := map[string]string{"key": "value"}
-		body := []byte("body-post")
-
-		t.Run("API calls should error", func(t *testing.T) {
-			_, err := ke.Post(errSrv.URL(pathTestPost), hdrs, body)
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.Delete(errSrv.URL(pathTestDelete), hdrs)
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.Get(errSrv.URL(pathTestGet), hdrs)
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.GetExceptions("")
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			err = ke.PostExceptions(mockExceptions())
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			err = ke.DeleteException("mock")
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.GetTenant()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.GetControlsInputs("")
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.GetAccountConfig("")
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			err = ke.Login()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), "error authenticating")
-			require.False(t, ke.IsLoggedIn())
-
-			_, err = ke.GetAttackTracks()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.GetFramework("mock-1")
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.GetFrameworks()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.ListFrameworks()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-
-			_, err = ke.ListCustomFrameworks()
-			require.Error(t, err)
-			require.Contains(t, err.Error(), errAPI.Error())
-		})
-	})
-
-	t.Run("with API returning invalid response", func(t *testing.T) {
-		// exercise the client when the API returns an invalid response
-		t.Parallel()
-
-		errSrv := mockAPIServer(t, withAPIGarbled(true))
-		t.Cleanup(errSrv.Close)
-
-		ke := NewKSCloudAPICustomized(
-			errSrv.Root(),
-			errSrv.Root(),
-		)
-		ke.SetAccountID("armo")
-		ke.SetClientID("armo")
-		ke.SetSecretKey("armo")
-
-		t.Run("API calls should return unmarshalling error", func(t *testing.T) {
-			// only API calls that return a typed response are checked
-
-			_, err := ke.GetExceptions("")
-			require.Error(t, err)
-
-			_, err = ke.GetTenant()
-			require.Error(t, err)
-
-			_, err = ke.GetAccountConfig("")
-			require.Error(t, err)
-
-			err = ke.Login()
-			require.Error(t, err)
-			require.False(t, ke.IsLoggedIn())
-
-			_, err = ke.GetControlsInputs("")
-			require.Error(t, err)
-
-			_, err = ke.GetAttackTracks()
-			require.Error(t, err)
-
-			_, err = ke.GetFramework("mock-1")
-			require.Error(t, err)
-
-			_, err = ke.GetFrameworks()
-			require.Error(t, err)
-
-			_, err = ke.ListFrameworks()
-			require.Error(t, err)
-
-			_, err = ke.ListCustomFrameworks()
-			require.Error(t, err)
-		})
-	})
-
-	t.Run("with no cookie response", func(t *testing.T) {
-		// simulates a successul login, but the second stage (retrieving the cookie) fails: no cookie is set in response
-		t.Parallel()
-
-		errSrv := mockAPIServer(t, withAPIAuth(true), withAPINoCookie(true)) // assert that a token is passed as header, and no cookie is returned
-		t.Cleanup(errSrv.Close)
-
-		kt := NewKSCloudAPICustomized(errSrv.Root(), errSrv.Root(), testOptions...)
-		kt.SetAccountID("armo")
-		kt.SetClientID("armo")
-		kt.SetSecretKey("armo")
-
-		err := kt.Login()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "no auth cookie in response")
-		require.False(t, kt.IsLoggedIn())
-	})
-
-	t.Run("with error on cookie response", func(t *testing.T) {
-		// simulates a successul login, but the second stage (retrieving the cookie) fails: API error
-		t.Parallel()
-
-		errSrv := mockAPIServer(t, withAPIAuth(true), withAPIErrOnCookie(errors.New("cookie error")))
-		t.Cleanup(errSrv.Close)
-
-		kt := NewKSCloudAPICustomized(errSrv.Root(), errSrv.Root(), testOptions...)
-		kt.SetAccountID("armo")
-		kt.SetClientID("armo")
-		kt.SetSecretKey("armo")
-
-		err := kt.Login()
-		require.Error(t, err)
-		require.Contains(t, err.Error(), "failed to get cookie")
-		require.False(t, kt.IsLoggedIn())
-	})
-}
+// func TestKSCloudAPI(t *testing.T) {
+// 	// NOTE:
+// 	// (i)  mock handlers do not use "require" in order to let goroutines end normally upon failure.
+// 	// (ii) run with DEBUG_TEST=1 go test -v -run KSCloudAPI to get a trace of all HTTP traffic.
+
+// 	srv := mockAPIServer(t, withAPIAuth(true)) // assert that a token is passed as header
+// 	t.Cleanup(srv.Close)
+
+// 	ks := NewKSCloudAPICustomized(
+// 		srv.Root(), // BEURL: API URL
+// 		srv.Root(), // AUTHURL: Authentication URL
+// 		append(
+// 			testOptions,
+// 			WithReportURL(srv.Root()),
+// 		)...,
+// 	)
+// 	ks.SetAccountID("armo")
+// 	ks.SetClientID("armo")
+// 	ks.SetSecretKey("armo")
+// 	ks.SetInvitationToken("armo")
+// 	hdrs := map[string]string{"key": "value"}
+// 	body := []byte("body-post")
+
+// 	t.Run("with authenticated", func(t *testing.T) {
+// 		require.NoError(t, ks.Login())
+// 		require.True(t, ks.IsLoggedIn())
+
+// 		require.NotEmpty(t, ks.feToken.Token)
+// 		require.NotNil(t, ks.authCookie)
+
+// 		t.Run("with generic REST methods", func(t *testing.T) {
+// 			t.Run("should POST", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				resp, err := ks.Post(srv.URL(pathTestPost), hdrs, body)
+// 				require.NoError(t, err)
+
+// 				require.EqualValues(t, string(body), resp)
+// 			})
+
+// 			t.Run("should POST (no headers)", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				resp, err := ks.Post(srv.URL(pathTestPost), nil, body)
+// 				require.NoError(t, err)
+
+// 				require.EqualValues(t, string(body), resp)
+// 			})
+
+// 			t.Run("should DELETE", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				resp, err := ks.Delete(srv.URL(pathTestDelete), hdrs)
+// 				require.NoError(t, err)
+
+// 				require.EqualValues(t, "body-delete", resp)
+// 			})
+
+// 			t.Run("should GET", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				resp, err := ks.Get(srv.URL(pathTestGet), hdrs)
+// 				require.NoError(t, err)
+
+// 				require.EqualValues(t, "body-get", resp)
+// 			})
+// 		})
+
+// 		t.Run("should retrieve AttackTracks", func(t *testing.T) {
+// 			t.Parallel()
+
+// 			tracks, err := ks.GetAttackTracks()
+// 			require.NoError(t, err)
+// 			require.NotNil(t, tracks)
+
+// 			expected := mockAttackTracks()
+
+// 			// make sure controls don't leak
+// 			for i := range expected {
+// 				expected[i].Spec.Data.Controls = nil // doesn't pass the JSON marshal
+// 				for j := range expected[i].Spec.Data.SubSteps {
+// 					expected[i].Spec.Data.SubSteps[j].Controls = nil
+// 				}
+// 			}
+// 			require.EqualValues(t, expected, tracks)
+// 		})
+
+// 		t.Run("with frameworks", func(t *testing.T) {
+// 			t.Run("should retrieve Framework #1", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				framework, err := ks.GetFramework("mock-1")
+// 				require.NoError(t, err)
+// 				require.NotNil(t, framework)
+
+// 				mocked := mockFrameworks()
+// 				expected := &mocked[0]
+// 				require.EqualValues(t, expected, framework)
+// 			})
+
+// 			t.Run("should retrieve Framework #2", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				framework, err := ks.GetFramework("mock-2")
+// 				require.NoError(t, err)
+// 				require.NotNil(t, framework)
+
+// 				mocked := mockFrameworks()
+// 				expected := &mocked[1]
+// 				require.EqualValues(t, expected, framework)
+// 			})
+
+// 			t.Run("should retrieve native Framework", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				const testFramework = "MITRE"
+// 				expected, err := os.ReadFile(testFrameworkFile(testFramework))
+// 				require.NoError(t, err)
+
+// 				framework, err := ks.GetFramework("miTrE")
+// 				require.NoError(t, err)
+// 				require.NotNil(t, framework)
+// 				jazon, err := json.Marshal(framework)
+// 				require.NoError(t, err)
+// 				require.JSONEq(t, string(expected), string(jazon))
+// 			})
+
+// 			t.Run("should retrieve all Frameworks", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				// NOTE: MITRE fixture is not part of the base mock
+
+// 				expected := mockFrameworks()
+// 				frameworks, err := ks.GetFrameworks()
+// 				require.NoError(t, err)
+// 				require.Len(t, frameworks, 3)
+// 				require.EqualValues(t, expected, frameworks)
+// 			})
+
+// 			t.Run("should list all Frameworks", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				mocks := mockFrameworks()
+// 				expected := make([]string, 0, 3)
+// 				for _, fw := range mocks {
+// 					expected = append(expected, fw.Name)
+// 				}
+
+// 				frameworkNames, err := ks.ListFrameworks()
+// 				require.NoError(t, err)
+// 				require.Len(t, frameworkNames, 3)
+// 				require.ElementsMatch(t, expected, frameworkNames)
+// 			})
+
+// 			t.Run("should list custom Frameworks", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				mocks := mockFrameworks()
+// 				expected := make([]string, 0, 2)
+// 				for _, fw := range mocks[:len(mocks)-1] {
+// 					expected = append(expected, fw.Name)
+// 				}
+
+// 				frameworkNames, err := ks.ListCustomFrameworks()
+// 				require.NoError(t, err)
+// 				require.Len(t, frameworkNames, 2)
+// 				require.ElementsMatch(t, expected, frameworkNames)
+// 			})
+// 		})
+
+// 		t.Run("with controls", func(t *testing.T) {
+// 			t.Run("should NOT retrieve Control (not a public API)", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				const id = "control-1"
+
+// 				control, err := ks.GetControl(id)
+// 				require.Error(t, err)
+// 				require.Nil(t, control)
+// 				require.Contains(t, err.Error(), "is not public")
+// 			})
+
+// 			t.Run("should NOT list Controls (not a public API)", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				control, err := ks.ListControls()
+// 				require.Error(t, err)
+// 				require.Nil(t, control)
+// 				require.Contains(t, err.Error(), "is not public")
+// 			})
+// 		})
+
+// 		t.Run("with exceptions", func(t *testing.T) {
+// 			t.Run("should retrieve Exceptions", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				expected := mockExceptions()
+// 				exceptions, err := ks.GetExceptions("")
+// 				require.NoError(t, err)
+// 				require.Len(t, exceptions, 2)
+// 				require.EqualValues(t, expected, exceptions)
+// 			})
+
+// 			t.Run("should POST Exceptions", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				require.NoError(t,
+// 					ks.PostExceptions(mockExceptions()),
+// 				)
+// 			})
+
+// 			t.Run("DELETE Exception requires a name", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				require.Error(t,
+// 					ks.DeleteException(""),
+// 				)
+// 			})
+
+// 			t.Run("should DELETE Exception", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				require.NoError(t,
+// 					ks.DeleteException("mock"),
+// 				)
+// 			})
+// 		})
+
+// 		t.Run("should retrieve Tenant", func(t *testing.T) {
+// 			t.Parallel()
+
+// 			expected := mockTenantResponse()
+// 			tenant, err := ks.GetTenant()
+// 			require.NoError(t, err)
+// 			require.NotNil(t, tenant)
+// 			require.EqualValues(t, expected, tenant)
+// 		})
+
+// 		t.Run("with CustomerConfig", func(t *testing.T) {
+// 			t.Run("empty CustomerConfig", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				kno := NewKSCloudAPICustomized(
+// 					"",
+// 					srv.Root(),
+// 				)
+
+// 				account, err := kno.GetAccountConfig("")
+// 				require.NoError(t, err)
+// 				require.NotNil(t, account)
+// 				require.Empty(t, *account)
+// 			})
+
+// 			t.Run("should retrieve CustomerConfig", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				expected := mockCustomerConfig("", "")()
+// 				account, err := ks.GetAccountConfig("")
+// 				require.NoError(t, err)
+// 				require.NotNil(t, account)
+// 				require.EqualValues(t, expected, account)
+// 			})
+
+// 			t.Run("should retrieve CustomerConfig for cluster", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				const cluster = "special-cluster"
+
+// 				expected := mockCustomerConfig(cluster, "")()
+// 				account, err := ks.GetAccountConfig(cluster)
+// 				require.NoError(t, err)
+// 				require.NotNil(t, account)
+// 				require.EqualValues(t, expected, account)
+// 			})
+
+// 			t.Run("should retrieve scoped CustomerConfig", func(t *testing.T) {
+// 				// NOTE: this is not directly exposed as an exported method of the API client,
+// 				// but called internally on some specific condition that is hard to reproduce in test.
+// 				t.Parallel()
+
+// 				mocks := mockCustomerConfig("", "customer")()
+// 				expected, err := json.Marshal(mocks)
+// 				require.NoError(t, err)
+
+// 				account, err := ks.Get(ks.getAccountConfigDefault(""), nil)
+// 				require.NoError(t, err)
+// 				require.NotNil(t, account)
+// 				require.JSONEq(t, string(expected), account)
+// 			})
+
+// 			t.Run("should retrieve scoped CustomerConfig for cluster", func(t *testing.T) {
+// 				// NOTE: same as above
+// 				t.Parallel()
+
+// 				const cluster = "special-cluster"
+
+// 				mocks := mockCustomerConfig(cluster, "customer")()
+// 				expected, err := json.Marshal(mocks)
+// 				require.NoError(t, err)
+
+// 				account, err := ks.Get(ks.getAccountConfigDefault(cluster), nil)
+// 				require.NoError(t, err)
+// 				require.NotNil(t, account)
+// 				require.JSONEq(t, string(expected), account)
+// 			})
+
+// 			t.Run("should retrieve ControlInputs", func(t *testing.T) {
+// 				t.Parallel()
+
+// 				config := mockCustomerConfig("", "")()
+// 				expected := config.Settings.PostureControlInputs
+
+// 				inputs, err := ks.GetControlsInputs("")
+// 				require.NoError(t, err)
+// 				require.NotNil(t, inputs)
+// 				require.EqualValues(t, expected, inputs)
+// 			})
+// 		})
+
+// 		t.Run("should submit report", func(t *testing.T) {
+// 			t.Parallel()
+
+// 			const (
+// 				cluster  = "special-cluster"
+// 				reportID = "5d817063-096f-4d91-b39b-8665240080af"
+// 			)
+
+// 			submitted := mockPostureReport(t, reportID, cluster)
+// 			require.NoError(t,
+// 				ks.SubmitReport(submitted),
+// 			)
+// 		})
+// 	})
+
+// 	t.Run("should POST with options", func(t *testing.T) {
+// 		// exercise some options of the client
+// 		t.Parallel()
+
+// 		log.SetOutput(io.Discard)
+// 		defer func() {
+// 			log.SetOutput(os.Stderr)
+// 		}()
+// 		kt := NewKSCloudAPICustomized(srv.Root(), srv.Root(),
+// 			WithHTTPClient(&http.Client{}),
+// 			WithTimeout(500*time.Millisecond),
+// 			WithTrace(true),
+// 		)
+// 		kt.SetAccountID("armo")
+// 		kt.SetClientID("armo")
+// 		kt.SetSecretKey("armo")
+
+// 		require.NoError(t, kt.Login())
+// 		require.True(t, kt.IsLoggedIn())
+
+// 		resp, err := kt.Post(srv.URL(pathTestPost), hdrs, body)
+// 		require.NoError(t, err)
+
+// 		require.EqualValues(t, string(body), resp)
+// 	})
+
+// 	t.Run("with login", func(t *testing.T) {
+// 		t.Run("login requires an account ID", func(t *testing.T) {
+// 			t.Parallel()
+
+// 			kno := NewKSCloudAPICustomized(
+// 				"",
+// 				srv.Root(),
+// 			)
+// 			kno.SetClientID("armo")
+// 			kno.SetSecretKey("armo")
+
+// 			err := kno.Login()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), "missing accountID")
+// 		})
+
+// 		t.Run("login requires a client ID", func(t *testing.T) {
+// 			t.Parallel()
+
+// 			kno := NewKSCloudAPICustomized(
+// 				"",
+// 				srv.Root(),
+// 			)
+// 			kno.SetAccountID("armo")
+// 			kno.SetSecretKey("armo")
+
+// 			err := kno.Login()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), "missing clientID")
+// 		})
+
+// 		t.Run("login requires a secret key", func(t *testing.T) {
+// 			t.Parallel()
+
+// 			kno := NewKSCloudAPICustomized(
+// 				"",
+// 				srv.Root(),
+// 			)
+// 			kno.SetAccountID("armo")
+// 			kno.SetClientID("armo")
+
+// 			err := kno.Login()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), "missing secretKey")
+// 		})
+// 	})
+
+// 	t.Run("with getters & setters", func(t *testing.T) {
+// 		t.Parallel()
+
+// 		kno := NewKSCloudAPICustomized(
+// 			"",
+// 			srv.Root(),
+// 		)
+
+// 		pickString := func() string {
+// 			return strconv.Itoa(rand.Intn(10000)) //nolint:gosec
+// 		}
+
+// 		t.Run("should get&set account", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetAccountID(str)
+// 			require.Equal(t, str, kno.GetAccountID())
+// 		})
+
+// 		t.Run("should get&set client", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetClientID(str)
+// 			require.Equal(t, str, kno.GetClientID())
+// 		})
+
+// 		t.Run("should get&set key", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetSecretKey(str)
+// 			require.Equal(t, str, kno.GetSecretKey())
+// 		})
+
+// 		t.Run("should get&set invitation token", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetInvitationToken(str)
+// 			require.Equal(t, str, kno.GetInvitationToken())
+// 		})
+
+// 		t.Run("should get&set report URL", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetCloudReportURL(str)
+// 			require.Equal(t, str, kno.GetCloudReportURL())
+// 		})
+
+// 		t.Run("should get&set API URL", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetCloudAPIURL(str)
+// 			require.Equal(t, str, kno.GetCloudAPIURL())
+// 		})
+
+// 		t.Run("should get&set UI URL", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetCloudUIURL(str)
+// 			require.Equal(t, str, kno.GetCloudUIURL())
+// 		})
+
+// 		t.Run("should get&set auth URL", func(t *testing.T) {
+// 			str := pickString()
+// 			kno.SetCloudAuthURL(str)
+// 			require.Equal(t, str, kno.GetCloudAuthURL())
+// 		})
+// 	})
+
+// 	t.Run("with API errors", func(t *testing.T) {
+// 		// exercise the client when the API returns errors
+// 		t.Parallel()
+
+// 		errAPI := errors.New("test error")
+// 		errSrv := mockAPIServer(t, withAPIError(errAPI))
+// 		t.Cleanup(errSrv.Close)
+
+// 		ke := NewKSCloudAPICustomized(
+// 			errSrv.Root(),
+// 			errSrv.Root(),
+// 		)
+// 		ke.SetAccountID("armo")
+// 		ke.SetClientID("armo")
+// 		ke.SetSecretKey("armo")
+
+// 		hdrs := map[string]string{"key": "value"}
+// 		body := []byte("body-post")
+
+// 		t.Run("API calls should error", func(t *testing.T) {
+// 			_, err := ke.Post(errSrv.URL(pathTestPost), hdrs, body)
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.Delete(errSrv.URL(pathTestDelete), hdrs)
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.Get(errSrv.URL(pathTestGet), hdrs)
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.GetExceptions("")
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			err = ke.PostExceptions(mockExceptions())
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			err = ke.DeleteException("mock")
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.GetTenant()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.GetControlsInputs("")
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.GetAccountConfig("")
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			err = ke.Login()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), "error authenticating")
+// 			require.False(t, ke.IsLoggedIn())
+
+// 			_, err = ke.GetAttackTracks()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.GetFramework("mock-1")
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.GetFrameworks()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.ListFrameworks()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+
+// 			_, err = ke.ListCustomFrameworks()
+// 			require.Error(t, err)
+// 			require.Contains(t, err.Error(), errAPI.Error())
+// 		})
+// 	})
+
+// 	t.Run("with API returning invalid response", func(t *testing.T) {
+// 		// exercise the client when the API returns an invalid response
+// 		t.Parallel()
+
+// 		errSrv := mockAPIServer(t, withAPIGarbled(true))
+// 		t.Cleanup(errSrv.Close)
+
+// 		ke := NewKSCloudAPICustomized(
+// 			errSrv.Root(),
+// 			errSrv.Root(),
+// 		)
+// 		ke.SetAccountID("armo")
+// 		ke.SetClientID("armo")
+// 		ke.SetSecretKey("armo")
+
+// 		t.Run("API calls should return unmarshalling error", func(t *testing.T) {
+// 			// only API calls that return a typed response are checked
+
+// 			_, err := ke.GetExceptions("")
+// 			require.Error(t, err)
+
+// 			_, err = ke.GetTenant()
+// 			require.Error(t, err)
+
+// 			_, err = ke.GetAccountConfig("")
+// 			require.Error(t, err)
+
+// 			err = ke.Login()
+// 			require.Error(t, err)
+// 			require.False(t, ke.IsLoggedIn())
+
+// 			_, err = ke.GetControlsInputs("")
+// 			require.Error(t, err)
+
+// 			_, err = ke.GetAttackTracks()
+// 			require.Error(t, err)
+
+// 			_, err = ke.GetFramework("mock-1")
+// 			require.Error(t, err)
+
+// 			_, err = ke.GetFrameworks()
+// 			require.Error(t, err)
+
+// 			_, err = ke.ListFrameworks()
+// 			require.Error(t, err)
+
+// 			_, err = ke.ListCustomFrameworks()
+// 			require.Error(t, err)
+// 		})
+// 	})
+
+// 	t.Run("with no cookie response", func(t *testing.T) {
+// 		// simulates a successul login, but the second stage (retrieving the cookie) fails: no cookie is set in response
+// 		t.Parallel()
+
+// 		errSrv := mockAPIServer(t, withAPIAuth(true), withAPINoCookie(true)) // assert that a token is passed as header, and no cookie is returned
+// 		t.Cleanup(errSrv.Close)
+
+// 		kt := NewKSCloudAPICustomized(errSrv.Root(), errSrv.Root(), testOptions...)
+// 		kt.SetAccountID("armo")
+// 		kt.SetClientID("armo")
+// 		kt.SetSecretKey("armo")
+
+// 		err := kt.Login()
+// 		require.Error(t, err)
+// 		require.Contains(t, err.Error(), "no auth cookie in response")
+// 		require.False(t, kt.IsLoggedIn())
+// 	})
+
+// 	t.Run("with error on cookie response", func(t *testing.T) {
+// 		// simulates a successul login, but the second stage (retrieving the cookie) fails: API error
+// 		t.Parallel()
+
+// 		errSrv := mockAPIServer(t, withAPIAuth(true), withAPIErrOnCookie(errors.New("cookie error")))
+// 		t.Cleanup(errSrv.Close)
+
+// 		kt := NewKSCloudAPICustomized(errSrv.Root(), errSrv.Root(), testOptions...)
+// 		kt.SetAccountID("armo")
+// 		kt.SetClientID("armo")
+// 		kt.SetSecretKey("armo")
+
+// 		err := kt.Login()
+// 		require.Error(t, err)
+// 		require.Contains(t, err.Error(), "failed to get cookie")
+// 		require.False(t, kt.IsLoggedIn())
+// 	})
+// }
 
 func TestKSCloudAPISmoke(t *testing.T) {
 	t.Run("smoke-test constructors", func(t *testing.T) {
