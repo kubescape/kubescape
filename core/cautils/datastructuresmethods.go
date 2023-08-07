@@ -4,6 +4,8 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/armosec/utils-go/boolutils"
+	cloudsupport "github.com/kubescape/k8s-interface/cloudsupport/v1"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -15,8 +17,11 @@ func NewPolicies() *Policies {
 	}
 }
 
-func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool) {
+func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) {
 	for i := range frameworks {
+		if !isFrameworkFitToScanScope(frameworks[i], scanningScope) {
+			continue
+		}
 		if frameworks[i].Name != "" && len(frameworks[i].Controls) > 0 {
 			policies.Frameworks = append(policies.Frameworks, frameworks[i].Name)
 		}
@@ -30,7 +35,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 					}
 				}
 
-				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) {
+				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
@@ -82,4 +87,90 @@ func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version
 		}
 	}
 	return true
+}
+
+func getCloudType(scanInfo *ScanInfo) (bool, reporthandling.ScanningScopeType) {
+	if cloudsupport.IsAKS() {
+		return true, reporthandling.ScopeCloudAKS
+	}
+	if cloudsupport.IsEKS(k8sinterface.GetConfig()) {
+		return true, reporthandling.ScopeCloudEKS
+	}
+	if cloudsupport.IsGKE(k8sinterface.GetConfig()) {
+		return true, reporthandling.ScopeCloudGKE
+	}
+	return false, ""
+}
+
+func GetScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
+	var result reporthandling.ScanningScopeType
+
+	switch scanInfo.GetScanningContext() {
+	case ContextCluster:
+		isCloud, cloudType := getCloudType(scanInfo)
+		if isCloud {
+			result = cloudType
+		} else {
+			result = reporthandling.ScopeCluster
+		}
+	default:
+		result = reporthandling.ScopeFile
+	}
+
+	return result
+}
+
+func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeType, controlScope reporthandling.ScanningScopeType) bool {
+	result := false
+
+	switch controlScope {
+	case reporthandling.ScopeFile:
+		result = (reporthandling.ScopeFile == scanScope)
+	case reporthandling.ScopeCluster:
+		result = (reporthandling.ScopeCluster == scanScope) || (reporthandling.ScopeCloud == scanScope) || (reporthandling.ScopeCloudAKS == scanScope) || (reporthandling.ScopeCloudEKS == scanScope) || (reporthandling.ScopeCloudGKE == scanScope)
+	case reporthandling.ScopeCloud:
+		result = (reporthandling.ScopeCloud == scanScope) || (reporthandling.ScopeCloudAKS == scanScope) || (reporthandling.ScopeCloudEKS == scanScope) || (reporthandling.ScopeCloudGKE == scanScope)
+	case reporthandling.ScopeCloudAKS:
+		result = (reporthandling.ScopeCloudAKS == scanScope)
+	case reporthandling.ScopeCloudEKS:
+		result = (reporthandling.ScopeCloudEKS == scanScope)
+	case reporthandling.ScopeCloudGKE:
+		result = (reporthandling.ScopeCloudGKE == scanScope)
+	default:
+		result = true
+	}
+
+	return result
+}
+
+func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches reporthandling.ScanningScopeType) bool {
+	// for backward compatibility - case: kubescape with scope(new one) and regolibrary without scope(old one)
+	if control.ScanningScope == nil {
+		return true
+	}
+	if len(control.ScanningScope.Matches) == 0 {
+		return true
+	}
+	for i := range control.ScanningScope.Matches {
+		if isScanningScopeMatchToControlScope(scanScopeMatches, control.ScanningScope.Matches[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func isFrameworkFitToScanScope(framework reporthandling.Framework, scanScopeMatches reporthandling.ScanningScopeType) bool {
+	// for backward compatibility - case: kubescape with scope(new one) and regolibrary without scope(old one)
+	if framework.ScanningScope == nil {
+		return true
+	}
+	if len(framework.ScanningScope.Matches) == 0 {
+		return true
+	}
+	for i := range framework.ScanningScope.Matches {
+		if isScanningScopeMatchToControlScope(scanScopeMatches, framework.ScanningScope.Matches[i]) {
+			return true
+		}
+	}
+	return false
 }

@@ -29,6 +29,6 @@ jobs:
       client: ${{ inputs.CLIENT }}
       image_name: "quay.io/${{ github.repository_owner }}/kubescape"
       image_tag: ${{ inputs.IMAGE_TAG }}
-      support_platforms: false
+      support_platforms: ${{ inputs.PLATFORMS }}
       cosign: ${{ inputs.CO_SIGN }}
     secrets: inherit
