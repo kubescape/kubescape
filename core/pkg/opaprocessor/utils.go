@@ -95,3 +95,17 @@ var cosignHasSignatureDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 	}
 	return ast.BooleanTerm(has_signature(string(aStr))), nil
 }
+
+var imageNameNormalizeDeclaration = &rego.Function{
+	Name:    "image.parse_normalized_name",
+	Decl:    types.NewFunction(types.Args(types.S), types.S),
+	Memoize: true,
+}
+var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
+	aStr, err := builtins.StringOperand(a.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+	normalizedName, err := normalize_image_name(string(aStr))
+	return ast.StringTerm(normalizedName), err
+}
