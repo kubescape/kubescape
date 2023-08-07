@@ -18,6 +18,8 @@ import (
 
 const clusterScope = "clusterScope"
 
+var largeClusterSize int = -1
+
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
 //
 // The function:
@@ -90,7 +92,6 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 }
 
 func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) map[string][]workloadinterface.IMetadata {
-	// k8sObjects := map[string][]workloadinterface.IMetadata{}
 	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
 	externalObjs := getKubenetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
 	if len(externalObjs) > 0 {
@@ -232,8 +233,7 @@ func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 
 func getNamespaceName(obj workloadinterface.IMetadata, clusterSize int) string {
 
-	largeClusterSize, _ := cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", 0)
-	if clusterSize < largeClusterSize {
+	if !isLargeCluster(clusterSize) {
 		return clusterScope
 	}
 
@@ -246,4 +246,14 @@ func getNamespaceName(obj workloadinterface.IMetadata, clusterSize int) string {
 	}
 
 	return clusterScope
+}
+
+// isLargeCluster returns true if the cluster size is larger than the largeClusterSize
+// This code is a workaround for large clusters. The final solution will be to scan resources individually
+func isLargeCluster(clusterSize int) bool {
+	if largeClusterSize < 0 {
+		// initialize large cluster size
+		largeClusterSize, _ = cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", 2500)
+	}
+	return clusterSize > largeClusterSize
 }

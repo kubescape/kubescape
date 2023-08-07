@@ -3,7 +3,6 @@ package opaprocessor
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -61,13 +60,8 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
-	maxGoRoutines, err := cautils.ParseIntEnvVar("RULE_PROCESSING_GOMAXPROCS", 2*runtime.NumCPU())
-	if err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
-	}
-
 	// process
-	if err := opap.Process(ctx, opap.OPASessionObj.AllPolicies, progressListener, maxGoRoutines); err != nil {
+	if err := opap.Process(ctx, opap.OPASessionObj.AllPolicies, progressListener); err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 		// Return error?
 	}
@@ -83,7 +77,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 }
 
 // Process OPA policies (rules) on all configured controls.
-func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient, maxGoRoutines int) error {
+func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policies, progressListener IJobProgressNotificationClient) error {
 	ctx, span := otel.Tracer("").Start(ctx, "OPAProcessor.Process")
 	defer span.End()
 	opap.loggerStartScanning()
@@ -149,19 +143,13 @@ func (opap *OPAProcessor) loggerDoneScanning() {
 // NOTE: the call to processControl no longer mutates the state of the current OPAProcessor instance,
 // but returns a map instead, to be merged by the caller.
 func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
-	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl, heuristicAllocControls)
-	allResources := make(map[string]workloadinterface.IMetadata, heuristicAllocResources)
+	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
 
 	for i := range control.Rules {
-		resourceAssociatedRule, allResourcesFromRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
+		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning(err.Error())
 			continue
-		}
-
-		// merge all resources for all processed rules in this control
-		for k, v := range allResourcesFromRule {
-			allResources[k] = v
 		}
 
 		// append failed rules to controls
@@ -192,9 +180,8 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 //
 // NOTE: processRule no longer mutates the state of the current OPAProcessor instance,
 // and returns a map instead, to be merged by the caller.
-func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, map[string]workloadinterface.IMetadata, error) {
+func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
-	allResources := make(map[string]workloadinterface.IMetadata)
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ConfigInputs, fixedControlInputs)
 
@@ -232,7 +219,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
 				Status:                apis.StatusPassed,
 			}
-			allResources[inputResource.GetID()] = inputResources[i]
+			opap.AllResources[inputResource.GetID()] = inputResources[i]
 		}
 
 		ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
@@ -280,7 +267,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			}
 		}
 	}
-	return resources, allResources, nil
+	return resources, nil
 }
 
 func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
