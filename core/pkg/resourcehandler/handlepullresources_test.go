@@ -4,10 +4,6 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -24,11 +20,6 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
-
-func emptyDirectory() string {
-	o, _ := os.Getwd()
-	return filepath.Join(filepath.Dir(o), ".", "cautils", "testdata", "emptyDirectory")
-}
 
 var (
 	//go:embed testdata/kubeconfig_mock.json
@@ -241,7 +232,7 @@ func getResourceHandlerMock() *K8sResourceHandler {
 		Context:          context.Background(),
 	}
 
-	return NewK8sResourceHandler(k8s, &EmptySelector{}, nil, nil, nil)
+	return NewK8sResourceHandler(k8s, nil, nil, nil)
 }
 func Test_CollectResources(t *testing.T) {
 	resourceHandler := getResourceHandlerMock()
@@ -255,22 +246,14 @@ func Test_CollectResources(t *testing.T) {
 			ClusterAPIServerInfo: nil,
 		},
 	}
-	policyIdentifier := []cautils.PolicyIdentifier{{}}
 
 	assert.NotPanics(t, func() {
-		CollectResources(context.TODO(), resourceHandler, policyIdentifier, objSession, cautils.NewProgressHandler(""))
+		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
-		CollectResources(context.TODO(), resourceHandler, policyIdentifier, objSession, cautils.NewProgressHandler(""))
+		CollectResources(context.TODO(), resourceHandler, []cautils.PolicyIdentifier{}, objSession, cautils.NewProgressHandler(""), &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
-}
-
-func Test_getResourcesFromPath(t *testing.T) {
-	expectedError := errors.New(fmt.Sprintf(cautils.ErrNoFilesToScan, emptyDirectory())).Error()
-	_, _, err := getResourcesFromPath(context.TODO(), emptyDirectory())
-	assert.NotEqual(t, err, nil)
-	assert.Contains(t, err.Error(), expectedError)
 }

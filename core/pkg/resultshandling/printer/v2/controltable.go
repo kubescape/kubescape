@@ -37,6 +37,9 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
 	row[columnComplianceScore] = getComplianceScoreColumn(controlSummary, infoToPrintInfo)
+	if row[columnComplianceScore] == "-1%" {
+		row[columnComplianceScore] = "N/A"
+	}
 
 	return row
 }

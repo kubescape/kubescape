@@ -11,6 +11,7 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"golang.org/x/exp/slices"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -78,14 +79,15 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			var frameworks []string
 
-			if len(args) == 0 { // scan all frameworks
+			if len(args) == 0 {
 				scanInfo.ScanAll = true
 			} else {
 				// Read frameworks from input args
 				frameworks = strings.Split(args[0], ",")
-				if cautils.StringInSlice(frameworks, "all") != cautils.ValueNotFound {
+				if slices.Contains(frameworks, "all") {
 					scanInfo.ScanAll = true
 					frameworks = getter.NativeFrameworks
+
 				}
 				if len(args) > 1 {
 					if len(args[1:]) == 0 || args[1] != "-" {
@@ -105,6 +107,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 					}
 				}
 			}
+			scanInfo.SetScanType(cautils.ScanTypeFramework)
 			scanInfo.FrameworkScan = true
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
@@ -118,7 +121,8 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			if err = results.HandleResults(ctx); err != nil {
 				logger.L().Fatal(err.Error())
 			}
-			if !scanInfo.VerboseMode {
+
+			if !scanInfo.VerboseMode && scanInfo.ScanType == cautils.ScanTypeFramework {
 				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
 			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
