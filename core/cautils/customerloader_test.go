@@ -308,12 +308,12 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	}{
 		{
 			name: "no env",
-			want: "kubescape",
+			want: kubescapeNamespace,
 		},
 		{
 			name: "default ns",
-			env:  "kubescape",
-			want: "kubescape",
+			env:  kubescapeNamespace,
+			want: kubescapeNamespace,
 		},
 		{
 			name: "custom ns",
@@ -355,9 +355,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 		{
 			outCo: &ConfigObj{
 				AccountID:          "",
-				ClientID:           "",
-				SecretKey:          "",
-				CustomerGUID:       "",
 				Token:              "",
 				CustomerAdminEMail: "",
 				ClusterName:        "",
@@ -368,9 +365,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 			},
 			inCo: &ConfigObj{
 				AccountID:          shouldUpdate,
-				ClientID:           shouldUpdate,
-				SecretKey:          shouldUpdate,
-				CustomerGUID:       shouldUpdate,
 				Token:              shouldUpdate,
 				CustomerAdminEMail: shouldUpdate,
 				ClusterName:        shouldUpdate,
@@ -383,9 +377,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 		{
 			outCo: &ConfigObj{
 				AccountID:          anyString,
-				ClientID:           anyString,
-				SecretKey:          anyString,
-				CustomerGUID:       anyString,
 				Token:              anyString,
 				CustomerAdminEMail: "",
 				ClusterName:        "",
@@ -396,9 +387,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 			},
 			inCo: &ConfigObj{
 				AccountID:          shouldNotUpdate,
-				ClientID:           shouldNotUpdate,
-				SecretKey:          shouldNotUpdate,
-				CustomerGUID:       shouldNotUpdate,
 				Token:              shouldNotUpdate,
 				CustomerAdminEMail: shouldUpdate,
 				ClusterName:        shouldUpdate,
@@ -411,9 +399,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 		{
 			outCo: &ConfigObj{
 				AccountID:          "",
-				ClientID:           "",
-				SecretKey:          "",
-				CustomerGUID:       "",
 				Token:              "",
 				CustomerAdminEMail: anyString,
 				ClusterName:        anyString,
@@ -424,9 +409,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 			},
 			inCo: &ConfigObj{
 				AccountID:          shouldUpdate,
-				ClientID:           shouldUpdate,
-				SecretKey:          shouldUpdate,
-				CustomerGUID:       shouldUpdate,
 				Token:              shouldUpdate,
 				CustomerAdminEMail: shouldNotUpdate,
 				ClusterName:        shouldNotUpdate,
@@ -439,9 +421,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 		{
 			outCo: &ConfigObj{
 				AccountID:          anyString,
-				ClientID:           "",
-				SecretKey:          anyString,
-				CustomerGUID:       "",
 				Token:              anyString,
 				CustomerAdminEMail: "",
 				ClusterName:        anyString,
@@ -452,9 +431,6 @@ func TestUpdateEmptyFields(t *testing.T) {
 			},
 			inCo: &ConfigObj{
 				AccountID:          shouldNotUpdate,
-				ClientID:           shouldUpdate,
-				SecretKey:          shouldNotUpdate,
-				CustomerGUID:       shouldUpdate,
 				Token:              shouldNotUpdate,
 				CustomerAdminEMail: shouldUpdate,
 				ClusterName:        shouldNotUpdate,
@@ -468,17 +444,14 @@ func TestUpdateEmptyFields(t *testing.T) {
 
 	for i := range tests {
 		beforeChangesOutCO := tests[i].outCo
-		tests[i].outCo.UpdateEmptyFields(tests[i].inCo)
+		tests[i].outCo.updateEmptyFields(tests[i].inCo)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.AccountID, tests[i].outCo.AccountID)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClientID, tests[i].outCo.ClientID)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAPIURL, tests[i].outCo.CloudAPIURL)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAuthURL, tests[i].outCo.CloudAuthURL)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudReportURL, tests[i].outCo.CloudReportURL)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudUIURL, tests[i].outCo.CloudUIURL)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClusterName, tests[i].outCo.ClusterName)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.CustomerAdminEMail, tests[i].outCo.CustomerAdminEMail)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.CustomerGUID, tests[i].outCo.CustomerGUID)
-		checkIsUpdateCorrectly(t, beforeChangesOutCO.SecretKey, tests[i].outCo.SecretKey)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.Token, tests[i].outCo.Token)
 	}
 }

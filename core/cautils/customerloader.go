@@ -33,7 +33,6 @@ type ConfigObj struct {
 	AccountID          string `json:"accountID,omitempty"`
 	ClientID           string `json:"clientID,omitempty"`
 	SecretKey          string `json:"secretKey,omitempty"`
-	CustomerGUID       string `json:"customerGUID,omitempty"` // Deprecated
 	Token              string `json:"invitationParam,omitempty"`
 	CustomerAdminEMail string `json:"adminMail,omitempty"`
 	ClusterName        string `json:"clusterName,omitempty"`
@@ -67,12 +66,9 @@ func (co *ConfigObj) Config() []byte {
 	return []byte{}
 }
 
-func (co *ConfigObj) UpdateEmptyFields(inCO *ConfigObj) error {
+func (co *ConfigObj) updateEmptyFields(inCO *ConfigObj) error {
 	if inCO.AccountID != "" {
 		co.AccountID = inCO.AccountID
-	}
-	if inCO.ClientID != "" {
-		co.ClientID = inCO.ClientID
 	}
 	if inCO.CloudAPIURL != "" {
 		co.CloudAPIURL = inCO.CloudAPIURL
@@ -92,14 +88,8 @@ func (co *ConfigObj) UpdateEmptyFields(inCO *ConfigObj) error {
 	if inCO.CustomerAdminEMail != "" {
 		co.CustomerAdminEMail = inCO.CustomerAdminEMail
 	}
-	if inCO.SecretKey != "" {
-		co.SecretKey = inCO.SecretKey
-	}
 	if inCO.Token != "" {
 		co.Token = inCO.Token
-	}
-	if inCO.CustomerGUID != "" {
-		co.CustomerGUID = inCO.CustomerGUID
 	}
 
 	return nil
@@ -412,7 +402,7 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromConfigMap() error {
 	tempCO := ConfigObj{}
 	if jsonConf, ok := configMap.Data["config.json"]; ok {
 		json.Unmarshal([]byte(jsonConf), &tempCO)
-		return c.configObj.UpdateEmptyFields(&tempCO)
+		return c.configObj.updateEmptyFields(&tempCO)
 	}
 	return err
 
@@ -568,10 +558,6 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 	if err := json.Unmarshal(dat, configObj); err != nil {
 		return err
 	}
-	if configObj.AccountID == "" {
-		configObj.AccountID = configObj.CustomerGUID
-	}
-	configObj.CustomerGUID = ""
 	return nil
 }
 
