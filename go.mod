@@ -11,7 +11,7 @@ require (
 	github.com/armosec/armoapi-go v0.0.212
 	github.com/armosec/utils-go v0.0.20
 	github.com/armosec/utils-k8s-go v0.0.16
-	github.com/briandowns/spinner v1.18.1
+	github.com/briandowns/spinner v1.23.0
 	github.com/docker/distribution v2.8.2+incompatible
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.15.0
@@ -22,7 +22,7 @@ require (
 	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
 	github.com/kubescape/go-git-url v0.0.25
-	github.com/kubescape/go-logger v0.0.15
+	github.com/kubescape/go-logger v0.0.16
 	github.com/kubescape/k8s-interface v0.0.136
 	github.com/kubescape/opa-utils v0.0.261
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520

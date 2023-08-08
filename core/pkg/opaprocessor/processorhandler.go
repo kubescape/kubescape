@@ -122,18 +122,18 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 func (opap *OPAProcessor) loggerStartScanning() {
 	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
-		logger.L().Info("Scanning", helpers.String(targetScan.String(), cautils.ClusterName))
+		logger.L().Start("Scanning", helpers.String(targetScan.String(), cautils.ClusterName))
 	} else {
-		logger.L().Info("Scanning " + targetScan.String())
+		logger.L().Start("Scanning " + targetScan.String())
 	}
 }
 
 func (opap *OPAProcessor) loggerDoneScanning() {
 	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
-		logger.L().Success("Done scanning", helpers.String(targetScan.String(), cautils.ClusterName))
+		logger.L().StopSuccess("Done scanning", helpers.String(targetScan.String(), cautils.ClusterName))
 	} else {
-		logger.L().Success("Done scanning " + targetScan.String())
+		logger.L().StopSuccess("Done scanning " + targetScan.String())
 	}
 }
 
