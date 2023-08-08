@@ -41,7 +41,7 @@ func NewHTTPHandler() *HTTPHandler {
 		scanRequestChan:  make(chan *scanRequestParams),
 		scanResponseChan: newScanResponseChan(),
 	}
-	go handler.executeScan()
+	go handler.watchForScan()
 
 	return handler
 }

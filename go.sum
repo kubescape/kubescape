@@ -1522,12 +1522,12 @@ github.com/kubescape/go-git-url v0.0.25 h1:i7SSSC1+1m/Dg+4LV3erp0YklnWj1Z0cVlRxC
 github.com/kubescape/go-git-url v0.0.25/go.mod h1:IbVT7Wsxlghsa+YxI5KOx4k9VQJaa3z0kTaQz5D3nKM=
 github.com/kubescape/go-logger v0.0.15 h1:iCzVFlXXF7KYLd1cZumGOtuAZbltV8QiZI+kTe6TSN0=
 github.com/kubescape/go-logger v0.0.15/go.mod h1:Al+yTE+vemECb/Myn2G9+2o2uFmMtphbkQmxf4OEHxE=
-github.com/kubescape/k8s-interface v0.0.135 h1:DrhaJO+RbRRj3ai3Oy8rchs/0XJqvFSv7798ckaCObc=
-github.com/kubescape/k8s-interface v0.0.135/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
+github.com/kubescape/k8s-interface v0.0.136 h1:/BMuj5ixYA48ODyAQTK2ZLgID+KXU3rQei8eNiXQTcg=
+github.com/kubescape/k8s-interface v0.0.136/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
 github.com/kubescape/opa-utils v0.0.261 h1:NEASuRRHfbQRf/9wAEdm+7VV+UDg5tr+VgIfsedbdas=
 github.com/kubescape/opa-utils v0.0.261/go.mod h1:0Be6E+vHqjavl/JneqgyC+oXOdfs6s+V6YnFvBkIAsA=
-github.com/kubescape/rbac-utils v0.0.20 h1:1MMxsCsCZ3ntDi8f9ZYYcY+K7bv50bDW5ZvnGnhMhJw=
-github.com/kubescape/rbac-utils v0.0.20/go.mod h1:t57AhSrjuNGQ+mpZWQM/hBzrCOeKBDHegFoVo4tbikQ=
+github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G+oFazeYmZQKoPczLEflBQpwpHCU8DoLLyfj8=
+github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/regolibrary v1.0.291-rc.0 h1:DztPS3NSKfiltO1wZvxRjuu5c99c6+dEgfTs6DcsVa8=
 github.com/kubescape/regolibrary v1.0.291-rc.0/go.mod h1:2j47Snl7jbbR0GenKlnbIQ+dk1J3XpX3x5T/SWY3OJ0=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
@@ -2351,8 +2351,8 @@ golang.org/x/exp v0.0.0-20200119233911-0405dc783f0a/go.mod h1:2RIsYlXP63K8oxa1u0
 golang.org/x/exp v0.0.0-20200207192155-f17229e696bd/go.mod h1:J/WKrq2StrnmMY6+EHIKF9dgMWnmCNThgcyBT1FY9mM=
 golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6/go.mod h1:3jZMyOhIsHpP37uCMkUooju7aAi5cS1Q23tOzKc+0MU=
 golang.org/x/exp v0.0.0-20200331195152-e8c3332aa8e5/go.mod h1:4M0jN8W1tt0AVLNr8HDosyJCDCDuyL9N9+3m7wDWgKw=
-golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691 h1:/yRP+0AN7mf5DkD3BAI6TOFnd51gEoDEb8o35jIFtgw=
-golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691/go.mod h1:FXUEEKJgO7OQYeo8N01OfiKP8RXMtf6e8aTskBGqWdc=
+golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b h1:r+vk0EmXNmekl0S0BascoeeoHk/L7wmaW2QF90K+kYI=
+golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b/go.mod h1:FXUEEKJgO7OQYeo8N01OfiKP8RXMtf6e8aTskBGqWdc=
 golang.org/x/image v0.0.0-20180708004352-c73c2afc3b81/go.mod h1:ux5Hcp/YLpHSI86hEcLt0YII63i6oz57MZXIpbrjZUs=
 golang.org/x/image v0.0.0-20190227222117-0694c2d4d067/go.mod h1:kZ7UVZpmo3dzQBMxlp+ypCbDeSB+sBbTgSJuh5dn5js=
 golang.org/x/image v0.0.0-20190802002840-cff245a6509b/go.mod h1:FeLwcggjj3mMvU+oOTbSwawSJRM1uh48EjtB4UJZlP0=

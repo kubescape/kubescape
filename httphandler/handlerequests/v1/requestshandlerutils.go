@@ -23,36 +23,36 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
+	response := &utilsmetav1.Response{}
+
+	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
+	_, err := scan(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
+	if err != nil {
+		logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+		if scanReq.scanQueryParams.ReturnResults {
+			response.Type = utilsapisv1.ErrorScanResponseType
+			response.Response = err.Error()
+		}
+	} else {
+		logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
+		if scanReq.scanQueryParams.ReturnResults {
+			response.Type = utilsapisv1.ResultsV1ScanResponseType
+		}
+	}
+
+	handler.state.setNotBusy(scanReq.scanID)
+
+	// return results
+	handler.scanResponseChan.push(scanReq.scanID, response)
+}
+
 // executeScan execute the scan request passed in the channel
-func (handler *HTTPHandler) executeScan() {
+func (handler *HTTPHandler) watchForScan() {
 	for {
 		scanReq := <-handler.scanRequestChan
-
 		logger.L().Info("triggering scan", helpers.String("scanID", scanReq.scanID))
-
-		response := &utilsmetav1.Response{}
-
-		logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-		results, err := scan(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
-		if err != nil {
-			logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
-			if scanReq.scanQueryParams.ReturnResults {
-				response.Type = utilsapisv1.ErrorScanResponseType
-				response.Response = err.Error()
-			}
-		} else {
-			logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
-			if scanReq.scanQueryParams.ReturnResults {
-				response.Type = utilsapisv1.ResultsV1ScanResponseType
-				response.Response = results
-			}
-		}
-
-		handler.state.setNotBusy(scanReq.scanID)
-
-		// return results
-		handler.scanResponseChan.push(scanReq.scanID, response)
-
+		handler.executeScan(scanReq)
 	}
 }
 func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
@@ -80,7 +80,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	if err := result.HandleResults(ctx); err != nil {
 		return nil, err
 	}
-	return result.GetResults(), nil
+	return nil, nil
 }
 
 func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {

@@ -22,6 +22,10 @@ type imageScanInfo struct {
 // TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
+  This command is still in BETA. Feel free to contact the kubescape maintainers for more information.
+  
+  Scan an image for vulnerabilities. 
+
   # Scan the 'nginx' image
   %[1]s scan image "nginx"
 
@@ -34,11 +38,11 @@ var (
 func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *imageScanInfo) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "image <IMAGE_NAME>",
-		Short:   "Scans an image for vulnerabilities",
+		Short:   "Scan an image for vulnerabilities",
 		Example: imageExample,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("The command takes exactly one image.")
+				return fmt.Errorf("the command takes exactly one image name as an argument")
 			}
 			return nil
 		},
@@ -60,10 +64,14 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			userInput := args[0]
 
 			logger.L().Info(fmt.Sprintf("Scanning image: %s", userInput))
+			cautils.StartSpinner()
 			scanResults, err := svc.Scan(ctx, userInput, creds)
 			if err != nil {
+				cautils.StopSpinner()
 				return err
 			}
+			cautils.StopSpinner()
+
 			logger.L().Success("Image scan completed successfully")
 
 			scanInfo.SetScanType(cautils.ScanTypeImage)
