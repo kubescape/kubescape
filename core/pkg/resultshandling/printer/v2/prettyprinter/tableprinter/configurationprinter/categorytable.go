@@ -96,6 +96,7 @@ func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments 
 	table.SetHeaderLine(true)
 	table.SetColumnAlignment(columnAligments)
 	table.SetAutoWrapText(false)
+	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 	return table
 }
 

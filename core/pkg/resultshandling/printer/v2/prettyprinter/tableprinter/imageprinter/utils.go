@@ -17,6 +17,7 @@ func renderTable(writer io.Writer, headers []string, columnAlignments []int, row
 	table.SetHeader(headers)
 	table.SetHeaderLine(true)
 	table.SetColumnAlignment(columnAlignments)
+	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 
 	table.AppendBulk(rows)
 

@@ -49,6 +49,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.SetHeader(generateResourceHeader())
 		summaryTable.SetHeaderLine(true)
 		summaryTable.SetRowLine(true)
+		summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 		data := Matrix{}
 
 		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails); len(raw) > 0 {
