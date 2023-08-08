@@ -12,6 +12,7 @@ require (
 	github.com/armosec/utils-go v0.0.20
 	github.com/armosec/utils-k8s-go v0.0.16
 	github.com/briandowns/spinner v1.18.1
+	github.com/docker/distribution v2.8.2+incompatible
 	github.com/enescakir/emoji v1.0.0
 	github.com/fatih/color v1.15.0
 	github.com/francoispqt/gojay v1.2.13
@@ -170,7 +171,6 @@ require (
 	github.com/deitch/magic v0.0.0-20230404182410-1ff89d7342da // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
 	github.com/docker/cli v23.0.5+incompatible // indirect
-	github.com/docker/distribution v2.8.2+incompatible // indirect
 	github.com/docker/docker v24.0.5+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
 	github.com/docker/go-connections v0.4.0 // indirect
