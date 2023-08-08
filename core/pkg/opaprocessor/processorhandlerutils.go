@@ -30,6 +30,12 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	_, span := otel.Tracer("").Start(ctx, "OPAProcessor.updateResults")
 	defer span.End()
 
+	logger.L().Ctx(ctx).Info("Aggregating results")
+	defer logger.L().Ctx(ctx).Success("Done aggregating results")
+
+	cautils.StartSpinner()
+	defer cautils.StopSpinner()
+
 	// remove data from all objects
 	for i := range opap.AllResources {
 		removeData(opap.AllResources[i])
