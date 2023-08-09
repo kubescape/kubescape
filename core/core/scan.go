@@ -125,7 +125,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printe
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.L().Start(cautils.BoldDisplay("Kubescape") + " scanner initializing")
+	logger.L().Start("Kubescape scanner initializing")
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info

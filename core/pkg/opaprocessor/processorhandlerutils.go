@@ -29,8 +29,6 @@ var largeClusterSize int = -1
 func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	_, span := otel.Tracer("").Start(ctx, "OPAProcessor.updateResults")
 	defer span.End()
-
-	logger.L().Ctx(ctx).Info("Aggregating results")
 	defer logger.L().Ctx(ctx).Success("Done aggregating results")
 
 	cautils.StartSpinner()

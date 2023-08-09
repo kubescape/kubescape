@@ -55,8 +55,6 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler ho
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
 	var err error
-	logger.L().Info("Getting Kubernetes objects")
-	cautils.StartSpinner()
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
 	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
@@ -98,7 +96,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
 	}
 
-	cautils.StopSpinner()
 	logger.L().Success("Accessed to Kubernetes objects")
 
 	// backswords compatibility - get image vulnerability resources
