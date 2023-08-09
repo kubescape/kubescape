@@ -39,6 +39,7 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	summaryTable.SetHeader(GetControlTableHeaders())
 	summaryTable.SetHeaderLine(true)
 	summaryTable.SetColumnAlignment(GetColumnsAlignments())
+	summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 
 	printAll := fp.getVerboseMode()
 	if summaryDetails.NumberOfResources().Failed() == 0 {
