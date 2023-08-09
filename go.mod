@@ -21,6 +21,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
+	github.com/jwalton/gchalk v1.3.0
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.15
 	github.com/kubescape/k8s-interface v0.0.136
@@ -264,6 +265,7 @@ require (
 	github.com/jonboulle/clockwork v0.3.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
+	github.com/jwalton/go-supportscolor v1.1.0 // indirect
 	github.com/kballard/go-shellquote v0.0.0-20180428030007-95032a82bc51 // indirect
 	github.com/kevinburke/ssh_config v1.2.0 // indirect
 	github.com/klauspost/compress v1.16.5 // indirect
