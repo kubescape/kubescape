@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -91,20 +91,21 @@ func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
-	return color.New(getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
+	return getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor()))(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
-func getColor(controlSeverity int) color.Attribute {
+
+func getColor(controlSeverity int) (func(...string) string) {
 	switch controlSeverity {
 	case apis.SeverityCritical:
-		return color.FgRed
+		return gchalk.WithAnsi256(1).Bold
 	case apis.SeverityHigh:
-		return color.FgYellow
+		return gchalk.WithAnsi256(196).Bold
 	case apis.SeverityMedium:
-		return color.FgCyan
+		return gchalk.WithAnsi256(166).Bold
 	case apis.SeverityLow:
-		return color.FgWhite
+		return gchalk.WithAnsi256(220).Bold
 	default:
-		return color.FgWhite
+		return gchalk.WithAnsi256(16).Bold
 	}
 }
 

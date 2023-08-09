@@ -1,25 +1,50 @@
 package cautils
 
 import (
+	"fmt"
+	"io"
 	"os"
 	"time"
 
 	spinnerpkg "github.com/briandowns/spinner"
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/mattn/go-isatty"
 	"github.com/schollz/progressbar/v3"
 )
 
-var FailureDisplay = color.New(color.Bold, color.FgHiRed).FprintfFunc()
-var WarningDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
-var FailureTextDisplay = color.New(color.Faint, color.FgHiRed).FprintfFunc()
-var InfoDisplay = color.New(color.Bold, color.FgCyan).FprintfFunc()
-var InfoTextDisplay = color.New(color.Bold, color.FgHiYellow).FprintfFunc()
-var SimpleDisplay = color.New().FprintfFunc()
-var SuccessDisplay = color.New(color.Bold, color.FgHiGreen).FprintfFunc()
-var DescriptionDisplay = color.New(color.Faint, color.FgWhite).FprintfFunc()
+func FailureDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightRed().Bold(format), a...)
+}
+
+func WarningDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightYellow().Bold(format), a...)
+}
+
+func FailureTextDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightRed().Dim(format), a...)
+}
+
+func InfoDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithCyan().Bold(format), a...)
+}
+
+func InfoTextDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBrightYellow().Bold(format), a...)
+}
+
+func SimpleDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.White(format), a...)
+}
+
+func SuccessDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithBlue().Bold(format), a...)
+}
+
+func DescriptionDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithWhite().Dim(format), a...)
+}
 
 var spinner *spinnerpkg.Spinner
 

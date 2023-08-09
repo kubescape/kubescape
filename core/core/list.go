@@ -96,7 +96,7 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 	policyTable.SetHeaderLine(true)
 	policyTable.SetRowLine(true)
 	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
-
+	policyTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 	data := v2.Matrix{}
 
 	controlRows := generatePolicyRows(policies)
@@ -118,6 +118,7 @@ func prettyPrintControls(ctx context.Context, policies []string) {
 	controlsTable.SetAutoWrapText(false)
 	controlsTable.SetHeaderLine(true)
 	controlsTable.SetRowLine(true)
+	controlsTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 
 	controlRows := generateControlRows(policies)
 

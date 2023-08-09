@@ -50,6 +50,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.SetAutoMergeCells(true)
 		summaryTable.SetHeaderLine(true)
 		summaryTable.SetRowLine(true)
+		summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 
 		resourceRows := [][]string{}
 		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails); len(raw) > 0 {
