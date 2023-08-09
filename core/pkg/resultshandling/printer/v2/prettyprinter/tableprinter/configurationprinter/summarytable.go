@@ -2,6 +2,7 @@ package configurationprinter
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -28,13 +29,19 @@ func GetSeverityColumn(controlSummary reportsummary.IControlSummary) string {
 	return color.New(utils.GetColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
 
-func GetControlTableHeaders() []string {
-	headers := make([]string, _summaryRowLen)
-	headers[summaryColumnName] = "CONTROL NAME"
-	headers[summaryColumnCounterFailed] = "FAILED RESOURCES"
-	headers[summaryColumnCounterAll] = "ALL RESOURCES"
-	headers[summaryColumnSeverity] = "SEVERITY"
-	headers[summaryColumnComplianceScore] = "% COMPLIANCE-SCORE"
+func GetControlTableHeaders(short bool) []string {
+	var headers []string
+	if short {
+		headers = make([]string, 1)
+		headers[0] = "CONTROLS"
+	} else {
+		headers = make([]string, _summaryRowLen)
+		headers[summaryColumnName] = "CONTROL NAME"
+		headers[summaryColumnCounterFailed] = "FAILED RESOURCES"
+		headers[summaryColumnCounterAll] = "ALL RESOURCES"
+		headers[summaryColumnSeverity] = "SEVERITY"
+		headers[summaryColumnComplianceScore] = "% COMPLIANCE-SCORE"
+	}
 	return headers
 }
 
@@ -85,14 +92,20 @@ func GetInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo
 	return ""
 }
 
-func GenerateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
-	// Severity | Control name | failed resources | all resources | % success
-	row := make([]string, _summaryRowLen)
-	row[summaryColumnName] = "Resource Summary"
-	row[summaryColumnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
-	row[summaryColumnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
-	row[summaryColumnSeverity] = " "
-	row[summaryColumnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
+func GenerateFooter(summaryDetails *reportsummary.SummaryDetails, short bool) []string {
+	var row []string
+	if short {
+		row = make([]string, 1)
+		row[0] = fmt.Sprintf("Resource Summary"+strings.Repeat(" ", 0)+"\n\nFailed Resources"+strings.Repeat(" ", 1)+": %d\nAll Resources"+strings.Repeat(" ", 4)+": %d\n%% Compliance-Score"+strings.Repeat(" ", 4)+": %.2f%%", summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
+	} else {
+		// Severity | Control name | failed resources | all resources | % success
+		row = make([]string, _summaryRowLen)
+		row[summaryColumnName] = "Resource Summary"
+		row[summaryColumnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
+		row[summaryColumnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
+		row[summaryColumnSeverity] = " "
+		row[summaryColumnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
+	}
 
 	return row
 }

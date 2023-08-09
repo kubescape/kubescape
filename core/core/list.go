@@ -11,6 +11,7 @@ import (
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	v2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -87,19 +88,20 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 		return
 	}
 
-	header := fmt.Sprintf("Supported %s", targetPolicy)
-
 	policyTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
+
 	policyTable.SetAutoWrapText(true)
+	header := fmt.Sprintf("Supported %s", targetPolicy)
 	policyTable.SetHeader([]string{header})
 	policyTable.SetHeaderLine(true)
 	policyTable.SetRowLine(true)
+	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
+
 	data := v2.Matrix{}
 
 	controlRows := generatePolicyRows(policies)
 	data = append(data, controlRows...)
 
-	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
 	policyTable.AppendBulk(data)
 	policyTable.Render()
 }
@@ -112,13 +114,23 @@ func jsonListFormat(_ context.Context, _ string, policies []string) {
 
 func prettyPrintControls(ctx context.Context, policies []string) {
 	controlsTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
+
 	controlsTable.SetAutoWrapText(false)
-	controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
 	controlsTable.SetHeaderLine(true)
 	controlsTable.SetRowLine(true)
-	data := v2.Matrix{}
 
 	controlRows := generateControlRows(policies)
+
+	short := utils.CheckShortTerminalWidth(controlRows, []string{"Control ID", "Control Name", "Docs", "Frameworks"})
+	if short {
+		controlsTable.SetAutoWrapText(false)
+		controlsTable.SetHeader([]string{"Controls"})
+		controlRows = shortFormatControlRows(controlRows)
+	} else {
+		controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
+	}
+
+	data := v2.Matrix{}
 	data = append(data, controlRows...)
 
 	controlsTable.AppendBulk(data)
@@ -148,6 +160,14 @@ func generatePolicyRows(policies []string) [][]string {
 	for _, policy := range policies {
 		currentRow := []string{policy}
 		rows = append(rows, currentRow)
+	}
+	return rows
+}
+
+func shortFormatControlRows(controlRows [][]string) [][]string {
+	rows := [][]string{}
+	for _, controlRow := range controlRows {
+		rows = append(rows, []string{fmt.Sprintf("Control ID"+strings.Repeat(" ", 3)+": %+v\nControl Name"+strings.Repeat(" ", 1)+": %+v\nDocs"+strings.Repeat(" ", 9)+": %+v\nFrameworks"+strings.Repeat(" ", 3)+": %+v", controlRow[0], controlRow[1], controlRow[2], strings.Replace(controlRow[3], "\n", " ", -1))})
 	}
 	return rows
 }
