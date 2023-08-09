@@ -30,7 +30,7 @@ require (
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/mattn/go-isatty v0.0.18
 	github.com/mikefarah/yq/v4 v4.29.1
-	github.com/olekukonko/tablewriter v0.0.5
+	github.com/olekukonko/tablewriter v0.0.6-0.20230417144759-edd1a71a5576
 	github.com/open-policy-agent/opa v0.55.0
 	github.com/owenrumney/go-sarif/v2 v2.1.2
 	github.com/schollz/progressbar/v3 v3.13.0
