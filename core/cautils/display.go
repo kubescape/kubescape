@@ -46,6 +46,10 @@ func DescriptionDisplay(w io.Writer, format string, a ...interface{}) {
 	fmt.Fprintf(w, gchalk.WithWhite().Dim(format), a...)
 }
 
+func BoldDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.Bold(format), a...)
+}
+
 var spinner *spinnerpkg.Spinner
 
 func StartSpinner() {
