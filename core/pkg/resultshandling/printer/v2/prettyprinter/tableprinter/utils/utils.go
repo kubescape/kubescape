@@ -3,11 +3,13 @@ package utils
 import (
 	"fmt"
 	"io"
+	"os"
 
 	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"golang.org/x/term"
 )
 
 type InfoStars struct {
@@ -136,4 +138,33 @@ func getColor(controlSeverity int) color.Attribute {
 	default:
 		return color.FgWhite
 	}
+}
+
+func CheckShortTerminalWidth(rows [][]string, headers []string) bool {
+	maxWidth := 0
+	for _, row := range rows {
+		rowWidth := 0
+		for idx, cell := range row {
+			cellLen := len(cell)
+			if cellLen > 50 { // Take only 50 characters of each sentence for counting size
+				cellLen = 50
+			}
+			if cellLen > len(headers[idx]) {
+				rowWidth += cellLen
+			} else {
+				rowWidth += len(headers[idx])
+			}
+			rowWidth += 2
+		}
+		if rowWidth > maxWidth {
+			maxWidth = rowWidth
+		}
+	}
+	maxWidth += 10
+	termWidth, _, err := term.GetSize(int(os.Stdin.Fd()))
+	if err != nil {
+		// Default to larger output table
+		return false
+	}
+	return termWidth <= maxWidth
 }

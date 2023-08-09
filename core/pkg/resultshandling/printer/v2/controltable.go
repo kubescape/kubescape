@@ -3,6 +3,7 @@ package printer
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -42,6 +43,14 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	}
 
 	return row
+}
+
+func shortFormatRow(dataRows [][]string) [][]string {
+	rows := [][]string{}
+	for _, dataRow := range dataRows {
+		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 11)+": %+v\nControl Name"+strings.Repeat(" ", 7)+": %+v\nFailed Resources"+strings.Repeat(" ", 3)+": %+v\nAll Resources"+strings.Repeat(" ", 6)+": %+v\n%% Compliance-Score"+strings.Repeat(" ", 1)+": %+v", dataRow[columnSeverity], dataRow[columnName], dataRow[columnCounterFailed], dataRow[columnCounterAll], dataRow[columnComplianceScore])})
+	}
+	return rows
 }
 
 func generateRowPdf(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
@@ -128,13 +137,19 @@ func getSortedControlsNames(controls reportsummary.ControlSummaries) [][]string 
 }
 */
 
-func getControlTableHeaders() []string {
-	headers := make([]string, _rowLen)
-	headers[columnName] = "CONTROL NAME"
-	headers[columnCounterFailed] = "FAILED RESOURCES"
-	headers[columnCounterAll] = "ALL RESOURCES"
-	headers[columnSeverity] = "SEVERITY"
-	headers[columnComplianceScore] = "% COMPLIANCE-SCORE"
+func getControlTableHeaders(short bool) []string {
+	var headers []string
+	if short {
+		headers = make([]string, 1)
+		headers[0] = "CONTROLS"
+	} else {
+		headers = make([]string, _rowLen)
+		headers[columnName] = "CONTROL NAME"
+		headers[columnCounterFailed] = "FAILED RESOURCES"
+		headers[columnCounterAll] = "ALL RESOURCES"
+		headers[columnSeverity] = "SEVERITY"
+		headers[columnComplianceScore] = "% COMPLIANCE-SCORE"
+	}
 	return headers
 }
 

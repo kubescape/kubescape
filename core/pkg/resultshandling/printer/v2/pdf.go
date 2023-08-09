@@ -165,7 +165,7 @@ func (pp *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IF
 
 // printTable creates the PDF table
 func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	headers := getControlTableHeaders()
+	headers := getControlTableHeaders(false)
 	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
 	var controls [][]string
 	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
