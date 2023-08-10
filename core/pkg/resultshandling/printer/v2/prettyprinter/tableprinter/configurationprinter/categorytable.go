@@ -97,6 +97,11 @@ func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments 
 	table.SetColumnAlignment(columnAligments)
 	table.SetAutoWrapText(false)
 	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+	var headerColors []tablewriter.Colors
+	for range headers {
+		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+	}
+	table.SetHeaderColor(headerColors...)
 	return table
 }
 

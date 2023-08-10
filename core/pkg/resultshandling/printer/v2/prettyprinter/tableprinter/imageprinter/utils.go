@@ -19,6 +19,12 @@ func renderTable(writer io.Writer, headers []string, columnAlignments []int, row
 	table.SetColumnAlignment(columnAlignments)
 	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 
+	var headerColors []tablewriter.Colors
+	for range rows[0] {
+		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+	}
+	table.SetHeaderColor(headerColors...)
+
 	table.AppendBulk(rows)
 
 	table.Render()
