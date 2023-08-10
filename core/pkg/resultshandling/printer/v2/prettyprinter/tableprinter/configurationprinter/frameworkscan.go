@@ -70,6 +70,12 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	summaryTable.SetHeader(GetControlTableHeaders(short))
 	summaryTable.SetFooter(GenerateFooter(summaryDetails, short))
 
+	var headerColors []tablewriter.Colors
+	for range dataRows[0] {
+		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+	}
+	summaryTable.SetHeaderColor(headerColors...)
+
 	summaryTable.AppendBulk(dataRows)
 	summaryTable.Render()
 

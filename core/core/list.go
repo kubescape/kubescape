@@ -100,6 +100,13 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 	data := v2.Matrix{}
 
 	controlRows := generatePolicyRows(policies)
+
+	var headerColors []tablewriter.Colors
+	for range controlRows[0] {
+		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+	}
+	policyTable.SetHeaderColor(headerColors...)
+
 	data = append(data, controlRows...)
 
 	policyTable.AppendBulk(data)
@@ -130,6 +137,11 @@ func prettyPrintControls(ctx context.Context, policies []string) {
 	} else {
 		controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
 	}
+	var headerColors []tablewriter.Colors
+	for range controlRows[0] {
+		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+	}
+	controlsTable.SetHeaderColor(headerColors...)
 
 	data := v2.Matrix{}
 	data = append(data, controlRows...)

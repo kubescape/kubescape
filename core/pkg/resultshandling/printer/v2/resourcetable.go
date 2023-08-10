@@ -65,6 +65,12 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		}
 		summaryTable.SetHeader(generateResourceHeader(short))
 
+		var headerColors []tablewriter.Colors
+		for range resourceRows[0] {
+			headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+		}
+		summaryTable.SetHeaderColor(headerColors...)
+
 		data := Matrix{}
 		data = append(data, resourceRows...)
 		// For control scan framework will be nil
