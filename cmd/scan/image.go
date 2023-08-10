@@ -63,16 +63,13 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 
 			userInput := args[0]
 
-			logger.L().Info(fmt.Sprintf("Scanning image: %s", userInput))
-			cautils.StartSpinner()
+			logger.L().Start(fmt.Sprintf("Scanning image: %s", userInput))
 			scanResults, err := svc.Scan(ctx, userInput, creds)
 			if err != nil {
-				cautils.StopSpinner()
+				logger.L().StopError(fmt.Sprintf("Failed to scan image: %s", userInput))
 				return err
 			}
-			cautils.StopSpinner()
-
-			logger.L().Success("Image scan completed successfully")
+			logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", userInput))
 
 			scanInfo.SetScanType(cautils.ScanTypeImage)
 
