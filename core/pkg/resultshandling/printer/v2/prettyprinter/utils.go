@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
@@ -245,5 +245,5 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 }
 
 func getCallToActionString(action string) string {
-	return color.New(color.Bold, color.FgHiBlue).SprintFunc()(action)
+	return gchalk.WithBrightBlue().Bold(action)
 }

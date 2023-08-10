@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/fatih/color"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -74,7 +73,7 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 		rows[0] = controlSummary.GetName()
 	}
 
-	rows[1] = color.New(color.Bold, utils.GetStatusColor(controlSummary.GetStatus().Status())).SprintFunc()(getStatus(status, controlSummary, infoToPrintInfo))
+	rows[1] = utils.GetStatusColor(controlSummary.GetStatus().Status())(getStatus(status, controlSummary, infoToPrintInfo))
 
 	rows[2] = getDocsForControl(controlSummary)
 
