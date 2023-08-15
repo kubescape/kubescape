@@ -25,9 +25,9 @@ const (
 
 	// Kubescape API routes
 	pathAttackTracks   = "/api/v1/attackTracks"
-	pathFrameworks     = "/api/v1/framworks"           // TODO rename to /frameworks
-	pathExceptions     = "/api/v1/kubescapeExceptions" // TODO rename to /kubescapeExceptions
-	pathCustomerConfig = "/api/v1/customerConfigs"     // TODO rename to /customerConfig
+	pathFrameworks     = "/api/v1/frameworks"
+	pathExceptions     = "/api/v1/kubescapeExceptions"
+	pathCustomerConfig = "/api/v1/customerConfig"
 
 	// reports upload route
 	pathReport = "/k8s/v2/postureReport"
