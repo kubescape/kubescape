@@ -14,7 +14,6 @@ require (
 	github.com/briandowns/spinner v1.23.0
 	github.com/docker/distribution v2.8.2+incompatible
 	github.com/enescakir/emoji v1.0.0
-	github.com/fatih/color v1.15.0
 	github.com/francoispqt/gojay v1.2.13
 	github.com/go-git/go-git/v5 v5.7.0
 	github.com/google/go-containerregistry v0.15.2
@@ -24,7 +23,7 @@ require (
 	github.com/jwalton/gchalk v1.3.0
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.19
-	github.com/kubescape/k8s-interface v0.0.136
+	github.com/kubescape/k8s-interface v0.0.138
 	github.com/kubescape/opa-utils v0.0.261
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.291-rc.0
@@ -178,6 +177,7 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/evanphx/json-patch v5.6.0+incompatible // indirect
 	github.com/facebookincubator/nvdtools v0.1.5 // indirect
+	github.com/fatih/color v1.15.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.2 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
