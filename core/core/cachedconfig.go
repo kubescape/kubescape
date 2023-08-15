@@ -9,7 +9,7 @@ import (
 
 func (ks *Kubescape) SetCachedConfig(setConfig *metav1.SetConfig) error {
 
-	tenant := getTenantConfig(nil, "", "", getKubernetesApi())
+	tenant := getTenantConfig(nil, "", "", nil)
 
 	if setConfig.Account != "" {
 		tenant.GetConfigObj().AccountID = setConfig.Account
@@ -45,6 +45,6 @@ func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 
 func (ks *Kubescape) DeleteCachedConfig(ctx context.Context, deleteConfig *metav1.DeleteConfig) error {
 
-	tenant := getTenantConfig(nil, "", "", getKubernetesApi()) // change k8sinterface
+	tenant := getTenantConfig(nil, "", "", nil) // change k8sinterface
 	return tenant.DeleteCachedConfig(ctx)
 }
