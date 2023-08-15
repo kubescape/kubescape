@@ -102,6 +102,19 @@ func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySum
 	}
 }
 
+// getFilteredCVEs returns a list of CVEs to show in the table. If there are no vulnerabilities with severity Critical or High, it will return vulnerabilities with severity Medium. Otherwise it will return vulnerabilities with severity Critical or High
+func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
+	// filter out vulnerabilities with severity lower than High
+	filteredCVEs := filterCVEsBySeverities(cves, []string{apis.SeverityCriticalString, apis.SeverityHighString})
+
+	// if there are no vulnerabilities with severity Critical or High, add vulnerabilities with severity Medium
+	if len(filteredCVEs) == 0 {
+		filteredCVEs = filterCVEsBySeverities(cves, []string{apis.SeverityMediumString})
+	}
+
+	return filteredCVEs
+}
+
 // filterCVEsBySeverities returns a list of CVEs only with the severities that are in the severities list
 func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imageprinter.CVE {
 	var filteredCVEs []imageprinter.CVE

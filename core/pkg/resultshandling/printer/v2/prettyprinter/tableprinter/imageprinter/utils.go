@@ -77,7 +77,7 @@ func getImageScanningColumnsAlignments() []int {
 	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT}
 }
 
-func getColor(severity string) (func(...string) string) {
+func getColor(severity string) func(...string) string {
 	switch severity {
 	case apis.SeverityCriticalString:
 		return gchalk.WithAnsi256(1).Bold
@@ -88,8 +88,8 @@ func getColor(severity string) (func(...string) string) {
 	case apis.SeverityLowString:
 		return gchalk.WithAnsi256(220).Bold
 	case apis.SeverityNegligibleString:
-		return gchalk.WithAnsi256(16).Bold
+		return gchalk.WithAnsi256(39).Bold
 	default:
-		return gchalk.WithAnsi256(16).Bold
+		return gchalk.WithAnsi256(30).Bold
 	}
 }
