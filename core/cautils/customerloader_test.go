@@ -246,12 +246,12 @@ func TestGetConfigMapNamespace(t *testing.T) {
 	}{
 		{
 			name: "no env",
-			want: "default",
+			want: kubescapeNamespace,
 		},
 		{
 			name: "default ns",
-			env:  "kubescape",
-			want: "kubescape",
+			env:  kubescapeNamespace,
+			want: kubescapeNamespace,
 		},
 		{
 			name: "custom ns",
@@ -266,5 +266,94 @@ func TestGetConfigMapNamespace(t *testing.T) {
 			}
 			assert.Equalf(t, tt.want, GetConfigMapNamespace(), "GetConfigMapNamespace()")
 		})
+	}
+}
+
+const (
+	anyString       string = "anyString"
+	shouldNotUpdate string = "shouldNotUpdate"
+	shouldUpdate    string = "shouldUpdate"
+)
+
+func checkIsUpdateCorrectly(t *testing.T, beforeField string, afterField string) {
+	switch beforeField {
+	case anyString:
+		assert.Equal(t, anyString, afterField)
+	case "":
+		assert.Equal(t, shouldUpdate, afterField)
+	}
+}
+
+func TestUpdateEmptyFields(t *testing.T) {
+
+	tests := []struct {
+		inCo  *ConfigObj
+		outCo *ConfigObj
+	}{
+		{
+			outCo: &ConfigObj{
+				AccountID:      "",
+				ClusterName:    "",
+				CloudReportURL: "",
+				CloudAPIURL:    "",
+			},
+			inCo: &ConfigObj{
+				AccountID:      shouldUpdate,
+				ClusterName:    shouldUpdate,
+				CloudReportURL: shouldUpdate,
+				CloudAPIURL:    shouldUpdate,
+			},
+		},
+		{
+			outCo: &ConfigObj{
+				AccountID:      anyString,
+				ClusterName:    "",
+				CloudReportURL: "",
+				CloudAPIURL:    "",
+			},
+			inCo: &ConfigObj{
+				AccountID:      shouldNotUpdate,
+				ClusterName:    shouldUpdate,
+				CloudReportURL: shouldUpdate,
+				CloudAPIURL:    shouldUpdate,
+			},
+		},
+		{
+			outCo: &ConfigObj{
+				AccountID:      "",
+				ClusterName:    anyString,
+				CloudReportURL: anyString,
+				CloudAPIURL:    anyString,
+			},
+			inCo: &ConfigObj{
+				AccountID:      shouldUpdate,
+				ClusterName:    shouldNotUpdate,
+				CloudReportURL: shouldNotUpdate,
+				CloudAPIURL:    shouldNotUpdate,
+			},
+		},
+		{
+			outCo: &ConfigObj{
+				AccountID:      anyString,
+				ClusterName:    anyString,
+				CloudReportURL: "",
+				CloudAPIURL:    anyString,
+			},
+			inCo: &ConfigObj{
+				AccountID:      shouldNotUpdate,
+				ClusterName:    shouldNotUpdate,
+				CloudReportURL: shouldUpdate,
+				CloudAPIURL:    shouldNotUpdate,
+			},
+		},
+	}
+
+	for i := range tests {
+		beforeChangesOutCO := tests[i].outCo
+		tests[i].outCo.updateEmptyFields(tests[i].inCo)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.AccountID, tests[i].outCo.AccountID)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAPIURL, tests[i].outCo.CloudAPIURL)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudReportURL, tests[i].outCo.CloudReportURL)
+		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClusterName, tests[i].outCo.ClusterName)
 	}
 }
