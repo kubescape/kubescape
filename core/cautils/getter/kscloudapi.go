@@ -26,7 +26,7 @@ const (
 	// Kubescape API routes
 	pathAttackTracks   = "/api/v1/attackTracks"
 	pathFrameworks     = "/api/v1/frameworks"
-	pathExceptions     = "/api/v1/kubescapeExceptions"
+	pathExceptions     = "/api/v1/controlExceptions"
 	pathCustomerConfig = "/api/v1/customerConfig"
 
 	// reports upload route

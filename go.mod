@@ -8,7 +8,7 @@ require (
 	github.com/anchore/grype v0.63.1
 	github.com/anchore/stereoscope v0.0.0-20230627195312-cd49355d934e
 	github.com/anchore/syft v0.84.1
-	github.com/armosec/armoapi-go v0.0.212
+	github.com/armosec/armoapi-go v0.0.220
 	github.com/armosec/utils-go v0.0.20
 	github.com/armosec/utils-k8s-go v0.0.16
 	github.com/briandowns/spinner v1.23.0
@@ -24,7 +24,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.18
 	github.com/kubescape/k8s-interface v0.0.138
-	github.com/kubescape/opa-utils v0.0.264-0.20230811134852-f590caca3026
+	github.com/kubescape/opa-utils v0.0.266
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.291-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9

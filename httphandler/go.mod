@@ -13,7 +13,7 @@ require (
 	github.com/kubescape/go-logger v0.0.18
 	github.com/kubescape/k8s-interface v0.0.138
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.264-0.20230811134852-f590caca3026
+	github.com/kubescape/opa-utils v0.0.266
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
 	go.opentelemetry.io/otel v1.16.0
@@ -99,7 +99,7 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20230627195312-cd49355d934e // indirect
 	github.com/anchore/syft v0.84.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/armosec/armoapi-go v0.0.212 // indirect
+	github.com/armosec/armoapi-go v0.0.220 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
 	github.com/armosec/utils-k8s-go v0.0.16 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect

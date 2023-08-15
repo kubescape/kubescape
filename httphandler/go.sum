@@ -591,8 +591,8 @@ github.com/armon/go-metrics v0.3.10/go.mod h1:4O98XIr/9W0sxpJ8UaYkvjk10Iff7SnFrb
 github.com/armon/go-radix v0.0.0-20180808171621-7fddfc383310/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgIH9cCH8=
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
-github.com/armosec/armoapi-go v0.0.212 h1:QdmCywiA8NRhyynzHJkIYYZBMBb+1pySUhN3jm4b3Fw=
-github.com/armosec/armoapi-go v0.0.212/go.mod h1:4AEdwBrbS1YCAn/lZzV+cOOR9BPa0MTHYHiJDlR1uRQ=
+github.com/armosec/armoapi-go v0.0.220 h1:gfg2UmcFgcyStjp5ZXfwE8yb0H43eaRX9H/KkqFIv6w=
+github.com/armosec/armoapi-go v0.0.220/go.mod h1:Y1ZcqPUTQ+F8JiQzErrToK5ULrPvClxZoshHmV9PIlU=
 github.com/armosec/gojay v1.2.15 h1:sSB2vnAvacUNkw9nzUYZKcPzhJOyk6/5LK2JCNdmoZY=
 github.com/armosec/gojay v1.2.15/go.mod h1:vzVAaay2TWJAngOpxu8aqLbye9jMgoKleuAOK+xsOts=
 github.com/armosec/utils-go v0.0.20 h1:bvr+TMumEYdMsGFGSsaQysST7K02nNROFvuajNuKPlw=
@@ -1300,8 +1300,8 @@ github.com/kubescape/go-logger v0.0.18 h1:59tYxL623xrPkjgDBU0FheFxjp4JoIuUuX/RJ0
 github.com/kubescape/go-logger v0.0.18/go.mod h1:BAWhQMYc/gnC5wMtPvc9Z4VXFqykFFMaXaPkq0+txBY=
 github.com/kubescape/k8s-interface v0.0.138 h1:JjqLExOQiV1iG6jDLVQ/KpPzH8T9U7jQOtpUe5frF2o=
 github.com/kubescape/k8s-interface v0.0.138/go.mod h1:5sz+5Cjvo98lTbTVDiDA4MmlXxeHSVMW/wR0V3hV4K8=
-github.com/kubescape/opa-utils v0.0.264-0.20230811134852-f590caca3026 h1:K6y50kRTsx/OnLaY2JbtRBDzpvdsO6cd+9qnvIKt0q8=
-github.com/kubescape/opa-utils v0.0.264-0.20230811134852-f590caca3026/go.mod h1:0Be6E+vHqjavl/JneqgyC+oXOdfs6s+V6YnFvBkIAsA=
+github.com/kubescape/opa-utils v0.0.266 h1:w/OUY0evhq0psEKGyJNJj+epst1P9MdBI9C+CN1vsNU=
+github.com/kubescape/opa-utils v0.0.266/go.mod h1:95JkuIOfClgLc+DyGb2mDvefRW0STkZe4L2z6AaZJlQ=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G+oFazeYmZQKoPczLEflBQpwpHCU8DoLLyfj8=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/regolibrary v1.0.291-rc.0 h1:DztPS3NSKfiltO1wZvxRjuu5c99c6+dEgfTs6DcsVa8=
