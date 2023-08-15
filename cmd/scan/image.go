@@ -22,7 +22,7 @@ type imageScanInfo struct {
 // TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
-  This command is still in BETA. Feel free to contact the kubescape maintainers for more information.
+  This command is still in BETA. Feel free to contact the Kubescape maintainers for more information.
   
   Scan an image for vulnerabilities. 
 

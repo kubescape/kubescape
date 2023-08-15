@@ -59,13 +59,6 @@ func errAPI(resp *http.Response) error {
 	return fmt.Errorf("http-error: '%s', reason: '%s'", resp.Status, reason.String())
 }
 
-// errAuth returns an authentication error.
-//
-// Authentication errors upon login croak a less detailed message.
-func errAuth(resp *http.Response) error {
-	return fmt.Errorf("error authenticating: %d", resp.StatusCode)
-}
-
 func readString(rdr io.Reader, sizeHint int64) (string, error) {
 
 	// if the response is empty, return an empty string

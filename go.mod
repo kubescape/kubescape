@@ -24,7 +24,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.18
 	github.com/kubescape/k8s-interface v0.0.136
-	github.com/kubescape/opa-utils v0.0.261
+	github.com/kubescape/opa-utils v0.0.264-0.20230811134852-f590caca3026
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.291-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9

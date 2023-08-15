@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	armosecadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/armosec/v1"
 	gcpadaptorv1 "github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/gcp/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/registryadaptors/registryvulnerabilities"
 
@@ -155,13 +154,6 @@ func imageTagsToContainerImageIdentifier(images []string) []registryvulnerabilit
 func listAdaptors() ([]registryvulnerabilities.IContainerImageVulnerabilityAdaptor, error) {
 
 	adaptors := []registryvulnerabilities.IContainerImageVulnerabilityAdaptor{}
-
-	ksCloudAPI := getter.GetKSCloudAPIConnector()
-	if ksCloudAPI != nil {
-		if ksCloudAPI.GetSecretKey() != "" && ksCloudAPI.GetClientID() != "" && ksCloudAPI.GetAccountID() != "" {
-			adaptors = append(adaptors, armosecadaptorv1.NewKSAdaptor(getter.GetKSCloudAPIConnector()))
-		}
-	}
 
 	gcpCloudAPI := getter.GetGlobalGCPCloudAPIConnector()
 	if gcpCloudAPI != nil {

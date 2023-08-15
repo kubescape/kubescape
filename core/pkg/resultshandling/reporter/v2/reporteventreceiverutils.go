@@ -16,9 +16,9 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 
 	urlObj.Path = "/k8s/v2/postureReport"
 	q := urlObj.Query()
-	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())
-	q.Add("contextName", report.clusterName)
-	q.Add("clusterName", report.clusterName) // deprecated
+	q.Add("customerGUID", uuid.MustParse(report.GetAccountID()).String())
+	q.Add("contextName", report.GetClusterName())
+	q.Add("clusterName", report.GetClusterName()) // deprecated
 
 	urlObj.RawQuery = q.Encode()
 
@@ -34,13 +34,14 @@ func hostToString(host *url.URL, reportID string) string {
 
 func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	reportObj := &reporthandlingv2.PostureReport{
-		CustomerGUID:         report.customerGUID,
-		ClusterName:          report.clusterName,
-		ReportID:             report.reportID,
-		ReportGenerationTime: report.reportTime,
-		SummaryDetails:       opaSessionObj.Report.SummaryDetails,
-		Attributes:           opaSessionObj.Report.Attributes,
-		ClusterAPIServerInfo: opaSessionObj.Report.ClusterAPIServerInfo,
+		CustomerGUID:          report.GetAccountID(),
+		ClusterName:           report.GetClusterName(),
+		ReportID:              report.reportID,
+		ReportGenerationTime:  report.reportTime,
+		SummaryDetails:        opaSessionObj.Report.SummaryDetails,
+		Attributes:            opaSessionObj.Report.Attributes,
+		ClusterAPIServerInfo:  opaSessionObj.Report.ClusterAPIServerInfo,
+		CustomerGUIDGenerated: report.accountIdGenerated,
 	}
 	if opaSessionObj.Metadata != nil {
 		reportObj.Metadata = *opaSessionObj.Metadata

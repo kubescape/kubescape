@@ -15,10 +15,9 @@ type DummyReporter struct{}
 func (dr *DummyReporter) Submit(_ context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	return nil
 }
-func (dr *DummyReporter) SetCustomerGUID(customerGUID string) {}
-func (dr *DummyReporter) SetClusterName(clusterName string)   {}
-func (dr *DummyReporter) DisplayReportURL()                   {}
-func (dr *DummyReporter) GetURL() string                      { return "" }
+func (dr *DummyReporter) SetTenantConfig(tenantConfig cautils.ITenantConfig) {}
+func (dr *DummyReporter) DisplayMessage()                                    {}
+func (dr *DummyReporter) GetURL() string                                     { return "" }
 
 type SpyPrinter struct {
 	ActionPrintCalls int

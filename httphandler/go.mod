@@ -13,7 +13,7 @@ require (
 	github.com/kubescape/go-logger v0.0.18
 	github.com/kubescape/k8s-interface v0.0.136
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.261
+	github.com/kubescape/opa-utils v0.0.264-0.20230811134852-f590caca3026
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
 	go.opentelemetry.io/otel v1.16.0

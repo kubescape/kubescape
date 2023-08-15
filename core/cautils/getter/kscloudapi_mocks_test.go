@@ -214,15 +214,6 @@ func mockExceptions() []armotypes.PostureExceptionPolicy {
 	}
 }
 
-func mockTenantResponse() *TenantResponse {
-	return &TenantResponse{
-		TenantID:  "id",
-		Token:     "token",
-		Expires:   "expiry-time",
-		AdminMail: "admin@example.com",
-	}
-}
-
 func mockCustomerConfig(cluster, scope string) func() *armotypes.CustomerConfig {
 	if cluster == "" {
 		cluster = "my-cluster"
@@ -268,15 +259,6 @@ func mockCustomerConfig(cluster, scope string) func() *armotypes.CustomerConfig 
 				},
 			},
 		}
-	}
-}
-
-func mockLoginResponse() *feLoginResponse {
-	return &feLoginResponse{
-		Token:        "access-token",
-		RefreshToken: "refresh-token",
-		Expires:      "expiry-time",
-		ExpiresIn:    123,
 	}
 }
 

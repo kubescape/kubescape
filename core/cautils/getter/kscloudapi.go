@@ -3,7 +3,6 @@ package getter
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -13,42 +12,25 @@ const (
 	// Kubescape API endpoints
 
 	// production
-	ksCloudERURL   = "report.armo.cloud" // API reports URL
-	ksCloudBEURL   = "api.armosec.io"    // API backend URL
-	ksCloudFEURL   = "cloud.armosec.io"  // API frontend (UI) URIL
-	ksCloudAUTHURL = "auth.armosec.io"   // API login URL
+	ksCloudERURL = "report.armo.cloud" // API reports URL
+	ksCloudBEURL = "api.armosec.io"    // API backend URL
 
 	// staging
-	ksCloudStageERURL   = "report-ks.eustage2.cyberarmorsoft.com"
-	ksCloudStageBEURL   = "api-stage.armosec.io"
-	ksCloudStageFEURL   = "armoui-stage.armosec.io"
-	ksCloudStageAUTHURL = "eggauth-stage.armosec.io"
+	ksCloudStageERURL = "report-ks.eustage2.cyberarmorsoft.com"
+	ksCloudStageBEURL = "api-stage.armosec.io"
 
 	// dev
-	ksCloudDevERURL   = "report.eudev3.cyberarmorsoft.com"
-	ksCloudDevBEURL   = "api-dev.armosec.io"
-	ksCloudDevFEURL   = "cloud-dev.armosec.io"
-	ksCloudDevAUTHURL = "eggauth-dev.armosec.io"
+	ksCloudDevERURL = "report.eudev3.cyberarmorsoft.com"
+	ksCloudDevBEURL = "api-dev.armosec.io"
 
 	// Kubescape API routes
-	pathAttackTracks    = "/api/v1/attackTracks"
-	pathFrameworks      = "/api/v1/armoFrameworks"
-	pathExceptions      = "/api/v1/armoPostureExceptions"
-	pathTenant          = "/api/v1/tenants/createTenant"
-	pathExceptionPolicy = "/api/v1/postureExceptionPolicy"
-	pathCustomerConfig  = "/api/v1/armoCustomerConfiguration"
-	pathLogin           = "/identity/resources/auth/v1/api-token"
-	pathToken           = "/api/v1/openid_customers" //nolint:gosec
+	pathAttackTracks   = "/api/v1/attackTracks"
+	pathFrameworks     = "/api/v1/framworks"           // TODO rename to /frameworks
+	pathExceptions     = "/api/v1/kubescapeExceptions" // TODO rename to /kubescapeExceptions
+	pathCustomerConfig = "/api/v1/customerConfigs"     // TODO rename to /customerConfig
 
 	// reports upload route
 	pathReport = "/k8s/v2/postureReport"
-
-	// Kubescape UI routes
-	pathUIScan       = "/compliance/%s"
-	pathUIRBAC       = "/rbac-visualizer"
-	pathUIRepository = "/repository-scanning/%s"
-	pathUIDashboard  = "/dashboard/"
-	pathUISign       = "/account/sign-up"
 )
 
 const (
@@ -63,21 +45,12 @@ const (
 	queryParamClusterName   = "clusterName"
 	queryParamContextName   = "contextName"
 
-	queryParamUTMSource = "utm_source"
-	queryParamUTMMedium = "utm_medium"
-	// queryParamUTMCampaign     = "utm_campaign"
-	queryParamReport          = "reportGUID"
-	queryParamInvitationToken = "invitationToken"
-
-	authenticationCookie = "auth"
+	queryParamReport = "reportGUID"
 )
 
 var (
 	// Errors returned by the API
-
 	ErrLoginMissingAccountID = errors.New("failed to login, missing accountID")
-	ErrLoginMissingClientID  = errors.New("failed to login, missing clientID")
-	ErrLoginMissingSecretKey = errors.New("failed to login, missing secretKey")
 	ErrAPINotPublic          = errors.New("control api is not public")
 )
 
@@ -94,24 +67,13 @@ var (
 
 // KSCloudAPI allows to access the API of the Kubescape Cloud offering.
 type KSCloudAPI struct {
-	authCookie *http.Cookie
 	*ksCloudOptions
-	authhost        string
-	cloudAPIURL     string
-	secretKey       string
-	accountID       string
-	cloudAuthURL    string
-	invitationToken string
-	reporthost      string
-	scheme          string
-	host            string
-	authscheme      string
-	clientID        string
-	uischeme        string
-	uihost          string
-	reportscheme    string
-	feToken         feLoginResponse
-	loggedIn        bool
+	cloudAPIURL  string
+	accountID    string
+	reportscheme string
+	reporthost   string
+	scheme       string
+	host         string
 }
 
 // SetKSCloudAPIConnector registers a global instance of the KS Cloud client.
@@ -140,14 +102,12 @@ func GetKSCloudAPIConnector() *KSCloudAPI {
 // NewKSCloudAPIDev returns a KS Cloud client pointing to a development environment.
 func NewKSCloudAPIDev(opts ...KSCloudOption) *KSCloudAPI {
 	devOpts := []KSCloudOption{
-		WithFrontendURL(ksCloudDevFEURL),
 		WithReportURL(ksCloudDevERURL),
 	}
 	devOpts = append(devOpts, opts...)
 
 	apiObj := newKSCloudAPI(
 		ksCloudDevBEURL,
-		ksCloudDevAUTHURL,
 		devOpts...,
 	)
 
@@ -157,14 +117,12 @@ func NewKSCloudAPIDev(opts ...KSCloudOption) *KSCloudAPI {
 // NewKSCloudAPIDProd returns a KS Cloud client pointing to a production environment.
 func NewKSCloudAPIProd(opts ...KSCloudOption) *KSCloudAPI {
 	prodOpts := []KSCloudOption{
-		WithFrontendURL(ksCloudFEURL),
 		WithReportURL(ksCloudERURL),
 	}
 	prodOpts = append(prodOpts, opts...)
 
 	return newKSCloudAPI(
 		ksCloudBEURL,
-		ksCloudAUTHURL,
 		prodOpts...,
 	)
 }
@@ -172,37 +130,31 @@ func NewKSCloudAPIProd(opts ...KSCloudOption) *KSCloudAPI {
 // NewKSCloudAPIStaging returns a KS Cloud client pointing to a testing environment.
 func NewKSCloudAPIStaging(opts ...KSCloudOption) *KSCloudAPI {
 	stagingOpts := []KSCloudOption{
-		WithFrontendURL(ksCloudStageFEURL),
 		WithReportURL(ksCloudStageERURL),
 	}
 	stagingOpts = append(stagingOpts, opts...)
 
 	return newKSCloudAPI(
 		ksCloudStageBEURL,
-		ksCloudStageAUTHURL,
 		stagingOpts...,
 	)
 }
 
 // NewKSCloudAPICustomed returns a KS Cloud client with configurable API and authentication endpoints.
-func NewKSCloudAPICustomized(ksCloudAPIURL, ksCloudAuthURL string, opts ...KSCloudOption) *KSCloudAPI {
+func NewKSCloudAPICustomized(ksCloudAPIURL string, opts ...KSCloudOption) *KSCloudAPI {
 	return newKSCloudAPI(
 		ksCloudAPIURL,
-		ksCloudAuthURL,
 		opts...,
 	)
 }
 
-func newKSCloudAPI(apiURL, authURL string, opts ...KSCloudOption) *KSCloudAPI {
+func newKSCloudAPI(apiURL string, opts ...KSCloudOption) *KSCloudAPI {
 	api := &KSCloudAPI{
 		cloudAPIURL:    apiURL,
-		cloudAuthURL:   authURL,
 		ksCloudOptions: ksCloudOptionsWithDefaults(opts),
 	}
 
 	api.SetCloudAPIURL(apiURL)
-	api.SetCloudAuthURL(authURL)
-	api.SetCloudUIURL(api.cloudUIURL)
 	api.SetCloudReportURL(api.cloudReportURL)
 
 	return api
@@ -262,35 +214,14 @@ func (api *KSCloudAPI) Delete(fullURL string, headers map[string]string) (string
 // GetAccountID returns the customer account's GUID.
 func (api *KSCloudAPI) GetAccountID() string { return api.accountID }
 
-// IsLoggedIn indicates if the client has sucessfully authenticated.
-func (api *KSCloudAPI) IsLoggedIn() bool { return api.loggedIn }
+func (api *KSCloudAPI) GetCloudReportURL() string { return api.cloudReportURL }
+func (api *KSCloudAPI) GetCloudAPIURL() string    { return api.cloudAPIURL }
 
-func (api *KSCloudAPI) GetClientID() string        { return api.clientID }
-func (api *KSCloudAPI) GetSecretKey() string       { return api.secretKey }
-func (api *KSCloudAPI) GetCloudReportURL() string  { return api.cloudReportURL }
-func (api *KSCloudAPI) GetCloudAPIURL() string     { return api.cloudAPIURL }
-func (api *KSCloudAPI) GetCloudUIURL() string      { return api.cloudUIURL }
-func (api *KSCloudAPI) GetCloudAuthURL() string    { return api.cloudAuthURL }
-func (api *KSCloudAPI) GetInvitationToken() string { return api.invitationToken }
-
-func (api *KSCloudAPI) SetAccountID(accountID string)   { api.accountID = accountID }
-func (api *KSCloudAPI) SetClientID(clientID string)     { api.clientID = clientID }
-func (api *KSCloudAPI) SetSecretKey(secretKey string)   { api.secretKey = secretKey }
-func (api *KSCloudAPI) SetInvitationToken(token string) { api.invitationToken = token }
+func (api *KSCloudAPI) SetAccountID(accountID string) { api.accountID = accountID }
 
 func (api *KSCloudAPI) SetCloudAPIURL(cloudAPIURL string) {
 	api.cloudAPIURL = cloudAPIURL
 	api.scheme, api.host = parseHost(cloudAPIURL)
-}
-
-func (api *KSCloudAPI) SetCloudUIURL(cloudUIURL string) {
-	api.cloudUIURL = cloudUIURL
-	api.uischeme, api.uihost = parseHost(cloudUIURL)
-}
-
-func (api *KSCloudAPI) SetCloudAuthURL(cloudAuthURL string) {
-	api.cloudAuthURL = cloudAuthURL
-	api.authscheme, api.authhost = parseHost(cloudAuthURL)
 }
 
 func (api *KSCloudAPI) SetCloudReportURL(cloudReportURL string) {
@@ -437,42 +368,6 @@ func (api *KSCloudAPI) getExceptionsURL(clusterName string) string {
 	// queryParamClusterName, clusterName, // TODO - fix customer name support in Armo BE
 }
 
-// GetTenant retrieves the credentials for the calling tenant.
-//
-// The tenant ID overides any already provided account ID.
-func (api *KSCloudAPI) GetTenant() (*TenantResponse, error) {
-	rdr, _, err := api.get(api.getTenantURL())
-	if err != nil {
-		return nil, err
-	}
-	defer rdr.Close()
-
-	tenant, err := decode[TenantResponse](rdr)
-	if err != nil {
-		return nil, err
-	}
-
-	if tenant.TenantID != "" {
-		api.accountID = tenant.TenantID
-	}
-
-	return &tenant, nil
-}
-
-func (api *KSCloudAPI) getTenantURL() string {
-	var params []string
-	if api.accountID != "" {
-		params = []string{
-			queryParamGUID, api.accountID, // NOTE: no fallback in this case
-		}
-	}
-
-	return api.buildAPIURL(
-		pathTenant,
-		params...,
-	)
-}
-
 // GetAccountConfig yields the account configuration.
 func (api *KSCloudAPI) GetAccountConfig(clusterName string) (*CustomerConfig, error) {
 	if api.accountID == "" {
@@ -552,44 +447,6 @@ func (api *KSCloudAPI) ListControls() ([]string, error) {
 	return nil, ErrAPINotPublic
 }
 
-// PostExceptions registers a list of exceptions.
-func (api *KSCloudAPI) PostExceptions(exceptions []PostureExceptionPolicy) error {
-	target := api.exceptionsURL("")
-
-	for i := range exceptions {
-		jazon, err := json.Marshal(exceptions[i])
-		if err != nil {
-			return err
-		}
-
-		_, _, err = api.post(target, jazon, withContentJSON(true))
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// Delete exception removes a registered exception rule.
-func (api *KSCloudAPI) DeleteException(exceptionName string) error {
-	_, _, err := api.delete(api.exceptionsURL(exceptionName))
-
-	return err
-}
-
-func (api *KSCloudAPI) exceptionsURL(exceptionsPolicyName string) string {
-	params := api.paramsWithGUID()
-	if exceptionsPolicyName != "" { // for delete
-		params = append(params, queryParamPolicyName, exceptionsPolicyName)
-	}
-
-	return api.buildAPIURL(
-		pathExceptionPolicy,
-		params...,
-	)
-}
-
 // SubmitReport uploads a posture report.
 func (api *KSCloudAPI) SubmitReport(report *PostureReport) error {
 	jazon, err := json.Marshal(report)
@@ -597,7 +454,7 @@ func (api *KSCloudAPI) SubmitReport(report *PostureReport) error {
 		return err
 	}
 
-	_, _, err = api.post(api.postReportURL(report.ClusterName, report.ReportID), jazon, withContentJSON(true), withToken(api.invitationToken))
+	_, _, err = api.post(api.postReportURL(report.ClusterName, report.ReportID), jazon, withContentJSON(true))
 
 	return err
 }
@@ -613,147 +470,9 @@ func (api *KSCloudAPI) postReportURL(cluster, reportID string) string {
 	)
 }
 
-// ViewReportURL yields the frontend URL to view a posture report (e.g. from a repository scan).
-func (api *KSCloudAPI) ViewReportURL(reportID string) string {
-	return api.buildUIURL(
-		fmt.Sprintf(pathUIRepository, reportID),
-	)
-}
-
-// ViewDashboardURL yields the frontend URL for the dashboard.
-func (api *KSCloudAPI) ViewDashboardURL() string {
-	return api.buildUIURL(
-		pathUIDashboard,
-	)
-}
-
-// ViewRBACURL yields the frontend URL to visualize RBAC.
-func (api *KSCloudAPI) ViewRBACURL() string {
-	return api.buildUIURL(
-		pathUIRBAC,
-	)
-}
-
-// ViewRBACURL yields the frontend URL to check the compliance of a scanned cluster.
-func (api *KSCloudAPI) ViewScanURL(cluster string) string {
-	return api.buildUIURL(
-		fmt.Sprintf(pathUIScan, cluster),
-	)
-}
-
-// ViewSignURL yields the frontend login page.
-func (api *KSCloudAPI) ViewSignURL() string {
-	params := api.paramsWithGUID()
-	params = append(params, api.paramsWithUTM()...)
-	params = append(params, queryParamInvitationToken, api.invitationToken)
-
-	return api.buildUIURL(
-		pathUISign,
-		params...,
-	)
-}
-
-// Login to the KS Cloud using the caller's accountID, clientID and secret key.
-func (api *KSCloudAPI) Login() error {
-	if err := api.loginRequirements(); err != nil {
-		return err
-	}
-
-	// 1. acquire auth token
-	body, err := json.Marshal(feLoginData{ClientId: api.clientID, Secret: api.secretKey})
-	if err != nil {
-		return err
-	}
-
-	rdr, _, err := api.post(api.authTokenURL(), body, withContentJSON(true))
-	if err != nil {
-		return err
-	}
-	defer rdr.Close()
-
-	resp, err := decode[feLoginResponse](rdr)
-	if err != nil {
-		return err
-	}
-
-	api.feToken = resp
-
-	// 2. acquire auth cookie
-	// Now that we have the JWT token, acquire a cookie from the API
-	api.authCookie, err = api.getAuthCookie()
-	if err != nil {
-		return err
-	}
-
-	api.loggedIn = true
-
-	return nil
-}
-
-func (api *KSCloudAPI) authTokenURL() string {
-	return api.buildAuthURL(pathLogin)
-}
-
-func (api *KSCloudAPI) getOpenidURL() string {
-	return api.buildAPIURL(pathToken)
-}
-
-func (api *KSCloudAPI) getAuthCookie() (*http.Cookie, error) {
-	selectCustomer := ksCloudSelectCustomer{SelectedCustomerGuid: api.accountID}
-	body, err := json.Marshal(selectCustomer)
-	if err != nil {
-		return nil, err
-	}
-
-	target := api.getOpenidURL()
-	o := api.defaultRequestOptions([]requestOption{withContentJSON(true), withCookie(nil)})
-	req, err := http.NewRequestWithContext(o.reqContext, http.MethodPost, target, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, err
-	}
-	o.setHeaders(req)
-	o.traceReq(req)
-	resp, err := api.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	o.traceResp(resp)
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("failed to get cookie from %s: status %d", target, resp.StatusCode)
-	}
-
-	for _, cookie := range resp.Cookies() {
-		if cookie.Name == authenticationCookie {
-			return cookie, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no auth cookie in response from %s", target)
-}
-
-func (api *KSCloudAPI) loginRequirements() error {
-	if api.accountID == "" {
-		return ErrLoginMissingAccountID
-	}
-
-	if api.clientID == "" {
-		return ErrLoginMissingClientID
-	}
-
-	if api.secretKey == "" {
-		return ErrLoginMissingSecretKey
-	}
-
-	return nil
-}
-
 // defaultRequestOptions adds standard authentication headers to all requests
 func (api *KSCloudAPI) defaultRequestOptions(opts []requestOption) *requestOptions {
 	optionsWithDefaults := append(make([]requestOption, 0, 4),
-		withToken(api.feToken.Token),
-		withCookie(api.authCookie),
 		withTrace(api.withTrace),
 	)
 	optionsWithDefaults = append(optionsWithDefaults, opts...)
@@ -802,10 +521,6 @@ func (api *KSCloudAPI) do(req *http.Request, o *requestOptions) (io.ReadCloser, 
 	o.traceResp(resp)
 
 	if resp.StatusCode >= 400 {
-		if req.URL.Path == pathLogin {
-			return nil, 0, errAuth(resp)
-
-		}
 		return nil, 0, errAPI(resp)
 	}
 
@@ -815,13 +530,6 @@ func (api *KSCloudAPI) do(req *http.Request, o *requestOptions) (io.ReadCloser, 
 func (api *KSCloudAPI) paramsWithGUID() []string {
 	return append(make([]string, 0, 6),
 		queryParamGUID, api.getCustomerGUIDFallBack(),
-	)
-}
-
-func (api *KSCloudAPI) paramsWithUTM() []string {
-	return append(make([]string, 0, 6),
-		queryParamUTMSource, "ARMOgithub",
-		queryParamUTMMedium, "createaccount",
 	)
 }
 

@@ -2,7 +2,6 @@ package getter
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -17,7 +16,6 @@ type (
 	ksCloudOptions struct {
 		httpClient     *http.Client
 		cloudReportURL string
-		cloudUIURL     string
 		timeout        *time.Duration
 		withTrace      bool
 	}
@@ -28,8 +26,6 @@ type (
 	// requestOptions knows how to enrich a request with headers
 	requestOptions struct {
 		withJSON   bool
-		withToken  string
-		withCookie *http.Cookie
 		withTrace  bool
 		headers    map[string]string
 		reqContext context.Context
@@ -62,13 +58,6 @@ func WithTimeout(timeout time.Duration) KSCloudOption {
 func WithReportURL(u string) KSCloudOption {
 	return func(o *ksCloudOptions) {
 		o.cloudReportURL = u
-	}
-}
-
-// WithFrontendURL specifies the URL to access the KS Cloud UI.
-func WithFrontendURL(u string) KSCloudOption {
-	return func(o *ksCloudOptions) {
-		o.cloudUIURL = u
 	}
 }
 
@@ -113,20 +102,6 @@ func withContentJSON(enabled bool) requestOption {
 	}
 }
 
-// withToken sets an Authorization header for a request
-func withToken(token string) requestOption {
-	return func(o *requestOptions) {
-		o.withToken = token
-	}
-}
-
-// withCookie sets an authentication cookie for a request
-func withCookie(cookie *http.Cookie) requestOption {
-	return func(o *requestOptions) {
-		o.withCookie = cookie
-	}
-}
-
 // withExtraHeaders adds extra headers to a request
 func withExtraHeaders(headers map[string]string) requestOption {
 	return func(o *requestOptions) {
@@ -155,14 +130,6 @@ func withTrace(enabled bool) requestOption {
 func (o *requestOptions) setHeaders(req *http.Request) {
 	if o.withJSON {
 		req.Header.Set("Content-Type", "application/json")
-	}
-
-	if len(o.withToken) > 0 {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", o.withToken))
-	}
-
-	if o.withCookie != nil {
-		req.AddCookie(o.withCookie)
 	}
 
 	for k, v := range o.headers {

@@ -67,18 +67,11 @@ func TestReportMockGetURL(t *testing.T) {
 
 			var reportMock reporter.IReport = NewReportMock(tc.fields.query, tc.fields.message)
 
-			t.Run("mock reports should support GetURL", func(t *testing.T) {
-				got := reportMock.GetURL()
-				require.Equalf(t, tc.want, got,
-					"ReportMock.GetURL() = %v, want %v", got, tc.want,
-				)
-			})
-
-			t.Run("mock reports should support DisplayReportURL", func(t *testing.T) {
+			t.Run("mock reports should support DisplayMessage", func(t *testing.T) {
 				capture, clean := captureStderr(t)
 				defer clean()
 
-				reportMock.DisplayReportURL()
+				reportMock.DisplayMessage()
 				require.NoError(t, capture.Close())
 
 				buf, err := os.ReadFile(capture.Name())

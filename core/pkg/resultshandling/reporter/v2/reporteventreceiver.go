@@ -29,7 +29,6 @@ type SubmitContext string
 
 const (
 	SubmitContextScan       SubmitContext = "scan"
-	SubmitContextRBAC       SubmitContext = "rbac"
 	SubmitContextRepository SubmitContext = "repository"
 )
 
@@ -38,25 +37,24 @@ var _ reporter.IReport = &ReportEventReceiver{}
 type ReportEventReceiver struct {
 	reportTime         time.Time
 	httpClient         *http.Client
-	clusterName        string
-	customerGUID       string
+	tenantConfig       cautils.ITenantConfig
 	eventReceiverURL   *url.URL
-	token              string
-	customerAdminEMail string
 	message            string
 	reportID           string
 	submitContext      SubmitContext
+	accountIdGenerated bool
 }
 
-func NewReportEventReceiver(tenantConfig *cautils.ConfigObj, reportID string, submitContext SubmitContext) *ReportEventReceiver {
+type PostureReportResponse struct {
+	Message string `json:"message"`
+}
+
+func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string, submitContext SubmitContext) *ReportEventReceiver {
 	return &ReportEventReceiver{
-		httpClient:         &http.Client{},
-		clusterName:        tenantConfig.ClusterName,
-		customerGUID:       tenantConfig.AccountID,
-		token:              tenantConfig.Token,
-		customerAdminEMail: tenantConfig.CustomerAdminEMail,
-		reportID:           reportID,
-		submitContext:      submitContext,
+		httpClient:    &http.Client{},
+		tenantConfig:  tenantConfig,
+		reportID:      reportID,
+		submitContext: submitContext,
 	}
 }
 
@@ -64,32 +62,37 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
 	defer span.End()
 	report.reportTime = time.Now().UTC()
-  
-	if report.customerGUID == "" {
-		logger.L().Ctx(ctx).Error("failed to publish results. Reason: Unknown account ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
-		return nil
+
+	if report.GetAccountID() == "" {
+		accountID := report.tenantConfig.GenerateAccountID()
+		report.accountIdGenerated = true
+		logger.L().Debug("generated account ID", helpers.String("account ID", accountID))
 	}
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.clusterName == "" {
+
+	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.GetClusterName() == "" {
 		logger.L().Ctx(ctx).Error("failed to publish results because the cluster name is Unknown. If you are scanning YAML files the results are not submitted to the Kubescape SaaS")
 		return nil
 	}
 
 	if err := report.prepareReport(opaSessionObj); err != nil {
-		return fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.GetURL(), err.Error())
+		return fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.eventReceiverURL, err.Error())
 	}
 
-	report.generateMessage()
-	logger.L().Debug("", helpers.String("account ID", report.customerGUID))
+	logger.L().Debug("", helpers.String("account ID", report.GetAccountID()))
 
 	return nil
 }
 
-func (report *ReportEventReceiver) SetCustomerGUID(customerGUID string) {
-	report.customerGUID = customerGUID
+func (report *ReportEventReceiver) SetTenantConfig(tenantConfig cautils.ITenantConfig) {
+	report.tenantConfig = tenantConfig
 }
 
-func (report *ReportEventReceiver) SetClusterName(clusterName string) {
-	report.clusterName = cautils.AdoptClusterName(clusterName) // clean cluster name
+func (report *ReportEventReceiver) GetAccountID() string {
+	return report.tenantConfig.GetAccountID()
+}
+
+func (report *ReportEventReceiver) GetClusterName() string {
+	return cautils.AdoptClusterName(report.tenantConfig.GetContextName()) // clean cluster name
 }
 
 func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessionObj) error {
@@ -111,24 +114,11 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 	host := hostToString(report.eventReceiverURL, report.reportID)
 
 	cautils.StartSpinner()
+	defer cautils.StopSpinner()
 
-	// send resources
-	err := report.sendResources(host, opaSessionObj)
-
-	cautils.StopSpinner()
-	return err
+	return report.sendResources(host, opaSessionObj)
 }
 
-func (report *ReportEventReceiver) GetURL() string {
-	u := url.URL{}
-	u.Host = getter.GetKSCloudAPIConnector().GetCloudUIURL()
-
-	parseHost(&u)
-	report.addPathURL(&u)
-
-	return u.String()
-
-}
 func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cautils.OPASessionObj) error {
 	splittedPostureReport := report.setSubReport(opaSessionObj)
 
@@ -232,6 +222,7 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 	}
 	return nil
 }
+
 func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = apis.PaginationMarks{
 		ReportNumber: counter,
@@ -241,55 +232,38 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 	if err != nil {
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
 	}
-	msg, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
+	strResponse, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
 	if err != nil {
-		return fmt.Errorf("%s, %v:%s", host, err, msg)
+		// in case of error, we need to revert the generated account ID
+		// otherwise the next run will fail using a non existing account ID
+		if report.accountIdGenerated {
+			report.tenantConfig.DeleteAccountID()
+		}
+
+		return fmt.Errorf("%s, %v:%s", host, err, strResponse)
 	}
+
+	// message is taken only from last report
+	if strResponse != "" && isLastReport {
+		response := PostureReportResponse{}
+		if unmarshalErr := json.Unmarshal([]byte(strResponse), &response); unmarshalErr != nil {
+			logger.L().Error("failed to unmarshal server response")
+		} else {
+			report.setMessage(response.Message)
+		}
+	}
+
 	return err
 }
 
-func (report *ReportEventReceiver) generateMessage() {
-	report.message = ""
-
-	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-	report.message = sep
-	report.message += "Now, take your scan results to the next level with actionable insights on ARMO Platform.\n\n"
-	report.message += fmt.Sprintf("Sign up for free here - %s\n", report.GetURL())
-	report.message += sep
-
+func (report *ReportEventReceiver) setMessage(message string) {
+	report.message = "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" + message
 }
 
-func (report *ReportEventReceiver) DisplayReportURL() {
+func (report *ReportEventReceiver) DisplayMessage() {
 
 	// print if logger level is lower than warning (debug/info)
 	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
 		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 	}
-}
-
-func (report *ReportEventReceiver) addPathURL(urlObj *url.URL) {
-	if report.customerAdminEMail != "" || report.token == "" { // data has been submitted
-		switch report.submitContext {
-		case SubmitContextScan:
-			urlObj.Path = fmt.Sprintf("compliance/%s", report.clusterName)
-		case SubmitContextRBAC:
-			urlObj.Path = "rbac-visualizer"
-		case SubmitContextRepository:
-			urlObj.Path = fmt.Sprintf("repository-scanning/%s", report.reportID)
-		default:
-			urlObj.Path = "dashboard"
-		}
-		return
-	}
-	urlObj.Path = "account/sign-up"
-
-	q := urlObj.Query()
-	q.Add("invitationToken", report.token)
-	q.Add("customerGUID", report.customerGUID)
-
-	// Adding utm parameters
-	q.Add("utm_source", "ARMOgithub")
-	q.Add("utm_medium", "createaccount")
-	urlObj.RawQuery = q.Encode()
-
 }

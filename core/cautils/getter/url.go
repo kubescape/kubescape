@@ -14,24 +14,6 @@ func (api *KSCloudAPI) buildAPIURL(pth string, pairs ...string) string {
 	}, pairs...)
 }
 
-// buildUIURL builds an URL pointing to the UI frontend.
-func (api *KSCloudAPI) buildUIURL(pth string, pairs ...string) string {
-	return buildQuery(url.URL{
-		Scheme: api.uischeme,
-		Host:   api.uihost,
-		Path:   pth,
-	}, pairs...)
-}
-
-// buildAuthURL builds an URL pointing to the authentication endpoint.
-func (api *KSCloudAPI) buildAuthURL(pth string, pairs ...string) string {
-	return buildQuery(url.URL{
-		Scheme: api.authscheme,
-		Host:   api.authhost,
-		Path:   pth,
-	}, pairs...)
-}
-
 // buildReportURL builds an URL pointing to the reporting endpoint.
 func (api *KSCloudAPI) buildReportURL(pth string, pairs ...string) string {
 	return buildQuery(url.URL{

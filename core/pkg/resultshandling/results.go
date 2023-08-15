@@ -96,7 +96,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context) error {
 		if err := rh.ReporterObj.Submit(ctx, rh.ScanData); err != nil {
 			return err
 		}
-		rh.ReporterObj.DisplayReportURL()
+		rh.ReporterObj.DisplayMessage()
 	}
 
 	return nil

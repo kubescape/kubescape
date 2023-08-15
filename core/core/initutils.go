@@ -30,11 +30,11 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(credentials *cautils.Credentials, clusterName string, customClusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+func getTenantConfig(accountID, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
 	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
+		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
 	}
-	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
+	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
 }
 
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
@@ -74,7 +74,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 		if scanInfo.GetScanningContext() != cautils.ContextCluster {
 			submitData = reporterv2.SubmitContextRepository
 		}
-		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID, submitData)
+		return reporterv2.NewReportEventReceiver(tenantConfig, reportID, submitData)
 	}
 	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework
@@ -100,7 +100,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, registryAdaptors)
+	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, registryAdaptors, tenantConfig.GetContextName())
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.
@@ -163,7 +163,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 
 	*/
 
-	if getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" {
+	if getter.GetKSCloudAPIConnector().GetCloudReportURL() == "" {
 		scanInfo.Submit = false
 		return
 	}
@@ -185,25 +185,24 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	// If There is no account, or if the account is not legal, do not submit
-	if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
+	// If there is no account, we will generate one before submitting
+	if tenantConfig.GetAccountID() == "" {
+		scanInfo.Submit = true
+		// If there is an account, but it is not a valid UUID, we do not submit
+	} else if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
+		logger.L().Warning("account is not a valid UUID", helpers.Error(err))
 		scanInfo.Submit = false
 	} else {
 		scanInfo.Submit = true
 	}
-
-	if scanInfo.CreateAccount {
-		scanInfo.Submit = true
-	}
-
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, tenantEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
-	if tenantEmail != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
+	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
 	}

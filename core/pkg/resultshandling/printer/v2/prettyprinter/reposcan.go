@@ -13,7 +13,6 @@ import (
 
 type RepoPrinter struct {
 	writer                 *os.File
-	inputPatterns          []string
 	categoriesTablePrinter configurationprinter.TablePrinter
 }
 

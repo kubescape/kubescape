@@ -38,14 +38,16 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 }
 
 type K8sResourceHandler struct {
+	clusterName       string
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
 	registryAdaptors  *RegistryAdaptors
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors, clusterName string) *K8sResourceHandler {
 	return &K8sResourceHandler{
+		clusterName:       clusterName,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
@@ -204,16 +206,15 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
-	clusterName := cautils.ClusterName
-	provider := cloudsupport.GetCloudProvider(clusterName)
+	provider := cloudsupport.GetCloudProvider(k8sHandler.clusterName)
 	if provider == "" {
-		return fmt.Errorf("failed to get cloud provider, cluster: %s", clusterName)
+		return fmt.Errorf("failed to get cloud provider, cluster: %s", k8sHandler.clusterName)
 	}
 
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
 	}
-	logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
+	logger.L().Debug("cloud", helpers.String("clusterName", k8sHandler.clusterName), helpers.String("provider", provider))
 
 	logger.L().Info("Downloading cloud resources")
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
@@ -222,7 +223,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		}
 
 		logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
-		wl, err := resourceGetter(clusterName, provider)
+		wl, err := resourceGetter(k8sHandler.clusterName, provider)
 		if err != nil {
 			if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
 				// Return error with useful info on how to configure credentials for getting cloud provider info
