@@ -42,16 +42,14 @@ type K8sResourceHandler struct {
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
-	registryAdaptors  *RegistryAdaptors
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors, clusterName string) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
 	return &K8sResourceHandler{
 		clusterName:       clusterName,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
-		registryAdaptors:  registryAdaptors,
 	}
 }
 
@@ -99,21 +97,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	logger.L().Success("Accessed to Kubernetes objects")
-
-	// backswords compatibility - get image vulnerability resources
-	if k8sHandler.registryAdaptors != nil {
-		imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
-		// check that controls use image vulnerability resources
-		if len(imgVulnResources) > 0 {
-			logger.L().Info("Requesting images vulnerabilities results")
-			cautils.StartSpinner()
-			if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
-				cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
-			}
-			cautils.StopSpinner()
-			logger.L().Success("Requested images vulnerabilities results")
-		}
-	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources

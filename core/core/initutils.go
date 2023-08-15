@@ -89,7 +89,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 	return reporterv2.NewReportMock("", message)
 }
 
-func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
+func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
 	ctx, span := otel.Tracer("").Start(ctx, "getResourceHandler")
 	defer span.End()
 
@@ -100,7 +100,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, registryAdaptors, tenantConfig.GetContextName())
+	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.

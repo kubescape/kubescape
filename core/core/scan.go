@@ -75,13 +75,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 	spanHostScanner.End()
 
-	// ================== setup registry adaptors ======================================
-
-	registryAdaptors, _ := resourcehandler.NewRegistryAdaptors()
-
 	// ================== setup resource collector object ======================================
 
-	resourceHandler := getResourceHandler(ctx, scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
+	resourceHandler := getResourceHandler(ctx, scanInfo, tenantConfig, k8s, hostSensorHandler)
 
 	// ================== setup reporter & printer objects ======================================
 
