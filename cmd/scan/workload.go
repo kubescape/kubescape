@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -70,11 +71,11 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			ctx := context.TODO()
 			results, err := ks.Scan(ctx, scanInfo)
 			if err != nil {
-				return err
+				logger.L().Fatal(err.Error())
 			}
 
 			if err = results.HandleResults(ctx); err != nil {
-				return err
+				logger.L().Fatal(err.Error())
 			}
 
 			return nil
