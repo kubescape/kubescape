@@ -57,6 +57,10 @@ func (rp *RepoPrinter) getNextSteps() []string {
 func (rp *RepoPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDetails) {
 	cautils.InfoTextDisplay(rp.writer, getTopWorkloadsTitle(len(summaryDetails.TopWorkloadsByScore)))
 
+	cautils.SimpleDisplay(rp.writer, "────────────────────────\n\n")
+
+	cautils.SimpleDisplay(rp.writer, "High-stakes workloads are defined as those which Kubescape estimates would have the highest impact if they were to be exploited. Learn more about high-stakes workloads at https://kubescape.io/docs/workloads/high-stakes.\n\n")
+
 	for i, wl := range summaryDetails.TopWorkloadsByScore {
 		ns := wl.GetNamespace()
 		name := wl.GetName()

@@ -96,7 +96,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
 	}
 
-	logger.L().Success("Accessed to Kubernetes objects")
+	logger.L().Success("Accessed Kubernetes objects")
 
 	// backswords compatibility - get image vulnerability resources
 	if k8sHandler.registryAdaptors != nil {

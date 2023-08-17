@@ -47,14 +47,18 @@ func (cp *ClusterPrinter) PrintNextSteps() {
 
 func (cp *ClusterPrinter) getNextSteps() []string {
 	return []string{
-		configScanVerboseRunText,
-		installHelmText,
-		CICDSetupText,
+		runCommandsText,
+		scanWorkloadText,
+		installKubescapeText,
 	}
 }
 
 func (cp *ClusterPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDetails) {
 	cautils.InfoTextDisplay(cp.writer, getTopWorkloadsTitle(len(summaryDetails.TopWorkloadsByScore)))
+
+	cautils.SimpleDisplay(cp.writer, "────────────────────────\n\n")
+
+	cautils.SimpleDisplay(cp.writer, "High-stakes workloads are defined as those which Kubescape estimates would have the highest impact if they were to be exploited. Learn more about high-stakes workloads at https://kubescape.io/docs/workloads/high-stakes.\n\n")
 
 	for i, wl := range summaryDetails.TopWorkloadsByScore {
 		ns := wl.GetNamespace()

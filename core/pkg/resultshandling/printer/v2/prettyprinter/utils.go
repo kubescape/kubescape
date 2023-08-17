@@ -17,10 +17,13 @@ import (
 )
 
 const (
-	linkToHelm               = "https://github.com/kubescape/helm-charts"
+	linkToHelm               = "https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
 	linkToCICDSetup          = "https://hub.armosec.io/docs/integrations"
 	configScanVerboseRunText = "Run with '--verbose'/'-v' flag for detailed resources view"
 	imageScanVerboseRunText  = "Run with '--verbose'/'-v' flag for detailed vulnerabilities view"
+	runCommandsText          = "Run one of the suggested commands to learn more about a failed control failure"
+	scanWorkloadText         = "Scan a workload with '$ kubescape scan workload' to see vulnerability information"
+	installKubescapeText     = "Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: https://github.com/kubescape/helm-charts/kubescape-cloud-operator"
 )
 
 var (
@@ -54,10 +57,10 @@ func getWorkloadPrefixForCmd(namespace, kind, name string) string {
 
 func getTopWorkloadsTitle(topWLsLen int) string {
 	if topWLsLen > 1 {
-		return "Your highest stake workloads:\n"
+		return "Highest-stakes workloads\n"
 	}
 	if topWLsLen > 0 {
-		return "Your highest stake workload:\n"
+		return "Highest-stake workload\n"
 	}
 	return ""
 }
@@ -215,16 +218,23 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 }
 
 func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary) {
-	for _, img := range summary.Images {
-		imgWithoutTag := strings.Split(img, ":")[0]
-		cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+	if len(summary.Images) > 3 {
+		cautils.SimpleDisplay(writer, "Receive full report by running: kubescape scan image <image>\n")
+	} else {
+		for _, img := range summary.Images {
+			imgWithoutTag := strings.Split(img, ":")[0]
+			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+		}
 	}
 
 	cautils.InfoTextDisplay(writer, "\n")
 }
 
 func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
-	cautils.InfoTextDisplay(writer, "Follow-up steps:\n")
+	cautils.InfoTextDisplay(writer, "What now?\n")
+
+	cautils.SimpleDisplay(writer, "─────────\n\n")
+
 	for _, ns := range nextSteps {
 		cautils.SimpleDisplay(writer, "- "+ns+"\n")
 	}
@@ -234,12 +244,15 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 }
 
 func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
-	cautils.InfoTextDisplay(writer, "Compliance Score:\n")
+	cautils.InfoTextDisplay(writer, "Compliance Score\n")
+	cautils.SimpleDisplay(writer, "────────────────\n\n")
+	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
+
 	for _, fw := range frameworks {
-		cautils.SimpleDisplay(writer, "* %s: %.2f%%\n", fw.GetName(), fw.GetComplianceScore())
+		cautils.SimpleDisplay(writer, "* %s: %s", fw.GetName(), gchalk.WithYellow().Bold(fmt.Sprintf("%.2f%%\n", fw.GetComplianceScore())))
 	}
 
-	cautils.SimpleDisplay(writer, fmt.Sprintf("View full compliance report by running: %s\n", getCallToActionString("'$ kubescape scan framework nsa,mitre'")))
+	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running '$ kubescape scan framework nsa' or '$ kubescape scan framework mitre'\n"))
 
 	cautils.InfoTextDisplay(writer, "\n")
 }

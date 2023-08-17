@@ -169,7 +169,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	}
 
 	// do not submit control scanning
-	if !scanInfo.FrameworkScan {
+	if !scanInfo.FrameworkScan && scanInfo.ScanType != cautils.ScanTypeCluster && scanInfo.ScanType != cautils.ScanTypeRepo {
 		scanInfo.Submit = false
 		return
 	}
