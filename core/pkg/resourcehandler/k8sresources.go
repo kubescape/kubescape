@@ -54,6 +54,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler ho
 }
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+	logger.L().Start("Accessing Kubernetes objects")
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
@@ -91,7 +92,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
 	}
 
-	logger.L().Success("Accessed to Kubernetes objects")
+	logger.L().StopSuccess("Accessed Kubernetes objects")
 
 	// backswords compatibility - get image vulnerability resources
 	if k8sHandler.registryAdaptors != nil {
@@ -209,12 +210,13 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		return fmt.Errorf("failed to get cloud provider, cluster: %s", clusterName)
 	}
 
+	logger.L().Start("Downloading cloud resources")
+
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
 	}
 	logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
 
-	logger.L().Info("Downloading cloud resources")
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
 		if !cloudResourceRequired(cloudResources, resourceKind) {
 			continue
@@ -236,7 +238,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		allResources[wl.GetID()] = wl
 		externalResourceMap[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
-	logger.L().Success("Downloaded cloud resources")
+	logger.L().StopSuccess("Downloaded cloud resources")
 
 	// get api server info resource
 	if cloudResourceRequired(cloudResources, string(cloudsupport.TypeApiServerInfo)) {
@@ -414,7 +416,7 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
-	logger.L().Debug("Collecting rbac resources")
+	logger.L().Start("Collecting RBAC resources")
 
 	if k8sHandler.rbacObjectsAPI == nil {
 		return nil
@@ -426,6 +428,9 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	for k, v := range allRbacResources {
 		allResources[k] = v
 	}
+
+	logger.L().StopSuccess("Collected RBAC resources")
+
 	return nil
 }
 

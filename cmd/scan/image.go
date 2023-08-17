@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/core"
 	"github.com/kubescape/kubescape/v2/core/meta"
@@ -53,6 +54,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			failOnSeverity := imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)
 
 			ctx := context.Background()
+
+			logger.InitLogger(iconlogger.LoggerName)
+
 			dbCfg, _ := imagescan.NewDefaultDBConfig()
 			svc := imagescan.NewScanService(dbCfg)
 
