@@ -241,23 +241,14 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				}
 
 				ruleResult.SetStatus(apis.StatusFailed, nil)
-				for _, failedPath := range ruleResponse.FailedPaths {
-					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FailedPath: failedPath})
-				}
-
-				for _, fixPath := range ruleResponse.FixPaths {
-					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixPath: fixPath})
-				}
-
-				if ruleResponse.FixCommand != "" {
-					ruleResult.Paths = append(ruleResult.Paths, armotypes.PosturePaths{FixCommand: ruleResponse.FixCommand})
-				}
+				ruleResult.Paths = appendPaths(ruleResult.Paths, ruleResponse.FailedPaths, ruleResponse.FixPaths, ruleResponse.FixCommand, failedResource.GetID())
 				// if ruleResponse has relatedObjects, add it to ruleResult
 				if len(ruleResponse.RelatedObjects) > 0 {
 					for _, relatedObject := range ruleResponse.RelatedObjects {
 						wl := objectsenvelopes.NewObject(relatedObject.Object)
 						if wl != nil {
 							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+							ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.FailedPaths, relatedObject.FixPaths, relatedObject.FixCommand, wl.GetID())
 						}
 					}
 				}
@@ -267,6 +258,20 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 		}
 	}
 	return resources, nil
+}
+
+// appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
+func appendPaths(paths []armotypes.PosturePaths, failedPaths []string, fixPaths []armotypes.FixPath, fixCommand string, resourceID string) []armotypes.PosturePaths {
+	for _, failedPath := range failedPaths {
+		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FailedPath: failedPath})
+	}
+	for _, fixPath := range fixPaths {
+		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FixPath: fixPath})
+	}
+	if fixCommand != "" {
+		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FixCommand: fixCommand})
+	}
+	return paths
 }
 
 func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
