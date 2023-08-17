@@ -63,11 +63,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		return nil, nil, nil, nil, err
 	}
 
-	// we don't scan resources which have a parent
-	if sessionObj.SingleResourceScan != nil && k8sinterface.WorkloadHasParent(sessionObj.SingleResourceScan) {
-		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
-	}
-
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
@@ -184,20 +179,24 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 	}
 	result, err := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors, globalFieldSelector)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resource %s, reason: %v", resource.GetID(), err)
+		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), err)
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("%s was not found", resource.GetID())
-	}
-
-	if len(result) > 1 {
-		return nil, fmt.Errorf("more than one resource found for %s", resource.GetID())
+		return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
 	}
 
 	metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+	if len(metaObjs) == 0 {
+		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", getReadableID(resource))
+	}
+
+	if len(metaObjs) > 1 {
+		return nil, fmt.Errorf("more than one resource found for %s", getReadableID(resource))
+	}
+
 	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
-		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", resource.GetID())
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", getReadableID(resource))
 	}
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())

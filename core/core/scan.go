@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -125,6 +126,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printe
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
+	logger.InitLogger(iconlogger.LoggerName)
 	logger.L().Start("Kubescape scanner initializing")
 
 	// ===================== Initialization =====================
