@@ -252,7 +252,7 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 		cautils.SimpleDisplay(writer, "* %s: %s", fw.GetName(), gchalk.WithYellow().Bold(fmt.Sprintf("%.2f%%\n", fw.GetComplianceScore())))
 	}
 
-	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running '$ kubescape scan framework nsa' or '$ kubescape scan framework mitre'\n"))
+	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s  or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))
 
 	cautils.InfoTextDisplay(writer, "\n")
 }
