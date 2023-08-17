@@ -416,7 +416,7 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
-	logger.L().Start("Collecting rbac resources")
+	logger.L().Start("Collecting RBAC resources")
 
 	if k8sHandler.rbacObjectsAPI == nil {
 		return nil
@@ -429,7 +429,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 		allResources[k] = v
 	}
 
-	logger.L().StopSuccess("Collected rbac resources")
+	logger.L().StopSuccess("Collected RBAC resources")
 
 	return nil
 }
