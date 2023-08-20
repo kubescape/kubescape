@@ -57,7 +57,7 @@ func (hp *HtmlPrinter) PrintNextSteps() {
 
 func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
-		logMissingData("html", ctx, opaSessionObj, imageScanData)
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
 		return
 	}
 

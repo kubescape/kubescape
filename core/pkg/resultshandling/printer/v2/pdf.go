@@ -91,7 +91,7 @@ func (pp *PdfPrinter) PrintNextSteps() {
 
 func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
-		logMissingData("pdf", ctx, opaSessionObj, imageScanData)
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
 		return
 	}
 

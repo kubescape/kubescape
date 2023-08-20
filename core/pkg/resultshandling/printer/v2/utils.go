@@ -1,12 +1,8 @@
 package printer
 
 import (
-	"context"
-	"fmt"
-
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/presenter/models"
-	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -142,12 +138,4 @@ func extractCVEs(matches []models.Match) []imageprinter.CVE {
 		CVEs = append(CVEs, cve)
 	}
 	return CVEs
-}
-
-func logMissingData(format string, ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
-	if imageScanData != nil {
-		logger.L().Ctx(ctx).Fatal(fmt.Sprintf("%s format is not supported for image scanning", format))
-	} else {
-		logger.L().Ctx(ctx).Fatal(fmt.Sprintf("failed to write results in %s format: no data provided", format))
-	}
 }

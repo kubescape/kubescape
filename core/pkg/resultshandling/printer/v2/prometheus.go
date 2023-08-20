@@ -57,7 +57,7 @@ func (pp *PrometheusPrinter) PrintImageScan(context.Context, *models.PresenterCo
 
 func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
-		logMissingData("prometheus", ctx, opaSessionObj, imageScanData)
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
 		return
 	}
 

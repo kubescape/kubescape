@@ -131,3 +131,14 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType, "", nil)
 	}
 }
+
+func ValidatePrinter(scanType cautils.ScanTypes, printFormat string) bool {
+	if scanType == cautils.ScanTypeImage {
+		if printFormat != printer.JsonFormat && printFormat != printer.PrettyFormat {
+			return false
+		}
+
+	}
+
+	return true
+}

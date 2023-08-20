@@ -118,7 +118,7 @@ func (jp *JunitPrinter) PrintNextSteps() {
 
 func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
-		logMissingData("junit", ctx, opaSessionObj, imageScanData)
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
 		return
 	}
 

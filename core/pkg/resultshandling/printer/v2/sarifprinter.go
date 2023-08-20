@@ -142,7 +142,6 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 	} else {
-
 		report, err := sarif.New(sarif.Version210)
 		if err != nil {
 			panic(err)
