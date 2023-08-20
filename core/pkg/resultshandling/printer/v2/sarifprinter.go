@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anchore/grype/grype/presenter"
 	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -110,7 +111,18 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
+func (sp *SARIFPrinter) PrintImageScan(scanResults *models.PresenterConfig) error {
+	if scanResults == nil {
+		return fmt.Errorf("no no image vulnerability data provided")
+	}
+
+	presenterConfig, err := presenter.ValidatedConfig("sarif", "", false)
+	if err != nil {
+		return err
+	}
+	pres := presenter.GetPresenter(presenterConfig, *scanResults)
+
+	return pres.Present(sp.writer)
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {
@@ -119,53 +131,61 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
-		logMissingData("sarif", ctx, opaSessionObj, imageScanData)
-		return
-	}
-
-	report, err := sarif.New(sarif.Version210)
-	if err != nil {
-		panic(err)
-	}
-
-	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
-	basePath := getBasePathFromMetadata(*opaSessionObj)
-
-	for resourceID, result := range opaSessionObj.ResourcesResult {
-		if result.GetStatus(nil).IsFailed() {
-			resourceSource := opaSessionObj.ResourceSource[resourceID]
-			filepath := resourceSource.RelativePath
-
-			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-			if filepath == "" || basePath == "" {
-				continue
+		if len(imageScanData) > 0 {
+			if err := sp.PrintImageScan(imageScanData[0].PresenterConfig); err != nil {
+				logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
+				return
 			}
+		} else {
+			logger.L().Ctx(ctx).Fatal("failed to write results in sarif format: no data provided")
+		}
 
-			rsrcAbsPath := path.Join(basePath, filepath)
-			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
-			if err != nil {
-				logger.L().Debug("failed to create location resolver", helpers.Error(err))
-			}
+	} else {
 
-			for _, toPin := range result.AssociatedControls {
-				ac := toPin
+		report, err := sarif.New(sarif.Version210)
+		if err != nil {
+			panic(err)
+		}
 
-				if ac.GetStatus(nil).IsFailed() {
-					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
-					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+		run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+		basePath := getBasePathFromMetadata(*opaSessionObj)
 
-					sp.addRule(run, ctl)
-					result := sp.addResult(run, ctl, filepath, location)
-					collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath)
+		for resourceID, result := range opaSessionObj.ResourcesResult {
+			if result.GetStatus(nil).IsFailed() {
+				resourceSource := opaSessionObj.ResourceSource[resourceID]
+				filepath := resourceSource.RelativePath
+
+				// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
+				if filepath == "" || basePath == "" {
+					continue
+				}
+
+				rsrcAbsPath := path.Join(basePath, filepath)
+				locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
+				if err != nil {
+					logger.L().Debug("failed to create location resolver", helpers.Error(err))
+				}
+
+				for _, toPin := range result.AssociatedControls {
+					ac := toPin
+
+					if ac.GetStatus(nil).IsFailed() {
+						ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+						location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+
+						sp.addRule(run, ctl)
+						result := sp.addResult(run, ctl, filepath, location)
+						collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath)
+					}
 				}
 			}
 		}
+
+		report.AddRun(run)
+
+		report.PrettyWrite(sp.writer)
+
 	}
-
-	report.AddRun(run)
-
-	report.PrettyWrite(sp.writer)
-
 	printer.LogOutputFile(sp.writer.Name())
 }
 
