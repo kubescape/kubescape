@@ -535,3 +535,104 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 		})
 	}
 }
+
+func TestGetFilteredCVEs(t *testing.T) {
+	tests := []struct {
+		name         string
+		cves         []imageprinter.CVE
+		expectedCVEs []imageprinter.CVE
+	}{
+		{
+			name: "High and Critical",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+				{
+					Severity: "Critical",
+				},
+				{
+					Severity: "Medium",
+				},
+				{
+					Severity: "Low",
+				},
+				{
+					Severity: "Negligible",
+				},
+			},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+				{
+					Severity: "Critical",
+				},
+			},
+		},
+		{
+			name: "Only High",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+				{
+					Severity: "Medium",
+				}},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+			},
+		},
+		{
+			name: "Only Critical",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "Critical",
+				},
+				{
+					Severity: "Medium",
+				}},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "Critical",
+				},
+			},
+		},
+		{
+			name: "No High or Critical",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "Low",
+				},
+				{
+					Severity: "Medium",
+				}},
+
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "Medium",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			filteredCVEs := getFilteredCVEs(tc.cves)
+			for _, cve := range filteredCVEs {
+				found := false
+				for _, expectedCVE := range tc.expectedCVEs {
+					if cve.Severity == expectedCVE.Severity {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected: %v, Got: %v", tc.expectedCVEs, filteredCVEs)
+				}
+			}
+		})
+	}
+}

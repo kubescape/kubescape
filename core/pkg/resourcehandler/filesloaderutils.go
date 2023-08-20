@@ -112,7 +112,7 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 	if len(wls) == 0 {
 		return nil, fmt.Errorf("k8s resource '%s' not found", getReadableID(resource))
 	} else if len(wls) > 1 {
-		return nil, fmt.Errorf("more than one k8s resource found for '%s'", resource.GetID())
+		return nil, fmt.Errorf("more than one k8s resource found for '%s'", getReadableID(resource))
 	}
 
 	return wls[0], nil
