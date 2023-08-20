@@ -15,20 +15,20 @@ func TestRepoScan_getNextSteps(t *testing.T) {
 		t.Errorf("Expected 4 next steps, got %d", len(nextSteps))
 	}
 
-	if nextSteps[0] != configScanVerboseRunText {
-		t.Errorf("Expected %s, got %s", configScanVerboseRunText, nextSteps[0])
+	if nextSteps[0] != runCommandsText {
+		t.Errorf("Expected %s, got %s", clusterScanRunText, nextSteps[0])
 	}
 
 	if nextSteps[1] != clusterScanRunText {
-		t.Errorf("Expected %s, got %s", clusterScanRunText, nextSteps[1])
+		t.Errorf("Expected %s, got %s", runCommandsText, nextSteps[1])
 	}
 
-	if nextSteps[2] != CICDSetupText {
-		t.Errorf("Expected %s, got %s", CICDSetupText, nextSteps[2])
+	if nextSteps[2] != scanWorkloadText {
+		t.Errorf("Expected %s, got %s", scanWorkloadText, nextSteps[2])
 	}
 
-	if nextSteps[3] != installHelmText {
-		t.Errorf("Expected %s, got %s", installHelmText, nextSteps[3])
+	if nextSteps[3] != installKubescapeText {
+		t.Errorf("Expected %s, got %s", installKubescapeText, nextSteps[3])
 	}
 }
 

@@ -116,8 +116,10 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj != nil {
-		if pp.scanType != cautils.ScanTypeCluster && pp.scanType != cautils.ScanTypeRepo {
+		if pp.scanType != cautils.ScanTypeCluster && pp.scanType != cautils.ScanTypeRepo && pp.scanType != cautils.ScanTypeWorkload {
 			fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+		} else {
+			fmt.Fprintf(pp.writer, "\n")
 		}
 
 		sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
@@ -133,7 +135,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		pp.printOverview(opaSessionObj, pp.verboseMode)
 
-		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs, opaSessionObj.TopWorkloadsByScore)
 
 		// When writing to Stdout, we aren’t really writing to an output file,
 		// so no need to print that we are

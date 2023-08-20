@@ -88,13 +88,13 @@ func TestGetTopWorkloadsTitle(t *testing.T) {
 	assert.Equal(t, "", title)
 
 	title = getTopWorkloadsTitle(1)
-	assert.Equal(t, "Your highest stake workload:\n", title)
+	assert.Equal(t, "Highest-stake workloads\n", title)
 
 	title = getTopWorkloadsTitle(2)
-	assert.Equal(t, "Your highest stake workloads:\n", title)
+	assert.Equal(t, "Highest-stake workloads\n", title)
 
 	title = getTopWorkloadsTitle(10)
-	assert.Equal(t, "Your highest stake workloads:\n", title)
+	assert.Equal(t, "Highest-stake workloads\n", title)
 }
 
 func TestGetSeverityToSummaryMap(t *testing.T) {

@@ -337,8 +337,8 @@ func TestDisplayReportURL(t *testing.T) {
 		require.NoError(t, err)
 
 		require.NotEmpty(t, buf)
-		assert.Contains(t, string(buf), "Now")
-		assert.Contains(t, string(buf), "https://cloud.armosec.io/account/sign-up")
+		assert.Contains(t, string(buf), "Your scan results were successfully submitted")
+		assert.Contains(t, string(buf), "View your results here")
 
 		t.Log(string(buf))
 	})

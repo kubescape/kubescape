@@ -56,6 +56,7 @@ type OPASessionObj struct {
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
+	TopWorkloadsByScore   []reporthandling.IResource
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
@@ -109,7 +110,7 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 			Source:    &source,
 		}
 
-		sessionObj.Report.SummaryDetails.TopWorkloadsByScore = append(sessionObj.Report.SummaryDetails.TopWorkloadsByScore, wlObj)
+		sessionObj.TopWorkloadsByScore = append(sessionObj.TopWorkloadsByScore, wlObj)
 		count++
 	}
 }

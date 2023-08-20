@@ -17,19 +17,17 @@ import (
 )
 
 const (
-	linkToHelm               = "https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
-	linkToCICDSetup          = "https://hub.armosec.io/docs/integrations"
 	configScanVerboseRunText = "Run with '--verbose'/'-v' flag for detailed resources view"
 	imageScanVerboseRunText  = "Run with '--verbose'/'-v' flag for detailed vulnerabilities view"
 	runCommandsText          = "Run one of the suggested commands to learn more about a failed control failure"
-	scanWorkloadText         = "Scan a workload with '$ kubescape scan workload' to see vulnerability information"
-	installKubescapeText     = "Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: https://github.com/kubescape/helm-charts/kubescape-cloud-operator"
+	ksHelmChartLink          = "https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
+	highStakesWlsText        = "High-stakes workloads are defined as those which Kubescape estimates would have the highest impact if they were to be exploited.\n\n"
 )
 
 var (
+	scanWorkloadText     = fmt.Sprintf("Scan a workload with %s to see vulnerability information", getCallToActionString("'$ kubescape scan workload'"))
+	installKubescapeText = fmt.Sprintf("Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: %s", ksHelmChartLink)
 	clusterScanRunText   = fmt.Sprintf("Run a cluster scan: %s", getCallToActionString("'$ kubescape scan'"))
-	installHelmText      = fmt.Sprintf("Install Kubescape in your cluster for continuous monitoring: %s", linkToHelm)
-	CICDSetupText        = fmt.Sprintf("Add Kubescape to your CI/CD pipeline: %s", linkToCICDSetup)
 	complianceFrameworks = []string{"nsa", "mitre"}
 	cveSeverities        = []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
 )
@@ -56,11 +54,8 @@ func getWorkloadPrefixForCmd(namespace, kind, name string) string {
 }
 
 func getTopWorkloadsTitle(topWLsLen int) string {
-	if topWLsLen > 1 {
-		return "Highest-stakes workloads\n"
-	}
 	if topWLsLen > 0 {
-		return "Highest-stake workload\n"
+		return "Highest-stake workloads\n"
 	}
 	return ""
 }
@@ -249,7 +244,7 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 	cautils.SimpleDisplay(writer, "─────────\n\n")
 
 	for _, ns := range nextSteps {
-		cautils.SimpleDisplay(writer, "- "+ns+"\n")
+		cautils.SimpleDisplay(writer, "* "+ns+"\n")
 	}
 	if addLine {
 		cautils.SimpleDisplay(writer, "\n")
