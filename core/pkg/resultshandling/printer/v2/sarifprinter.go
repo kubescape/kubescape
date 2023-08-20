@@ -120,6 +120,7 @@ func (sp *SARIFPrinter) PrintImageScan(scanResults *models.PresenterConfig) erro
 	if err != nil {
 		return err
 	}
+
 	pres := presenter.GetPresenter(presenterConfig, *scanResults)
 
 	return pres.Present(sp.writer)
