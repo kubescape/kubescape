@@ -56,6 +56,10 @@ func (pp *PrometheusPrinter) PrintImageScan(context.Context, *models.PresenterCo
 }
 
 func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logMissingData("prometheus", ctx, opaSessionObj, imageScanData)
+		return
+	}
 
 	metrics := pp.generatePrometheusFormat(opaSessionObj.AllResources, opaSessionObj.ResourcesResult, &opaSessionObj.Report.SummaryDetails)
 

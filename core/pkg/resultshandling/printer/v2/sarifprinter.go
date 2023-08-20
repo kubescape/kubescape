@@ -118,6 +118,11 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 }
 
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logMissingData("sarif", ctx, opaSessionObj, imageScanData)
+		return
+	}
+
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
 		panic(err)

@@ -56,6 +56,11 @@ func (hp *HtmlPrinter) PrintNextSteps() {
 }
 
 func (hp *HtmlPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logMissingData("html", ctx, opaSessionObj, imageScanData)
+		return
+	}
+
 	tplFuncMap := template.FuncMap{
 		"sum": func(nums ...int) int {
 			total := 0

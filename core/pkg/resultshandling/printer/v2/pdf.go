@@ -90,6 +90,11 @@ func (pp *PdfPrinter) PrintNextSteps() {
 }
 
 func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logMissingData("pdf", ctx, opaSessionObj, imageScanData)
+		return
+	}
+
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
