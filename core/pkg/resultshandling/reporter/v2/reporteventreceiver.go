@@ -251,7 +251,7 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 
 func (report *ReportEventReceiver) generateMessage() {
 	report.message = "Your scan results were successfully submitted to ARMO Platform. Take your security posture to the next level with actionable insights and evaluation of your full Kubernetes estate.\n"
-	report.message += fmt.Sprintf("\nView your results here: %s\n", report.GetURL())
+	report.message += fmt.Sprintf("\nView your results here: %s", report.GetURL())
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {

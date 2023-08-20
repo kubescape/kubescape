@@ -239,10 +239,11 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 }
 
 func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
-	cautils.InfoTextDisplay(writer, "What now?\n")
+	txt := "What now?"
+	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
 
-	cautils.SimpleDisplay(writer, "─────────\n\n")
-
+	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+	
 	for _, ns := range nextSteps {
 		cautils.SimpleDisplay(writer, "* "+ns+"\n")
 	}
@@ -252,8 +253,11 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 }
 
 func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
-	cautils.InfoTextDisplay(writer, "Compliance Score\n")
-	cautils.SimpleDisplay(writer, "────────────────\n\n")
+	txt := "Compliance Score"
+	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
+
+	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+
 	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
 
 	for _, fw := range frameworks {
