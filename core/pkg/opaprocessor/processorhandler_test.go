@@ -307,8 +307,10 @@ func TestProcessRule(t *testing.T) {
 					ControlConfigurations: map[string][]string{},
 					Status:                "failed",
 					SubStatus:             "",
-					Paths:                 nil,
-					Exception:             nil,
+					Paths: []armotypes.PosturePaths{
+						{ResourceID: "/v1/default/Service/fake-service-1", FailedPath: "spec.type"},
+					},
+					Exception: nil,
 					RelatedResourcesIDs: []string{
 						"/v1/default/Service/fake-service-1",
 					},
