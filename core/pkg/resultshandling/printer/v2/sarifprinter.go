@@ -111,7 +111,7 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) PrintImageScan(scanResults *models.PresenterConfig) error {
+func (sp *SARIFPrinter) printImageScan(scanResults *models.PresenterConfig) error {
 	if scanResults == nil {
 		return fmt.Errorf("no no image vulnerability data provided")
 	}
@@ -132,8 +132,9 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj == nil {
+		// image scan
 		if len(imageScanData) > 0 {
-			if err := sp.PrintImageScan(imageScanData[0].PresenterConfig); err != nil {
+			if err := sp.printImageScan(imageScanData[0].PresenterConfig); err != nil {
 				logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 				return
 			}
@@ -142,51 +143,61 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 	} else {
-		report, err := sarif.New(sarif.Version210)
-		if err != nil {
-			panic(err)
+		// configuration scan
+		if err := sp.printConfigurationScan(ctx, opaSessionObj); err != nil {
+			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
+			return
 		}
-
-		run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
-		basePath := getBasePathFromMetadata(*opaSessionObj)
-
-		for resourceID, result := range opaSessionObj.ResourcesResult {
-			if result.GetStatus(nil).IsFailed() {
-				resourceSource := opaSessionObj.ResourceSource[resourceID]
-				filepath := resourceSource.RelativePath
-
-				// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-				if filepath == "" || basePath == "" {
-					continue
-				}
-
-				rsrcAbsPath := path.Join(basePath, filepath)
-				locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
-				if err != nil {
-					logger.L().Debug("failed to create location resolver", helpers.Error(err))
-				}
-
-				for _, toPin := range result.AssociatedControls {
-					ac := toPin
-
-					if ac.GetStatus(nil).IsFailed() {
-						ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
-						location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
-
-						sp.addRule(run, ctl)
-						result := sp.addResult(run, ctl, filepath, location)
-						collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath)
-					}
-				}
-			}
-		}
-
-		report.AddRun(run)
-
-		report.PrettyWrite(sp.writer)
 
 	}
 	printer.LogOutputFile(sp.writer.Name())
+}
+
+func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
+	report, err := sarif.New(sarif.Version210)
+	if err != nil {
+		return err
+	}
+
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+	basePath := getBasePathFromMetadata(*opaSessionObj)
+
+	for resourceID, result := range opaSessionObj.ResourcesResult {
+		if result.GetStatus(nil).IsFailed() {
+			resourceSource := opaSessionObj.ResourceSource[resourceID]
+			filepath := resourceSource.RelativePath
+
+			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
+			if filepath == "" || basePath == "" {
+				continue
+			}
+
+			rsrcAbsPath := path.Join(basePath, filepath)
+			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
+			if err != nil {
+				logger.L().Debug("failed to create location resolver", helpers.Error(err))
+			}
+
+			for _, toPin := range result.AssociatedControls {
+				ac := toPin
+
+				if ac.GetStatus(nil).IsFailed() {
+					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+
+					sp.addRule(run, ctl)
+					result := sp.addResult(run, ctl, filepath, location)
+					collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath)
+				}
+			}
+		}
+	}
+
+	report.AddRun(run)
+
+	report.PrettyWrite(sp.writer)
+
+	return nil
 }
 
 func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {
