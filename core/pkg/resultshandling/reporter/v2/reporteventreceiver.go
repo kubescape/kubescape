@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
+	v1 "github.com/kubescape/backend/pkg/server/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -43,10 +44,6 @@ type ReportEventReceiver struct {
 	reportID           string
 	submitContext      SubmitContext
 	accountIdGenerated bool
-}
-
-type PostureReportResponse struct {
-	Message string `json:"message"`
 }
 
 func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string, submitContext SubmitContext) *ReportEventReceiver {
@@ -245,7 +242,7 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 
 	// message is taken only from last report
 	if strResponse != "" && isLastReport {
-		response := PostureReportResponse{}
+		response := v1.PostureReportResponse{}
 		if unmarshalErr := json.Unmarshal([]byte(strResponse), &response); unmarshalErr != nil {
 			logger.L().Error("failed to unmarshal server response")
 		} else {

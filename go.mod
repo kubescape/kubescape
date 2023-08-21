@@ -3,7 +3,6 @@ module github.com/kubescape/kubescape/v2
 go 1.20
 
 require (
-	cloud.google.com/go/containeranalysis v0.10.1
 	github.com/adrg/xdg v0.4.0
 	github.com/anchore/grype v0.63.1
 	github.com/anchore/stereoscope v0.0.0-20230627195312-cd49355d934e
@@ -21,6 +20,7 @@ require (
 	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
+	github.com/kubescape/backend v0.0.0-20230820141235-28748e7aad2a
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.18
 	github.com/kubescape/k8s-interface v0.0.138
@@ -62,7 +62,6 @@ require (
 	cloud.google.com/go/compute v1.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	cloud.google.com/go/container v1.24.0 // indirect
-	cloud.google.com/go/grafeas v0.3.0 // indirect
 	cloud.google.com/go/iam v1.1.1 // indirect
 	cloud.google.com/go/storage v1.30.1 // indirect
 	filippo.io/edwards25519 v1.0.0 // indirect

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	beClient "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/stretchr/testify/require"
 )
 
@@ -72,7 +73,7 @@ func TestHttpMethods(t *testing.T) {
 	client := http.DefaultClient
 	hdrs := map[string]string{"key": "value"}
 
-	srv := mockAPIServer(t)
+	srv := beClient.MockAPIServer(t)
 	t.Cleanup(srv.Close)
 
 	t.Run("HttpGetter should GET", func(t *testing.T) {

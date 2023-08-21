@@ -309,15 +309,6 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromConfigMap() error {
 
 }
 
-func (c *ClusterConfig) loadConfigFromConfigMap() error {
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
-	if err != nil {
-		return err
-	}
-
-	return loadConfigFromData(c.configObj, configMap.Data)
-}
-
 func loadConfigFromData(co *ConfigObj, data map[string]string) error {
 	var e error
 	if jsonConf, ok := data["config.json"]; ok {

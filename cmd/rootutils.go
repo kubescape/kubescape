@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -79,9 +80,9 @@ func initEnvironment() {
 		ksEventReceiverURL := urlSlices[0] // mandatory
 		ksBackendURL := urlSlices[1]       // mandatory
 
-		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPICustomized(
+		getter.SetKSCloudAPIConnector(v1.NewKSCloudAPICustomized(
 			ksBackendURL,
-			getter.WithReportURL(ksEventReceiverURL),
+			v1.WithReportURL(ksEventReceiverURL),
 		))
 	}
 }
