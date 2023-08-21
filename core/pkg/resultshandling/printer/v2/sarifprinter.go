@@ -116,7 +116,7 @@ func (sp *SARIFPrinter) printImageScan(scanResults *models.PresenterConfig) erro
 		return fmt.Errorf("no no image vulnerability data provided")
 	}
 
-	presenterConfig, err := presenter.ValidatedConfig("sarif", "", false)
+	presenterConfig, err := presenter.ValidatedConfig(printer.SARIFFormat, "", false)
 	if err != nil {
 		return err
 	}
