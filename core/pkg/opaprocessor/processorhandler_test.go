@@ -161,7 +161,7 @@ func BenchmarkProcess(b *testing.B) {
 			go monitorHeapSpace(&maxHeap, quitChan)
 
 			// test
-			opap.Process(context.Background(), opap.OPASessionObj.AllPolicies, nil, maxGoRoutines)
+			opap.Process(context.Background(), opap.OPASessionObj.AllPolicies, nil)
 
 			// teardown
 			quitChan <- true
@@ -185,7 +185,8 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opaSessionObj.Policies = frameworks
 
-	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "", nil)
+	scanningScope := cautils.GetScanningScope(&cautils.ScanInfo{InputPatterns: []string{""}})
+	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "", nil, scanningScope)
 	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Policies, policies)
 
 	opaSessionObj.K8SResources = k8sResources
@@ -193,7 +194,7 @@ func TestProcessResourcesResult(t *testing.T) {
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock())
 	opap.AllPolicies = policies
-	opap.Process(context.TODO(), policies, nil, 1)
+	opap.Process(context.TODO(), policies, nil)
 
 	assert.Equal(t, 1, len(opaSessionObj.ResourcesResult))
 	res := opaSessionObj.ResourcesResult[deployment.GetID()]
@@ -327,7 +328,7 @@ func TestProcessRule(t *testing.T) {
 		// since all resources JSON is a large file, we need to unzip it and set the variable before running the benchmark
 		unzipAllResourcesTestDataAndSetVar("testdata/allResourcesMock.json.zip", "testdata/allResourcesMock.json")
 		opap := NewOPAProcessorMock(tc.opaSessionObjMock, tc.resourcesMock)
-		resources, _, err := opap.processRule(context.Background(), &tc.rule, nil)
+		resources, err := opap.processRule(context.Background(), &tc.rule, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, tc.expectedResult, resources)
 	}

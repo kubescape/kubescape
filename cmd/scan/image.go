@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/core"
 	"github.com/kubescape/kubescape/v2/core/meta"
@@ -22,6 +23,10 @@ type imageScanInfo struct {
 // TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
+  This command is still in BETA. Feel free to contact the kubescape maintainers for more information.
+  
+  Scan an image for vulnerabilities. 
+
   # Scan the 'nginx' image
   %[1]s scan image "nginx"
 
@@ -34,11 +39,11 @@ var (
 func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *imageScanInfo) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "image <IMAGE_NAME>",
-		Short:   "Scans an image for vulnerabilities",
+		Short:   "Scan an image for vulnerabilities",
 		Example: imageExample,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 1 {
-				return fmt.Errorf("The command takes exactly one image.")
+				return fmt.Errorf("the command takes exactly one image name as an argument")
 			}
 			return nil
 		},
@@ -49,6 +54,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 			failOnSeverity := imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)
 
 			ctx := context.Background()
+
+			logger.InitLogger(iconlogger.LoggerName)
+
 			dbCfg, _ := imagescan.NewDefaultDBConfig()
 			svc := imagescan.NewScanService(dbCfg)
 
@@ -59,12 +67,13 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 
 			userInput := args[0]
 
-			logger.L().Info(fmt.Sprintf("Scanning image: %s", userInput))
+			logger.L().Start(fmt.Sprintf("Scanning image: %s", userInput))
 			scanResults, err := svc.Scan(ctx, userInput, creds)
 			if err != nil {
+				logger.L().StopError(fmt.Sprintf("Failed to scan image: %s", userInput))
 				return err
 			}
-			logger.L().Success("Image scan completed successfully")
+			logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", userInput))
 
 			scanInfo.SetScanType(cautils.ScanTypeImage)
 

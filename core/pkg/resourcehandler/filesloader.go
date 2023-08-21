@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 
@@ -20,33 +19,26 @@ import (
 )
 
 // FileResourceHandler handle resources from files and URLs
-type FileResourceHandler struct {
-	singleResourceScan *objectsenvelopes.ScanObject
-	inputPatterns      []string
-}
+type FileResourceHandler struct{}
 
-func NewFileResourceHandler(_ context.Context, inputPatterns []string, singleResourceScan *objectsenvelopes.ScanObject) *FileResourceHandler {
+func NewFileResourceHandler() *FileResourceHandler {
 	k8sinterface.InitializeMapResourcesMock() // initialize the resource map
-	return &FileResourceHandler{
-		inputPatterns:      inputPatterns,
-		singleResourceScan: singleResourceScan,
-	}
+	return &FileResourceHandler{}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.KSResources, map[string]bool, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
-	ksResources := cautils.KSResources{}
+	externalResources := cautils.ExternalResources{}
 
-	if len(fileHandler.inputPatterns) == 0 {
+	if len(scanInfo.InputPatterns) == 0 {
 		return nil, nil, nil, nil, fmt.Errorf("missing input")
 	}
 
-	logger.L().Info("Accessing local objects")
-	cautils.StartSpinner()
+	logger.L().Start("Accessing local objects")
 
 	// load resources from all input paths
 	mappedResources := map[string][]workloadinterface.IMetadata{}
-	for path := range fileHandler.inputPatterns {
+	for path := range scanInfo.InputPatterns {
 		var workloadIDToSource map[string]reporthandling.Source
 		var workloads []workloadinterface.IMetadata
 		var err error
@@ -54,13 +46,13 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
 			workloadIDToSource, workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.ChartPath, scanInfo.FilePath)
 		} else {
-			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, fileHandler.inputPatterns[path])
+			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path])
 			if err != nil {
 				return nil, allResources, nil, nil, err
 			}
 		}
 		if len(workloads) == 0 {
-			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", fileHandler.inputPatterns[path]))
+			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", scanInfo.InputPatterns[path]))
 		}
 
 		for k, v := range workloadIDToSource {
@@ -73,7 +65,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 	// locate input k8s object in the mapped resources - if not found or not a valid resource, return error
 	var err error
-	if sessionObj.SingleResourceScan, err = findScanObjectResource(mappedResources, fileHandler.singleResourceScan); err != nil {
+	if sessionObj.SingleResourceScan, err = findScanObjectResource(mappedResources, scanInfo.ScanObject); err != nil {
 		return nil, nil, nil, nil, err
 	}
 
@@ -98,13 +90,11 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		}
 	}
 
+	logger.L().StopSuccess("Done accessing local objects")
 	// save input resource in resource maps
 	addSingleResourceToResourceMaps(k8sResources, allResources, sessionObj.SingleResourceScan)
 
-	cautils.StopSpinner()
-	logger.L().Success("Done accessing local objects")
-
-	return k8sResources, allResources, ksResources, excludedRulesMap, nil
+	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }
 
 func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
@@ -229,9 +219,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		if gitRepo != nil {
 			commitInfo, err := gitRepo.GetFileLastCommit(source)
 			if err != nil && !warnIssued {
-				cautils.StopSpinner()
-				logger.L().Ctx(ctx).Warning("git scan skipped", helpers.Error(err))
-				cautils.StartSpinner()
+				logger.L().Ctx(ctx).Warning("Git scan skipped", helpers.Error(err))
 				warnIssued = true // croak only once
 			}
 

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/olekukonko/tablewriter"
@@ -17,6 +17,13 @@ func renderTable(writer io.Writer, headers []string, columnAlignments []int, row
 	table.SetHeader(headers)
 	table.SetHeaderLine(true)
 	table.SetColumnAlignment(columnAlignments)
+	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+
+	var headerColors []tablewriter.Colors
+	for range rows[0] {
+		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+	}
+	table.SetHeaderColor(headerColors...)
 
 	table.AppendBulk(rows)
 
@@ -40,7 +47,7 @@ func generateRows(summary ImageScanSummary) [][]string {
 
 func generateRow(cve CVE) []string {
 	row := make([]string, 5)
-	row[imageColumnSeverity] = color.New(getColor(cve.Severity), color.Bold).Sprint(cve.Severity)
+	row[imageColumnSeverity] = getColor(cve.Severity)(cve.Severity)
 	row[imageColumnName] = cve.ID
 	row[imageColumnComponent] = cve.Package
 	row[imageColumnVersion] = cve.Version
@@ -70,19 +77,19 @@ func getImageScanningColumnsAlignments() []int {
 	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT}
 }
 
-func getColor(severity string) color.Attribute {
+func getColor(severity string) func(...string) string {
 	switch severity {
 	case apis.SeverityCriticalString:
-		return color.FgRed
+		return gchalk.WithAnsi256(1).Bold
 	case apis.SeverityHighString:
-		return color.FgYellow
+		return gchalk.WithAnsi256(196).Bold
 	case apis.SeverityMediumString:
-		return color.FgCyan
+		return gchalk.WithAnsi256(166).Bold
 	case apis.SeverityLowString:
-		return color.FgBlue
+		return gchalk.WithAnsi256(220).Bold
 	case apis.SeverityNegligibleString:
-		return color.FgMagenta
+		return gchalk.WithAnsi256(39).Bold
 	default:
-		return color.FgWhite
+		return gchalk.WithAnsi256(30).Bold
 	}
 }

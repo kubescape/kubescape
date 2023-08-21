@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-const ValueNotFound = -1
-
 func ConvertLabelsToString(labels map[string]string) string {
 	labelsStr := ""
 	delimiter := ""
@@ -35,15 +33,6 @@ func ConvertStringToLabels(labelsStr string) map[string]string {
 		labels[kvSlice[0]] = kvSlice[1]
 	}
 	return labels
-}
-
-func StringInSlice(strSlice []string, str string) int {
-	for i := range strSlice {
-		if strSlice[i] == str {
-			return i
-		}
-	}
-	return ValueNotFound
 }
 
 func StringSlicesAreEqual(a, b []string) bool {

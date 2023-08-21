@@ -17,7 +17,11 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-const configFileName = "config"
+const (
+	configFileName         string = "config"
+	kubescapeNamespace     string = "kubescape"
+	kubescapeConfigMapName string = "kubescape-config"
+)
 
 func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName + ".json") }
 
@@ -29,7 +33,6 @@ type ConfigObj struct {
 	AccountID          string `json:"accountID,omitempty"`
 	ClientID           string `json:"clientID,omitempty"`
 	SecretKey          string `json:"secretKey,omitempty"`
-	CustomerGUID       string `json:"customerGUID,omitempty"` // Deprecated
 	Token              string `json:"invitationParam,omitempty"`
 	CustomerAdminEMail string `json:"adminMail,omitempty"`
 	ClusterName        string `json:"clusterName,omitempty"`
@@ -61,6 +64,35 @@ func (co *ConfigObj) Config() []byte {
 	}
 
 	return []byte{}
+}
+
+func (co *ConfigObj) updateEmptyFields(inCO *ConfigObj) error {
+	if inCO.AccountID != "" {
+		co.AccountID = inCO.AccountID
+	}
+	if inCO.CloudAPIURL != "" {
+		co.CloudAPIURL = inCO.CloudAPIURL
+	}
+	if inCO.CloudAuthURL != "" {
+		co.CloudAuthURL = inCO.CloudAuthURL
+	}
+	if inCO.CloudReportURL != "" {
+		co.CloudReportURL = inCO.CloudReportURL
+	}
+	if inCO.CloudUIURL != "" {
+		co.CloudUIURL = inCO.CloudUIURL
+	}
+	if inCO.ClusterName != "" {
+		co.ClusterName = inCO.ClusterName
+	}
+	if inCO.CustomerAdminEMail != "" {
+		co.CustomerAdminEMail = inCO.CustomerAdminEMail
+	}
+	if inCO.Token != "" {
+		co.Token = inCO.Token
+	}
+
+	return nil
 }
 
 // ======================================================================================
@@ -245,15 +277,16 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 		configMapNamespace: GetConfigMapNamespace(),
 	}
 
-	// first, load from configMap
-	if c.existsConfigMap() {
-		c.loadConfigFromConfigMap()
-	}
-
-	// second, load from file
+	// first, load from file
 	if existsConfigFile() { // get from file
 		loadConfigFromFile(c.configObj)
 	}
+
+	// second, load from configMap
+	if c.existsConfigMap() {
+		c.updateConfigEmptyFieldsFromConfigMap()
+	}
+
 	updateCredentials(c.configObj, credentials)
 	updateCloudURLs(c.configObj)
 
@@ -359,6 +392,22 @@ func (c *ClusterConfig) ToMapString() map[string]interface{} {
 	}
 	return m
 }
+
+func (c *ClusterConfig) updateConfigEmptyFieldsFromConfigMap() error {
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	tempCO := ConfigObj{}
+	if jsonConf, ok := configMap.Data["config.json"]; ok {
+		json.Unmarshal([]byte(jsonConf), &tempCO)
+		return c.configObj.updateEmptyFields(&tempCO)
+	}
+	return err
+
+}
+
 func (c *ClusterConfig) loadConfigFromConfigMap() error {
 	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
 	if err != nil {
@@ -509,10 +558,6 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 	if err := json.Unmarshal(dat, configObj); err != nil {
 		return err
 	}
-	if configObj.AccountID == "" {
-		configObj.AccountID = configObj.CustomerGUID
-	}
-	configObj.CustomerGUID = ""
 	return nil
 }
 
@@ -554,7 +599,7 @@ func getConfigMapName() string {
 	if n := os.Getenv("KS_DEFAULT_CONFIGMAP_NAME"); n != "" {
 		return n
 	}
-	return "kubescape"
+	return kubescapeConfigMapName
 }
 
 // GetConfigMapNamespace returns the namespace of the cluster config, which is the same for all in-cluster components
@@ -562,7 +607,7 @@ func GetConfigMapNamespace() string {
 	if n := os.Getenv("KS_DEFAULT_CONFIGMAP_NAMESPACE"); n != "" {
 		return n
 	}
-	return "default"
+	return kubescapeNamespace
 }
 
 func getAccountFromEnv(credentials *Credentials) {

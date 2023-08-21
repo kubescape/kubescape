@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -125,7 +126,8 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printe
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.L().Info("Kubescape scanner starting")
+	logger.InitLogger(iconlogger.LoggerName)
+	logger.L().Start("Kubescape scanner initializing")
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info
@@ -153,9 +155,11 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	// remove host scanner components
 	defer func() {
 		if err := interfaces.hostSensorHandler.TearDown(); err != nil {
-			logger.L().Ctx(ctx).Error("failed to tear down host scanner", helpers.Error(err))
+			logger.L().Ctx(ctx).StopError("Failed to tear down host scanner", helpers.Error(err))
 		}
 	}()
+
+	logger.L().StopSuccess("Initialized scanner")
 
 	resultsHandling := resultshandling.NewResultsHandler(interfaces.report, interfaces.outputPrinters, interfaces.uiPrinter)
 
@@ -171,7 +175,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	// ===================== resources =====================
 	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
-	err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanInfo.PolicyIdentifier, scanData, cautils.NewProgressHandler(""), *scanInfo)
+	err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanInfo.PolicyIdentifier, scanData, cautils.NewProgressHandler(""), scanInfo)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err
@@ -185,7 +189,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
-	if err := reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
+	if err := reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler(""), scanInfo); err != nil {
 		// TODO - do something
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
@@ -245,31 +249,31 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 			}
 		}
 	}
-	logger.L().Info("Scanning images")
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)
 
 	for _, img := range imagesToScan {
-		scanSingleImage(ctx, img, svc, resultsHandling)
+		logger.L().Start("Scanning", helpers.String("image", img))
+		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
+			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
+		}
+		logger.L().StopSuccess("Scanned successfully", helpers.String("image", img))
 	}
-
-	logger.L().Success("Finished scanning images")
 }
 
-func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) {
-	logger.L().Ctx(ctx).Debug(fmt.Sprintf("Scanning image: %s", img))
+func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) error {
 
 	scanResults, err := svc.Scan(ctx, img, imagescan.RegistryCredentials{})
 	if err != nil {
-		logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to scan image: %s", img), helpers.Error(err))
-		return
+		return err
 	}
 
 	resultsHandling.ImageScanData = append(resultsHandling.ImageScanData, cautils.ImageScanData{
 		Image:           img,
 		PresenterConfig: scanResults,
 	})
+	return nil
 }
 
 func isPrioritizationScanType(scanType cautils.ScanTypes) bool {

@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -85,7 +85,7 @@ func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.
 
 	failedResources := controlSummary.NumberOfResources().Failed()
 	if failedResources > 0 {
-		rows[1] = string(color.New(color.FgYellow, color.Bold).SprintFunc()(fmt.Sprintf("%d", failedResources)))
+		rows[1] = string(gchalk.WithYellow().Bold(fmt.Sprintf("%d", failedResources)))
 	} else {
 		rows[1] = fmt.Sprintf("%d", failedResources)
 	}

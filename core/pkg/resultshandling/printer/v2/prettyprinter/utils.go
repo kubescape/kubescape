@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
@@ -101,6 +101,19 @@ func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySum
 			}
 		}
 	}
+}
+
+// getFilteredCVEs returns a list of CVEs to show in the table. If there are no vulnerabilities with severity Critical or High, it will return vulnerabilities with severity Medium. Otherwise it will return vulnerabilities with severity Critical or High
+func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
+	// filter out vulnerabilities with severity lower than High
+	filteredCVEs := filterCVEsBySeverities(cves, []string{apis.SeverityCriticalString, apis.SeverityHighString})
+
+	// if there are no vulnerabilities with severity Critical or High, add vulnerabilities with severity Medium
+	if len(filteredCVEs) == 0 {
+		filteredCVEs = filterCVEsBySeverities(cves, []string{apis.SeverityMediumString})
+	}
+
+	return filteredCVEs
 }
 
 // filterCVEsBySeverities returns a list of CVEs only with the severities that are in the severities list
@@ -246,5 +259,5 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 }
 
 func getCallToActionString(action string) string {
-	return color.New(color.Bold, color.FgHiBlue).SprintFunc()(action)
+	return gchalk.WithBrightBlue().Bold(action)
 }

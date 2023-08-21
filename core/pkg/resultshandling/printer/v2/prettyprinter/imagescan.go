@@ -5,7 +5,6 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -37,8 +36,7 @@ func (ip *ImagePrinter) PrintImageScanning(summary *imageprinter.ImageScanSummar
 
 func (ip *ImagePrinter) PrintImageScanningTable(summary imageprinter.ImageScanSummary) {
 	if !ip.verboseMode {
-		// filter out vulnerabilities with severity lower than High
-		summary.CVEs = filterCVEsBySeverities(summary.CVEs, []string{apis.SeverityCriticalString, apis.SeverityHighString})
+		summary.CVEs = getFilteredCVEs(summary.CVEs)
 	}
 
 	ip.imageTablePrinter.PrintImageScanningTable(ip.writer, summary)

@@ -13,12 +13,13 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/topdown/builtins"
 	"github.com/open-policy-agent/opa/types"
+	"golang.org/x/exp/slices"
 )
 
 // ConvertFrameworksToPolicies convert list of frameworks to list of policies
-func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool) *cautils.Policies {
+func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) *cautils.Policies {
 	policies := cautils.NewPolicies()
-	policies.Set(frameworks, version, excludedRules)
+	policies.Set(frameworks, version, excludedRules, scanningScope)
 	return policies
 }
 
@@ -50,7 +51,7 @@ func ConvertFrameworksToSummaryDetails(summaryDetails *reportsummary.SummaryDeta
 				summaryDetails.Controls[id] = c
 			}
 		}
-		if cautils.StringInSlice(policies.Frameworks, frameworks[i].Name) != cautils.ValueNotFound {
+		if slices.Contains(policies.Frameworks, frameworks[i].Name) {
 			summaryDetails.Frameworks = append(summaryDetails.Frameworks, reportsummary.FrameworkSummary{
 				Name:     frameworks[i].Name,
 				Controls: controls,
@@ -93,4 +94,18 @@ var cosignHasSignatureDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
 	return ast.BooleanTerm(has_signature(string(aStr))), nil
+}
+
+var imageNameNormalizeDeclaration = &rego.Function{
+	Name:    "image.parse_normalized_name",
+	Decl:    types.NewFunction(types.Args(types.S), types.S),
+	Memoize: true,
+}
+var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (*ast.Term, error) {
+	aStr, err := builtins.StringOperand(a.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+	normalizedName, err := normalize_image_name(string(aStr))
+	return ast.StringTerm(normalizedName), err
 }

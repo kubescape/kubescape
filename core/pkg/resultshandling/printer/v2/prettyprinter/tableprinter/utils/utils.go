@@ -3,11 +3,13 @@ package utils
 import (
 	"fmt"
 	"io"
+	"os"
 
-	"github.com/fatih/color"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"golang.org/x/term"
 )
 
 type InfoStars struct {
@@ -53,18 +55,18 @@ func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
 	return infoToPrintInfo
 }
 
-func GetColor(severity int) color.Attribute {
+func GetColor(severity int) (func(...string) string) {
 	switch severity {
 	case apis.SeverityCritical:
-		return color.FgRed
+		return gchalk.WithAnsi256(1).Bold
 	case apis.SeverityHigh:
-		return color.FgYellow
+		return gchalk.WithAnsi256(196).Bold
 	case apis.SeverityMedium:
-		return color.FgCyan
+		return gchalk.WithAnsi256(166).Bold
 	case apis.SeverityLow:
-		return color.FgWhite
+		return gchalk.WithAnsi256(220).Bold
 	default:
-		return color.FgWhite
+		return gchalk.WithAnsi256(16).Bold
 	}
 }
 
@@ -110,30 +112,59 @@ func PrintInfo(writer io.Writer, infoToPrintInfo []InfoStars) {
 	}
 }
 
-func GetStatusColor(status apis.ScanningStatus) color.Attribute {
+func GetStatusColor(status apis.ScanningStatus) (func(...string) string) {
 	switch status {
 	case apis.StatusPassed:
-		return color.FgGreen
+		return gchalk.WithGreen().Bold
 	case apis.StatusFailed:
-		return color.FgRed
+		return gchalk.WithRed().Bold
 	case apis.StatusSkipped:
-		return color.FgCyan
+		return gchalk.WithCyan().Bold
 	default:
-		return color.FgWhite
+		return gchalk.WithWhite().Bold
 	}
 }
 
-func getColor(controlSeverity int) color.Attribute {
+func getColor(controlSeverity int) (func(...string) string) {
 	switch controlSeverity {
 	case apis.SeverityCritical:
-		return color.FgRed
+		return gchalk.WithAnsi256(1).Bold
 	case apis.SeverityHigh:
-		return color.FgYellow
+		return gchalk.WithAnsi256(196).Bold
 	case apis.SeverityMedium:
-		return color.FgCyan
+		return gchalk.WithAnsi256(166).Bold
 	case apis.SeverityLow:
-		return color.FgWhite
+		return gchalk.WithAnsi256(220).Bold
 	default:
-		return color.FgWhite
+		return gchalk.WithAnsi256(16).Bold
 	}
+}
+
+func CheckShortTerminalWidth(rows [][]string, headers []string) bool {
+	maxWidth := 0
+	for _, row := range rows {
+		rowWidth := 0
+		for idx, cell := range row {
+			cellLen := len(cell)
+			if cellLen > 50 { // Take only 50 characters of each sentence for counting size
+				cellLen = 50
+			}
+			if cellLen > len(headers[idx]) {
+				rowWidth += cellLen
+			} else {
+				rowWidth += len(headers[idx])
+			}
+			rowWidth += 2
+		}
+		if rowWidth > maxWidth {
+			maxWidth = rowWidth
+		}
+	}
+	maxWidth += 10
+	termWidth, _, err := term.GetSize(int(os.Stdin.Fd()))
+	if err != nil {
+		// Default to larger output table
+		return false
+	}
+	return termWidth <= maxWidth
 }

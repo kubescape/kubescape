@@ -32,9 +32,9 @@ var (
 	}
 )
 
-func MapKSResource(ksResourceMap KSResources, resources []string) []string {
+func MapExternalResource(externalResourceMap ExternalResources, resources []string) []string {
 	var hostResources []string
-	for k := range ksResourceMap {
+	for k := range externalResourceMap {
 		for _, resource := range resources {
 			if strings.Contains(k, resource) {
 				hostResources = append(hostResources, k)
@@ -44,16 +44,16 @@ func MapKSResource(ksResourceMap KSResources, resources []string) []string {
 	return hostResources
 }
 
-func MapHostResources(ksResourceMap KSResources) []string {
-	return MapKSResource(ksResourceMap, HostSensorResources)
+func MapHostResources(externalResourceMap ExternalResources) []string {
+	return MapExternalResource(externalResourceMap, HostSensorResources)
 }
 
-func MapImageVulnResources(ksResourceMap KSResources) []string {
-	return MapKSResource(ksResourceMap, ImageVulnResources)
+func MapImageVulnResources(externalResourceMap ExternalResources) []string {
+	return MapExternalResource(externalResourceMap, ImageVulnResources)
 }
 
-func MapCloudResources(ksResourceMap KSResources) []string {
-	return MapKSResource(ksResourceMap, CloudResources)
+func MapCloudResources(externalResourceMap ExternalResources) []string {
+	return MapExternalResource(externalResourceMap, CloudResources)
 }
 
 func SetInfoMapForResources(info string, resources []string, errorMap map[string]apis.StatusInfo) {

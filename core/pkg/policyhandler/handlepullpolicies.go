@@ -67,10 +67,8 @@ func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyI
 func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, err error) {
 	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getPolicies")
 	defer span.End()
-	logger.L().Info("Downloading/Loading policy definitions")
 
-	cautils.StartSpinner()
-	defer cautils.StopSpinner()
+	logger.L().Start("Loading policies")
 
 	// get policies
 	policies, err = policyHandler.getScanPolicies(ctx, policyIdentifier)
@@ -81,18 +79,23 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 		return nil, nil, nil, fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(policyIdentifier), ", "))
 	}
 
+	logger.L().StopSuccess("Loaded policies")
+	logger.L().Start("Loading exceptions")
+
 	// get exceptions
 	if exceptions, err = policyHandler.getExceptions(); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to load exceptions", helpers.Error(err))
 	}
+
+	logger.L().StopSuccess("Loaded exceptions")
+	logger.L().Start("Loading account configurations")
 
 	// get account configuration
 	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 
-	cautils.StopSpinner()
-	logger.L().Success("Downloaded/Loaded policy")
+	logger.L().StopSuccess("Loaded account configurations")
 
 	return policies, exceptions, controlInputs, nil
 }
