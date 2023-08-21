@@ -116,7 +116,7 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj != nil {
-		if pp.scanType != cautils.ScanTypeCluster && pp.scanType != cautils.ScanTypeRepo && pp.scanType != cautils.ScanTypeWorkload {
+		if isPrintSeparatorType(pp.scanType) {
 			fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
 		} else {
 			fmt.Fprintf(pp.writer, "\n")
@@ -334,4 +334,13 @@ func getSeparator(sep string) string {
 		s += sep
 	}
 	return s
+}
+
+func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
+	switch scanType {
+	case cautils.ScanTypeCluster, cautils.ScanTypeRepo, cautils.ScanTypeImage, cautils.ScanTypeWorkload:
+		return false
+	default:
+		return true
+	}
 }
