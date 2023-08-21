@@ -33,6 +33,7 @@ const (
 	ScanTypeImage      ScanTypes = "image"
 	ScanTypeWorkload   ScanTypes = "workload"
 	ScanTypeFramework  ScanTypes = "framework"
+	ScanTypeControl    ScanTypes = "control"
 )
 
 type OPASessionObj struct {
