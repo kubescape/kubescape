@@ -63,17 +63,14 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 	}
 
 	// Check if image is in canonical format (required by copacetic for patching images)
-	if _, err := ref.ParseNamed(patchInfo.Image); err != nil {
+	// Parse the image full name to get image name and tag
+	named, err := ref.ParseNamed(patchInfo.Image)
+	if err != nil{
 		return err
 	}
 
 	// If no patched image tag is provided, default to '<image-tag>-patched'
 	if patchInfo.PatchedImageTag == "" {
-		// Parse the image full name to get image name and tag
-		named, err := ref.ParseNamed(patchInfo.Image)
-		if err != nil {
-			return err
-		}
 
 		taggedName, ok := named.(ref.Tagged)
 		if !ok {
@@ -89,7 +86,9 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 			patchInfo.PatchedImageTag = fmt.Sprintf("%s-%s", patchInfo.ImageTag, "patched")
 		}
 
-		patchInfo.ImageName = named.Name()
 	}
+	
+	patchInfo.ImageName = named.Name()
+
 	return nil
 }

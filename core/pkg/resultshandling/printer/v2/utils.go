@@ -124,7 +124,7 @@ func setPkgNameToScoreMap(matches []models.Match, pkgScores map[string]*imagepri
 	}
 }
 
-func ExtractCVEs(matches []models.Match) []imageprinter.CVE {
+func extractCVEs(matches []models.Match) []imageprinter.CVE {
 	CVEs := []imageprinter.CVE{}
 	for i := range matches {
 		cve := imageprinter.CVE{
@@ -136,24 +136,6 @@ func ExtractCVEs(matches []models.Match) []imageprinter.CVE {
 			FixedState:  matches[i].Vulnerability.Fix.State,
 		}
 		CVEs = append(CVEs, cve)
-	}
-	return CVEs
-}
-
-func ExtractFixableCVEs(matches []models.Match) []imageprinter.CVE {
-	CVEs := []imageprinter.CVE{}
-	for i := range matches {
-		if matches[i].Vulnerability.Fix.State == string(v5.FixedState) {
-			cve := imageprinter.CVE{
-				ID:          matches[i].Vulnerability.ID,
-				Severity:    matches[i].Vulnerability.Severity,
-				Package:     matches[i].Artifact.Name,
-				Version:     matches[i].Artifact.Version,
-				FixVersions: matches[i].Vulnerability.Fix.Versions,
-				FixedState:  matches[i].Vulnerability.Fix.State,
-			}
-			CVEs = append(CVEs, cve)
-		}
 	}
 	return CVEs
 }

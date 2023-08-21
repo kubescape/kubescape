@@ -7,22 +7,24 @@ import (
 	"strings"
 
 	"github.com/anchore/grype/grype/presenter"
-	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 
+	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 	copa "github.com/project-copacetic/copacetic/pkg/patch"
 )
 
 func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) error {
 
+	logger.InitLogger(iconlogger.LoggerName)
 	// ===================== Scan the image =====================
-	logger.L().Info("Scanning image...")
+	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
+
 	// Setup the scan service
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)
@@ -40,28 +42,26 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 
 	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
 	fileName = strings.ReplaceAll(fileName, "/", "-")
-	writer, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
-	if err != nil {
-		return err
-	}
-	defer writer.Close()
+
+	writer := printer.GetWriter(ctx, fileName)
 
 	if err := pres.Present(writer); err != nil {
 		return err
 	}
-	logger.L().Success("Scanned image successfully")
+	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
 
 	// ===================== Patch the image using copacetic =====================
-	logger.L().Info("Patching image...")
+	logger.L().Start("Patching image...")
 	if err := copa.Patch(ctx, patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchInfo.PatchedImageTag, ""); err != nil {
 		return err
 	}
-	logger.L().Success("Patched image successfully")
+	logger.L().StopSuccess("Patched image successfully")
 
 	// ===================== Re-scan the image =====================
-	logger.L().Info("Re-scanning image...")
+
 	// Re-scan the image
 	patchedImageName := fmt.Sprintf("%s:%s", patchInfo.ImageName, patchInfo.PatchedImageTag)
+	logger.L().Start(fmt.Sprintf("Re-Scanning image: %s", patchedImageName))
 
 	scanResultsPatched, err := svc.Scan(ctx, patchedImageName, creds)
 	if err != nil {
@@ -73,18 +73,12 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 
 	if patchInfo.IncludeReport {
 		pres = presenter.GetPresenter("json", "", false, *scanResultsPatched)
-
-		writer, err = os.OpenFile(fileNamePatched, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
-		if err != nil {
-			return err
-		}
-		defer writer.Close()
-
+		writer = printer.GetWriter(ctx, fileNamePatched)
 		if err := pres.Present(writer); err != nil {
 			return err
 		}
 	}
-	logger.L().Success("Re-scanned image successfully")
+	logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
 
 	// ===================== Clean up =====================
 	// Remove the scan results files, which were used to patch the image
@@ -95,32 +89,19 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 	}
 
 	// ===================== Results Handling =====================
-	logger.L().Info("Preparing results ...")
 
-	doc, err := models.NewDocument(scanResults.Packages, scanResults.Context, scanResults.Matches, scanResults.IgnoredMatches, scanResults.MetadataProvider, nil, scanResults.DBStatus)
-	if err != nil {
-		logger.L().Error(fmt.Sprintf("failed to create document for image: %v", patchInfo.Image), helpers.Error(err))
+	var scanInfo cautils.ScanInfo
+	scanInfo.SetScanType(cautils.ScanTypeImage)
+	outputPrinters := GetOutputPrinters(&scanInfo, ctx)
+	uiPrinter := GetUIPrinter(ctx, &scanInfo)
+	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
+	resultsHandler.ImageScanData = []cautils.ImageScanData{
+		{
+			PresenterConfig: scanResultsPatched,
+			Image:           patchedImageName,
+		},
 	}
-	CVEs := printerv2.ExtractCVEs(doc.Matches)
-	fixableCVEs := printerv2.ExtractFixableCVEs(doc.Matches)
-
-	docPatched, err := models.NewDocument(scanResultsPatched.Packages, scanResultsPatched.Context, scanResultsPatched.Matches, scanResultsPatched.IgnoredMatches, scanResultsPatched.MetadataProvider, nil, scanResultsPatched.DBStatus)
-	if err != nil {
-		logger.L().Error(fmt.Sprintf("failed to create document for image: %v", patchedImageName), helpers.Error(err))
-	}
-	CVEsPatched := printerv2.ExtractCVEs(docPatched.Matches)
-	fixableCVEsPatched := printerv2.ExtractFixableCVEs(docPatched.Matches)
-
-	writer = printer.GetWriter(ctx, os.Stdout.Name())
-	cautils.InfoTextDisplay(writer, "\nVulnerability summary: \n")
-
-	cautils.SimpleDisplay(writer, "Image: %s\n", patchInfo.Image)
-	cautils.SimpleDisplay(writer, "  * Total CVE's  : %v\n", len(CVEs))
-	cautils.SimpleDisplay(writer, "  * Fixable CVE's: %v\n\n", len(fixableCVEs))
-
-	cautils.SimpleDisplay(writer, "Image: %s\n", patchedImageName)
-	cautils.SimpleDisplay(writer, "  * Total CVE's  : %v\n", len(CVEsPatched))
-	cautils.SimpleDisplay(writer, "  * Fixable CVE's: %v\n\n", len(fixableCVEsPatched))
+	resultsHandler.HandleResults(ctx)
 
 	if patchInfo.IncludeReport {
 		logger.L().Success("Results saved", helpers.String("filename", fileName))
