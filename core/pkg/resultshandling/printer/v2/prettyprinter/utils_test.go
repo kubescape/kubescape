@@ -88,13 +88,13 @@ func TestGetTopWorkloadsTitle(t *testing.T) {
 	assert.Equal(t, "", title)
 
 	title = getTopWorkloadsTitle(1)
-	assert.Equal(t, "Your highest stake workload:\n", title)
+	assert.Equal(t, "Highest-stake workloads\n", title)
 
 	title = getTopWorkloadsTitle(2)
-	assert.Equal(t, "Your highest stake workloads:\n", title)
+	assert.Equal(t, "Highest-stake workloads\n", title)
 
 	title = getTopWorkloadsTitle(10)
-	assert.Equal(t, "Your highest stake workloads:\n", title)
+	assert.Equal(t, "Highest-stake workloads\n", title)
 }
 
 func TestGetSeverityToSummaryMap(t *testing.T) {
@@ -530,6 +530,107 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 			for i := range sortedCVEs {
 				if sortedCVEs[i] != tc.expectedResult[i] {
 					t.Errorf("Expected: %v, Got: %v", tc.expectedResult, sortedCVEs)
+				}
+			}
+		})
+	}
+}
+
+func TestGetFilteredCVEs(t *testing.T) {
+	tests := []struct {
+		name         string
+		cves         []imageprinter.CVE
+		expectedCVEs []imageprinter.CVE
+	}{
+		{
+			name: "High and Critical",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+				{
+					Severity: "Critical",
+				},
+				{
+					Severity: "Medium",
+				},
+				{
+					Severity: "Low",
+				},
+				{
+					Severity: "Negligible",
+				},
+			},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+				{
+					Severity: "Critical",
+				},
+			},
+		},
+		{
+			name: "Only High",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+				{
+					Severity: "Medium",
+				}},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "High",
+				},
+			},
+		},
+		{
+			name: "Only Critical",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "Critical",
+				},
+				{
+					Severity: "Medium",
+				}},
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "Critical",
+				},
+			},
+		},
+		{
+			name: "No High or Critical",
+			cves: []imageprinter.CVE{
+				{
+					Severity: "Low",
+				},
+				{
+					Severity: "Medium",
+				}},
+
+			expectedCVEs: []imageprinter.CVE{
+				{
+					Severity: "Medium",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			filteredCVEs := getFilteredCVEs(tc.cves)
+			for _, cve := range filteredCVEs {
+				found := false
+				for _, expectedCVE := range tc.expectedCVEs {
+					if cve.Severity == expectedCVE.Severity {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("Expected: %v, Got: %v", tc.expectedCVEs, filteredCVEs)
 				}
 			}
 		})

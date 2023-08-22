@@ -18,7 +18,7 @@ const (
 	statusHeader      = "STATUS"
 	docsHeader        = "DOCS"
 	resourcesHeader   = "RESOURCES"
-	runHeader         = "RUN"
+	runHeader         = "VIEW DETAILS"
 )
 
 // initializes the table headers and column alignments based on the category type

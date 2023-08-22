@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -261,6 +262,11 @@ func (report *ReportEventReceiver) DisplayMessage() {
 
 	// print if logger level is lower than warning (debug/info)
 	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
-		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+		txt := "View results"
+		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", txt))
+
+		cautils.SimpleDisplay(os.Stderr, strings.Repeat("─", len(txt)))
+
+		cautils.SimpleDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 	}
 }

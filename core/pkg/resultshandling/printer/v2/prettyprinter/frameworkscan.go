@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -34,6 +35,6 @@ func (sp *SummaryPrinter) getVerboseMode() bool {
 	return sp.verboseMode
 }
 
-func (sp *SummaryPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (sp *SummaryPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
 	sp.summaryTablePrinter.PrintSummaryTable(sp.writer, summaryDetails, sortedControlIDs)
 }

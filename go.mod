@@ -22,9 +22,9 @@ require (
 	github.com/jwalton/gchalk v1.3.0
 	github.com/kubescape/backend v0.0.0-20230820141235-28748e7aad2a
 	github.com/kubescape/go-git-url v0.0.25
-	github.com/kubescape/go-logger v0.0.18
+	github.com/kubescape/go-logger v0.0.20
 	github.com/kubescape/k8s-interface v0.0.138
-	github.com/kubescape/opa-utils v0.0.266
+	github.com/kubescape/opa-utils v0.0.267
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.291-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9

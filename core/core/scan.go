@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -85,9 +86,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, *scanInfo)
 
 	// setup printers
-	outputPrinters := GetOutputPrinters(scanInfo, ctx)
+	outputPrinters := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
 
-	uiPrinter := GetUIPrinter(ctx, scanInfo)
+	uiPrinter := GetUIPrinter(ctx, scanInfo, tenantConfig.GetContextName())
 
 	// ================== return interface ======================================
 
@@ -101,12 +102,17 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 }
 
-func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printer.IPrinter {
+func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) []printer.IPrinter {
 	formats := scanInfo.Formats()
 
 	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
-		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
+		if !resultshandling.ValidatePrinter(scanInfo.ScanType, format) {
+			logger.L().Ctx(ctx).Fatal(fmt.Sprintf("Unsupported output format: %s", format))
+			continue
+		}
+
+		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View), clusterName)
 		printerHandler.SetWriter(ctx, scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
@@ -115,6 +121,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printe
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
+	logger.InitLogger(iconlogger.LoggerName)
 	logger.L().Start("Kubescape scanner initializing")
 
 	// ===================== Initialization =====================

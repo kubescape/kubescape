@@ -56,3 +56,96 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 		t.Errorf("UI Printer was not called to print. Got calls: %d, want calls: %d", got, want)
 	}
 }
+
+func TestValidatePrinter(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanType cautils.ScanTypes
+		format   string
+		expected bool
+	}{
+		{
+			name:     "json format for cluster scan",
+			scanType: cautils.ScanTypeCluster,
+			format:   printer.JsonFormat,
+			expected: true,
+		},
+		{
+			name:     "junit format for cluster scan",
+			scanType: cautils.ScanTypeCluster,
+			format:   printer.JunitResultFormat,
+			expected: true,
+		},
+		{
+			name:     "sarif format for cluster scan",
+			scanType: cautils.ScanTypeCluster,
+			format:   printer.SARIFFormat,
+			expected: true,
+		},
+		{
+			name:     "pretty format for cluster scan",
+			scanType: cautils.ScanTypeCluster,
+			format:   printer.PrettyFormat,
+			expected: true,
+		},
+		{
+			name:     "html format for cluster scan",
+			scanType: cautils.ScanTypeCluster,
+			format:   printer.HtmlFormat,
+			expected: true,
+		},
+		{
+			name:     "prometheus format for cluster scan",
+			scanType: cautils.ScanTypeCluster,
+			format:   printer.PrometheusFormat,
+			expected: true,
+		},
+
+		{
+			name:     "json format for image scan",
+			scanType: cautils.ScanTypeImage,
+			format:   printer.JsonFormat,
+			expected: true,
+		},
+		{
+			name:     "junit format for image scan",
+			scanType: cautils.ScanTypeImage,
+			format:   printer.JunitResultFormat,
+			expected: false,
+		},
+		{
+			name:     "sarif format for image scan",
+			scanType: cautils.ScanTypeImage,
+			format:   printer.SARIFFormat,
+			expected: true,
+		},
+		{
+			name:     "pretty format for image scan",
+			scanType: cautils.ScanTypeImage,
+			format:   printer.PrettyFormat,
+			expected: true,
+		},
+		{
+			name:     "html format for image scan",
+			scanType: cautils.ScanTypeImage,
+			format:   printer.HtmlFormat,
+			expected: false,
+		},
+		{
+			name:     "prometheus format for image scan",
+			scanType: cautils.ScanTypeImage,
+			format:   printer.PrometheusFormat,
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ValidatePrinter(tt.scanType, tt.format)
+			if got != tt.expected {
+				t.Errorf("%s failed - got = %v, want %v", tt.name, got, tt.expected)
+			}
+		})
+	}
+
+}

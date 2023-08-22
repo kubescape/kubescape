@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"runtime"
 	"testing"
 	"time"
@@ -306,8 +307,10 @@ func TestProcessRule(t *testing.T) {
 					ControlConfigurations: map[string][]string{},
 					Status:                "failed",
 					SubStatus:             "",
-					Paths:                 nil,
-					Exception:             nil,
+					Paths: []armotypes.PosturePaths{
+						{ResourceID: "/v1/default/Service/fake-service-1", FailedPath: "spec.type"},
+					},
+					Exception: nil,
 					RelatedResourcesIDs: []string{
 						"/v1/default/Service/fake-service-1",
 					},
@@ -331,5 +334,76 @@ func TestProcessRule(t *testing.T) {
 		resources, err := opap.processRule(context.Background(), &tc.rule, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, tc.expectedResult, resources)
+	}
+}
+
+func TestAppendPaths(t *testing.T) {
+	tests := []struct {
+		name        string
+		paths       []armotypes.PosturePaths
+		failedPaths []string
+		fixPaths    []armotypes.FixPath
+		fixCommand  string
+		resourceID  string
+		expected    []armotypes.PosturePaths
+	}{
+		{
+			name:        "Only FailedPaths",
+			paths:       []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}},
+			failedPaths: []string{"path2", "path3"},
+			resourceID:  "2",
+			expected: []armotypes.PosturePaths{
+				{ResourceID: "1", FailedPath: "path1"},
+				{ResourceID: "2", FailedPath: "path2"},
+				{ResourceID: "2", FailedPath: "path3"},
+			},
+		},
+		{
+			name:  "Only FixPaths",
+			paths: []armotypes.PosturePaths{},
+			fixPaths: []armotypes.FixPath{
+				{Path: "path2", Value: "command2"},
+				{Path: "path3", Value: "command3"},
+			},
+			resourceID: "2",
+			expected: []armotypes.PosturePaths{
+				{ResourceID: "2", FixPath: armotypes.FixPath{Path: "path2", Value: "command2"}},
+				{ResourceID: "2", FixPath: armotypes.FixPath{Path: "path3", Value: "command3"}},
+			},
+		},
+		{
+			name:       "Only FixCommand",
+			paths:      []armotypes.PosturePaths{},
+			fixCommand: "fix command",
+			resourceID: "2",
+			expected: []armotypes.PosturePaths{
+				{ResourceID: "2", FixCommand: "fix command"},
+			},
+		},
+		{
+			name:        "All types of paths",
+			paths:       []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}},
+			failedPaths: []string{"path2"},
+			fixPaths: []armotypes.FixPath{
+				{Path: "path3", Value: "command3"},
+			},
+			fixCommand: "fix command",
+			resourceID: "2",
+			expected: []armotypes.PosturePaths{
+				{ResourceID: "1", FailedPath: "path1"},
+				{ResourceID: "2", FailedPath: "path2"},
+				{ResourceID: "2", FixPath: armotypes.FixPath{Path: "path3", Value: "command3"}},
+				{ResourceID: "2", FixCommand: "fix command"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := appendPaths(tt.paths, tt.failedPaths, tt.fixPaths, tt.fixCommand, tt.resourceID)
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("Expected %v, but got %v", tt.expected, result)
+			}
+		})
 	}
 }

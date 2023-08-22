@@ -17,16 +17,17 @@ import (
 )
 
 const (
-	linkToHelm               = "https://github.com/kubescape/helm-charts"
-	linkToCICDSetup          = "https://hub.armosec.io/docs/integrations"
 	configScanVerboseRunText = "Run with '--verbose'/'-v' flag for detailed resources view"
 	imageScanVerboseRunText  = "Run with '--verbose'/'-v' flag for detailed vulnerabilities view"
+	runCommandsText          = "Run one of the suggested commands to learn more about a failed control failure"
+	ksHelmChartLink          = "https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
+	highStakesWlsText        = "High-stakes workloads are defined as those which Kubescape estimates would have the highest impact if they were to be exploited.\n\n"
 )
 
 var (
+	scanWorkloadText     = fmt.Sprintf("Scan a workload with %s to see vulnerability information", getCallToActionString("'$ kubescape scan workload'"))
+	installKubescapeText = fmt.Sprintf("Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: %s", ksHelmChartLink)
 	clusterScanRunText   = fmt.Sprintf("Run a cluster scan: %s", getCallToActionString("'$ kubescape scan'"))
-	installHelmText      = fmt.Sprintf("Install Kubescape in your cluster for continuous monitoring: %s", linkToHelm)
-	CICDSetupText        = fmt.Sprintf("Add Kubescape to your CI/CD pipeline: %s", linkToCICDSetup)
 	complianceFrameworks = []string{"nsa", "mitre"}
 	cveSeverities        = []string{"Critical", "High", "Medium", "Low", "Negligible", "Unknown"}
 )
@@ -53,11 +54,8 @@ func getWorkloadPrefixForCmd(namespace, kind, name string) string {
 }
 
 func getTopWorkloadsTitle(topWLsLen int) string {
-	if topWLsLen > 1 {
-		return "Your highest stake workloads:\n"
-	}
 	if topWLsLen > 0 {
-		return "Your highest stake workload:\n"
+		return "Highest-stake workloads\n"
 	}
 	return ""
 }
@@ -100,6 +98,19 @@ func addEmptySeverities(mapSeverityTSummary map[string]*imageprinter.SeveritySum
 			}
 		}
 	}
+}
+
+// getFilteredCVEs returns a list of CVEs to show in the table. If there are no vulnerabilities with severity Critical or High, it will return vulnerabilities with severity Medium. Otherwise it will return vulnerabilities with severity Critical or High
+func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
+	// filter out vulnerabilities with severity lower than High
+	filteredCVEs := filterCVEsBySeverities(cves, []string{apis.SeverityCriticalString, apis.SeverityHighString})
+
+	// if there are no vulnerabilities with severity Critical or High, add vulnerabilities with severity Medium
+	if len(filteredCVEs) == 0 {
+		filteredCVEs = filterCVEsBySeverities(cves, []string{apis.SeverityMediumString})
+	}
+
+	return filteredCVEs
 }
 
 // filterCVEsBySeverities returns a list of CVEs only with the severities that are in the severities list
@@ -205,28 +216,32 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 	}
 
 	for _, k := range keys {
-		if k == "Other" {
-			cautils.SimpleDisplay(writer, "  * %d %s \n", mapSeverityTSummary[k].NumberOfCVEs, k)
-		} else {
-			cautils.SimpleDisplay(writer, "  * %d %s\n", mapSeverityTSummary[k].NumberOfCVEs, k)
-		}
+		cautils.SimpleDisplay(writer, "  * %d %s \n", mapSeverityTSummary[k].NumberOfCVEs, utils.GetColorForVulnerabilitySeverity(k)(k))
 	}
 
 }
 
 func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary) {
-	for _, img := range summary.Images {
-		imgWithoutTag := strings.Split(img, ":")[0]
-		cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+	if len(summary.Images) > 3 {
+		cautils.SimpleDisplay(writer, "Receive full report by running: kubescape scan image <image>\n")
+	} else {
+		for _, img := range summary.Images {
+			imgWithoutTag := strings.Split(img, ":")[0]
+			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+		}
 	}
 
 	cautils.InfoTextDisplay(writer, "\n")
 }
 
 func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
-	cautils.InfoTextDisplay(writer, "Follow-up steps:\n")
+	txt := "What now?"
+	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
+
+	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+
 	for _, ns := range nextSteps {
-		cautils.SimpleDisplay(writer, "- "+ns+"\n")
+		cautils.SimpleDisplay(writer, "* "+ns+"\n")
 	}
 	if addLine {
 		cautils.SimpleDisplay(writer, "\n")
@@ -234,12 +249,18 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 }
 
 func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
-	cautils.InfoTextDisplay(writer, "Compliance Score:\n")
+	txt := "Compliance Score"
+	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
+
+	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+
+	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
+
 	for _, fw := range frameworks {
-		cautils.SimpleDisplay(writer, "* %s: %.2f%%\n", fw.GetName(), fw.GetComplianceScore())
+		cautils.SimpleDisplay(writer, "* %s: %s", fw.GetName(), gchalk.WithYellow().Bold(fmt.Sprintf("%.2f%%\n", fw.GetComplianceScore())))
 	}
 
-	cautils.SimpleDisplay(writer, fmt.Sprintf("View full compliance report by running: %s\n", getCallToActionString("'$ kubescape scan framework nsa,mitre'")))
+	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s  or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))
 
 	cautils.InfoTextDisplay(writer, "\n")
 }

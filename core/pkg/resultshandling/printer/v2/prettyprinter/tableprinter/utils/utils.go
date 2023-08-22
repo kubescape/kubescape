@@ -55,7 +55,7 @@ func MapInfoToPrintInfo(controls reportsummary.ControlSummaries) []InfoStars {
 	return infoToPrintInfo
 }
 
-func GetColor(severity int) (func(...string) string) {
+func GetColor(severity int) func(...string) string {
 	switch severity {
 	case apis.SeverityCritical:
 		return gchalk.WithAnsi256(1).Bold
@@ -112,7 +112,7 @@ func PrintInfo(writer io.Writer, infoToPrintInfo []InfoStars) {
 	}
 }
 
-func GetStatusColor(status apis.ScanningStatus) (func(...string) string) {
+func GetStatusColor(status apis.ScanningStatus) func(...string) string {
 	switch status {
 	case apis.StatusPassed:
 		return gchalk.WithGreen().Bold
@@ -125,7 +125,7 @@ func GetStatusColor(status apis.ScanningStatus) (func(...string) string) {
 	}
 }
 
-func getColor(controlSeverity int) (func(...string) string) {
+func getColor(controlSeverity int) func(...string) string {
 	switch controlSeverity {
 	case apis.SeverityCritical:
 		return gchalk.WithAnsi256(1).Bold
@@ -167,4 +167,23 @@ func CheckShortTerminalWidth(rows [][]string, headers []string) bool {
 		return false
 	}
 	return termWidth <= maxWidth
+}
+
+func GetColorForVulnerabilitySeverity(severity string) func(...string) string {
+	switch severity {
+	case apis.SeverityCriticalString:
+		return gchalk.WithAnsi256(1).Bold
+	case apis.SeverityHighString:
+		return gchalk.WithAnsi256(196).Bold
+	case apis.SeverityMediumString:
+		return gchalk.WithAnsi256(166).Bold
+	case apis.SeverityLowString:
+		return gchalk.WithAnsi256(220).Bold
+	case apis.SeverityNegligibleString:
+		return gchalk.WithAnsi256(39).Bold
+	case apis.SeverityUnknownString:
+		return gchalk.WithAnsi256(30).Bold
+	default:
+		return gchalk.WithAnsi256(7).Bold
+	}
 }

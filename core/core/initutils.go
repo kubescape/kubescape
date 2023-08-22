@@ -168,19 +168,13 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	// do not submit control scanning
-	if !scanInfo.FrameworkScan {
+	// do not submit control/workload scanning
+	if !isScanTypeForSubmission(scanInfo.ScanType) {
 		scanInfo.Submit = false
 		return
 	}
 
 	if scanInfo.Local {
-		scanInfo.Submit = false
-		return
-	}
-
-	// do not submit single resource scan to BE
-	if scanInfo.ScanObject != nil {
 		scanInfo.Submit = false
 		return
 	}
@@ -195,6 +189,13 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	} else {
 		scanInfo.Submit = true
 	}
+}
+
+func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
+	if scanType == cautils.ScanTypeControl || scanType == cautils.ScanTypeWorkload {
+		return false
+	}
+	return true
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
@@ -276,12 +277,12 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 }
 
 // getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
-func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo) printer.IPrinter {
+func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName string) printer.IPrinter {
 	var p printer.IPrinter
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		p = &printerv2.SilentPrinter{}
 	} else {
-		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
+		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
 
 		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
 		p.SetWriter(ctx, os.Stdout.Name())

@@ -54,17 +54,13 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler ho
 }
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+	logger.L().Start("Accessing Kubernetes objects")
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
 	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
 	if err != nil {
 		return nil, nil, nil, nil, err
-	}
-
-	// we don't scan resources which have a parent
-	if sessionObj.SingleResourceScan != nil && k8sinterface.WorkloadHasParent(sessionObj.SingleResourceScan) {
-		return nil, nil, nil, nil, fmt.Errorf("resource %s has a parent and cannot be scanned", sessionObj.SingleResourceScan.GetID())
 	}
 
 	resourceToControl := make(map[string][]string)
@@ -96,7 +92,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		metrics.UpdateWorkerNodesCount(ctx, int64(numberOfWorkerNodes))
 	}
 
-	logger.L().Success("Accessed to Kubernetes objects")
+	logger.L().StopSuccess("Accessed Kubernetes objects")
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources
@@ -168,20 +164,24 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 	}
 	result, err := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors, globalFieldSelector)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resource %s, reason: %v", resource.GetID(), err)
+		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), err)
 	}
 
 	if len(result) == 0 {
-		return nil, fmt.Errorf("%s was not found", resource.GetID())
-	}
-
-	if len(result) > 1 {
-		return nil, fmt.Errorf("more than one resource found for %s", resource.GetID())
+		return nil, fmt.Errorf("resource %s was not found", getReadableID(resource))
 	}
 
 	metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+	if len(metaObjs) == 0 {
+		return nil, fmt.Errorf("resource %s has a parent and cannot be scanned", getReadableID(resource))
+	}
+
+	if len(metaObjs) > 1 {
+		return nil, fmt.Errorf("more than one resource found for %s", getReadableID(resource))
+	}
+
 	if !k8sinterface.IsTypeWorkload(metaObjs[0].GetObject()) {
-		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", resource.GetID())
+		return nil, fmt.Errorf("%s is not a valid Kubernetes workload", getReadableID(resource))
 	}
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())
@@ -194,12 +194,13 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		return fmt.Errorf("failed to get cloud provider, cluster: %s", k8sHandler.clusterName)
 	}
 
+	logger.L().Start("Downloading cloud resources")
+
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
 	}
 	logger.L().Debug("cloud", helpers.String("clusterName", k8sHandler.clusterName), helpers.String("provider", provider))
 
-	logger.L().Info("Downloading cloud resources")
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
 		if !cloudResourceRequired(cloudResources, resourceKind) {
 			continue
@@ -221,7 +222,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		allResources[wl.GetID()] = wl
 		externalResourceMap[fmt.Sprintf("%s/%s", wl.GetApiVersion(), wl.GetKind())] = []string{wl.GetID()}
 	}
-	logger.L().Success("Downloaded cloud resources")
+	logger.L().StopSuccess("Downloaded cloud resources")
 
 	// get api server info resource
 	if cloudResourceRequired(cloudResources, string(cloudsupport.TypeApiServerInfo)) {
@@ -399,7 +400,7 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
-	logger.L().Debug("Collecting rbac resources")
+	logger.L().Start("Collecting RBAC resources")
 
 	if k8sHandler.rbacObjectsAPI == nil {
 		return nil
@@ -411,6 +412,9 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	for k, v := range allRbacResources {
 		allResources[k] = v
 	}
+
+	logger.L().StopSuccess("Collected RBAC resources")
+
 	return nil
 }
 

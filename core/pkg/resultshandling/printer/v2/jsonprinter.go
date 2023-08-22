@@ -53,11 +53,11 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	} else if imageScanData != nil {
 		err = jp.PrintImageScan(ctx, imageScanData[0].PresenterConfig)
 	} else {
-		err = fmt.Errorf("failed to write results, no data provided")
+		err = fmt.Errorf("no data provided")
 	}
 
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to write results", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to write results in json format", helpers.Error(err))
 		return
 	}
 
@@ -75,7 +75,15 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, ctx conte
 }
 
 func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
-	presenterConfig, _ := presenter.ValidatedConfig("json", "", false)
+	if scanResults == nil {
+		return fmt.Errorf("no image vulnerability data provided")
+	}
+
+	presenterConfig, err := presenter.ValidatedConfig("json", "", false)
+	if err != nil {
+		return err
+	}
+
 	pres := presenter.GetPresenter(presenterConfig, *scanResults)
 
 	return pres.Present(jp.writer)

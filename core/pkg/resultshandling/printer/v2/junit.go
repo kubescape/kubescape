@@ -117,6 +117,11 @@ func (jp *JunitPrinter) PrintNextSteps() {
 }
 
 func (jp *JunitPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
+		return
+	}
+
 	junitResult := testsSuites(opaSessionObj)
 	postureReportStr, err := xml.Marshal(junitResult)
 	if err != nil {

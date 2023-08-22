@@ -114,6 +114,8 @@ func TestDisplayMessage(t *testing.T) {
 
 		require.NotEmpty(t, buf)
 		assert.Contains(t, string(buf), "message returned from server")
+		assert.Contains(t, string(buf), "Your scan results were successfully submitted")
+		assert.Contains(t, string(buf), "View your results here")
 
 		t.Log(string(buf))
 	})
