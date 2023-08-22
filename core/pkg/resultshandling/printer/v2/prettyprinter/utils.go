@@ -216,11 +216,7 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 	}
 
 	for _, k := range keys {
-		if k == "Other" {
-			cautils.SimpleDisplay(writer, "  * %d %s \n", mapSeverityTSummary[k].NumberOfCVEs, k)
-		} else {
-			cautils.SimpleDisplay(writer, "  * %d %s\n", mapSeverityTSummary[k].NumberOfCVEs, k)
-		}
+		cautils.SimpleDisplay(writer, "  * %d %s \n", mapSeverityTSummary[k].NumberOfCVEs, utils.GetColorForVulnerabilitySeverity(k)(k))
 	}
 
 }
@@ -243,7 +239,7 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
 
 	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
-	
+
 	for _, ns := range nextSteps {
 		cautils.SimpleDisplay(writer, "* "+ns+"\n")
 	}
