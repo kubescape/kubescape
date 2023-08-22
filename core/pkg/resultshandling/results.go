@@ -131,3 +131,17 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType, "", nil)
 	}
 }
+
+func ValidatePrinter(scanType cautils.ScanTypes, printFormat string) bool {
+	if scanType != cautils.ScanTypeImage {
+		return true
+	}
+
+	// supported types for image scanning
+	switch printFormat {
+	case printer.JsonFormat, printer.PrettyFormat, printer.SARIFFormat:
+		return true
+	default:
+		return false
+	}
+}
