@@ -91,6 +91,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			}
 
 			scanInfo.FrameworkScan = false
+			scanInfo.SetScanType(cautils.ScanTypeControl)
 
 			if err := validateControlScanInfo(scanInfo); err != nil {
 				return err

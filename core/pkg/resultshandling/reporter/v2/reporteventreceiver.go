@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -64,7 +65,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
 	defer span.End()
 	report.reportTime = time.Now().UTC()
-  
+
 	if report.customerGUID == "" {
 		logger.L().Ctx(ctx).Error("failed to publish results. Reason: Unknown account ID. Run kubescape with the '--account <account ID>' flag. Contact ARMO team for more details")
 		return nil
@@ -249,21 +250,20 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 }
 
 func (report *ReportEventReceiver) generateMessage() {
-	report.message = ""
-
-	sep := "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"
-	report.message = sep
-	report.message += "Now, take your scan results to the next level with actionable insights on ARMO Platform.\n\n"
-	report.message += fmt.Sprintf("Sign up for free here - %s\n", report.GetURL())
-	report.message += sep
-
+	report.message = "Your scan results were successfully submitted to ARMO Platform. Take your security posture to the next level with actionable insights and evaluation of your full Kubernetes estate.\n"
+	report.message += fmt.Sprintf("\nView your results here: %s", report.GetURL())
 }
 
 func (report *ReportEventReceiver) DisplayReportURL() {
 
 	// print if logger level is lower than warning (debug/info)
 	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
-		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+		txt := "View results"
+		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", txt))
+
+		cautils.SimpleDisplay(os.Stderr, strings.Repeat("─", len(txt)))
+
+		cautils.SimpleDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
 	}
 }
 

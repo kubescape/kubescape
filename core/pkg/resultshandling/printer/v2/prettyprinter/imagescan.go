@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -43,13 +44,13 @@ func (ip *ImagePrinter) PrintImageScanningTable(summary imageprinter.ImageScanSu
 	cautils.InfoTextDisplay(ip.writer, "\n")
 }
 
-func (ip *ImagePrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (ip *ImagePrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
 }
 
 func (ip *ImagePrinter) PrintNextSteps() {
 	if ip.verboseMode {
-		printNextSteps(ip.writer, []string{CICDSetupText, installHelmText}, true)
+		printNextSteps(ip.writer, []string{installKubescapeText}, true)
 		return
 	}
-	printNextSteps(ip.writer, []string{imageScanVerboseRunText, CICDSetupText, installHelmText}, true)
+	printNextSteps(ip.writer, []string{imageScanVerboseRunText, installKubescapeText}, true)
 }

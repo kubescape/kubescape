@@ -168,19 +168,13 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	// do not submit control scanning
-	if !scanInfo.FrameworkScan {
+	// do not submit control/workload scanning
+	if !isScanTypeForSubmission(scanInfo.ScanType) {
 		scanInfo.Submit = false
 		return
 	}
 
 	if scanInfo.Local {
-		scanInfo.Submit = false
-		return
-	}
-
-	// do not submit single resource scan to BE
-	if scanInfo.ScanObject != nil {
 		scanInfo.Submit = false
 		return
 	}
@@ -196,6 +190,13 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		scanInfo.Submit = true
 	}
 
+}
+
+func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
+	if scanType == cautils.ScanTypeControl || scanType == cautils.ScanTypeWorkload {
+		return false
+	}
+	return true
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API

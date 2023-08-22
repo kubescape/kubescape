@@ -116,7 +116,11 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj != nil {
-		fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+		if isPrintSeparatorType(pp.scanType) {
+			fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+		} else {
+			fmt.Fprintf(pp.writer, "\n")
+		}
 
 		sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
 
@@ -131,7 +135,7 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 
 		pp.printOverview(opaSessionObj, pp.verboseMode)
 
-		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs, opaSessionObj.TopWorkloadsByScore)
 
 		// When writing to Stdout, we aren’t really writing to an output file,
 		// so no need to print that we are
@@ -157,7 +161,8 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 
 func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 	if pp.scanType == cautils.ScanTypeCluster || pp.scanType == cautils.ScanTypeRepo {
-		cautils.InfoDisplay(pp.writer, "\nSecurity Overview\n\n")
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nKubescape security posture overview for cluster: %s\n\n", cautils.ClusterName))
+		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
 	} else if pp.scanType == cautils.ScanTypeWorkload {
 		ns := opaSessionObj.SingleResourceScan.GetNamespace()
 		if ns == "" {
@@ -329,4 +334,13 @@ func getSeparator(sep string) string {
 		s += sep
 	}
 	return s
+}
+
+func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
+	switch scanType {
+	case cautils.ScanTypeCluster, cautils.ScanTypeRepo, cautils.ScanTypeImage, cautils.ScanTypeWorkload:
+		return false
+	default:
+		return true
+	}
 }
