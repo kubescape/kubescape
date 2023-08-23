@@ -39,8 +39,6 @@ require (
 	cloud.google.com/go/compute v1.23.0 // indirect
 	cloud.google.com/go/compute/metadata v0.2.3 // indirect
 	cloud.google.com/go/container v1.24.0 // indirect
-	cloud.google.com/go/containeranalysis v0.10.1 // indirect
-	cloud.google.com/go/grafeas v0.3.0 // indirect
 	cloud.google.com/go/iam v1.1.1 // indirect
 	cloud.google.com/go/storage v1.30.1 // indirect
 	filippo.io/edwards25519 v1.0.0 // indirect
@@ -247,6 +245,7 @@ require (
 	github.com/knqyf263/go-apk-version v0.0.0-20200609155635-041fdbb8563f // indirect
 	github.com/knqyf263/go-deb-version v0.0.0-20190517075300-09fca494f03d // indirect
 	github.com/knqyf263/go-rpmdb v0.0.0-20230301153543-ba94b245509b // indirect
+	github.com/kubescape/backend v0.0.0-20230820141235-28748e7aad2a // indirect
 	github.com/kubescape/go-git-url v0.0.25 // indirect
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 // indirect
 	github.com/kubescape/regolibrary v1.0.291-rc.0 // indirect

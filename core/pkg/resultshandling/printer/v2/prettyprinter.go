@@ -40,9 +40,10 @@ type PrettyPrinter struct {
 	scanType        cautils.ScanTypes
 	inputPatterns   []string
 	mainPrinter     prettyprinter.MainPrinter
+	clusterName     string
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string) *PrettyPrinter {
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string) *PrettyPrinter {
 	prettyPrinter := &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
@@ -50,6 +51,7 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 		printAttackTree: attackTree,
 		scanType:        scanType,
 		inputPatterns:   inputPatterns,
+		clusterName:     clusterName,
 	}
 
 	return prettyPrinter
@@ -161,7 +163,7 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 
 func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 	if pp.scanType == cautils.ScanTypeCluster || pp.scanType == cautils.ScanTypeRepo {
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nKubescape security posture overview for cluster: %s\n\n", cautils.ClusterName))
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nKubescape security posture overview for cluster: %s\n\n", pp.clusterName))
 		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
 	} else if pp.scanType == cautils.ScanTypeWorkload {
 		ns := opaSessionObj.SingleResourceScan.GetNamespace()

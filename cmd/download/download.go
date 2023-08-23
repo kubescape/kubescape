@@ -83,9 +83,9 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
+	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	downloadCmd.PersistentFlags().MarkDeprecated("client-id", "Client ID is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
+	downloadCmd.PersistentFlags().MarkDeprecated("secret-key", "Secret Key is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 	return downloadCmd
@@ -95,5 +95,5 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 func flagValidationDownload(downloadInfo *v1.DownloadInfo) error {
 
 	// Validate the user's credentials
-	return downloadInfo.Credentials.Validate()
+	return cautils.ValidateAccountID(downloadInfo.AccountID)
 }

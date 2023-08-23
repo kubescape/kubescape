@@ -8,8 +8,6 @@ import (
 
 type IReport interface {
 	Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error
-	SetCustomerGUID(customerGUID string)
-	SetClusterName(clusterName string)
-	DisplayReportURL()
-	GetURL() string
+	SetTenantConfig(tenantConfig cautils.ITenantConfig)
+	DisplayMessage()
 }

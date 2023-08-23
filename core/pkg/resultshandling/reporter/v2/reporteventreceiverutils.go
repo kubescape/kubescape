@@ -4,6 +4,7 @@ import (
 	"net/url"
 
 	"github.com/google/uuid"
+	server "github.com/kubescape/backend/pkg/server/v1"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -14,11 +15,11 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 	urlObj.Host = getter.GetKSCloudAPIConnector().GetCloudReportURL()
 	parseHost(&urlObj)
 
-	urlObj.Path = "/k8s/v2/postureReport"
+	urlObj.Path = server.ReporterReportPath
 	q := urlObj.Query()
-	q.Add("customerGUID", uuid.MustParse(report.customerGUID).String())
-	q.Add("contextName", report.clusterName)
-	q.Add("clusterName", report.clusterName) // deprecated
+	q.Add(server.QueryParamCustomerGUID, uuid.MustParse(report.GetAccountID()).String())
+	q.Add(server.QueryParamContextName, report.GetClusterName())
+	q.Add(server.QueryParamClusterName, report.GetClusterName()) // deprecated
 
 	urlObj.RawQuery = q.Encode()
 
@@ -27,20 +28,21 @@ func (report *ReportEventReceiver) initEventReceiverURL() {
 
 func hostToString(host *url.URL, reportID string) string {
 	q := host.Query()
-	q.Add("reportGUID", reportID) // TODO - do we add the reportID?
+	q.Add(server.QueryParamReport, reportID) // TODO - do we add the reportID?
 	host.RawQuery = q.Encode()
 	return host.String()
 }
 
 func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	reportObj := &reporthandlingv2.PostureReport{
-		CustomerGUID:         report.customerGUID,
-		ClusterName:          report.clusterName,
-		ReportID:             report.reportID,
-		ReportGenerationTime: report.reportTime,
-		SummaryDetails:       opaSessionObj.Report.SummaryDetails,
-		Attributes:           opaSessionObj.Report.Attributes,
-		ClusterAPIServerInfo: opaSessionObj.Report.ClusterAPIServerInfo,
+		CustomerGUID:          report.GetAccountID(),
+		ClusterName:           report.GetClusterName(),
+		ReportID:              report.reportID,
+		ReportGenerationTime:  report.reportTime,
+		SummaryDetails:        opaSessionObj.Report.SummaryDetails,
+		Attributes:            opaSessionObj.Report.Attributes,
+		ClusterAPIServerInfo:  opaSessionObj.Report.ClusterAPIServerInfo,
+		CustomerGUIDGenerated: report.accountIdGenerated,
 	}
 	if opaSessionObj.Metadata != nil {
 		reportObj.Metadata = *opaSessionObj.Metadata

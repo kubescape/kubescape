@@ -8,10 +8,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
@@ -68,14 +69,10 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			k8s := getKubernetesApi()
 
 			// get config
-			clusterConfig := getTenantConfig(&submitInfo.Credentials, "", "", k8s)
-			if err := clusterConfig.SetTenant(); err != nil {
-				logger.L().Error("failed setting account ID", helpers.Error(err))
-			}
-
+			clusterConfig := getTenantConfig(submitInfo.AccountID, "", "", k8s)
 			resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetContextName(), args[0])
 
-			r := reporterv2.NewReportEventReceiver(clusterConfig.GetConfigObj(), uuid.NewString(), reporterv2.SubmitContextScan)
+			r := reporterv2.NewReportEventReceiver(clusterConfig, uuid.NewString(), reporterv2.SubmitContextScan)
 
 			submitInterfaces := cliinterfaces.SubmitInterfaces{
 				ClusterConfig: clusterConfig,
@@ -103,4 +100,25 @@ func loadResultsFromFile(filePath string) (*reporthandlingv2.PostureReport, erro
 		return report, fmt.Errorf("failed to unmarshal results file: %s, make sure you run kubescape with '--format=json --format-version=v2'", err.Error())
 	}
 	return report, nil
+}
+
+// getKubernetesApi
+func getKubernetesApi() *k8sinterface.KubernetesApi {
+	if !k8sinterface.IsConnectedToCluster() {
+		return nil
+	}
+	return k8sinterface.NewKubernetesApi()
+}
+func getTenantConfig(accountID, clusterName string, customClusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
+	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
+		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
+	}
+	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
+}
+
+// Check if the flag entered are valid
+func flagValidationSubmit(submitInfo *v1.Submit) error {
+
+	// Validate the user's credentials
+	return cautils.ValidateAccountID(submitInfo.AccountID)
 }

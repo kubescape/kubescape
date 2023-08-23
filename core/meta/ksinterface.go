@@ -17,16 +17,12 @@ type IKubescape interface {
 	Download(ctx context.Context, downloadInfo *metav1.DownloadInfo) error // TODO - return downloaded policies
 
 	// submit
-	Submit(ctx context.Context, submitInterfaces cliinterfaces.SubmitInterfaces) error            // TODO - func should receive object
-	SubmitExceptions(ctx context.Context, credentials *cautils.Credentials, excPath string) error // TODO - remove
+	Submit(ctx context.Context, submitInterfaces cliinterfaces.SubmitInterfaces) error // TODO - func should receive object
 
 	// config
 	SetCachedConfig(setConfig *metav1.SetConfig) error
 	ViewCachedConfig(viewConfig *metav1.ViewConfig) error
 	DeleteCachedConfig(ctx context.Context, deleteConfig *metav1.DeleteConfig) error
-
-	// delete
-	DeleteExceptions(deleteexceptions *metav1.DeleteExceptions) error
 
 	// fix
 	Fix(ctx context.Context, fixInfo *metav1.FixInfo) error

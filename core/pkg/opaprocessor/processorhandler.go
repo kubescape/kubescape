@@ -31,19 +31,15 @@ type IJobProgressNotificationClient interface {
 	Stop()
 }
 
-const (
-	heuristicAllocResources = 100
-	heuristicAllocControls  = 100
-)
-
 // OPAProcessor processes Open Policy Agent rules.
 type OPAProcessor struct {
+	clusterName          string
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
 	opaRegisterOnce sync.Once
 }
 
-func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData) *OPAProcessor {
+func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
 		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
@@ -52,6 +48,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 	return &OPAProcessor{
 		OPASessionObj:        sessionObj,
 		regoDependenciesData: regoDependenciesData,
+		clusterName:          clusterName,
 	}
 }
 
@@ -122,7 +119,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 func (opap *OPAProcessor) loggerStartScanning() {
 	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
-		logger.L().Start("Scanning", helpers.String(targetScan.String(), cautils.ClusterName))
+		logger.L().Start("Scanning", helpers.String(targetScan.String(), opap.clusterName))
 	} else {
 		logger.L().Start("Scanning " + targetScan.String())
 	}
@@ -131,7 +128,7 @@ func (opap *OPAProcessor) loggerStartScanning() {
 func (opap *OPAProcessor) loggerDoneScanning() {
 	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
-		logger.L().StopSuccess("Done scanning", helpers.String(targetScan.String(), cautils.ClusterName))
+		logger.L().StopSuccess("Done scanning", helpers.String(targetScan.String(), opap.clusterName))
 	} else {
 		logger.L().StopSuccess("Done scanning " + targetScan.String())
 	}
@@ -378,12 +375,4 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []string, fixedControlInputs
 		DataControlInputs:    dataControlInputs,
 		PostureControlInputs: postureControlInputs,
 	}
-}
-
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-
-	return b
 }
