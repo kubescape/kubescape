@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
@@ -60,8 +61,8 @@ func initEnvironment() {
 		rootInfo.KSCloudBEURLs = rootInfo.KSCloudBEURLsDep
 	}
 	urlSlices := strings.Split(rootInfo.KSCloudBEURLs, ",")
-	if len(urlSlices) != 1 && len(urlSlices) < 3 {
-		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
+	if len(urlSlices) != 1 && len(urlSlices) < 2 {
+		logger.L().Fatal("expected at least 2 URLs (report, api)")
 	}
 	switch len(urlSlices) {
 	case 1:
@@ -76,20 +77,12 @@ func initEnvironment() {
 			logger.L().Fatal("--environment flag usage: " + envFlagUsage)
 		}
 	case 2:
-		logger.L().Fatal("--environment flag usage: " + envFlagUsage)
-	case 3, 4:
-		var ksAuthURL string
 		ksEventReceiverURL := urlSlices[0] // mandatory
 		ksBackendURL := urlSlices[1]       // mandatory
-		ksFrontendURL := urlSlices[2]      // mandatory
-		if len(urlSlices) >= 4 {
-			ksAuthURL = urlSlices[3]
-		}
 
-		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPICustomized(
-			ksBackendURL, ksAuthURL,
-			getter.WithReportURL(ksEventReceiverURL),
-			getter.WithFrontendURL(ksFrontendURL),
+		getter.SetKSCloudAPIConnector(v1.NewKSCloudAPICustomized(
+			ksBackendURL,
+			v1.WithReportURL(ksEventReceiverURL),
 		))
 	}
 }

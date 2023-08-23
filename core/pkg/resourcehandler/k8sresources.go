@@ -38,18 +38,18 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 }
 
 type K8sResourceHandler struct {
+	clusterName       string
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
-	registryAdaptors  *RegistryAdaptors
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, registryAdaptors *RegistryAdaptors) *K8sResourceHandler {
+func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
 	return &K8sResourceHandler{
+		clusterName:       clusterName,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
-		registryAdaptors:  registryAdaptors,
 	}
 }
 
@@ -93,21 +93,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	logger.L().StopSuccess("Accessed Kubernetes objects")
-
-	// backswords compatibility - get image vulnerability resources
-	if k8sHandler.registryAdaptors != nil {
-		imgVulnResources := cautils.MapImageVulnResources(ksResourceMap)
-		// check that controls use image vulnerability resources
-		if len(imgVulnResources) > 0 {
-			logger.L().Info("Requesting images vulnerabilities results")
-			cautils.StartSpinner()
-			if err := k8sHandler.registryAdaptors.collectImagesVulnerabilities(k8sResourcesMap, allResources, ksResourceMap); err != nil {
-				cautils.SetInfoMapForResources(fmt.Sprintf("failed to pull image scanning data: %s. for more information: https://hub.armosec.io/docs/configuration-of-image-vulnerabilities", err.Error()), imgVulnResources, sessionObj.InfoMap)
-			}
-			cautils.StopSpinner()
-			logger.L().Success("Requested images vulnerabilities results")
-		}
-	}
 
 	hostResources := cautils.MapHostResources(ksResourceMap)
 	// check that controls use host sensor resources
@@ -204,10 +189,9 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
-	clusterName := cautils.ClusterName
-	provider := cloudsupport.GetCloudProvider(clusterName)
+	provider := cloudsupport.GetCloudProvider(k8sHandler.clusterName)
 	if provider == "" {
-		return fmt.Errorf("failed to get cloud provider, cluster: %s", clusterName)
+		return fmt.Errorf("failed to get cloud provider, cluster: %s", k8sHandler.clusterName)
 	}
 
 	logger.L().Start("Downloading cloud resources")
@@ -215,7 +199,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
 	}
-	logger.L().Debug("cloud", helpers.String("cluster", clusterName), helpers.String("clusterName", clusterName), helpers.String("provider", provider))
+	logger.L().Debug("cloud", helpers.String("clusterName", k8sHandler.clusterName), helpers.String("provider", provider))
 
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
 		if !cloudResourceRequired(cloudResources, resourceKind) {
@@ -223,7 +207,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		}
 
 		logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
-		wl, err := resourceGetter(clusterName, provider)
+		wl, err := resourceGetter(k8sHandler.clusterName, provider)
 		if err != nil {
 			if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
 				// Return error with useful info on how to configure credentials for getting cloud provider info

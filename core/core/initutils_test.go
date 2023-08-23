@@ -88,7 +88,7 @@ func Test_getUIPrinter(t *testing.T) {
 				View:            string(tt.args.viewType),
 			}
 
-			got := GetUIPrinter(tt.args.ctx, scanInfo)
+			got := GetUIPrinter(tt.args.ctx, scanInfo, "test-cluster")
 
 			assert.Equal(t, tt.want.structType, reflect.TypeOf(got).String())
 

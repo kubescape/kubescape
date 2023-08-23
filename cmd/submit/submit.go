@@ -13,8 +13,6 @@ var submitCmdExamples = fmt.Sprintf(`
 # Submit Kubescape scan results file
 %[1]s submit results
 
-# Submit exceptions file to Kubescape SaaS
-%[1]s submit exceptions
 `, cautils.ExecName())
 
 func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
@@ -28,13 +26,20 @@ func GetSubmitCmd(ks meta.IKubescape) *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 		},
 	}
-	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
-	submitCmd.PersistentFlags().StringVarP(&submitInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
+	submitCmd.PersistentFlags().StringVarP(&submitInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	submitCmd.PersistentFlags().MarkDeprecated("client-id", "Client ID is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
+	submitCmd.PersistentFlags().MarkDeprecated("secret-key", "Secret Key is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 
-	submitCmd.AddCommand(getExceptionsCmd(ks, &submitInfo))
 	submitCmd.AddCommand(getResultsCmd(ks, &submitInfo))
-	submitCmd.AddCommand(getRBACCmd(ks, &submitInfo))
 
+	// deprecated commands
+	submitCmd.AddCommand(&cobra.Command{
+		Use:        "exceptions",
+		Deprecated: "Contact Kubescape maintainers for more information.",
+	})
+	submitCmd.AddCommand(&cobra.Command{
+		Use:        "rbac",
+		Deprecated: "Contact Kubescape maintainers for more information.",
+	})
 	return submitCmd
 }

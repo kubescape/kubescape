@@ -50,7 +50,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 			t.SetExceptions(
 				resource,
 				opap.Exceptions,
-				cautils.ClusterName,
+				opap.clusterName,
 				opap.AllPolicies.Controls, // update status depending on action required
 				resourcesresults.WithExceptionsProcessor(processor),
 			)

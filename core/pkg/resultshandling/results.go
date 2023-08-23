@@ -96,14 +96,14 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context) error {
 		if err := rh.ReporterObj.Submit(ctx, rh.ScanData); err != nil {
 			return err
 		}
-		rh.ReporterObj.DisplayReportURL()
+		rh.ReporterObj.DisplayMessage()
 	}
 
 	return nil
 }
 
 // NewPrinter returns a new printer for a given format and configuration options
-func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseMode, attackTree bool, viewType cautils.ViewTypes) printer.IPrinter {
+func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseMode, attackTree bool, viewType cautils.ViewTypes, clusterName string) printer.IPrinter {
 
 	switch printFormat {
 	case printer.JsonFormat:
@@ -128,7 +128,7 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
 		}
-		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType, "", nil)
+		return printerv2.NewPrettyPrinter(verboseMode, formatVersion, attackTree, viewType, "", nil, clusterName)
 	}
 }
 

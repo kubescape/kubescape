@@ -23,7 +23,7 @@ type imageScanInfo struct {
 // TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
-  This command is still in BETA. Feel free to contact the kubescape maintainers for more information.
+  This command is still in BETA. Feel free to contact the Kubescape maintainers for more information.
   
   Scan an image for vulnerabilities. 
 
@@ -77,9 +77,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *im
 
 			scanInfo.SetScanType(cautils.ScanTypeImage)
 
-			outputPrinters := core.GetOutputPrinters(scanInfo, ctx)
+			outputPrinters := core.GetOutputPrinters(scanInfo, ctx, "")
 
-			uiPrinter := core.GetUIPrinter(ctx, scanInfo)
+			uiPrinter := core.GetUIPrinter(ctx, scanInfo, "")
 
 			resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 
