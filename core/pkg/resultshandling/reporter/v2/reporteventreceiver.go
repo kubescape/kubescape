@@ -65,7 +65,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 		accountID, err := report.tenantConfig.GenerateAccountID()
 		if err != nil {
 			logger.L().Error("failed to generate account ID", helpers.String("reason", err.Error()))
-			return nil
+			return err
 		}
 		report.accountIdGenerated = true
 		logger.L().Debug("generated account ID", helpers.String("account ID", accountID))
