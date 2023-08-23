@@ -73,6 +73,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	}
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.CreateAccount, "create-account", false, "Create a Kubescape SaaS account ID account ID is not found in cache. After creating the account, the account ID will be saved in cache. In addition, the scanning results will be uploaded to the Kubescape SaaS")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
@@ -104,7 +105,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 
 	scanCmd.PersistentFlags().MarkDeprecated("client-id", "Client ID is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 	scanCmd.PersistentFlags().MarkDeprecated("secret-key", "Secret Key is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
-	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Account creation is no longer. Feel free to contact the Kubescape maintainers for more information")
 
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("omit-raw-resources")

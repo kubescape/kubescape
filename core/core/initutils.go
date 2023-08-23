@@ -155,7 +155,9 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	/*
 		If CloudReportURL not set - Do not send report
 
-		If There is no account - Do not send report
+		If There is no account -
+			If CreateAccount provided - Generate Account & Submit report
+			Otherwise, do not send report
 
 		If There is account -
 			keep-local - Do not send report
@@ -179,16 +181,19 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	// If there is no account, we will generate one before submitting
 	if tenantConfig.GetAccountID() == "" {
-		scanInfo.Submit = true
-		// If there is an account, but it is not a valid UUID, we do not submit
-	} else if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
-		logger.L().Warning("account is not a valid UUID", helpers.Error(err))
-		scanInfo.Submit = false
-	} else {
-		scanInfo.Submit = true
+		// Submit only if CreateAccount was provided
+		scanInfo.Submit = scanInfo.CreateAccount
+		return
 	}
+
+	_, err := uuid.Parse(tenantConfig.GetAccountID())
+	if err != nil {
+		logger.L().Warning("account is not a valid UUID", helpers.Error(err))
+	}
+
+	// submit if account is valid
+	scanInfo.Submit = err != nil
 }
 
 func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
