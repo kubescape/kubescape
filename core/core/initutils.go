@@ -193,7 +193,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 	}
 
 	// submit if account is valid
-	scanInfo.Submit = err != nil
+	scanInfo.Submit = err == nil
 }
 
 func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {

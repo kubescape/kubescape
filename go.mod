@@ -9,7 +9,7 @@ require (
 	github.com/anchore/syft v0.84.1
 	github.com/armosec/armoapi-go v0.0.220
 	github.com/armosec/utils-go v0.0.20
-	github.com/armosec/utils-k8s-go v0.0.16
+	github.com/armosec/utils-k8s-go v0.0.17
 	github.com/briandowns/spinner v1.23.0
 	github.com/docker/distribution v2.8.2+incompatible
 	github.com/enescakir/emoji v1.0.0

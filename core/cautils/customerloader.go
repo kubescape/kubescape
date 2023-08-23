@@ -77,7 +77,7 @@ func (co *ConfigObj) updateEmptyFields(inCO *ConfigObj) error {
 type ITenantConfig interface {
 	UpdateCachedConfig() error
 	DeleteCachedConfig(ctx context.Context) error
-	GenerateAccountID() string
+	GenerateAccountID() (string, error)
 	DeleteAccountID() error
 
 	// getters
@@ -149,10 +149,10 @@ func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterN
 func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
 func (lc *LocalConfig) GetCloudAPIURL() string    { return lc.configObj.CloudAPIURL }
 func (lc *LocalConfig) IsConfigFound() bool       { return existsConfigFile() }
-func (lc *LocalConfig) GenerateAccountID() string {
+func (lc *LocalConfig) GenerateAccountID() (string, error) {
 	lc.configObj.AccountID = uuid.NewString()
-	lc.UpdateCachedConfig()
-	return lc.configObj.AccountID
+	err := lc.UpdateCachedConfig()
+	return lc.configObj.AccountID, err
 }
 
 func (lc *LocalConfig) DeleteAccountID() error {
@@ -260,23 +260,10 @@ func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPI
 func (c *ClusterConfig) IsConfigFound() bool { return existsConfigFile() || c.existsConfigMap() }
 
 func (c *ClusterConfig) UpdateCachedConfig() error {
-	// update/create config
-	if c.existsConfigMap() {
-		if err := c.updateConfigMap(); err != nil {
-			return err
-		}
-	} else {
-		if err := c.createConfigMap(); err != nil {
-			return err
-		}
-	}
 	return updateConfigFile(c.configObj)
 }
 
 func (c *ClusterConfig) DeleteCachedConfig(ctx context.Context) error {
-	if err := c.deleteConfigMap(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
-	}
 	if err := DeleteConfigFile(); err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 	}
@@ -326,6 +313,11 @@ func (c *ClusterConfig) existsConfigMap() bool {
 	return err == nil
 }
 
+func (c *ClusterConfig) existsNamespace() bool {
+	_, err := c.k8s.KubernetesClient.CoreV1().Namespaces().Get(context.Background(), c.configMapNamespace, metav1.GetOptions{})
+	return err == nil
+}
+
 func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
 
 	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
@@ -357,76 +349,19 @@ func GetValueFromConfigJson(key string) (string, error) {
 
 }
 
-func (c *ClusterConfig) SetKeyValueInConfigmap(key string, value string) error {
-
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
-	if err != nil {
-		configMap = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: c.configMapName,
-			},
-		}
-	}
-
-	if len(configMap.Data) == 0 {
-		configMap.Data = make(map[string]string)
-	}
-
-	configMap.Data[key] = value
-
-	if err != nil {
-		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Create(context.Background(), configMap, metav1.CreateOptions{})
-	} else {
-		_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
-	}
-
-	return err
-}
-
 func existsConfigFile() bool {
 	_, err := os.ReadFile(ConfigFileFullPath())
 	return err == nil
-}
-
-func (c *ClusterConfig) createConfigMap() error {
-	if c.k8s == nil {
-		return nil
-	}
-	configMap := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: c.configMapName,
-		},
-	}
-	c.updateConfigData(configMap)
-
-	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Create(context.Background(), configMap, metav1.CreateOptions{})
-	return err
-}
-
-func (c *ClusterConfig) updateConfigMap() error {
-	if c.k8s == nil {
-		return nil
-	}
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
-
-	if err != nil {
-		return err
-	}
-
-	c.updateConfigData(configMap)
-
-	_, err = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Update(context.Background(), configMap, metav1.UpdateOptions{})
-	return err
 }
 
 func updateConfigFile(configObj *ConfigObj) error {
 	return os.WriteFile(ConfigFileFullPath(), configObj.Config(), 0664) //nolint:gosec
 }
 
-func (c *ClusterConfig) GenerateAccountID() string {
+func (c *ClusterConfig) GenerateAccountID() (string, error) {
 	c.configObj.AccountID = uuid.NewString()
-	c.UpdateCachedConfig()
-	return c.configObj.AccountID
+	err := c.UpdateCachedConfig()
+	return c.configObj.AccountID, err
 }
 
 func (c *ClusterConfig) DeleteAccountID() error {
@@ -467,10 +402,6 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 // Check if the customer is submitted
 func (clusterConfig *ClusterConfig) IsSubmitted() bool {
 	return clusterConfig.existsConfigMap() || existsConfigFile()
-}
-
-func (clusterConfig *ClusterConfig) deleteConfigMap() error {
-	return clusterConfig.k8s.KubernetesClient.CoreV1().ConfigMaps(clusterConfig.configMapNamespace).Delete(context.Background(), clusterConfig.configMapName, metav1.DeleteOptions{})
 }
 
 func DeleteConfigFile() error {

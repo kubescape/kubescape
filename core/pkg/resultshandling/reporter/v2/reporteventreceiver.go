@@ -62,7 +62,11 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	report.reportTime = time.Now().UTC()
 
 	if report.GetAccountID() == "" {
-		accountID := report.tenantConfig.GenerateAccountID()
+		accountID, err := report.tenantConfig.GenerateAccountID()
+		if err != nil {
+			logger.L().Error("failed to generate account ID", helpers.String("reason", err.Error()))
+			return nil
+		}
 		report.accountIdGenerated = true
 		logger.L().Debug("generated account ID", helpers.String("account ID", accountID))
 	}

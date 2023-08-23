@@ -99,7 +99,7 @@ require (
 	github.com/andybalholm/brotli v1.0.4 // indirect
 	github.com/armosec/armoapi-go v0.0.220 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
-	github.com/armosec/utils-k8s-go v0.0.16 // indirect
+	github.com/armosec/utils-k8s-go v0.0.17 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/aws/aws-sdk-go v1.44.312 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.19.1 // indirect

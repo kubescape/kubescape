@@ -53,9 +53,9 @@ func (tcm *TenantConfigMock) GetCloudAPIURL() string {
 func (tcm *TenantConfigMock) IsConfigFound() bool {
 	return true
 }
-func (tcm *TenantConfigMock) GenerateAccountID() string {
+func (tcm *TenantConfigMock) GenerateAccountID() (string, error) {
 	tcm.accountID = testGeneratedAccountIDString
-	return testGeneratedAccountIDString
+	return testGeneratedAccountIDString, nil
 }
 
 func (tcm *TenantConfigMock) DeleteAccountID() error {
