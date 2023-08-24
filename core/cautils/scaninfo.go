@@ -124,7 +124,6 @@ type ScanInfo struct {
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
 	Submit                bool                         // Submit results to Kubescape Cloud BE
-	CreateAccount         bool                         // Create account in Kubescape Cloud BE if no account found in local cache
 	ScanID                string                       // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
 	HostSensorYamlPath    string                       // Path to hostsensor file

@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/google/uuid"
+	v1 "github.com/kubescape/backend/pkg/client/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -98,16 +99,12 @@ type ITenantConfig interface {
 var _ ITenantConfig = &LocalConfig{}
 
 type LocalConfig struct {
-	backendAPI getter.IBackend
-	configObj  *ConfigObj
+	configObj *ConfigObj
 }
 
-func NewLocalConfig(
-	backendAPI getter.IBackend, accountID, clusterName string, customClusterName string) *LocalConfig {
-
+func NewLocalConfig(accountID, clusterName string, customClusterName string) *LocalConfig {
 	lc := &LocalConfig{
-		backendAPI: backendAPI,
-		configObj:  &ConfigObj{},
+		configObj: &ConfigObj{},
 	}
 	// get from configMap
 	if existsConfigFile() { // get from file
@@ -124,21 +121,8 @@ func NewLocalConfig(
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 
-	lc.backendAPI.SetAccountID(lc.configObj.AccountID)
-	if lc.configObj.CloudAPIURL != "" {
-		lc.backendAPI.SetCloudAPIURL(lc.configObj.CloudAPIURL)
-	} else {
-		lc.configObj.CloudAPIURL = lc.backendAPI.GetCloudAPIURL()
-	}
-
-	if lc.configObj.CloudReportURL != "" {
-		lc.backendAPI.SetCloudReportURL(lc.configObj.CloudReportURL)
-	} else {
-		lc.configObj.CloudReportURL = lc.backendAPI.GetCloudReportURL()
-	}
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", lc.backendAPI.GetCloudAPIURL()), helpers.String("report", lc.backendAPI.GetCloudReportURL()))
-
-	initializeCloudAPI(lc)
+	updatedKsCloud := overrideKsCloudAPIFromConfig(lc)
+	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
 
 	return lc
 }
@@ -190,18 +174,16 @@ KS_CACHE // path to cached files
 var _ ITenantConfig = &ClusterConfig{}
 
 type ClusterConfig struct {
-	backendAPI         getter.IBackend
 	k8s                *k8sinterface.KubernetesApi
 	configObj          *ConfigObj
 	configMapName      string
 	configMapNamespace string
 }
 
-func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, accountID, clusterName string, customClusterName string) *ClusterConfig {
+func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, clusterName, customClusterName string) *ClusterConfig {
 	// var configObj *ConfigObj
 	c := &ClusterConfig{
 		k8s:                k8s,
-		backendAPI:         backendAPI,
 		configObj:          &ConfigObj{},
 		configMapName:      getConfigMapName(),
 		configMapNamespace: GetConfigMapNamespace(),
@@ -232,22 +214,8 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
-
-	c.backendAPI.SetAccountID(c.configObj.AccountID)
-	if c.configObj.CloudAPIURL != "" {
-		c.backendAPI.SetCloudAPIURL(c.configObj.CloudAPIURL)
-	} else {
-		c.configObj.CloudAPIURL = c.backendAPI.GetCloudAPIURL()
-	}
-	if c.configObj.CloudReportURL != "" {
-		c.backendAPI.SetCloudReportURL(c.configObj.CloudReportURL)
-	} else {
-		c.configObj.CloudReportURL = c.backendAPI.GetCloudReportURL()
-	}
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", c.backendAPI.GetCloudAPIURL()), helpers.String("report", c.backendAPI.GetCloudReportURL()))
-
-	initializeCloudAPI(c)
-
+	updatedKsCloud := overrideKsCloudAPIFromConfig(c)
+	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
 	return c
 }
 
@@ -465,10 +433,45 @@ func updateCloudURLs(configObj *ConfigObj) {
 
 }
 
-func initializeCloudAPI(c ITenantConfig) {
-	cloud := getter.GetKSCloudAPIConnector()
-	cloud.SetAccountID(c.GetAccountID())
-	cloud.SetCloudReportURL(c.GetCloudReportURL())
-	cloud.SetCloudAPIURL(c.GetCloudAPIURL())
-	getter.SetKSCloudAPIConnector(cloud)
+func overrideKsCloudAPIFromConfig(c ITenantConfig) *v1.KSCloudAPI {
+	// reads the initialized KSCloud
+	globalKsCloud := getter.GetKSCloudAPIConnector()
+
+	shouldUpdateConfig := false
+	accountId := c.GetAccountID()
+	if globalKsCloud.GetAccountID() != "" {
+		c.GetConfigObj().AccountID = globalKsCloud.GetAccountID()
+		shouldUpdateConfig = true
+	}
+
+	cloudApiUrl := c.GetCloudAPIURL()
+	if globalKsCloud.GetCloudAPIURL() != "" {
+		c.GetConfigObj().CloudAPIURL = globalKsCloud.GetCloudAPIURL()
+		shouldUpdateConfig = true
+	}
+
+	cloudReportUrl := c.GetCloudReportURL()
+	if globalKsCloud.GetCloudReportURL() != "" {
+		c.GetConfigObj().CloudReportURL = globalKsCloud.GetCloudReportURL()
+		shouldUpdateConfig = true
+	}
+
+	if shouldUpdateConfig {
+		logger.L().Debug("Updating cached config Cloud URLs")
+		c.UpdateCachedConfig()
+	}
+	cloudApi, err := v1.NewKSCloudAPI(cloudApiUrl, cloudReportUrl, accountId)
+	if err != nil {
+		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+	}
+
+	getter.SetKSCloudAPIConnector(cloudApi)
+	return cloudApi
+}
+
+func GetTenantConfig(accountID, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {
+	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
+		return NewLocalConfig(accountID, clusterName, customClusterName)
+	}
+	return NewClusterConfig(k8s, accountID, clusterName, customClusterName)
 }
