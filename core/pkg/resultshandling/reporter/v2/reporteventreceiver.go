@@ -271,6 +271,6 @@ func (report *ReportEventReceiver) DisplayMessage() {
 
 		cautils.SimpleDisplay(os.Stderr, strings.Repeat("─", len(txt)))
 
-		cautils.SimpleDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+		cautils.SimpleDisplay(os.Stderr, fmt.Sprintf("\n%s\n\n", report.message))
 	}
 }

@@ -31,8 +31,8 @@ func initCategoryTableData(categoryType CategoryType) ([]string, []int) {
 
 func getCategoryStatusTypeHeaders() []string {
 	headers := make([]string, 3)
-	headers[0] = controlNameHeader
-	headers[1] = statusHeader
+	headers[0] = ""
+	headers[1] = controlNameHeader
 	headers[2] = docsHeader
 
 	return headers
@@ -66,14 +66,14 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 
 	rows := make([]string, 3)
 
-	rows[0] = controlSummary.GetName()
-	if len(controlSummary.GetName()) > 50 {
-		rows[0] = controlSummary.GetName()[:50] + "..."
-	} else {
-		rows[0] = controlSummary.GetName()
-	}
+	rows[0] = utils.GetStatusIcon(controlSummary.GetStatus().Status())
 
-	rows[1] = utils.GetStatusColor(controlSummary.GetStatus().Status())(getStatus(status, controlSummary, infoToPrintInfo))
+	rows[1] = controlSummary.GetName()
+	if len(controlSummary.GetName()) > 50 {
+		rows[1] = controlSummary.GetName()[:50] + "..."
+	} else {
+		rows[1] = controlSummary.GetName()
+	}
 
 	rows[2] = getDocsForControl(controlSummary)
 

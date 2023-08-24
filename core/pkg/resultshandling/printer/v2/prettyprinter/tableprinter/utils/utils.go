@@ -125,18 +125,16 @@ func GetStatusColor(status apis.ScanningStatus) func(...string) string {
 	}
 }
 
-func getColor(controlSeverity int) func(...string) string {
-	switch controlSeverity {
-	case apis.SeverityCritical:
-		return gchalk.WithAnsi256(1).Bold
-	case apis.SeverityHigh:
-		return gchalk.WithAnsi256(196).Bold
-	case apis.SeverityMedium:
-		return gchalk.WithAnsi256(166).Bold
-	case apis.SeverityLow:
-		return gchalk.WithAnsi256(220).Bold
+func GetStatusIcon(status apis.ScanningStatus) string {
+	switch status {
+	case apis.StatusPassed:
+		return "✅"
+	case apis.StatusFailed:
+		return "❌"
+	case apis.StatusSkipped:
+		return "⚠️"
 	default:
-		return gchalk.WithAnsi256(16).Bold
+		return "⚠️"
 	}
 }
 
