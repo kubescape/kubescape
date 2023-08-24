@@ -1,12 +1,10 @@
 package configurationprinter
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
@@ -79,14 +77,6 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 
 	return rows
 
-}
-
-func getStatus(status apis.IStatus, controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
-	// skipped is shown as action required
-	if status.IsSkipped() {
-		return fmt.Sprintf("%s %s", "action required", GetInfoColumn(controlSummary, infoToPrintInfo))
-	}
-	return string(controlSummary.GetStatus().Status())
 }
 
 func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments []int) *tablewriter.Table {
