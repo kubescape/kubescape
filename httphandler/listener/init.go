@@ -3,6 +3,8 @@ package listener
 import (
 	"os"
 
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	v1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
@@ -39,17 +41,25 @@ func initializeLoggerLevel() {
 
 // SetupHTTPListener set up listening http servers
 func initializeSaaSEnv() {
-
-	saasEnv := os.Getenv("KS_SAAS_ENV")
-	switch saasEnv {
-	case "dev", "development":
-		logger.L().Debug("setting dev env")
-		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIDev())
-	case "stage", "staging":
-		logger.L().Debug("setting staging env")
-		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIStaging())
-	default:
-		logger.L().Debug("setting prod env")
-		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIProd())
+	serviceDiscoveryFilePath := "/etc/config/services.json"
+	if envVar := os.Getenv("KS_SERVICE_DISCOVERY_FILE_PATH"); envVar != "" {
+		logger.L().Debug("service discovery file path updated from env var", helpers.String("path", envVar))
+		serviceDiscoveryFilePath = envVar
 	}
+
+	if _, err := os.Stat(serviceDiscoveryFilePath); err != nil {
+		logger.L().Info("service discovery file not found - skipping", helpers.String("path", serviceDiscoveryFilePath))
+		return
+	}
+
+	backendServices, err := servicediscovery.GetServices(
+		v1.NewServiceDiscoveryFileV1(serviceDiscoveryFilePath),
+	)
+	if err != nil {
+		logger.L().Fatal("failed to get backend services", helpers.Error(err))
+		return
+	}
+
+	getter.SetKSCloudAPIConnector(getter.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl()))
+
 }

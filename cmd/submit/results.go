@@ -8,7 +8,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
 	logger "github.com/kubescape/go-logger"
@@ -69,7 +68,7 @@ func getResultsCmd(ks meta.IKubescape, submitInfo *v1.Submit) *cobra.Command {
 			k8s := getKubernetesApi()
 
 			// get config
-			clusterConfig := getTenantConfig(submitInfo.AccountID, "", "", k8s)
+			clusterConfig := cautils.GetTenantConfig(submitInfo.AccountID, "", "", k8s)
 			resultsObjects := NewResultsObject(clusterConfig.GetAccountID(), clusterConfig.GetContextName(), args[0])
 
 			r := reporterv2.NewReportEventReceiver(clusterConfig, uuid.NewString(), reporterv2.SubmitContextScan)
@@ -108,12 +107,6 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
-}
-func getTenantConfig(accountID, clusterName string, customClusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
-	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
-	}
-	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
 }
 
 // Check if the flag entered are valid

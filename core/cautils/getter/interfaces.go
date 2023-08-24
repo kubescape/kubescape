@@ -31,15 +31,4 @@ type (
 	IAttackTracksGetter interface {
 		GetAttackTracks() ([]v1alpha1.AttackTrack, error)
 	}
-
-	// IBackend knows how to configure a KS Cloud client
-	IBackend interface {
-		GetAccountID() string
-		GetCloudReportURL() string
-		GetCloudAPIURL() string
-
-		SetAccountID(accountID string)
-		SetCloudReportURL(cloudReportURL string)
-		SetCloudAPIURL(cloudAPIURL string)
-	}
 )

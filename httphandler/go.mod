@@ -10,6 +10,7 @@ require (
 	github.com/google/uuid v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
+	github.com/kubescape/backend v0.0.0-20230824115246-c973cbd6fb0e
 	github.com/kubescape/go-logger v0.0.20
 	github.com/kubescape/k8s-interface v0.0.138
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
@@ -245,7 +246,6 @@ require (
 	github.com/knqyf263/go-apk-version v0.0.0-20200609155635-041fdbb8563f // indirect
 	github.com/knqyf263/go-deb-version v0.0.0-20190517075300-09fca494f03d // indirect
 	github.com/knqyf263/go-rpmdb v0.0.0-20230301153543-ba94b245509b // indirect
-	github.com/kubescape/backend v0.0.0-20230820141235-28748e7aad2a // indirect
 	github.com/kubescape/go-git-url v0.0.25 // indirect
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 // indirect
 	github.com/kubescape/regolibrary v1.0.291-rc.0 // indirect

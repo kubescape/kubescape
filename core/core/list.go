@@ -53,14 +53,14 @@ func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies
 }
 
 func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
-	tenant := getTenantConfig(listPolicies.AccountID, "", "", getKubernetesApi()) // change k8sinterface
+	tenant := cautils.GetTenantConfig(listPolicies.AccountID, "", "", getKubernetesApi()) // change k8sinterface
 	policyGetter := getPolicyGetter(ctx, nil, tenant.GetAccountID(), true, nil)
 
 	return listFrameworksNames(policyGetter), nil
 }
 
 func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
-	tenant := getTenantConfig(listPolicies.AccountID, "", "", getKubernetesApi()) // change k8sinterface
+	tenant := cautils.GetTenantConfig(listPolicies.AccountID, "", "", getKubernetesApi()) // change k8sinterface
 
 	policyGetter := getPolicyGetter(ctx, nil, tenant.GetAccountID(), false, nil)
 	return policyGetter.ListControls()
@@ -68,7 +68,7 @@ func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]str
 
 func listExceptions(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
 	// load tenant metav1
-	tenant := getTenantConfig(listPolicies.AccountID, "", "", getKubernetesApi())
+	tenant := cautils.GetTenantConfig(listPolicies.AccountID, "", "", getKubernetesApi())
 
 	var exceptionsNames []string
 	ksCloudAPI := getExceptionsGetter(ctx, "", tenant.GetAccountID(), nil)

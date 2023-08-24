@@ -30,12 +30,6 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(accountID, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
-	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
-	}
-	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), accountID, clusterName, customClusterName)
-}
 
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
 	if useExceptions != "" {
@@ -153,37 +147,34 @@ func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
+		If keep-local OR scan type which is not submittable - Do not send report
+
 		If CloudReportURL not set - Do not send report
 
-		If There is no account -
-			If CreateAccount provided - Generate Account & Submit report
-			Otherwise, do not send report
+		If CloudReportURL is set
+			If There is no account -
+				Generate Account & Submit report
 
-		If There is account -
-			keep-local - Do not send report
-			Default - Submit report
+			If There is account -
+				Invalid Account ID - Do not send report
+				Valid Account - Submit report
 
 	*/
+
+	// do not submit control/workload scanning
+	if !isScanTypeForSubmission(scanInfo.ScanType) || scanInfo.Local {
+		scanInfo.Submit = false
+		return
+	}
 
 	if getter.GetKSCloudAPIConnector().GetCloudReportURL() == "" {
 		scanInfo.Submit = false
 		return
 	}
 
-	// do not submit control/workload scanning
-	if !isScanTypeForSubmission(scanInfo.ScanType) {
-		scanInfo.Submit = false
-		return
-	}
-
-	if scanInfo.Local {
-		scanInfo.Submit = false
-		return
-	}
-
+	// a new account will be created if a report URL is set and there is no account ID
 	if tenantConfig.GetAccountID() == "" {
-		// Submit only if CreateAccount was provided
-		scanInfo.Submit = scanInfo.CreateAccount
+		scanInfo.Submit = true
 		return
 	}
 

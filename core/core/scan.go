@@ -50,7 +50,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := getTenantConfig(scanInfo.AccountID, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
+	tenantConfig := cautils.GetTenantConfig(scanInfo.AccountID, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
