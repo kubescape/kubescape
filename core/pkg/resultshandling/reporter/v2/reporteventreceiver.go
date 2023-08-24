@@ -259,7 +259,7 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 }
 
 func (report *ReportEventReceiver) setMessage(message string) {
-	report.message = "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" + message
+	report.message = message
 }
 
 func (report *ReportEventReceiver) DisplayMessage() {
