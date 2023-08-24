@@ -115,6 +115,12 @@ if [ "$(id -u)" -ne 0 ]; then
   export PATH=\$PATH:$BASE_DIR/bin
 fi
 
+# Check cluster access by getting nodes
+if ! kubectl get nodes &> /dev/null; then
+    echo -e "  $KUBESCAPE_EXEC scan --create-account"
+    exit 0
+fi
+
 echo -e "\033[0m"
 echo -e "\033[32mExecuting Kubescape."
 echo
