@@ -27,7 +27,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 
 	fixCmd := &cobra.Command{
 		Use:     "fix <report output file>",
-		Short:   "Fix misconfiguration in files",
+		Short:   "Propose a fix for the misconfiguration found when scanning Kubernetes manifest files",
 		Long:    ``,
 		Example: fixCmdExamples,
 		RunE: func(cmd *cobra.Command, args []string) error {

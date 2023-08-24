@@ -17,14 +17,14 @@ import (
 var scanCmdExamples = fmt.Sprintf(`
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
-  # Scan current cluster with all frameworks
+  # Scan current cluster
   %[1]s scan
 
-  # Scan kubernetes YAML manifest files
+  # Scan kubernetes manifest files 
   %[1]s scan .
 
   # Scan and save the results in the JSON format
-  %[1]s scan --format json --output results.json --format-version=v2
+  %[1]s scan --format json --output results.json
 
   # Display all resources
   %[1]s scan --verbose
@@ -39,7 +39,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
 		Use:     "scan",
-		Short:   "Scan the current running cluster or yaml files",
+		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `The action you want to perform`,
 		Example: scanCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {

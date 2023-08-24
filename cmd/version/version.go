@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/spf13/cobra"
 )
@@ -19,10 +20,10 @@ func GetVersionCmd() *cobra.Command {
 			v := cautils.NewIVersionCheckHandler(ctx)
 			v.CheckLatestVersion(ctx, cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", "version"))
 			fmt.Fprintf(os.Stdout,
-				"Your current version is: %s [git enabled in build: %t]\n",
+				"Your current version is: %s\n",
 				cautils.BuildNumber,
-				isGitEnabled(),
 			)
+			logger.L().Debug(fmt.Sprintf("git enabled in build: %t", isGitEnabled()))
 			return nil
 		},
 	}
