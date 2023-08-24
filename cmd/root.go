@@ -86,8 +86,16 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
 	rootCmd.AddCommand(update.GetUpdateCmd())
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
-	// rootCmd.AddCommand(submit.GetSubmitCmd(ks))// the submit command should be supported after we add a third-party authentication in Kubescape
-	// rootCmd.AddCommand(delete.GetDeleteCmd(ks)) // the delete command should be supported after we add a third-party authentication in Kubescape
+
+	// deprecated commands
+	rootCmd.AddCommand(&cobra.Command{
+		Use:        "submit",
+		Deprecated: "This command is deprecated. Contact Kubescape maintainers for more information.",
+	})
+	rootCmd.AddCommand(&cobra.Command{
+		Use:        "delete",
+		Deprecated: "This command is deprecated. Contact Kubescape maintainers for more information.",
+	})
 
 	return rootCmd
 }
