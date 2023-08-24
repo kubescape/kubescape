@@ -203,11 +203,15 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 	})
 
 	if len(summary.CVEs) == 0 {
-		cautils.InfoTextDisplay(writer, "Vulnerability summary - no vulnerabilities were found!\n\n")
+		txt := "Vulnerability summary - no vulnerabilities were found!"
+		cautils.InfoTextDisplay(writer, txt+"\n")
+		cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
 		return
 	}
 
-	cautils.InfoTextDisplay(writer, "Vulnerability summary - %d vulnerabilities found:\n", len(summary.CVEs))
+	txt := fmt.Sprintf("Vulnerability summary - %d vulnerabilities found:", len(summary.CVEs))
+	cautils.InfoTextDisplay(writer, txt+"\n")
+	cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
 
 	if len(summary.Images) == 1 {
 		cautils.SimpleDisplay(writer, "Image: %s\n", summary.Images[0])
@@ -238,7 +242,7 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 	txt := "What now?"
 	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
 
-	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
 
 	for _, ns := range nextSteps {
 		cautils.SimpleDisplay(writer, "* "+ns+"\n")
@@ -252,7 +256,7 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 	txt := "Compliance Score"
 	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
 
-	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
 
 	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
 
@@ -260,7 +264,7 @@ func printComplianceScore(writer *os.File, frameworks []reportsummary.IFramework
 		cautils.SimpleDisplay(writer, "* %s: %s", fw.GetName(), gchalk.WithYellow().Bold(fmt.Sprintf("%.2f%%\n", fw.GetComplianceScore())))
 	}
 
-	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s  or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))
+	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))
 
 	cautils.InfoTextDisplay(writer, "\n")
 }
