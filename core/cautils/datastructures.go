@@ -119,6 +119,7 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources map[string]int) {
 	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+		// panic("Here")
 	}
 	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources == nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.MapNamespaceToNumberOfResources = make(map[string]int)
@@ -129,6 +130,7 @@ func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespace
 func (sessionObj *OPASessionObj) SetNumberOfWorkerNodes(n int) {
 	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{}
+		// panic("Here")
 	}
 	sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.NumberOfWorkerNodes = n
 }

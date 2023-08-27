@@ -50,9 +50,7 @@ func (tcm *TenantConfigMock) GetCloudReportURL() string {
 func (tcm *TenantConfigMock) GetCloudAPIURL() string {
 	return ""
 }
-func (tcm *TenantConfigMock) IsConfigFound() bool {
-	return true
-}
+
 func (tcm *TenantConfigMock) GenerateAccountID() (string, error) {
 	tcm.accountID = testGeneratedAccountIDString
 	return testGeneratedAccountIDString, nil
