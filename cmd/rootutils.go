@@ -89,8 +89,4 @@ func initEnvironment() {
 	}
 
 	getter.SetKSCloudAPIConnector(ksCloud)
-
-	// // we would like to update the cached config
-	// tenantConfig := cautils.GetTenantConfigWithBackend("", "", "", nil, ksCloud)
-	// tenantConfig.UpdateCachedConfig()
 }

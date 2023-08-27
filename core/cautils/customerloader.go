@@ -442,19 +442,16 @@ func overrideKsCloudAPIFromConfig(c ITenantConfig) *v1.KSCloudAPI {
 	globalKsCloud := getter.GetKSCloudAPIConnector()
 
 	shouldUpdateConfig := false
-	accountId := c.GetAccountID()
 	if globalKsCloud.GetAccountID() != "" {
 		c.GetConfigObj().AccountID = globalKsCloud.GetAccountID()
 		shouldUpdateConfig = true
 	}
 
-	cloudApiUrl := c.GetCloudAPIURL()
 	if globalKsCloud.GetCloudAPIURL() != "" {
 		c.GetConfigObj().CloudAPIURL = globalKsCloud.GetCloudAPIURL()
 		shouldUpdateConfig = true
 	}
 
-	cloudReportUrl := c.GetCloudReportURL()
 	if globalKsCloud.GetCloudReportURL() != "" {
 		c.GetConfigObj().CloudReportURL = globalKsCloud.GetCloudReportURL()
 		shouldUpdateConfig = true
@@ -463,14 +460,15 @@ func overrideKsCloudAPIFromConfig(c ITenantConfig) *v1.KSCloudAPI {
 	if shouldUpdateConfig {
 		logger.L().Debug("updating cached config Cloud URLs")
 		c.UpdateCachedConfig()
-	}
-	cloudApi, err := v1.NewKSCloudAPI(cloudApiUrl, cloudReportUrl, accountId)
-	if err != nil {
-		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+		// update the global KSCloud with the new config
+		cloudApi, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID())
+		if err != nil {
+			logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+		}
+		getter.SetKSCloudAPIConnector(cloudApi)
 	}
 
-	getter.SetKSCloudAPIConnector(cloudApi)
-	return cloudApi
+	return getter.GetKSCloudAPIConnector()
 }
 
 func GetTenantConfig(accountID, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {
