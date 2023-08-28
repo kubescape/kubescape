@@ -13,7 +13,7 @@ const (
 	docsPrefix        = "https://hub.armosec.io/docs"
 	scanControlPrefix = "$ kubescape scan control"
 	controlNameHeader = "CONTROL NAME"
-	statusHeader      = "STATUS"
+	statusHeader      = ""
 	docsHeader        = "DOCS"
 	resourcesHeader   = "RESOURCES"
 	runHeader         = "VIEW DETAILS"
@@ -29,7 +29,7 @@ func initCategoryTableData(categoryType CategoryType) ([]string, []int) {
 
 func getCategoryStatusTypeHeaders() []string {
 	headers := make([]string, 3)
-	headers[0] = ""
+	headers[0] = statusHeader
 	headers[1] = controlNameHeader
 	headers[2] = docsHeader
 
@@ -46,7 +46,7 @@ func getCategoryCountingTypeHeaders() []string {
 }
 
 func getStatusTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER}
 }
 
 func getCountingTypeAlignments() []int {
