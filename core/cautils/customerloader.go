@@ -129,7 +129,7 @@ func NewLocalConfig(accountID, clusterName string, customClusterName string) *Lo
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 
-	updatedKsCloud := overrideKsCloudAPIFromConfig(lc)
+	updatedKsCloud := initializeCloudAPI(lc)
 	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
 
 	return lc
@@ -228,7 +228,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, clusterName st
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
-	updatedKsCloud := overrideKsCloudAPIFromConfig(c)
+	updatedKsCloud := initializeCloudAPI(c)
 	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
 	return c
 }
@@ -437,37 +437,12 @@ func updateCloudURLs(configObj *ConfigObj) {
 
 }
 
-func overrideKsCloudAPIFromConfig(c ITenantConfig) *v1.KSCloudAPI {
-	// reads the initialized KSCloud
-	globalKsCloud := getter.GetKSCloudAPIConnector()
-
-	shouldUpdateConfig := false
-	if globalKsCloud.GetAccountID() != "" {
-		c.GetConfigObj().AccountID = globalKsCloud.GetAccountID()
-		shouldUpdateConfig = true
+func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
+	cloud, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID())
+	if err != nil {
+		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
 	}
-
-	if globalKsCloud.GetCloudAPIURL() != "" {
-		c.GetConfigObj().CloudAPIURL = globalKsCloud.GetCloudAPIURL()
-		shouldUpdateConfig = true
-	}
-
-	if globalKsCloud.GetCloudReportURL() != "" {
-		c.GetConfigObj().CloudReportURL = globalKsCloud.GetCloudReportURL()
-		shouldUpdateConfig = true
-	}
-
-	if shouldUpdateConfig {
-		logger.L().Debug("updating cached config Cloud URLs")
-		c.UpdateCachedConfig()
-		// update the global KSCloud with the new config
-		cloudApi, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID())
-		if err != nil {
-			logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
-		}
-		getter.SetKSCloudAPIConnector(cloudApi)
-	}
-
+	getter.SetKSCloudAPIConnector(cloud)
 	return getter.GetKSCloudAPIConnector()
 }
 

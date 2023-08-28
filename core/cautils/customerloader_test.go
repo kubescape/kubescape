@@ -210,7 +210,7 @@ func TestUpdateCloudURLs(t *testing.T) {
 	assert.Equal(t, co.CloudAPIURL, mockCloudAPIURL)
 }
 
-func Test_overrideKsCloudAPIFromConfig(t *testing.T) {
+func Test_initializeCloudAPI(t *testing.T) {
 	type args struct {
 		c ITenantConfig
 	}
@@ -227,7 +227,7 @@ func Test_overrideKsCloudAPIFromConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			overrideKsCloudAPIFromConfig(tt.args.c)
+			initializeCloudAPI(tt.args.c)
 			cloud := getter.GetKSCloudAPIConnector()
 			assert.Equal(t, "https://api.domain.com", cloud.GetCloudAPIURL())
 			assert.Equal(t, "https://report.domain.com", cloud.GetCloudReportURL())

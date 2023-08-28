@@ -10,6 +10,7 @@ import (
 	sdClientV1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 
 	"github.com/mattn/go-isatty"
@@ -77,6 +78,16 @@ func initEnvironment() {
 	}
 
 	logger.L().Info("configured backend", helpers.String("cloudAPIURL", services.GetApiServerUrl()), helpers.String("cloudReportURL", services.GetReportReceiverHttpUrl()))
+
+	tenant := cautils.GetTenantConfig("", "", "", nil)
+	if services.GetApiServerUrl() != "" {
+		tenant.GetConfigObj().CloudAPIURL = services.GetApiServerUrl()
+	}
+	if services.GetReportReceiverHttpUrl() != "" {
+		tenant.GetConfigObj().CloudReportURL = services.GetReportReceiverHttpUrl()
+	}
+
+	tenant.UpdateCachedConfig()
 
 	ksCloud, err := v1.NewKSCloudAPI(
 		services.GetApiServerUrl(),

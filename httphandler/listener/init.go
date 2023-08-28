@@ -60,6 +60,7 @@ func initializeSaaSEnv() {
 		logger.L().Fatal("failed to get backend services", helpers.Error(err))
 		return
 	}
+
 	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), ""); err != nil {
 		logger.L().Fatal("failed to initialize cloud api", helpers.Error(err))
 	} else {
