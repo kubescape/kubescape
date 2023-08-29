@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -326,7 +327,13 @@ func existsConfigFile() bool {
 }
 
 func updateConfigFile(configObj *ConfigObj) error {
-	return os.WriteFile(ConfigFileFullPath(), configObj.Config(), 0664) //nolint:gosec
+	fullPath := ConfigFileFullPath()
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(fullPath, configObj.Config(), 0664) //nolint:gosec
 }
 
 func (c *ClusterConfig) GenerateAccountID() (string, error) {
