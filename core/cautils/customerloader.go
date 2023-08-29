@@ -153,6 +153,7 @@ func (lc *LocalConfig) DeleteAccountID() error {
 }
 
 func (lc *LocalConfig) UpdateCachedConfig() error {
+	logger.L().Debug("updating cached config", helpers.Interface("configObj", lc.configObj))
 	return updateConfigFile(lc.configObj)
 }
 
@@ -240,6 +241,7 @@ func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudRep
 func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPIURL }
 
 func (c *ClusterConfig) UpdateCachedConfig() error {
+	logger.L().Debug("updating cached config", helpers.Interface("configObj", c.configObj))
 	return updateConfigFile(c.configObj)
 }
 

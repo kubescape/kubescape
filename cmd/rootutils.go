@@ -89,7 +89,9 @@ func initEnvironment() {
 		tenant.GetConfigObj().CloudReportURL = services.GetReportReceiverHttpUrl()
 	}
 
-	tenant.UpdateCachedConfig()
+	if err = tenant.UpdateCachedConfig(); err != nil {
+		logger.L().Error("failed to update cached config", helpers.Error(err))
+	}
 
 	ksCloud, err := v1.NewKSCloudAPI(
 		services.GetApiServerUrl(),
