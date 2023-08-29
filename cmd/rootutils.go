@@ -62,6 +62,8 @@ func initEnvironment() {
 		return
 	}
 
+	logger.L().Debug("fetching URLs from service discovery server", helpers.String("server", rootInfo.DiscoveryServerURL))
+
 	client, err := sdClientV1.NewServiceDiscoveryClientV1(rootInfo.DiscoveryServerURL)
 	if err != nil {
 		logger.L().Fatal("failed to create service discovery client", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
@@ -77,7 +79,7 @@ func initEnvironment() {
 		return
 	}
 
-	logger.L().Info("configured backend", helpers.String("cloudAPIURL", services.GetApiServerUrl()), helpers.String("cloudReportURL", services.GetReportReceiverHttpUrl()))
+	logger.L().Debug("configuring service discovery URLs", helpers.String("cloudAPIURL", services.GetApiServerUrl()), helpers.String("cloudReportURL", services.GetReportReceiverHttpUrl()))
 
 	tenant := cautils.GetTenantConfig("", "", "", nil)
 	if services.GetApiServerUrl() != "" {

@@ -416,9 +416,11 @@ func updateAccountID(configObj *ConfigObj, accountID string) {
 func getCloudURLsFromEnv(cloudURLs *CloudURLs) {
 	// load from env
 	if cloudAPIURL := os.Getenv(cloudApiUrlEnvVar); cloudAPIURL != "" {
+		logger.L().Debug("cloud API URL updated from env var", helpers.Interface(cloudApiUrlEnvVar, cloudAPIURL))
 		cloudURLs.CloudAPIURL = cloudAPIURL
 	}
 	if cloudReportURL := os.Getenv(cloudReportUrlEnvVar); cloudReportURL != "" {
+		logger.L().Debug("cloud Report URL updated from env var", helpers.Interface(cloudReportUrlEnvVar, cloudReportURL))
 		cloudURLs.CloudReportURL = cloudReportURL
 	}
 }
@@ -438,6 +440,7 @@ func updateCloudURLs(configObj *ConfigObj) {
 }
 
 func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
+	logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))
 	cloud, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID())
 	if err != nil {
 		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
