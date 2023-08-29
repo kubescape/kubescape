@@ -335,7 +335,6 @@ func GetScanningContext(input string) ScanningContext {
 func setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata, input string) {
 	switch GetScanningContext(input) {
 	case ContextCluster:
-		// panic("Here")
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
 			ContextName: k8sinterface.GetContextName(),
 		}
