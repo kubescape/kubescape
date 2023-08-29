@@ -1,12 +1,10 @@
 package configurationprinter
 
 import (
-	"fmt"
 	"io"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
 )
@@ -15,7 +13,7 @@ const (
 	docsPrefix        = "https://hub.armosec.io/docs"
 	scanControlPrefix = "$ kubescape scan control"
 	controlNameHeader = "CONTROL NAME"
-	statusHeader      = "STATUS"
+	statusHeader      = ""
 	docsHeader        = "DOCS"
 	resourcesHeader   = "RESOURCES"
 	runHeader         = "VIEW DETAILS"
@@ -31,8 +29,8 @@ func initCategoryTableData(categoryType CategoryType) ([]string, []int) {
 
 func getCategoryStatusTypeHeaders() []string {
 	headers := make([]string, 3)
-	headers[0] = controlNameHeader
-	headers[1] = statusHeader
+	headers[0] = statusHeader
+	headers[1] = controlNameHeader
 	headers[2] = docsHeader
 
 	return headers
@@ -48,7 +46,7 @@ func getCategoryCountingTypeHeaders() []string {
 }
 
 func getStatusTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER}
+	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER}
 }
 
 func getCountingTypeAlignments() []int {
@@ -66,27 +64,19 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 
 	rows := make([]string, 3)
 
-	rows[0] = controlSummary.GetName()
-	if len(controlSummary.GetName()) > 50 {
-		rows[0] = controlSummary.GetName()[:50] + "..."
-	} else {
-		rows[0] = controlSummary.GetName()
-	}
+	rows[0] = utils.GetStatusIcon(controlSummary.GetStatus().Status())
 
-	rows[1] = utils.GetStatusColor(controlSummary.GetStatus().Status())(getStatus(status, controlSummary, infoToPrintInfo))
+	rows[1] = controlSummary.GetName()
+	if len(controlSummary.GetName()) > 50 {
+		rows[1] = controlSummary.GetName()[:50] + "..."
+	} else {
+		rows[1] = controlSummary.GetName()
+	}
 
 	rows[2] = getDocsForControl(controlSummary)
 
 	return rows
 
-}
-
-func getStatus(status apis.IStatus, controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) string {
-	// skipped is shown as action required
-	if status.IsSkipped() {
-		return fmt.Sprintf("%s %s", "action required", GetInfoColumn(controlSummary, infoToPrintInfo))
-	}
-	return string(controlSummary.GetStatus().Status())
 }
 
 func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments []int) *tablewriter.Table {

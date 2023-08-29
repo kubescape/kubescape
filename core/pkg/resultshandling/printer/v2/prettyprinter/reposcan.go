@@ -58,7 +58,7 @@ func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IR
 	txt := getTopWorkloadsTitle(len(topWorkloadsByScore))
 	cautils.InfoTextDisplay(rp.writer, txt)
 
-	cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+	cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
 
 	cautils.SimpleDisplay(rp.writer, highStakesWlsText)
 
@@ -67,7 +67,8 @@ func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IR
 		name := wl.GetName()
 		kind := wl.GetKind()
 		cmdPrefix := getWorkloadPrefixForCmd(ns, kind, name)
-		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s - '%s'\n", i+1, cmdPrefix, getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
+		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s\n", i+1, cmdPrefix))
+		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
 	}
 
 	cautils.InfoTextDisplay(rp.writer, "\n")

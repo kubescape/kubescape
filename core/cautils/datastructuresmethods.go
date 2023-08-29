@@ -5,7 +5,6 @@ import (
 
 	"github.com/armosec/utils-go/boolutils"
 	cloudsupport "github.com/kubescape/k8s-interface/cloudsupport/v1"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -89,58 +88,50 @@ func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version
 	return true
 }
 
-func getCloudType(scanInfo *ScanInfo) (bool, reporthandling.ScanningScopeType) {
+func getCloudProvider(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
 	if cloudsupport.IsAKS() {
-		return true, reporthandling.ScopeCloudAKS
+		return reporthandling.ScopeCloudAKS
 	}
-	if cloudsupport.IsEKS(k8sinterface.GetConfig()) {
-		return true, reporthandling.ScopeCloudEKS
+	if cloudsupport.IsEKS() {
+		return reporthandling.ScopeCloudEKS
 	}
-	if cloudsupport.IsGKE(k8sinterface.GetConfig()) {
-		return true, reporthandling.ScopeCloudGKE
+	if cloudsupport.IsGKE() {
+		return reporthandling.ScopeCloudGKE
 	}
-	return false, ""
+	return ""
 }
 
 func GetScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
-	var result reporthandling.ScanningScopeType
 
 	switch scanInfo.GetScanningContext() {
 	case ContextCluster:
-		isCloud, cloudType := getCloudType(scanInfo)
-		if isCloud {
-			result = cloudType
-		} else {
-			result = reporthandling.ScopeCluster
+		if cloudProvider := getCloudProvider(scanInfo); cloudProvider != "" {
+			return cloudProvider
 		}
+		return reporthandling.ScopeCluster
 	default:
-		result = reporthandling.ScopeFile
+		return reporthandling.ScopeFile
 	}
-
-	return result
 }
 
 func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeType, controlScope reporthandling.ScanningScopeType) bool {
-	result := false
 
 	switch controlScope {
 	case reporthandling.ScopeFile:
-		result = (reporthandling.ScopeFile == scanScope)
+		return reporthandling.ScopeFile == scanScope
 	case reporthandling.ScopeCluster:
-		result = (reporthandling.ScopeCluster == scanScope) || (reporthandling.ScopeCloud == scanScope) || (reporthandling.ScopeCloudAKS == scanScope) || (reporthandling.ScopeCloudEKS == scanScope) || (reporthandling.ScopeCloudGKE == scanScope)
+		return reporthandling.ScopeCluster == scanScope || reporthandling.ScopeCloud == scanScope || reporthandling.ScopeCloudAKS == scanScope || reporthandling.ScopeCloudEKS == scanScope || reporthandling.ScopeCloudGKE == scanScope
 	case reporthandling.ScopeCloud:
-		result = (reporthandling.ScopeCloud == scanScope) || (reporthandling.ScopeCloudAKS == scanScope) || (reporthandling.ScopeCloudEKS == scanScope) || (reporthandling.ScopeCloudGKE == scanScope)
+		return reporthandling.ScopeCloud == scanScope || reporthandling.ScopeCloudAKS == scanScope || reporthandling.ScopeCloudEKS == scanScope || reporthandling.ScopeCloudGKE == scanScope
 	case reporthandling.ScopeCloudAKS:
-		result = (reporthandling.ScopeCloudAKS == scanScope)
+		return reporthandling.ScopeCloudAKS == scanScope
 	case reporthandling.ScopeCloudEKS:
-		result = (reporthandling.ScopeCloudEKS == scanScope)
+		return reporthandling.ScopeCloudEKS == scanScope
 	case reporthandling.ScopeCloudGKE:
-		result = (reporthandling.ScopeCloudGKE == scanScope)
+		return reporthandling.ScopeCloudGKE == scanScope
 	default:
-		result = true
+		return true
 	}
-
-	return result
 }
 
 func isControlFitToScanScope(control reporthandling.Control, scanScopeMatches reporthandling.ScanningScopeType) bool {

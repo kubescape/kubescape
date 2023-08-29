@@ -27,8 +27,8 @@ func TestInitCategoryTableData(t *testing.T) {
 		{
 			name:               "Test2",
 			categoryType:       TypeStatus,
-			expectedHeaders:    []string{"CONTROL NAME", "STATUS", "DOCS"},
-			expectedAlignments: []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_CENTER},
+			expectedHeaders:    []string{"", "CONTROL NAME", "DOCS"},
+			expectedAlignments: []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER},
 		},
 	}
 	for _, tt := range tests {
@@ -53,12 +53,12 @@ func TestGetCategoryStatusTypeHeaders(t *testing.T) {
 		t.Errorf("Expected 3 headers, got %d", len(headers))
 	}
 
-	if headers[0] != controlNameHeader {
-		t.Errorf("Expected %s, got %s", controlNameHeader, headers[0])
+	if headers[0] != statusHeader {
+		t.Errorf("Expected %s, got %s", statusHeader, headers[0])
 	}
 
-	if headers[1] != statusHeader {
-		t.Errorf("Expected %s, got %s", statusHeader, headers[1])
+	if headers[1] != controlNameHeader {
+		t.Errorf("Expected %s, got %s", controlNameHeader, headers[1])
 	}
 
 	if headers[2] != docsHeader {
@@ -93,12 +93,12 @@ func TestGetStatusTypeAlignments(t *testing.T) {
 		t.Errorf("Expected 3 alignments, got %d", len(alignments))
 	}
 
-	if alignments[0] != tablewriter.ALIGN_LEFT {
-		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_LEFT, alignments[0])
+	if alignments[0] != tablewriter.ALIGN_CENTER {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_CENTER, alignments[0])
 	}
 
-	if alignments[1] != tablewriter.ALIGN_CENTER {
-		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_CENTER, alignments[1])
+	if alignments[1] != tablewriter.ALIGN_LEFT {
+		t.Errorf("Expected %d, got %d", tablewriter.ALIGN_LEFT, alignments[1])
 	}
 
 	if alignments[2] != tablewriter.ALIGN_CENTER {
@@ -140,7 +140,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusFailed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"test", "failed", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"❌", "test", "https://hub.armosec.io/docs/ctrlid"},
 		},
 		{
 			name: "skipped control",
@@ -152,7 +152,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				},
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"test", "action required *", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"⚠️", "test", "https://hub.armosec.io/docs/ctrlid"},
 			infoToPrintInfo: []utils.InfoStars{
 				{
 					Info:  "testInfo",
@@ -167,7 +167,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusPassed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"test", "passed", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"✅", "test", "https://hub.armosec.io/docs/ctrlid"},
 		},
 		{
 			name: "big name",
@@ -176,7 +176,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusFailed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"testtesttesttesttesttesttesttesttesttesttesttestte...", "failed", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"❌", "testtesttesttesttesttesttesttesttesttesttesttestte...", "https://hub.armosec.io/docs/ctrlid"},
 		},
 	}
 

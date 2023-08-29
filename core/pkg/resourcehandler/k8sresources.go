@@ -189,7 +189,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
-	provider := cloudsupport.GetCloudProvider(k8sHandler.clusterName)
+	provider := cloudsupport.GetCloudProvider()
 	if provider == "" {
 		return fmt.Errorf("failed to get cloud provider, cluster: %s", k8sHandler.clusterName)
 	}
