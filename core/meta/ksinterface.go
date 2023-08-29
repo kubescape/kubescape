@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 )
@@ -15,9 +14,6 @@ type IKubescape interface {
 	// policies
 	List(ctx context.Context, listPolicies *metav1.ListPolicies) error     // TODO - return list response
 	Download(ctx context.Context, downloadInfo *metav1.DownloadInfo) error // TODO - return downloaded policies
-
-	// submit
-	Submit(ctx context.Context, submitInterfaces cliinterfaces.SubmitInterfaces) error // TODO - func should receive object
 
 	// config
 	SetCachedConfig(setConfig *metav1.SetConfig) error

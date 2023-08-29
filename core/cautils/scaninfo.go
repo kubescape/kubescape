@@ -295,11 +295,10 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 }
 
 func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
-	input := ""
 	if len(scanInfo.InputPatterns) > 0 {
-		input = scanInfo.InputPatterns[0]
+		return GetScanningContext(scanInfo.InputPatterns[0])
 	}
-	return GetScanningContext(input)
+	return GetScanningContext("")
 }
 
 // GetScanningContext get scanning context from the input param

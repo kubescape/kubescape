@@ -263,7 +263,7 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 }
 
 func (report *ReportEventReceiver) setMessage(message string) {
-	report.message = "~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n" + message
+	report.message = message
 }
 
 func (report *ReportEventReceiver) DisplayMessage() {
@@ -275,6 +275,6 @@ func (report *ReportEventReceiver) DisplayMessage() {
 
 		cautils.SimpleDisplay(os.Stderr, strings.Repeat("─", len(txt)))
 
-		cautils.SimpleDisplay(os.Stderr, fmt.Sprintf("\n\n%s\n\n", report.message))
+		cautils.SimpleDisplay(os.Stderr, fmt.Sprintf("\n%s\n\n", report.message))
 	}
 }

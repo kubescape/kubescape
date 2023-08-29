@@ -64,7 +64,7 @@ func generateRow(cve CVE) []string {
 func getImageScanningHeaders() []string {
 	headers := make([]string, 5)
 	headers[imageColumnSeverity] = "SEVERITY"
-	headers[imageColumnName] = "NAME"
+	headers[imageColumnName] = "VULNERABILITY"
 	headers[imageColumnComponent] = "COMPONENT"
 	headers[imageColumnVersion] = "VERSION"
 	headers[imageColumnFixedIn] = "FIXED IN"

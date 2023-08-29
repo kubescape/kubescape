@@ -59,7 +59,7 @@ func (cp *ClusterPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling
 
 	cautils.InfoTextDisplay(cp.writer, txt)
 
-	cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%s\n\n", strings.Repeat("─", len(txt))))
+	cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
 
 	cautils.SimpleDisplay(cp.writer, highStakesWlsText)
 
@@ -67,7 +67,8 @@ func (cp *ClusterPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling
 		ns := wl.GetNamespace()
 		name := wl.GetName()
 		kind := wl.GetKind()
-		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s - '%s'\n", i+1, ns, name, kind, getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name))))
+		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s\n", i+1, ns, name, kind))
+		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("   '%s'\n", getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name))))
 	}
 
 	cautils.InfoTextDisplay(cp.writer, "\n")
