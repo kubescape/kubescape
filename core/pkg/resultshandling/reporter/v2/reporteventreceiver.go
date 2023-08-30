@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
+	client "github.com/kubescape/backend/pkg/client/v1"
 	v1 "github.com/kubescape/backend/pkg/server/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -112,33 +113,36 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 		}()
 	}
 
-	report.initEventReceiverURL()
-	host := hostToString(report.eventReceiverURL, report.reportID)
+	var err error
+	report.eventReceiverURL, err = client.GetPostureReportUrl(getter.GetKSCloudAPIConnector().GetCloudReportURL(), report.GetAccountID(), report.GetClusterName(), report.reportID)
+	if err != nil {
+		return err
+	}
 
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
-	return report.sendResources(host, opaSessionObj)
+	return report.sendResources(opaSessionObj)
 }
 
-func (report *ReportEventReceiver) sendResources(host string, opaSessionObj *cautils.OPASessionObj) error {
+func (report *ReportEventReceiver) sendResources(opaSessionObj *cautils.OPASessionObj) error {
 	splittedPostureReport := report.setSubReport(opaSessionObj)
 
 	counter := 0
 	reportCounter := 0
 
-	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter, host); err != nil {
+	if err := report.setResources(splittedPostureReport, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesResult, &counter, &reportCounter); err != nil {
 		return err
 	}
 
-	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter, host); err != nil {
+	if err := report.setResults(splittedPostureReport, opaSessionObj.ResourcesResult, opaSessionObj.AllResources, opaSessionObj.ResourceSource, opaSessionObj.ResourcesPrioritized, &counter, &reportCounter); err != nil {
 		return err
 	}
 
-	return report.sendReport(host, splittedPostureReport, reportCounter, true)
+	return report.sendReport(splittedPostureReport, reportCounter, true)
 }
 
-func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int, host string) error {
+func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.PostureReport, results map[string]resourcesresults.Result, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, prioritizedResources map[string]prioritization.PrioritizedResource, counter, reportCounter *int) error {
 	for _, v := range results {
 		// set result.RawResource
 		resourceID := v.GetResourceID()
@@ -164,7 +168,7 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
 
 			// send report
-			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
+			if err := report.sendReport(reportObj, *reportCounter, false); err != nil {
 				return err
 			}
 			*reportCounter++
@@ -183,7 +187,7 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 	return nil
 }
 
-func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int, host string) error {
+func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.PostureReport, allResources map[string]workloadinterface.IMetadata, resourcesSource map[string]reporthandling.Source, results map[string]resourcesresults.Result, counter, reportCounter *int) error {
 	for resourceID, v := range allResources {
 		/*
 
@@ -206,7 +210,7 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
 
 			// send report
-			if err := report.sendReport(host, reportObj, *reportCounter, false); err != nil {
+			if err := report.sendReport(reportObj, *reportCounter, false); err != nil {
 				return err
 			}
 			*reportCounter++
@@ -225,7 +229,7 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 	return nil
 }
 
-func (report *ReportEventReceiver) sendReport(host string, postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
+func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = apis.PaginationMarks{
 		ReportNumber: counter,
 		IsLastReport: isLastReport,
@@ -234,7 +238,7 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 	if err != nil {
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
 	}
-	strResponse, err := getter.HttpPost(report.httpClient, host, nil, reqBody)
+	strResponse, err := getter.HttpPost(report.httpClient, report.eventReceiverURL.String(), nil, reqBody)
 	if err != nil {
 		// in case of error, we need to revert the generated account ID
 		// otherwise the next run will fail using a non existing account ID
@@ -242,7 +246,7 @@ func (report *ReportEventReceiver) sendReport(host string, postureReport *report
 			report.tenantConfig.DeleteAccountID()
 		}
 
-		return fmt.Errorf("%s, %v:%s", host, err, strResponse)
+		return fmt.Errorf("%s, %v:%s", report.eventReceiverURL.String(), err, strResponse)
 	}
 
 	// message is taken only from last report

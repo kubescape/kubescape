@@ -3,13 +3,16 @@ package cautils
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/google/uuid"
+	v1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -18,9 +21,18 @@ import (
 )
 
 const (
-	configFileName         string = "config"
-	kubescapeNamespace     string = "kubescape"
-	kubescapeConfigMapName string = "kubescape-config"
+	configFileName              string = "config"
+	kubescapeNamespace          string = "kubescape"
+	kubescapeConfigMapName      string = "kubescape-config"
+	kubescapeCloudConfigMapName string = "ks-cloud-config"
+
+	// env vars
+	defaultConfigMapNameEnvVar      string = "KS_DEFAULT_CONFIGMAP_NAME"
+	defaultCloudConfigMapNameEnvVar string = "KS_DEFAULT_CLOUD_CONFIGMAP_NAME"
+	defaultConfigMapNamespaceEnvVar string = "KS_DEFAULT_CONFIGMAP_NAMESPACE"
+	accountIdEnvVar                 string = "KS_ACCOUNT_ID"
+	cloudApiUrlEnvVar               string = "KS_CLOUD_API_URL"
+	cloudReportUrlEnvVar            string = "KS_CLOUD_REPORT_URL"
 )
 
 func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName + ".json") }
@@ -86,8 +98,6 @@ type ITenantConfig interface {
 	GetConfigObj() *ConfigObj
 	GetCloudReportURL() string
 	GetCloudAPIURL() string
-
-	IsConfigFound() bool
 }
 
 // ======================================================================================
@@ -98,16 +108,12 @@ type ITenantConfig interface {
 var _ ITenantConfig = &LocalConfig{}
 
 type LocalConfig struct {
-	backendAPI getter.IBackend
-	configObj  *ConfigObj
+	configObj *ConfigObj
 }
 
-func NewLocalConfig(
-	backendAPI getter.IBackend, accountID, clusterName string, customClusterName string) *LocalConfig {
-
+func NewLocalConfig(accountID, clusterName string, customClusterName string) *LocalConfig {
 	lc := &LocalConfig{
-		backendAPI: backendAPI,
-		configObj:  &ConfigObj{},
+		configObj: &ConfigObj{},
 	}
 	// get from configMap
 	if existsConfigFile() { // get from file
@@ -124,21 +130,8 @@ func NewLocalConfig(
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 
-	lc.backendAPI.SetAccountID(lc.configObj.AccountID)
-	if lc.configObj.CloudAPIURL != "" {
-		lc.backendAPI.SetCloudAPIURL(lc.configObj.CloudAPIURL)
-	} else {
-		lc.configObj.CloudAPIURL = lc.backendAPI.GetCloudAPIURL()
-	}
-
-	if lc.configObj.CloudReportURL != "" {
-		lc.backendAPI.SetCloudReportURL(lc.configObj.CloudReportURL)
-	} else {
-		lc.configObj.CloudReportURL = lc.backendAPI.GetCloudReportURL()
-	}
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", lc.backendAPI.GetCloudAPIURL()), helpers.String("report", lc.backendAPI.GetCloudReportURL()))
-
-	initializeCloudAPI(lc)
+	updatedKsCloud := initializeCloudAPI(lc)
+	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
 
 	return lc
 }
@@ -148,7 +141,7 @@ func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountI
 func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterName }
 func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
 func (lc *LocalConfig) GetCloudAPIURL() string    { return lc.configObj.CloudAPIURL }
-func (lc *LocalConfig) IsConfigFound() bool       { return existsConfigFile() }
+
 func (lc *LocalConfig) GenerateAccountID() (string, error) {
 	lc.configObj.AccountID = uuid.NewString()
 	err := lc.UpdateCachedConfig()
@@ -161,6 +154,7 @@ func (lc *LocalConfig) DeleteAccountID() error {
 }
 
 func (lc *LocalConfig) UpdateCachedConfig() error {
+	logger.L().Debug("updating cached config", helpers.Interface("configObj", lc.configObj))
 	return updateConfigFile(lc.configObj)
 }
 
@@ -190,21 +184,20 @@ KS_CACHE // path to cached files
 var _ ITenantConfig = &ClusterConfig{}
 
 type ClusterConfig struct {
-	backendAPI         getter.IBackend
-	k8s                *k8sinterface.KubernetesApi
-	configObj          *ConfigObj
-	configMapName      string
-	configMapNamespace string
+	k8s                  *k8sinterface.KubernetesApi
+	configObj            *ConfigObj
+	configMapNamespace   string
+	ksConfigMapName      string
+	ksCloudConfigMapName string
 }
 
-func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBackend, accountID, clusterName string, customClusterName string) *ClusterConfig {
-	// var configObj *ConfigObj
+func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, clusterName string, customClusterName string) *ClusterConfig {
 	c := &ClusterConfig{
-		k8s:                k8s,
-		backendAPI:         backendAPI,
-		configObj:          &ConfigObj{},
-		configMapName:      getConfigMapName(),
-		configMapNamespace: GetConfigMapNamespace(),
+		k8s:                  k8s,
+		configObj:            &ConfigObj{},
+		ksConfigMapName:      getKubescapeConfigMapName(),
+		ksCloudConfigMapName: getKubescapeCloudConfigMapName(),
+		configMapNamespace:   GetConfigMapNamespace(),
 	}
 
 	// first, load from file
@@ -213,8 +206,13 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	}
 
 	// second, load from configMap
-	if c.existsConfigMap() {
-		c.updateConfigEmptyFieldsFromConfigMap()
+	if c.existsConfigMap(c.ksConfigMapName) {
+		c.updateConfigEmptyFieldsFromKubescapeConfigMap()
+	}
+
+	// third, load urls from cloudConfigMap
+	if c.existsConfigMap(c.ksCloudConfigMapName) {
+		c.updateConfigEmptyFieldsFromKubescapeCloudConfigMap()
 	}
 
 	updateAccountID(c.configObj, accountID)
@@ -232,22 +230,8 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, backendAPI getter.IBacken
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
-
-	c.backendAPI.SetAccountID(c.configObj.AccountID)
-	if c.configObj.CloudAPIURL != "" {
-		c.backendAPI.SetCloudAPIURL(c.configObj.CloudAPIURL)
-	} else {
-		c.configObj.CloudAPIURL = c.backendAPI.GetCloudAPIURL()
-	}
-	if c.configObj.CloudReportURL != "" {
-		c.backendAPI.SetCloudReportURL(c.configObj.CloudReportURL)
-	} else {
-		c.configObj.CloudReportURL = c.backendAPI.GetCloudReportURL()
-	}
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", c.backendAPI.GetCloudAPIURL()), helpers.String("report", c.backendAPI.GetCloudReportURL()))
-
-	initializeCloudAPI(c)
-
+	updatedKsCloud := initializeCloudAPI(c)
+	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
 	return c
 }
 
@@ -257,9 +241,8 @@ func (c *ClusterConfig) GetAccountID() string      { return c.configObj.AccountI
 func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudReportURL }
 func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPIURL }
 
-func (c *ClusterConfig) IsConfigFound() bool { return existsConfigFile() || c.existsConfigMap() }
-
 func (c *ClusterConfig) UpdateCachedConfig() error {
+	logger.L().Debug("updating cached config", helpers.Interface("configObj", c.configObj))
 	return updateConfigFile(c.configObj)
 }
 
@@ -281,19 +264,44 @@ func (c *ClusterConfig) ToMapString() map[string]interface{} {
 	return m
 }
 
-func (c *ClusterConfig) updateConfigEmptyFieldsFromConfigMap() error {
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
+func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.ksConfigMapName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 
 	tempCO := ConfigObj{}
 	if jsonConf, ok := configMap.Data["config.json"]; ok {
-		json.Unmarshal([]byte(jsonConf), &tempCO)
+		if err = json.Unmarshal([]byte(jsonConf), &tempCO); err != nil {
+			return err
+		}
 		return c.configObj.updateEmptyFields(&tempCO)
 	}
 	return err
+}
 
+func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeCloudConfigMap() error {
+	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.ksCloudConfigMapName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+
+	if jsonConf, ok := configMap.Data["services"]; ok {
+		services, err := servicediscovery.GetServices(
+			servicediscoveryv1.NewServiceDiscoveryStreamV1([]byte(jsonConf)),
+		)
+		if err != nil {
+			return err
+		}
+
+		if services.GetApiServerUrl() != "" {
+			c.configObj.CloudAPIURL = services.GetApiServerUrl()
+		}
+		if services.GetReportReceiverHttpUrl() != "" {
+			c.configObj.CloudReportURL = services.GetReportReceiverHttpUrl()
+		}
+	}
+	return nil
 }
 
 func loadConfigFromData(co *ConfigObj, data map[string]string) error {
@@ -307,46 +315,10 @@ func loadConfigFromData(co *ConfigObj, data map[string]string) error {
 
 	return e
 }
-func (c *ClusterConfig) existsConfigMap() bool {
-	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
-	// TODO - check if has customerGUID
+
+func (c *ClusterConfig) existsConfigMap(name string) bool {
+	_, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), name, metav1.GetOptions{})
 	return err == nil
-}
-
-func (c *ClusterConfig) existsNamespace() bool {
-	_, err := c.k8s.KubernetesClient.CoreV1().Namespaces().Get(context.Background(), c.configMapNamespace, metav1.GetOptions{})
-	return err == nil
-}
-
-func (c *ClusterConfig) GetValueByKeyFromConfigMap(key string) (string, error) {
-
-	configMap, err := c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), c.configMapName, metav1.GetOptions{})
-
-	if err != nil {
-		return "", err
-	}
-	if val, ok := configMap.Data[key]; ok {
-		return val, nil
-	} else {
-		return "", fmt.Errorf("value does not exist")
-	}
-}
-
-func GetValueFromConfigJson(key string) (string, error) {
-	data, err := os.ReadFile(ConfigFileFullPath())
-	if err != nil {
-		return "", err
-	}
-	var obj map[string]interface{}
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return "", err
-	}
-	if val, ok := obj[key]; ok {
-		return fmt.Sprint(val), nil
-	} else {
-		return "", fmt.Errorf("value does not exist")
-	}
-
 }
 
 func existsConfigFile() bool {
@@ -355,7 +327,13 @@ func existsConfigFile() bool {
 }
 
 func updateConfigFile(configObj *ConfigObj) error {
-	return os.WriteFile(ConfigFileFullPath(), configObj.Config(), 0664) //nolint:gosec
+	fullPath := ConfigFileFullPath()
+	dir := filepath.Dir(fullPath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	return os.WriteFile(fullPath, configObj.Config(), 0664) //nolint:gosec
 }
 
 func (c *ClusterConfig) GenerateAccountID() (string, error) {
@@ -399,11 +377,6 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 	return nil
 }
 
-// Check if the customer is submitted
-func (clusterConfig *ClusterConfig) IsSubmitted() bool {
-	return clusterConfig.existsConfigMap() || existsConfigFile()
-}
-
 func DeleteConfigFile() error {
 	return os.Remove(ConfigFileFullPath())
 }
@@ -416,16 +389,24 @@ func AdoptClusterName(clusterName string) string {
 	return re.ReplaceAllString(clusterName, "-")
 }
 
-func getConfigMapName() string {
-	if n := os.Getenv("KS_DEFAULT_CONFIGMAP_NAME"); n != "" {
+func getKubescapeConfigMapName() string {
+	if n := os.Getenv(defaultConfigMapNameEnvVar); n != "" {
 		return n
 	}
 	return kubescapeConfigMapName
 }
 
+func getKubescapeCloudConfigMapName() string {
+	if n := os.Getenv(defaultCloudConfigMapNameEnvVar); n != "" {
+		return n
+	}
+
+	return kubescapeCloudConfigMapName
+}
+
 // GetConfigMapNamespace returns the namespace of the cluster config, which is the same for all in-cluster components
 func GetConfigMapNamespace() string {
-	if n := os.Getenv("KS_DEFAULT_CONFIGMAP_NAMESPACE"); n != "" {
+	if n := os.Getenv(defaultConfigMapNamespaceEnvVar); n != "" {
 		return n
 	}
 	return kubescapeNamespace
@@ -436,17 +417,19 @@ func updateAccountID(configObj *ConfigObj, accountID string) {
 		configObj.AccountID = accountID
 	}
 
-	if envAccountID := os.Getenv("KS_ACCOUNT_ID"); envAccountID != "" {
+	if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
 		configObj.AccountID = envAccountID
 	}
 }
 
 func getCloudURLsFromEnv(cloudURLs *CloudURLs) {
 	// load from env
-	if cloudAPIURL := os.Getenv("KS_CLOUD_API_URL"); cloudAPIURL != "" {
+	if cloudAPIURL := os.Getenv(cloudApiUrlEnvVar); cloudAPIURL != "" {
+		logger.L().Debug("cloud API URL updated from env var", helpers.Interface(cloudApiUrlEnvVar, cloudAPIURL))
 		cloudURLs.CloudAPIURL = cloudAPIURL
 	}
-	if cloudReportURL := os.Getenv("KS_CLOUD_REPORT_URL"); cloudReportURL != "" {
+	if cloudReportURL := os.Getenv(cloudReportUrlEnvVar); cloudReportURL != "" {
+		logger.L().Debug("cloud Report URL updated from env var", helpers.Interface(cloudReportUrlEnvVar, cloudReportURL))
 		cloudURLs.CloudReportURL = cloudReportURL
 	}
 }
@@ -465,10 +448,19 @@ func updateCloudURLs(configObj *ConfigObj) {
 
 }
 
-func initializeCloudAPI(c ITenantConfig) {
-	cloud := getter.GetKSCloudAPIConnector()
-	cloud.SetAccountID(c.GetAccountID())
-	cloud.SetCloudReportURL(c.GetCloudReportURL())
-	cloud.SetCloudAPIURL(c.GetCloudAPIURL())
+func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
+	logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))
+	cloud, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID())
+	if err != nil {
+		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+	}
 	getter.SetKSCloudAPIConnector(cloud)
+	return getter.GetKSCloudAPIConnector()
+}
+
+func GetTenantConfig(accountID, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {
+	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
+		return NewLocalConfig(accountID, clusterName, customClusterName)
+	}
+	return NewClusterConfig(k8s, accountID, clusterName, customClusterName)
 }

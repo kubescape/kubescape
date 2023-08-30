@@ -88,11 +88,11 @@ fi
 # Check cluster access by getting nodes
 if ! kubectl get nodes &> /dev/null; then
     echo -e "\033[0;37;32m\nRun:"
-    echo -e "\033[1;35;40m$ $KUBESCAPE_EXEC scan --create-account"
+    echo -e "\033[1;35;40m$ $KUBESCAPE_EXEC scan --server api.armosec.io"
     echo
     exit 0
 fi
 
 echo -e "\033[0;37;40m"
 echo -e "\033[0;37;32mExecuting Kubescape."
-$KUBESCAPE_EXEC scan --create-account
+$KUBESCAPE_EXEC scan --server api.armosec.io

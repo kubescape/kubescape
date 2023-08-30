@@ -14,21 +14,19 @@ func mockConfigObj() *ConfigObj {
 	return &ConfigObj{
 		AccountID:      "aaa",
 		ClusterName:    "ddd",
-		CloudReportURL: "report.armo.cloud",
-		CloudAPIURL:    "api.armosec.io",
+		CloudReportURL: "report.domain.com",
+		CloudAPIURL:    "api.domain.com",
 	}
 }
 func mockLocalConfig() *LocalConfig {
 	return &LocalConfig{
-		backendAPI: nil,
-		configObj:  mockConfigObj(),
+		configObj: mockConfigObj(),
 	}
 }
 
 func mockClusterConfig() *ClusterConfig {
 	return &ClusterConfig{
-		backendAPI: nil,
-		configObj:  mockConfigObj(),
+		configObj: mockConfigObj(),
 	}
 }
 func TestConfig(t *testing.T) {
@@ -231,8 +229,8 @@ func Test_initializeCloudAPI(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			initializeCloudAPI(tt.args.c)
 			cloud := getter.GetKSCloudAPIConnector()
-			assert.Equal(t, tt.args.c.GetCloudAPIURL(), cloud.GetCloudAPIURL())
-			assert.Equal(t, tt.args.c.GetCloudReportURL(), cloud.GetCloudReportURL())
+			assert.Equal(t, "https://api.domain.com", cloud.GetCloudAPIURL())
+			assert.Equal(t, "https://report.domain.com", cloud.GetCloudReportURL())
 			assert.Equal(t, tt.args.c.GetAccountID(), cloud.GetAccountID())
 		})
 	}

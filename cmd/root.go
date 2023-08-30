@@ -61,9 +61,10 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		rootCmd.SetUsageTemplate(newUsageTemplate)
 	}
 
-	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLsDep, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLs, "env", "", envFlagUsage)
-	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
+	rootCmd.PersistentFlags().StringVar(&rootInfo.DiscoveryServerURL, "server", "api.armosec.io", "Backend discovery server URL") // TODO: remove default value
+
+	rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
+	rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
 

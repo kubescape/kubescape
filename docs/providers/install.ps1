@@ -36,4 +36,4 @@ if (-not $currentPath.Contains($BASE_DIR)) {
 Write-Host "Finished Installation.`n" -ForegroundColor Green
 Write-Host "Executing Kubescape.`n" -ForegroundColor Green
 
-kubescape scan --create-account
+kubescape scan --server api.armosec.io

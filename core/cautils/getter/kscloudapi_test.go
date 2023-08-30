@@ -33,25 +33,17 @@ func TestGlobalKSCloudAPIConnector(t *testing.T) {
 
 	globalKSCloudAPIConnector = nil
 
-	t.Run("uninitialized global connector should yield a prod-ready KS client", func(t *testing.T) {
-		prod := NewKSCloudAPIProd()
-		require.EqualValues(t, prod, GetKSCloudAPIConnector())
+	t.Run("uninitialized global connector should yield an empty KS client", func(t *testing.T) {
+		empty := v1.NewEmptyKSCloudAPI()
+		require.EqualValues(t, empty, GetKSCloudAPIConnector())
 	})
 
 	t.Run("initialized global connector should yield the same pointer", func(t *testing.T) {
-		dev := NewKSCloudAPIDev()
-		SetKSCloudAPIConnector(dev)
+		ksCloud, _ := v1.NewKSCloudAPI("test-123", "test-456", "account")
+		SetKSCloudAPIConnector(ksCloud)
 
 		client := GetKSCloudAPIConnector()
-		require.Equal(t, dev, client)
+		require.Equal(t, ksCloud, client)
 		require.Equal(t, client, GetKSCloudAPIConnector())
-	})
-}
-
-func TestKSCloudAPISmoke(t *testing.T) {
-	t.Run("smoke-test constructors", func(t *testing.T) {
-		require.NotNil(t, NewKSCloudAPIDev())
-		require.NotNil(t, NewKSCloudAPIStaging())
-		require.NotNil(t, NewKSCloudAPIProd())
 	})
 }
