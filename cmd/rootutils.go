@@ -25,7 +25,7 @@ func initLogger() {
 			rootInfo.LoggerName = l
 		} else {
 			if isatty.IsTerminal(os.Stdout.Fd()) {
-				rootInfo.LoggerName = "pretty"
+				rootInfo.LoggerName = "icon"
 			} else {
 				rootInfo.LoggerName = "zap"
 			}
