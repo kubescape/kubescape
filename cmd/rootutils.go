@@ -10,6 +10,8 @@ import (
 	sdClientV1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/iconlogger"
+	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 
@@ -25,9 +27,9 @@ func initLogger() {
 			rootInfo.LoggerName = l
 		} else {
 			if isatty.IsTerminal(os.Stdout.Fd()) {
-				rootInfo.LoggerName = "pretty"
+				rootInfo.LoggerName = iconlogger.LoggerName
 			} else {
-				rootInfo.LoggerName = "zap"
+				rootInfo.LoggerName = zaplogger.LoggerName
 			}
 		}
 	}
