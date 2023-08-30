@@ -400,11 +400,11 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 }
 
 func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[string]workloadinterface.IMetadata) error {
-	logger.L().Start("Collecting RBAC resources")
-
 	if k8sHandler.rbacObjectsAPI == nil {
 		return nil
 	}
+
+	logger.L().Start("Collecting RBAC resources")
 	allRbacResources, err := k8sHandler.rbacObjectsAPI.ListAllResources()
 	if err != nil {
 		return err
