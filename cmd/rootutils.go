@@ -11,6 +11,7 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/iconlogger"
+	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 
@@ -28,7 +29,7 @@ func initLogger() {
 			if isatty.IsTerminal(os.Stdout.Fd()) {
 				rootInfo.LoggerName = iconlogger.LoggerName
 			} else {
-				rootInfo.LoggerName = "zap"
+				rootInfo.LoggerName = zaplogger.LoggerName
 			}
 		}
 	}
