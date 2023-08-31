@@ -6,6 +6,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/cmd/completion"
 	"github.com/kubescape/kubescape/v2/cmd/config"
 	"github.com/kubescape/kubescape/v2/cmd/download"
@@ -49,6 +50,13 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		Use:     "kubescape",
 		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://hub.armosec.io/docs",
 		Example: ksExamples,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
+			initLogger()
+			initLoggerLevel()
+			initEnvironment()
+			initCacheDir()
+		},
 	}
 
 	if cautils.IsKrewPlugin() {
@@ -76,8 +84,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable color output for logging")
 	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable color output for logging")
 
-	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
-
+	rootCmd.PersistentFlags().StringVarP(&rootInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	// Supported commands
 	rootCmd.AddCommand(scan.GetScanCommand(ks))
 	rootCmd.AddCommand(download.GetDownloadCmd(ks))

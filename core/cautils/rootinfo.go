@@ -13,6 +13,7 @@ type RootInfo struct {
 	DisableColor       bool   // Disable Color
 	EnableColor        bool   // Force enable Color
 	DiscoveryServerURL string // Discovery Server URL  (See https://github.com/kubescape/backend/tree/main/pkg/servicediscovery)
+	KubeContext        string //  context name
 }
 type CloudURLs struct {
 	CloudReportURL string
