@@ -17,6 +17,7 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
 	copa "github.com/project-copacetic/copacetic/pkg/patch"
+	log "github.com/sirupsen/logrus"
 )
 
 func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) error {
@@ -52,40 +53,37 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 
 	// ===================== Patch the image using copacetic =====================
 	logger.L().Start("Patching image...")
+
+	sout, serr := os.Stdout, os.Stderr
+	if logger.L().GetLevel() != "debug" {
+		disableCopaLogger()
+	}
+
 	if err := copa.Patch(ctx, patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchInfo.PatchedImageTag, ""); err != nil {
 		return err
 	}
-	logger.L().StopSuccess("Patched image successfully")
+
+	if logger.L().GetLevel() != "debug" {
+		enableCopaLogger(sout, serr)
+	}
+
+	patchedImageName := fmt.Sprintf("%s:%s", patchInfo.ImageName, patchInfo.PatchedImageTag)
+	logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded image: %s", patchedImageName))
 
 	// ===================== Re-scan the image =====================
 
-	// Re-scan the image
-	patchedImageName := fmt.Sprintf("%s:%s", patchInfo.ImageName, patchInfo.PatchedImageTag)
 	logger.L().Start(fmt.Sprintf("Re-Scanning image: %s", patchedImageName))
 
 	scanResultsPatched, err := svc.Scan(ctx, patchedImageName, creds)
 	if err != nil {
 		return err
 	}
-	// Save the patched image's scan results to a file in json format, if requested
-	fileNamePatched := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.PatchedImageTag)
-	fileNamePatched = strings.ReplaceAll(fileNamePatched, "/", "-")
-
-	if patchInfo.IncludeReport {
-		pres = presenter.GetPresenter("json", "", false, *scanResultsPatched)
-		writer = printer.GetWriter(ctx, fileNamePatched)
-		if err := pres.Present(writer); err != nil {
-			return err
-		}
-	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
 
 	// ===================== Clean up =====================
-	// Remove the scan results files, which were used to patch the image
-	if !patchInfo.IncludeReport {
-		if err := os.Remove(fileName); err != nil {
-			logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
-		}
+	// Remove the scan results file, which was used to patch the image
+	if err := os.Remove(fileName); err != nil {
+		logger.L().Warning(fmt.Sprintf("failed to remove residual file: %v", fileName), helpers.Error(err))
 	}
 
 	// ===================== Results Handling =====================
@@ -103,11 +101,16 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 	}
 	resultsHandler.HandleResults(ctx)
 
-	if patchInfo.IncludeReport {
-		logger.L().Success("Results saved", helpers.String("filename", fileName))
-		logger.L().Success("Results saved", helpers.String("filename", fileNamePatched))
-	}
-
 	return nil
+}
 
+func disableCopaLogger() {
+	os.Stdout, os.Stderr = nil, nil
+	null, _ := os.Open(os.DevNull)
+	log.SetOutput(null)
+}
+
+func enableCopaLogger(sout, serr *os.File) {
+	os.Stdout, os.Stderr = sout, serr
+	log.SetOutput(os.Stdout)
 }

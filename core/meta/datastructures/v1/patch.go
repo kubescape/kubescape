@@ -7,9 +7,8 @@ type PatchInfo struct {
 	PatchedImageTag string        // can be empty, if empty then the image tag will be patched with the latest tag
 	BuildkitAddress string        // buildkit address
 	Timeout         time.Duration // timeout for patching an image
-	IncludeReport   bool          // include report in the output
-	
-	// Image registry credentials 
+
+	// Image registry credentials
 	Username string // username for registry login
 	Password string // password for registry login
 
