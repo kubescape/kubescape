@@ -8,13 +8,11 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v2/cmd/completion"
 	"github.com/kubescape/kubescape/v2/cmd/config"
-	"github.com/kubescape/kubescape/v2/cmd/delete"
 	"github.com/kubescape/kubescape/v2/cmd/download"
 	"github.com/kubescape/kubescape/v2/cmd/fix"
 	"github.com/kubescape/kubescape/v2/cmd/list"
 	"github.com/kubescape/kubescape/v2/cmd/patch"
 	"github.com/kubescape/kubescape/v2/cmd/scan"
-	"github.com/kubescape/kubescape/v2/cmd/submit"
 	"github.com/kubescape/kubescape/v2/cmd/update"
 	"github.com/kubescape/kubescape/v2/cmd/version"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -28,11 +26,11 @@ import (
 var rootInfo cautils.RootInfo
 
 var ksExamples = fmt.Sprintf(`
-  # Scan command
+  # Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations
   %[1]s scan
 
-  # List supported frameworks
-  %[1]s list frameworks
+  # List supported controls
+  %[1]s list controls
 
   # Download artifacts (air-gapped environment support)
   %[1]s download artifacts
@@ -64,9 +62,10 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		rootCmd.SetUsageTemplate(newUsageTemplate)
 	}
 
-	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLsDep, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLs, "env", "", envFlagUsage)
-	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
+	rootCmd.PersistentFlags().StringVar(&rootInfo.DiscoveryServerURL, "server", "api.armosec.io", "Backend discovery server URL") // TODO: remove default value
+
+	rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
+	rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
 
@@ -75,23 +74,31 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
-	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
-	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable Color output for logging")
+	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable color output for logging")
+	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable color output for logging")
 
 	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
 
 	// Supported commands
 	rootCmd.AddCommand(scan.GetScanCommand(ks))
 	rootCmd.AddCommand(download.GetDownloadCmd(ks))
-	rootCmd.AddCommand(delete.GetDeleteCmd(ks))
 	rootCmd.AddCommand(list.GetListCmd(ks))
-	rootCmd.AddCommand(submit.GetSubmitCmd(ks))
 	rootCmd.AddCommand(completion.GetCompletionCmd())
 	rootCmd.AddCommand(version.GetVersionCmd())
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
 	rootCmd.AddCommand(update.GetUpdateCmd())
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
 	rootCmd.AddCommand(patch.GetPatchCmd(ks))
+
+	// deprecated commands
+	rootCmd.AddCommand(&cobra.Command{
+		Use:        "submit",
+		Deprecated: "This command is deprecated. Contact Kubescape maintainers for more information.",
+	})
+	rootCmd.AddCommand(&cobra.Command{
+		Use:        "delete",
+		Deprecated: "This command is deprecated. Contact Kubescape maintainers for more information.",
+	})
 
 	return rootCmd
 }

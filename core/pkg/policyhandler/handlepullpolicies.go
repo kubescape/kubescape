@@ -24,6 +24,7 @@ var policyHandlerInstance *PolicyHandler
 
 // PolicyHandler
 type PolicyHandler struct {
+	clusterName             string
 	getters                 *cautils.Getters
 	cachedPolicyIdentifiers *TimedCache[[]string]
 	cachedFrameworks        *TimedCache[[]reporthandling.Framework]
@@ -33,10 +34,11 @@ type PolicyHandler struct {
 
 // NewPolicyHandler creates and returns an instance of the `PolicyHandler`. The function initializes the `PolicyHandler` only if it hasn't been previously created.
 // The PolicyHandler supports caching of downloaded policies and exceptions by setting the `POLICIES_CACHE_TTL` environment variable (default is no caching).
-func NewPolicyHandler() *PolicyHandler {
+func NewPolicyHandler(clusterName string) *PolicyHandler {
 	if policyHandlerInstance == nil {
 		cacheTtl := getPoliciesCacheTtl()
 		policyHandlerInstance = &PolicyHandler{
+			clusterName:             clusterName,
 			cachedPolicyIdentifiers: NewTimedCache[[]string](cacheTtl),
 			cachedFrameworks:        NewTimedCache[[]reporthandling.Framework](cacheTtl),
 			cachedExceptions:        NewTimedCache[[]armotypes.PostureExceptionPolicy](cacheTtl),
@@ -194,7 +196,7 @@ func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptio
 		return cachedExceptions, nil
 	}
 
-	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(cautils.ClusterName)
+	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(policyHandler.clusterName)
 	if err == nil {
 		policyHandler.cachedExceptions.Set(exceptions)
 	}
@@ -208,7 +210,7 @@ func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, err
 		return cachedControlInputs, nil
 	}
 
-	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(cautils.ClusterName)
+	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(policyHandler.clusterName)
 	if err == nil {
 		policyHandler.cachedControlInputs.Set(controlInputs)
 	}

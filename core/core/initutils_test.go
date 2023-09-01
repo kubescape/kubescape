@@ -88,7 +88,7 @@ func Test_getUIPrinter(t *testing.T) {
 				View:            string(tt.args.viewType),
 			}
 
-			got := GetUIPrinter(tt.args.ctx, scanInfo)
+			got := GetUIPrinter(tt.args.ctx, scanInfo, "test-cluster")
 
 			assert.Equal(t, tt.want.structType, reflect.TypeOf(got).String())
 
@@ -182,4 +182,50 @@ func TestGetSensorHandler(t *testing.T) {
 	})
 
 	// TODO(fredbi): need to share the k8s client mock to test a happy path / deployment failure path
+}
+
+func TestIsScanTypeForSubmission(t *testing.T) {
+	test := []struct {
+		name     string
+		scanType cautils.ScanTypes
+		want     bool
+	}{
+		{
+			name:     "cluster scan",
+			scanType: cautils.ScanTypeCluster,
+			want:     true,
+		},
+		{
+			name:     "repo scan",
+			scanType: cautils.ScanTypeRepo,
+			want:     true,
+		},
+		{
+			name:     "workload scan",
+			scanType: cautils.ScanTypeWorkload,
+			want:     false,
+		},
+		{
+			name:     "control scan",
+			scanType: cautils.ScanTypeControl,
+			want:     false,
+		},
+		{
+			name:     "framework scan",
+			scanType: cautils.ScanTypeFramework,
+			want:     true,
+		},
+		{
+			name:     "image scan",
+			scanType: cautils.ScanTypeImage,
+			want:     true,
+		},
+	}
+
+	for _, tt := range test {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isScanTypeForSubmission(tt.scanType)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

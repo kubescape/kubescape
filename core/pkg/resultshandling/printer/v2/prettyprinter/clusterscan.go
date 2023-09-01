@@ -3,10 +3,12 @@ package prettyprinter
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -29,16 +31,15 @@ func (cp *ClusterPrinter) PrintImageScanning(summary *imageprinter.ImageScanSumm
 	printImagesCommands(cp.writer, *summary)
 }
 
-func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
 
 	cp.categoriesTablePrinter.PrintCategoriesTables(cp.writer, summaryDetails, sortedControlIDs)
 
-	printComplianceScore(cp.writer, filterComplianceFrameworks(summaryDetails.ListFrameworks()))
-
-	if len(summaryDetails.TopWorkloadsByScore) > 0 {
-		cp.printTopWorkloads(summaryDetails)
+	if len(topWorkloadsByScore) > 0 {
+		cp.printTopWorkloads(topWorkloadsByScore)
 	}
 
+	printComplianceScore(cp.writer, filterComplianceFrameworks(summaryDetails.ListFrameworks()))
 }
 
 func (cp *ClusterPrinter) PrintNextSteps() {
@@ -47,20 +48,27 @@ func (cp *ClusterPrinter) PrintNextSteps() {
 
 func (cp *ClusterPrinter) getNextSteps() []string {
 	return []string{
-		configScanVerboseRunText,
-		installHelmText,
-		CICDSetupText,
+		runCommandsText,
+		scanWorkloadText,
+		installKubescapeText,
 	}
 }
 
-func (cp *ClusterPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDetails) {
-	cautils.InfoTextDisplay(cp.writer, getTopWorkloadsTitle(len(summaryDetails.TopWorkloadsByScore)))
+func (cp *ClusterPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IResource) {
+	txt := getTopWorkloadsTitle(len(topWorkloadsByScore))
 
-	for i, wl := range summaryDetails.TopWorkloadsByScore {
+	cautils.InfoTextDisplay(cp.writer, txt)
+
+	cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
+
+	cautils.SimpleDisplay(cp.writer, highStakesWlsText)
+
+	for i, wl := range topWorkloadsByScore {
 		ns := wl.GetNamespace()
 		name := wl.GetName()
 		kind := wl.GetKind()
-		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s - '%s'\n", i+1, ns, name, kind, getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name))))
+		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("%d. namespace: %s, name: %s, kind: %s\n", i+1, ns, name, kind))
+		cautils.SimpleDisplay(cp.writer, fmt.Sprintf("   '%s'\n", getCallToActionString(cp.getWorkloadScanCommand(ns, kind, name))))
 	}
 
 	cautils.InfoTextDisplay(cp.writer, "\n")

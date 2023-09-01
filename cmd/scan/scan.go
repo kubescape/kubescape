@@ -17,14 +17,14 @@ import (
 var scanCmdExamples = fmt.Sprintf(`
   Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
   
-  # Scan current cluster with all frameworks
+  # Scan current cluster
   %[1]s scan
 
-  # Scan kubernetes YAML manifest files
+  # Scan kubernetes manifest files 
   %[1]s scan .
 
   # Scan and save the results in the JSON format
-  %[1]s scan --format json --output results.json --format-version=v2
+  %[1]s scan --format json --output results.json
 
   # Display all resources
   %[1]s scan --verbose
@@ -39,7 +39,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	// scanCmd represents the scan command
 	scanCmd := &cobra.Command{
 		Use:     "scan",
-		Short:   "Scan the current running cluster or yaml files",
+		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `The action you want to perform`,
 		Example: scanCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -72,8 +72,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	scanCmd.PersistentFlags().BoolVar(&scanInfo.CreateAccount, "create-account", false, "Create a Kubescape SaaS account ID account ID is not found in cache. After creating the account, the account ID will be saved in cache. In addition, the scanning results will be uploaded to the Kubescape SaaS")
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
@@ -103,10 +102,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
 
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
-	scanCmd.PersistentFlags().MarkDeprecated("client-id", "login to Kubescape SaaS will be unsupported, please contact the Kubescape maintainers for more information")
-	scanCmd.PersistentFlags().MarkDeprecated("secret-key", "login to Kubescape SaaS will be unsupported, please contact the Kubescape maintainers for more information")
+	scanCmd.PersistentFlags().MarkDeprecated("client-id", "Client ID is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
+	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Create account is no longer supported. In case of a missing Account ID and a configured backend server, a new account id will be generated automatically by Kubescape. Feel free to contact the Kubescape maintainers for more information.")
+	scanCmd.PersistentFlags().MarkDeprecated("secret-key", "Secret Key is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("omit-raw-resources")

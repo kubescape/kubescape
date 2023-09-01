@@ -63,7 +63,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 	}
-	listCmd.PersistentFlags().StringVarP(&listPolicies.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	listCmd.PersistentFlags().StringVarP(&listPolicies.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
 	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-print'/'json'")
 	listCmd.PersistentFlags().MarkDeprecated("id", "Control ID's are included in list outputs")
 
@@ -74,5 +74,5 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 func flagValidationList(listPolicies *v1.ListPolicies) error {
 
 	// Validate the user's credentials
-	return listPolicies.Credentials.Validate()
+	return cautils.ValidateAccountID(listPolicies.AccountID)
 }

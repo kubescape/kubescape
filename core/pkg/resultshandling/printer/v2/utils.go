@@ -14,6 +14,8 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
+const indicator = "†"
+
 // finalizeV2Report finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report := reporthandlingv2.PostureReport{
@@ -57,7 +59,7 @@ type infoStars struct {
 func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 	infoToPrintInfo := []infoStars{}
 	infoToPrintInfoMap := map[string]interface{}{}
-	starCount := "*"
+	starCount := indicator
 	for _, control := range controls {
 		if control.GetStatus().IsSkipped() && control.GetStatus().Info() != "" {
 			if _, ok := infoToPrintInfoMap[control.GetStatus().Info()]; !ok {
@@ -65,7 +67,7 @@ func mapInfoToPrintInfo(controls reportsummary.ControlSummaries) []infoStars {
 					info:  control.GetStatus().Info(),
 					stars: starCount,
 				})
-				starCount += "*"
+				starCount += indicator
 				infoToPrintInfoMap[control.GetStatus().Info()] = nil
 			}
 		}

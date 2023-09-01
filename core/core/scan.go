@@ -6,7 +6,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
@@ -50,23 +49,17 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 
 	// ================== setup tenant object ======================================
-	ctxTenant, spanTenant := otel.Tracer("").Start(ctx, "setup tenant")
-	tenantConfig := getTenantConfig(&scanInfo.Credentials, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
+	tenantConfig := cautils.GetTenantConfig(scanInfo.AccountID, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
 
 	if scanInfo.Submit {
 		// submit - Create tenant & Submit report
-		if err := tenantConfig.SetTenant(); err != nil {
-			logger.L().Ctx(ctxTenant).Error(err.Error())
-		}
-
 		if scanInfo.OmitRawResources {
 			logger.L().Ctx(ctx).Warning("omit-raw-resources flag will be ignored in submit mode")
 		}
 	}
-	spanTenant.End()
 
 	// ================== version testing ======================================
 
@@ -82,13 +75,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 	spanHostScanner.End()
 
-	// ================== setup registry adaptors ======================================
-
-	registryAdaptors, _ := resourcehandler.NewRegistryAdaptors()
-
 	// ================== setup resource collector object ======================================
 
-	resourceHandler := getResourceHandler(ctx, scanInfo, tenantConfig, k8s, hostSensorHandler, registryAdaptors)
+	resourceHandler := getResourceHandler(ctx, scanInfo, tenantConfig, k8s, hostSensorHandler)
 
 	// ================== setup reporter & printer objects ======================================
 
@@ -96,9 +85,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	reportHandler := getReporter(ctx, tenantConfig, scanInfo.ScanID, scanInfo.Submit, scanInfo.FrameworkScan, *scanInfo)
 
 	// setup printers
-	outputPrinters := GetOutputPrinters(scanInfo, ctx)
+	outputPrinters := GetOutputPrinters(scanInfo, ctx, tenantConfig.GetContextName())
 
-	uiPrinter := GetUIPrinter(ctx, scanInfo)
+	uiPrinter := GetUIPrinter(ctx, scanInfo, tenantConfig.GetContextName())
 
 	// ================== return interface ======================================
 
@@ -112,12 +101,17 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 }
 
-func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printer.IPrinter {
+func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) []printer.IPrinter {
 	formats := scanInfo.Formats()
 
 	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
-		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View))
+		if !resultshandling.ValidatePrinter(scanInfo.ScanType, format) {
+			logger.L().Ctx(ctx).Fatal(fmt.Sprintf("Unsupported output format: %s", format))
+			continue
+		}
+
+		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View), clusterName)
 		printerHandler.SetWriter(ctx, scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
@@ -126,23 +120,18 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context) []printe
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.InitLogger(iconlogger.LoggerName)
 	logger.L().Start("Kubescape scanner initializing")
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info
 
 	interfaces := getInterfaces(ctxInit, scanInfo)
-
-	cautils.ClusterName = interfaces.tenantConfig.GetContextName() // TODO - Deprecated
-	cautils.CustomerGUID = interfaces.tenantConfig.GetAccountID()  // TODO - Deprecated
-	interfaces.report.SetClusterName(interfaces.tenantConfig.GetContextName())
-	interfaces.report.SetCustomerGUID(interfaces.tenantConfig.GetAccountID())
+	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
 	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.Getters.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetTenantEmail(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.Getters.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
 	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
@@ -165,7 +154,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	// ===================== policies =====================
 	ctxPolicies, spanPolicies := otel.Tracer("").Start(ctxInit, "policies")
-	policyHandler := policyhandler.NewPolicyHandler()
+	policyHandler := policyhandler.NewPolicyHandler(interfaces.tenantConfig.GetContextName())
 	scanData, err := policyHandler.CollectPolicies(ctxPolicies, scanInfo.PolicyIdentifier, scanInfo)
 	if err != nil {
 		spanInit.End()
@@ -188,8 +177,8 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	defer spanOpa.End()
 
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-	reportResults := opaprocessor.NewOPAProcessor(scanData, deps)
-	if err := reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler(""), scanInfo); err != nil {
+	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName())
+	if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler(""), scanInfo); err != nil {
 		// TODO - do something
 		return resultsHandling, fmt.Errorf("%w", err)
 	}

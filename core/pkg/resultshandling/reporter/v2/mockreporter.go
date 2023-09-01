@@ -27,10 +27,7 @@ func (reportMock *ReportMock) Submit(_ context.Context, opaSessionObj *cautils.O
 	return nil
 }
 
-func (reportMock *ReportMock) SetCustomerGUID(customerGUID string) {
-}
-
-func (reportMock *ReportMock) SetClusterName(clusterName string) {
+func (reportMock *ReportMock) SetTenantConfig(tenantConfig cautils.ITenantConfig) {
 }
 
 func (reportMock *ReportMock) GetURL() string {
@@ -42,7 +39,7 @@ func (reportMock *ReportMock) GetURL() string {
 	return u.String()
 }
 
-func (reportMock *ReportMock) DisplayReportURL() {
+func (reportMock *ReportMock) DisplayMessage() {
 	if m := reportMock.strToDisplay(); m != "" {
 		cautils.InfoTextDisplay(os.Stderr, m)
 	}

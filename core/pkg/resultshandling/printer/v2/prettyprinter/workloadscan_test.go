@@ -11,15 +11,16 @@ func TestWorkloadScan_getNextSteps(t *testing.T) {
 		t.Errorf("Expected 3 next steps, got %d", len(nextSteps))
 	}
 
-	if nextSteps[0] != configScanVerboseRunText {
+	if nextSteps[0] != runCommandsText {
+		t.Errorf("Expected %s, got %s", runCommandsText, nextSteps[0])
+	}
+
+	if nextSteps[1] != configScanVerboseRunText {
 		t.Errorf("Expected %s, got %s", configScanVerboseRunText, nextSteps[0])
 	}
 
-	if nextSteps[1] != installHelmText {
-		t.Errorf("Expected %s, got %s", installHelmText, nextSteps[1])
+	if nextSteps[2] != installKubescapeText {
+		t.Errorf("Expected %s, got %s", installKubescapeText, nextSteps[1])
 	}
 
-	if nextSteps[2] != CICDSetupText {
-		t.Errorf("Expected %s, got %s", CICDSetupText, nextSteps[2])
-	}
 }

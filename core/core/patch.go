@@ -90,8 +90,8 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 
 	var scanInfo cautils.ScanInfo
 	scanInfo.SetScanType(cautils.ScanTypeImage)
-	outputPrinters := GetOutputPrinters(&scanInfo, ctx)
-	uiPrinter := GetUIPrinter(ctx, &scanInfo)
+	outputPrinters := GetOutputPrinters(&scanInfo, ctx, "")
+	uiPrinter := GetUIPrinter(ctx, &scanInfo, "")
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 	resultsHandler.ImageScanData = []cautils.ImageScanData{
 		{

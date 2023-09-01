@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
@@ -33,13 +34,13 @@ func (wp *WorkloadPrinter) PrintNextSteps() {
 
 func (wp *WorkloadPrinter) getNextSteps() []string {
 	return []string{
+		runCommandsText,
 		configScanVerboseRunText,
-		installHelmText,
-		CICDSetupText,
+		installKubescapeText,
 	}
 }
 
-func (wp *WorkloadPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (wp *WorkloadPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
 	wp.categoriesTablePrinter.PrintCategoriesTables(wp.writer, summaryDetails, sortedControlIDs)
 
 }

@@ -9,10 +9,18 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/internal/testutils"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/kubescape/kubescape/v2/internal/testutils"
 	"github.com/stretchr/testify/require"
 )
+
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+
+	return b
+}
 
 func TestReleasedPolicy(t *testing.T) {
 	t.Parallel()

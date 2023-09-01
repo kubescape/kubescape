@@ -60,16 +60,3 @@ func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, catego
 func (wp *WorkloadPrinter) initCategoryTableData() ([]string, []int) {
 	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
 }
-
-func (wp *WorkloadPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) []string {
-
-	row := make([]string, 3)
-
-	row[0] = controlSummary.GetName()
-
-	row[1] = getStatus(controlSummary.GetStatus(), controlSummary, infoToPrintInfo)
-
-	row[2] = getDocsForControl(controlSummary)
-
-	return row
-}

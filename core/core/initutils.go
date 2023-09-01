@@ -30,12 +30,6 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	}
 	return k8sinterface.NewKubernetesApi()
 }
-func getTenantConfig(credentials *cautils.Credentials, clusterName string, customClusterName string, k8s *k8sinterface.KubernetesApi) cautils.ITenantConfig {
-	if !k8sinterface.IsConnectedToCluster() || k8s == nil {
-		return cautils.NewLocalConfig(getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
-	}
-	return cautils.NewClusterConfig(k8s, getter.GetKSCloudAPIConnector(), credentials, clusterName, customClusterName)
-}
 
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
 	if useExceptions != "" {
@@ -74,7 +68,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 		if scanInfo.GetScanningContext() != cautils.ContextCluster {
 			submitData = reporterv2.SubmitContextRepository
 		}
-		return reporterv2.NewReportEventReceiver(tenantConfig.GetConfigObj(), reportID, submitData)
+		return reporterv2.NewReportEventReceiver(tenantConfig, reportID, submitData)
 	}
 	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework
@@ -89,7 +83,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 	return reporterv2.NewReportMock("", message)
 }
 
-func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, registryAdaptors *resourcehandler.RegistryAdaptors) resourcehandler.IResourceHandler {
+func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
 	ctx, span := otel.Tracer("").Start(ctx, "getResourceHandler")
 	defer span.End()
 
@@ -100,7 +94,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 
 	getter.GetKSCloudAPIConnector()
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, registryAdaptors)
+	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.
@@ -153,57 +147,59 @@ func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
 func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 
 	/*
+		If keep-local OR scan type which is not submittable - Do not send report
+
 		If CloudReportURL not set - Do not send report
 
-		If There is no account - Do not send report
+		If CloudReportURL is set
+			If There is no account -
+				Generate Account & Submit report
 
-		If There is account -
-			keep-local - Do not send report
-			Default - Submit report
+			If There is account -
+				Invalid Account ID - Do not send report
+				Valid Account - Submit report
 
 	*/
 
-	if getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" {
+	// do not submit control/workload scanning
+	if !isScanTypeForSubmission(scanInfo.ScanType) || scanInfo.Local {
 		scanInfo.Submit = false
 		return
 	}
 
-	// do not submit control scanning
-	if !scanInfo.FrameworkScan {
+	if getter.GetKSCloudAPIConnector().GetCloudReportURL() == "" {
 		scanInfo.Submit = false
 		return
 	}
 
-	if scanInfo.Local {
-		scanInfo.Submit = false
-		return
-	}
-
-	// do not submit single resource scan to BE
-	if scanInfo.ScanObject != nil {
-		scanInfo.Submit = false
-		return
-	}
-
-	// If There is no account, or if the account is not legal, do not submit
-	if _, err := uuid.Parse(tenantConfig.GetAccountID()); err != nil {
-		scanInfo.Submit = false
-	} else {
+	// a new account will be created if a report URL is set and there is no account ID
+	if tenantConfig.GetAccountID() == "" {
 		scanInfo.Submit = true
+		return
 	}
 
-	if scanInfo.CreateAccount {
-		scanInfo.Submit = true
+	_, err := uuid.Parse(tenantConfig.GetAccountID())
+	if err != nil {
+		logger.L().Warning("account is not a valid UUID", helpers.Error(err))
 	}
 
+	// submit if account is valid
+	scanInfo.Submit = err == nil
+}
+
+func isScanTypeForSubmission(scanType cautils.ScanTypes) bool {
+	if scanType == cautils.ScanTypeControl || scanType == cautils.ScanTypeWorkload {
+		return false
+	}
+	return true
 }
 
 // setPolicyGetter set the policy getter - local file/github release/Kubescape Cloud API
-func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, tenantEmail string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
+func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, accountID string, frameworkScope bool, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IPolicyGetter {
 	if len(loadPoliciesFromFile) > 0 {
 		return getter.NewLoadPolicy(loadPoliciesFromFile)
 	}
-	if tenantEmail != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
+	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
 	}
@@ -277,12 +273,12 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 }
 
 // getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
-func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo) printer.IPrinter {
+func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName string) printer.IPrinter {
 	var p printer.IPrinter
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
 		p = &printerv2.SilentPrinter{}
 	} else {
-		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns)
+		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
 
 		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
 		p.SetWriter(ctx, os.Stdout.Name())

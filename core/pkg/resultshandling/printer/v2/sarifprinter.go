@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/anchore/grype/grype/presenter"
 	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -110,7 +111,14 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
+func (sp *SARIFPrinter) printImageScan(scanResults *models.PresenterConfig) error {
+	if scanResults == nil {
+		return fmt.Errorf("no no image vulnerability data provided")
+	}
+
+	pres := presenter.GetPresenter(printer.SARIFFormat, "", false, *scanResults)
+
+	return pres.Present(sp.writer)
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {
@@ -118,9 +126,32 @@ func (sp *SARIFPrinter) PrintNextSteps() {
 }
 
 func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		if len(imageScanData) == 0 {
+			logger.L().Ctx(ctx).Fatal("failed to write results in sarif format: no data provided")
+			return
+		}
+
+		// image scan
+		if err := sp.printImageScan(imageScanData[0].PresenterConfig); err != nil {
+			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
+			return
+		}
+	} else {
+		// configuration scan
+		if err := sp.printConfigurationScan(ctx, opaSessionObj); err != nil {
+			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
+			return
+		}
+
+	}
+	printer.LogOutputFile(sp.writer.Name())
+}
+
+func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	report, err := sarif.New(sarif.Version210)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
@@ -161,7 +192,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 
 	report.PrettyWrite(sp.writer)
 
-	printer.LogOutputFile(sp.writer.Name())
+	return nil
 }
 
 func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj, locationResolver *locationresolver.FixPathLocationResolver, ac *resourcesresults.ResourceAssociatedControl, resourceID string) locationresolver.Location {

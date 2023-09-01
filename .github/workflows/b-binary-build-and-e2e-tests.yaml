@@ -292,6 +292,7 @@ jobs:
         uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
         with:
           repository: armosec/system-tests
+          ref: remove-urls
           path: .
 
       - uses: actions/setup-python@d27e3f3d7c64b4bbf8e4abfb9b63b83e846e0435 # ratchet:actions/setup-python@v4

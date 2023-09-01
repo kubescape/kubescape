@@ -68,12 +68,19 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 	if err != nil {
 		return nil
 	}
-	patchInfo.Image = patchInfoImage
+
 	// Parse the image full name to get image name and tag
-	named, err := ref.ParseNamed(patchInfo.Image)
+	named, err := ref.ParseNamed(patchInfoImage)
 	if err != nil {
 		return err
 	}
+
+	// If no tag or digest is provided, default to 'latest'
+	if ref.IsNameOnly(named) {
+		logger.L().Warning("Image name has no tag or digest, using latest as tag")
+		named = ref.TagNameOnly(named)
+	}
+	patchInfo.Image = named.String()
 
 	// If no patched image tag is provided, default to '<image-tag>-patched'
 	if patchInfo.PatchedImageTag == "" {
@@ -96,7 +103,7 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 
 	// Extract the "image" name from the canonical Image URL
 	// If it's an official docker image, we store just the "image-name". Else if a docker repo then we store as "repo/image". Else complete URL
-	ref, _ := reference.ParseNormalizedNamed(patchInfoImage)
+	ref, _ := reference.ParseNormalizedNamed(patchInfo.Image)
 	imageName := named.Name()
 	if strings.Contains(imageName, "docker.io/library/") {
 		imageName = reference.Path(ref)

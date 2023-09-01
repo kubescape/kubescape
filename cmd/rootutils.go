@@ -5,14 +5,18 @@ import (
 	"os"
 	"strings"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	sdClientV1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/iconlogger"
+	"github.com/kubescape/go-logger/zaplogger"
+	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 
 	"github.com/mattn/go-isatty"
 )
-
-const envFlagUsage = "Send report results to specific URL. Format:<ReportReceiver>,<Backend>,<Frontend>.\n\t\tExample:report.armo.cloud,api.armo.cloud,portal.armo.cloud"
 
 func initLogger() {
 	logger.DisableColor(rootInfo.DisableColor)
@@ -23,9 +27,9 @@ func initLogger() {
 			rootInfo.LoggerName = l
 		} else {
 			if isatty.IsTerminal(os.Stdout.Fd()) {
-				rootInfo.LoggerName = "pretty"
+				rootInfo.LoggerName = iconlogger.LoggerName
 			} else {
-				rootInfo.LoggerName = "zap"
+				rootInfo.LoggerName = zaplogger.LoggerName
 			}
 		}
 	}
@@ -56,40 +60,50 @@ func initCacheDir() {
 	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
 }
 func initEnvironment() {
-	if rootInfo.KSCloudBEURLs == "" {
-		rootInfo.KSCloudBEURLs = rootInfo.KSCloudBEURLsDep
+	if rootInfo.DiscoveryServerURL == "" {
+		return
 	}
-	urlSlices := strings.Split(rootInfo.KSCloudBEURLs, ",")
-	if len(urlSlices) != 1 && len(urlSlices) < 3 {
-		logger.L().Fatal("expected at least 3 URLs (report, api, frontend, auth)")
-	}
-	switch len(urlSlices) {
-	case 1:
-		switch urlSlices[0] {
-		case "dev", "development":
-			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIDev())
-		case "stage", "staging":
-			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIStaging())
-		case "":
-			getter.SetKSCloudAPIConnector(getter.NewKSCloudAPIProd())
-		default:
-			logger.L().Fatal("--environment flag usage: " + envFlagUsage)
-		}
-	case 2:
-		logger.L().Fatal("--environment flag usage: " + envFlagUsage)
-	case 3, 4:
-		var ksAuthURL string
-		ksEventReceiverURL := urlSlices[0] // mandatory
-		ksBackendURL := urlSlices[1]       // mandatory
-		ksFrontendURL := urlSlices[2]      // mandatory
-		if len(urlSlices) >= 4 {
-			ksAuthURL = urlSlices[3]
-		}
 
-		getter.SetKSCloudAPIConnector(getter.NewKSCloudAPICustomized(
-			ksBackendURL, ksAuthURL,
-			getter.WithReportURL(ksEventReceiverURL),
-			getter.WithFrontendURL(ksFrontendURL),
-		))
+	logger.L().Debug("fetching URLs from service discovery server", helpers.String("server", rootInfo.DiscoveryServerURL))
+
+	client, err := sdClientV1.NewServiceDiscoveryClientV1(rootInfo.DiscoveryServerURL)
+	if err != nil {
+		logger.L().Fatal("failed to create service discovery client", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
+		return
 	}
+
+	services, err := servicediscovery.GetServices(
+		client,
+	)
+
+	if err != nil {
+		logger.L().Fatal("failed to to get services from server", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
+		return
+	}
+
+	logger.L().Debug("configuring service discovery URLs", helpers.String("cloudAPIURL", services.GetApiServerUrl()), helpers.String("cloudReportURL", services.GetReportReceiverHttpUrl()))
+
+	tenant := cautils.GetTenantConfig("", "", "", nil)
+	if services.GetApiServerUrl() != "" {
+		tenant.GetConfigObj().CloudAPIURL = services.GetApiServerUrl()
+	}
+	if services.GetReportReceiverHttpUrl() != "" {
+		tenant.GetConfigObj().CloudReportURL = services.GetReportReceiverHttpUrl()
+	}
+
+	if err = tenant.UpdateCachedConfig(); err != nil {
+		logger.L().Error("failed to update cached config", helpers.Error(err))
+	}
+
+	ksCloud, err := v1.NewKSCloudAPI(
+		services.GetApiServerUrl(),
+		services.GetReportReceiverHttpUrl(),
+		"",
+	)
+	if err != nil {
+		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+		return
+	}
+
+	getter.SetKSCloudAPIConnector(ksCloud)
 }

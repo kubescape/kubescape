@@ -6,9 +6,7 @@ import (
 	"strings"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -47,7 +45,7 @@ func generateRows(summary ImageScanSummary) [][]string {
 
 func generateRow(cve CVE) []string {
 	row := make([]string, 5)
-	row[imageColumnSeverity] = getColor(cve.Severity)(cve.Severity)
+	row[imageColumnSeverity] = utils.GetColorForVulnerabilitySeverity(cve.Severity)(cve.Severity)
 	row[imageColumnName] = cve.ID
 	row[imageColumnComponent] = cve.Package
 	row[imageColumnVersion] = cve.Version
@@ -66,7 +64,7 @@ func generateRow(cve CVE) []string {
 func getImageScanningHeaders() []string {
 	headers := make([]string, 5)
 	headers[imageColumnSeverity] = "SEVERITY"
-	headers[imageColumnName] = "NAME"
+	headers[imageColumnName] = "VULNERABILITY"
 	headers[imageColumnComponent] = "COMPONENT"
 	headers[imageColumnVersion] = "VERSION"
 	headers[imageColumnFixedIn] = "FIXED IN"
@@ -75,21 +73,4 @@ func getImageScanningHeaders() []string {
 
 func getImageScanningColumnsAlignments() []int {
 	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT}
-}
-
-func getColor(severity string) func(...string) string {
-	switch severity {
-	case apis.SeverityCriticalString:
-		return gchalk.WithAnsi256(1).Bold
-	case apis.SeverityHighString:
-		return gchalk.WithAnsi256(196).Bold
-	case apis.SeverityMediumString:
-		return gchalk.WithAnsi256(166).Bold
-	case apis.SeverityLowString:
-		return gchalk.WithAnsi256(220).Bold
-	case apis.SeverityNegligibleString:
-		return gchalk.WithAnsi256(39).Bold
-	default:
-		return gchalk.WithAnsi256(30).Bold
-	}
 }

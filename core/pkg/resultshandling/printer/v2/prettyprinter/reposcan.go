@@ -3,6 +3,7 @@ package prettyprinter
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
@@ -13,7 +14,6 @@ import (
 
 type RepoPrinter struct {
 	writer                 *os.File
-	inputPatterns          []string
 	categoriesTablePrinter configurationprinter.TablePrinter
 }
 
@@ -32,11 +32,11 @@ func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary
 	printTopComponents(rp.writer, *summary)
 }
 
-func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
 	rp.categoriesTablePrinter.PrintCategoriesTables(rp.writer, summaryDetails, sortedControlIDs)
 
-	if len(summaryDetails.TopWorkloadsByScore) > 1 {
-		rp.printTopWorkloads(summaryDetails)
+	if len(topWorkloadsByScore) > 1 {
+		rp.printTopWorkloads(topWorkloadsByScore)
 	}
 
 }
@@ -47,22 +47,28 @@ func (rp *RepoPrinter) PrintNextSteps() {
 
 func (rp *RepoPrinter) getNextSteps() []string {
 	return []string{
-		configScanVerboseRunText,
+		runCommandsText,
 		clusterScanRunText,
-		CICDSetupText,
-		installHelmText,
+		scanWorkloadText,
+		installKubescapeText,
 	}
 }
 
-func (rp *RepoPrinter) printTopWorkloads(summaryDetails *reportsummary.SummaryDetails) {
-	cautils.InfoTextDisplay(rp.writer, getTopWorkloadsTitle(len(summaryDetails.TopWorkloadsByScore)))
+func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IResource) {
+	txt := getTopWorkloadsTitle(len(topWorkloadsByScore))
+	cautils.InfoTextDisplay(rp.writer, txt)
 
-	for i, wl := range summaryDetails.TopWorkloadsByScore {
+	cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
+
+	cautils.SimpleDisplay(rp.writer, highStakesWlsText)
+
+	for i, wl := range topWorkloadsByScore {
 		ns := wl.GetNamespace()
 		name := wl.GetName()
 		kind := wl.GetKind()
 		cmdPrefix := getWorkloadPrefixForCmd(ns, kind, name)
-		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s - '%s'\n", i+1, cmdPrefix, getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
+		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%d. %s\n", i+1, cmdPrefix))
+		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
 	}
 
 	cautils.InfoTextDisplay(rp.writer, "\n")
