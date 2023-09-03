@@ -41,15 +41,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
 		Long:    `The action you want to perform`,
 		Example: scanCmdExamples,
-		Args: func(cmd *cobra.Command, args []string) error {
-			// setting input patterns for framework scan is only relevancy for non-security view
-			if len(args) > 0 && scanInfo.View != string(cautils.SecurityViewType) {
-				if args[0] != "framework" && args[0] != "control" {
-					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
-				}
-			}
-			return nil
-		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				setSecurityViewScanInfo(args, &scanInfo)
@@ -57,8 +48,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				return securityScan(scanInfo, ks)
 			}
 
-			if len(args) == 0 {
-				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, []string{strings.Join(getter.NativeFrameworks, ",")})
+			if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
+				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
 			}
 			return nil
 		},
