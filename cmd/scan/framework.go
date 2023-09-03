@@ -42,7 +42,11 @@ var (
   Run '%[1]s list frameworks' for the list of supported frameworks
 `, cautils.ExecName())
 
-	ErrUnknownSeverity = errors.New("unknown severity")
+	ErrUnknownSeverity          = errors.New("unknown severity")
+	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
+	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
+	ErrKeepLocalOrSubmit        = errors.New("you can use `keep-local` or `submit`, but not both")
+	ErrOmitRawResourcesOrSubmit = errors.New("you can use `omit-raw-resources` or `submit`, but not both")
 )
 
 func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
@@ -209,20 +213,20 @@ func validateSeverity(severity string) error {
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
 func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.View == string(cautils.SecurityViewType) {
-		return fmt.Errorf("you can use `security` view only when not scanning specific frameworks/controls")
+		return ErrSecurityViewNotSupported
 	}
 
 	if scanInfo.Submit && scanInfo.Local {
-		return fmt.Errorf("you can use `keep-local` or `submit`, but not both")
+		return ErrKeepLocalOrSubmit
 	}
 	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
-		return fmt.Errorf("bad argument: out of range threshold")
+		return ErrBadThreshold
 	}
 	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
-		return fmt.Errorf("bad argument: out of range threshold")
+		return ErrBadThreshold
 	}
 	if scanInfo.Submit && scanInfo.OmitRawResources {
-		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+		return ErrOmitRawResourcesOrSubmit
 	}
 	severity := scanInfo.FailThresholdSeverity
 	if err := validateSeverity(severity); severity != "" && err != nil {

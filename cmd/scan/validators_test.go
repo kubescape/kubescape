@@ -68,6 +68,16 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
 			ErrUnknownSeverity,
 		},
+		{
+			"Security view should be invalid for scan info",
+			&cautils.ScanInfo{View: string(cautils.SecurityViewType)},
+			ErrSecurityViewNotSupported,
+		},
+		{
+			"Empty view should be valid for scan info",
+			&cautils.ScanInfo{},
+			nil,
+		},
 	}
 
 	for _, tc := range testCases {
