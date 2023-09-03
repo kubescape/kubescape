@@ -132,16 +132,26 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 	}
 }
 
-func ValidatePrinter(scanType cautils.ScanTypes, printFormat string) bool {
-	if scanType != cautils.ScanTypeImage {
-		return true
+func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string) error {
+	if scanType == cautils.ScanTypeImage {
+		// supported types for image scanning
+		switch printFormat {
+		case printer.JsonFormat, printer.PrettyFormat, printer.SARIFFormat:
+			return nil
+		default:
+			return fmt.Errorf("format \"%s\"is not supported for image scanning", printFormat)
+		}
 	}
 
-	// supported types for image scanning
-	switch printFormat {
-	case printer.JsonFormat, printer.PrettyFormat, printer.SARIFFormat:
-		return true
-	default:
-		return false
+	if printFormat == printer.SARIFFormat {
+		// supported types for SARIF
+		switch scanContext {
+		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal:
+			return nil
+		default:
+			return fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
+		}
 	}
+
+	return nil
 }

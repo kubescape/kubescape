@@ -176,6 +176,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
 			if err != nil {
 				logger.L().Debug("failed to create location resolver", helpers.Error(err))
+				continue
 			}
 
 			for _, toPin := range result.AssociatedControls {
