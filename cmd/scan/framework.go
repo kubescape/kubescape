@@ -208,6 +208,10 @@ func validateSeverity(severity string) error {
 
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
 func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.View == string(cautils.SecurityViewType) {
+		return fmt.Errorf("you can use `security` view only when not scanning specific frameworks/controls")
+	}
+
 	if scanInfo.Submit && scanInfo.Local {
 		return fmt.Errorf("you can use `keep-local` or `submit`, but not both")
 	}
