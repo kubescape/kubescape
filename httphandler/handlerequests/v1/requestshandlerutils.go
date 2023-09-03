@@ -70,7 +70,6 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 		trace.WithAttributes(attribute.String("excludedNamespaces", scanInfo.ExcludedNamespaces)),
 		trace.WithAttributes(attribute.String("includeNamespaces", scanInfo.IncludeNamespaces)),
 		trace.WithAttributes(attribute.String("hostSensorYamlPath", scanInfo.HostSensorYamlPath)),
-		trace.WithAttributes(attribute.String("kubeContext", scanInfo.KubeContext)),
 	)
 
 	result, err := ks.Scan(ctx, scanInfo)
@@ -151,8 +150,8 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
 
-	// Set default KubeContext from scanInfo input
-	k8sinterface.SetClusterContextName(scanInfo.KubeContext)
+	// Set default KubeContext from current context
+	k8sinterface.SetClusterContextName(k8sinterface.GetContextName())
 
 	return scanInfo
 }
@@ -173,7 +172,6 @@ func defaultScanInfo() *cautils.ScanInfo {
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
-	scanInfo.KubeContext = envToString("KS_CONTEXT", "") // publish results to Kubescape SaaS
 
 	return scanInfo
 }

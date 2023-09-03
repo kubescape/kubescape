@@ -129,7 +129,6 @@ type ScanInfo struct {
 	HostSensorYamlPath    string                       // Path to hostsensor file
 	Local                 bool                         // Do not submit results
 	AccountID             string                       // account ID
-	KubeContext           string                       // context name
 	FrameworkScan         bool                         // false if scanning control
 	ScanAll               bool                         // true if scan all frameworks
 	OmitRawResources      bool                         // true if omit raw resources from the output
