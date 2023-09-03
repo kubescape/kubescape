@@ -106,9 +106,8 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
-		if !resultshandling.ValidatePrinter(scanInfo.ScanType, format) {
-			logger.L().Ctx(ctx).Fatal(fmt.Sprintf("Unsupported output format: %s", format))
-			continue
+		if err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format); err != nil {
+			logger.L().Ctx(ctx).Fatal(err.Error())
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View), clusterName)

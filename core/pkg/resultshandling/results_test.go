@@ -2,12 +2,14 @@ package resultshandling
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/stretchr/testify/assert"
 )
 
 type DummyReporter struct{}
@@ -59,93 +61,123 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 
 func TestValidatePrinter(t *testing.T) {
 	tests := []struct {
-		name     string
-		scanType cautils.ScanTypes
-		format   string
-		expected bool
+		name        string
+		scanType    cautils.ScanTypes
+		scanContext cautils.ScanningContext
+		format      string
+		expectErr   error
 	}{
 		{
-			name:     "json format for cluster scan",
-			scanType: cautils.ScanTypeCluster,
-			format:   printer.JsonFormat,
-			expected: true,
+			name:      "json format for cluster scan should not return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.JsonFormat,
+			expectErr: nil,
 		},
 		{
-			name:     "junit format for cluster scan",
-			scanType: cautils.ScanTypeCluster,
-			format:   printer.JunitResultFormat,
-			expected: true,
+			name:      "junit format for cluster scan should return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.JunitResultFormat,
+			expectErr: nil,
 		},
 		{
-			name:     "sarif format for cluster scan",
-			scanType: cautils.ScanTypeCluster,
-			format:   printer.SARIFFormat,
-			expected: true,
+			name:        "sarif format for cluster scan and git url context should not return error",
+			scanType:    cautils.ScanTypeCluster,
+			scanContext: cautils.ContextGitLocal,
+			format:      printer.SARIFFormat,
+			expectErr:   nil,
 		},
 		{
-			name:     "pretty format for cluster scan",
-			scanType: cautils.ScanTypeCluster,
-			format:   printer.PrettyFormat,
-			expected: true,
+			name:      "pretty format for cluster scan should not return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.PrettyFormat,
+			expectErr: nil,
 		},
 		{
-			name:     "html format for cluster scan",
-			scanType: cautils.ScanTypeCluster,
-			format:   printer.HtmlFormat,
-			expected: true,
+			name:      "html format for cluster scan should not return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.HtmlFormat,
+			expectErr: nil,
 		},
 		{
-			name:     "prometheus format for cluster scan",
-			scanType: cautils.ScanTypeCluster,
-			format:   printer.PrometheusFormat,
-			expected: true,
+			name:      "prometheus format for cluster scan should not return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.PrometheusFormat,
+			expectErr: nil,
 		},
 
 		{
-			name:     "json format for image scan",
-			scanType: cautils.ScanTypeImage,
-			format:   printer.JsonFormat,
-			expected: true,
+			name:      "json format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.JsonFormat,
+			expectErr: nil,
 		},
 		{
-			name:     "junit format for image scan",
-			scanType: cautils.ScanTypeImage,
-			format:   printer.JunitResultFormat,
-			expected: false,
+			name:      "junit format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.JunitResultFormat,
+			expectErr: errors.New("format \"junit\"is not supported for image scanning"),
 		},
 		{
-			name:     "sarif format for image scan",
-			scanType: cautils.ScanTypeImage,
-			format:   printer.SARIFFormat,
-			expected: true,
+			name:      "sarif format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.SARIFFormat,
+			expectErr: nil,
 		},
 		{
-			name:     "pretty format for image scan",
-			scanType: cautils.ScanTypeImage,
-			format:   printer.PrettyFormat,
-			expected: true,
+			name:      "pretty format for image scan should not return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.PrettyFormat,
+			expectErr: nil,
 		},
 		{
-			name:     "html format for image scan",
-			scanType: cautils.ScanTypeImage,
-			format:   printer.HtmlFormat,
-			expected: false,
+			name:      "html format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.HtmlFormat,
+			expectErr: errors.New("format \"html\"is not supported for image scanning"),
 		},
 		{
-			name:     "prometheus format for image scan",
-			scanType: cautils.ScanTypeImage,
-			format:   printer.PrometheusFormat,
-			expected: false,
+			name:      "prometheus format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.PrometheusFormat,
+			expectErr: errors.New("format \"prometheus\"is not supported for image scanning"),
+		},
+		{
+			name:        "sarif format for cluster context should return error",
+			scanContext: cautils.ContextCluster,
+			format:      printer.SARIFFormat,
+			expectErr:   errors.New("format \"sarif\" is only supported when scanning local files"),
+		},
+		{
+			name:        "sarif format for remote url context should return error",
+			scanContext: cautils.ContextGitURL,
+			format:      printer.SARIFFormat,
+			expectErr:   errors.New("format \"sarif\" is only supported when scanning local files"),
+		},
+		{
+			name:        "sarif format for local dir context should not return error",
+			scanContext: cautils.ContextDir,
+			format:      printer.SARIFFormat,
+			expectErr:   nil,
+		},
+		{
+			name:        "sarif format for local file context should not return error",
+			scanContext: cautils.ContextFile,
+			format:      printer.SARIFFormat,
+			expectErr:   nil,
+		},
+		{
+			name:        "sarif format for local git context should not return error",
+			scanContext: cautils.ContextGitLocal,
+			format:      printer.SARIFFormat,
+			expectErr:   nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ValidatePrinter(tt.scanType, tt.format)
-			if got != tt.expected {
-				t.Errorf("%s failed - got = %v, want %v", tt.name, got, tt.expected)
-			}
+			got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format)
+
+			assert.Equal(t, tt.expectErr, got)
 		})
 	}
-
 }
