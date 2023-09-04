@@ -9,7 +9,7 @@ import (
 	"github.com/anchore/grype/grype/presenter"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/go-logger/iconlogger"
+
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
@@ -22,7 +22,6 @@ import (
 
 func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) error {
 
-	logger.InitLogger(iconlogger.LoggerName)
 	// ===================== Scan the image =====================
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
 
@@ -63,9 +62,8 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 		return err
 	}
 
-	if logger.L().GetLevel() != "debug" {
-		enableCopaLogger(sout, serr)
-	}
+	// Restore the output streams
+	os.Stdout, os.Stderr = sout, serr
 
 	patchedImageName := fmt.Sprintf("%s:%s", patchInfo.ImageName, patchInfo.PatchedImageTag)
 	logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded image: %s", patchedImageName))
@@ -108,9 +106,4 @@ func disableCopaLogger() {
 	os.Stdout, os.Stderr = nil, nil
 	null, _ := os.Open(os.DevNull)
 	log.SetOutput(null)
-}
-
-func enableCopaLogger(sout, serr *os.File) {
-	os.Stdout, os.Stderr = sout, serr
-	log.SetOutput(os.Stdout)
 }

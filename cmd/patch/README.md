@@ -41,16 +41,15 @@ The patch command can be run in 2 ways:
 
 ### Flags
 
-| Flag | Description | Required | Default |
-|------|-------------|----------|---------|
-| -i, --image | Image name to be patched (should be in canonical form) | Yes | |
-| -r, --report | Generate reports of the image scan before and after patching | No | false | 
-| -a, --addr | Address of the buildkitd service | No | unix:///run/buildkit/buildkitd.sock |
-| -t, --tag | Tag of the resultant patched image | No | image_name-patched |
-| --timeout | Timeout for the patching process | No | 5m |
-| -u, --username | Username for the image registry login | No | |
-| -p, --password | Password for the image registry login | No | |
-| -h, --help | help for patch | No | |
+| Flag           | Description                                            | Required | Default                             |
+| -------------- | ------------------------------------------------------ | -------- | ----------------------------------- |
+| -i, --image    | Image name to be patched (should be in canonical form) | Yes      |                                     |
+| -a, --addr     | Address of the buildkitd service                       | No       | unix:///run/buildkit/buildkitd.sock |
+| -t, --tag      | Tag of the resultant patched image                     | No       | image_name-patched                  |
+| --timeout      | Timeout for the patching process                       | No       | 5m                                  |
+| -u, --username | Username for the image registry login                  | No       |                                     |
+| -p, --password | Password for the image registry login                  | No       |                                     |
+| -h, --help     | help for patch                                         | No       |                                     |
 
 
 ## Example
@@ -76,27 +75,60 @@ We will demonstrate how to use the patch command with an example of [nginx](http
     sudo kubescape patch --image docker.io/library/nginx:1.22
     ```
 
-3. The output will be similar to:
+3. You will get an output like below:
 
     ```bash
-    [info] Scanning image...
-    [success] Scanned image successfully
-    [info] Patching image...
-    ...<logs>
-    [success] Patched image successfully
-    [info] Re-scanning image...
-    [success] Re-scanned image successfully
-    [info] Preparing results ...
+    ✅  Successfully scanned image: docker.io/library/nginx:1.22
+    ✅  Patched image successfully. Loaded image: nginx:1.22-patched
+    ✅  Successfully re-scanned image: nginx:1.22-patched
+
+    | Severity | Vulnerability  | Component     | Version                 | Fixed In |
+    | -------- | -------------- | ------------- | ----------------------- | -------- |
+    | Critical | CVE-2023-23914 | curl          | 7.74.0-1.3+deb11u7      | wont-fix |
+    | Critical | CVE-2019-8457  | libdb5.3      | 5.3.28+dfsg1-0.8        | wont-fix |
+    | High     | CVE-2022-42916 | libcurl4      | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2022-1304  | libext2fs2    | 1.46.2-2                | wont-fix |
+    | High     | CVE-2022-42916 | curl          | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2022-1304  | e2fsprogs     | 1.46.2-2                | wont-fix |
+    | High     | CVE-2022-1304  | libcom-err2   | 1.46.2-2                | wont-fix |
+    | High     | CVE-2023-27533 | curl          | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2023-27534 | libcurl4      | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2023-27533 | libcurl4      | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2022-43551 | libcurl4      | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2022-3715  | bash          | 5.1-2+deb11u1           | wont-fix |
+    | High     | CVE-2023-27534 | curl          | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2022-43551 | curl          | 7.74.0-1.3+deb11u7      | wont-fix |
+    | High     | CVE-2021-33560 | libgcrypt20   | 1.8.7-6                 | wont-fix |
+    | High     | CVE-2023-2953  | libldap-2.4-2 | 2.4.57+dfsg-3+deb11u1   | wont-fix |
+    | High     | CVE-2022-1304  | libss2        | 1.46.2-2                | wont-fix |
+    | High     | CVE-2020-22218 | libssh2-1     | 1.9.0-2                 | wont-fix |
+    | High     | CVE-2023-29491 | libtinfo6     | 6.2+20201114-2+deb11u1  | wont-fix |
+    | High     | CVE-2022-2309  | libxml2       | 2.9.10+dfsg-6.7+deb11u4 | wont-fix |
+    | High     | CVE-2022-4899  | libzstd1      | 1.4.8+dfsg-2.1          | wont-fix |
+    | High     | CVE-2022-1304  | logsave       | 1.46.2-2                | wont-fix |
+    | High     | CVE-2023-29491 | ncurses-base  | 6.2+20201114-2+deb11u1  | wont-fix |
+    | High     | CVE-2023-29491 | ncurses-bin   | 6.2+20201114-2+deb11u1  | wont-fix |
+    | High     | CVE-2023-31484 | perl-base     | 5.32.1-4+deb11u2        | wont-fix |
+    | High     | CVE-2020-16156 | perl-base     | 5.32.1-4+deb11u2        | wont-fix |
     
-    Vulnerability summary:
-    Image: docker.io/library/nginx:1.22
-      * Total CVE's  : 175
-      * Fixable CVE's: 23
+    Vulnerability summary - 161 vulnerabilities found:
+    Image: nginx:1.22-patched
+      * 3 Critical
+      * 24 High
+      * 31 Medium
+      * 103 Other
 
-    Image: docker.io/library/nginx:1.22-patched
-       * Total CVE's  : 152
-       * Fixable CVE's: 0
-
+    Most vulnerable components:
+      * curl (7.74.0-1.3+deb11u7) - 1 Critical, 4 High, 5 Medium, 1 Low, 3 Negligible
+      * libcurl4 (7.74.0-1.3+deb11u7) - 1 Critical, 4 High, 5 Medium, 1 Low, 3 Negligible
+      * libtiff5 (4.2.0-1+deb11u4) - 7 Medium, 10 Negligible, 2 Unknown
+      * libxml2 (2.9.10+dfsg-6.7+deb11u4) - 1 High, 2 Medium
+      * perl-base (5.32.1-4+deb11u2) - 2 High, 2 Negligible
+    
+    What now?
+    ─────────
+    * Run with '--verbose'/'-v' flag for detailed vulnerabilities view
+    * Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator
     ```
 
 ## Limitations

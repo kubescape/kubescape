@@ -64,7 +64,7 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 	}
 
 	// Convert image to canonical format (required by copacetic for patching images)
-	patchInfoImage, err := cautils.Normalize_image_name(patchInfo.Image)
+	patchInfoImage, err := cautils.NormalizeImageName(patchInfo.Image)
 	if err != nil {
 		return nil
 	}
