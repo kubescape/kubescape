@@ -20,7 +20,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) error {
+func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) error {
 
 	// ===================== Scan the image =====================
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
@@ -86,10 +86,9 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 
 	// ===================== Results Handling =====================
 
-	var scanInfo cautils.ScanInfo
 	scanInfo.SetScanType(cautils.ScanTypeImage)
-	outputPrinters := GetOutputPrinters(&scanInfo, ctx, "")
-	uiPrinter := GetUIPrinter(ctx, &scanInfo, "")
+	outputPrinters := GetOutputPrinters(scanInfo, ctx, "")
+	uiPrinter := GetUIPrinter(ctx, scanInfo, "")
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 	resultsHandler.ImageScanData = []cautils.ImageScanData{
 		{

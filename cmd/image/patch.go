@@ -56,7 +56,7 @@ func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *me
 				return err
 			}
 
-			return ks.Patch(context.Background(), &patchInfo)
+			return ks.Patch(context.Background(), &patchInfo, scanInfo)
 		},
 	}
 

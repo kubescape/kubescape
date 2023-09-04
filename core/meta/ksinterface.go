@@ -25,7 +25,7 @@ type IKubescape interface {
 	Fix(ctx context.Context, fixInfo *metav1.FixInfo) error
 
 	// patch
-	Patch(ctx context.Context, patchInfo *metav1.PatchInfo) error
+	Patch(ctx context.Context, patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) error
 
 	// scan image
 	ScanImage(ctx context.Context, imgScanInfo *metav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error)
