@@ -27,12 +27,9 @@ var patchCmdExamples = fmt.Sprintf(`
   # Documentation: https://github.com/kubescape/kubescape/tree/master/cmd/patch
 `, cautils.ExecName())
 
-func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *metav1.ImageScanInfo) *cobra.Command {
-	patchInfo := metav1.PatchInfo{
-		Username: imgScanInfo.Username,
-		Password: imgScanInfo.Password,
-	}
+func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials imageCredentials) *cobra.Command {
 
+	var patchInfo metav1.PatchInfo
 	patchCmd := &cobra.Command{
 		Use:     "patch <image_name>:<image-tag> [flags]",
 		Short:   "Patch container images with vulnerabilities ",
@@ -50,7 +47,11 @@ func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *me
 				return err
 			}
 
-			patchInfo.Image = args[0]
+			patchInfo = metav1.PatchInfo{
+				Username: imgCredentials.Username,
+				Password: imgCredentials.Password,
+				Image:    args[0],
+			}
 
 			if err := validateImagePatchInfo(&patchInfo); err != nil {
 				return err
