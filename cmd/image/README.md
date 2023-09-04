@@ -7,7 +7,7 @@ It uses [grype](https://github.com/anchore/grype) under the hood for scanning th
 
 
 ```bash
-kubescape image scan <image-name> [flags]
+kubescape image scan <image:tag> [flags]
 ```
 
 ### Flags
@@ -31,7 +31,7 @@ We will demonstrate how to use the scan command with an example of [nginx](https
 1. In a terminal, run the `kubescape image scan` command: 
     
     ```bash
-    sudo kubescape image scan nginx:1.22
+    kubescape image scan nginx:1.22
     ```
 
 2. You will get an output like below:
@@ -85,20 +85,26 @@ We will demonstrate how to use the scan command with an example of [nginx](https
     What now?
     ─────────
     * Run with '--verbose'/'-v' flag for detailed vulnerabilities view
-    * Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator
+    * Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator
     ```
 
 
 # Patch Command
 
 The patch command is used for patching container images with vulnerabilities.  
-It uses [copa](https://github.com/project-copacetic/copacetic) and [buildkit](https://github.com/moby/buildkit) under the hood for patching the container images, and [grype](https://github.com/anchore/grype) as the engine for scanning the images (at the moment).
+It uses [copa](https://github.com/project-copacetic/copacetic) and [buildkit](https://github.com/moby/buildkit) under the hood for patching the container images, and [grype](https://github.com/anchore/grype) as the engine for scanning the images.
 
 ## Usage
 
 ```bash
-kubescape image patch <image-name> [flags]
+kubescape image patch <image:tag> [flags]
 ```
+### Pre-requisites
+
+- [docker](https://docs.docker.com/desktop/install/linux-install/#generic-installation-steps) daemon must be installed and running.
+- [buildkit](https://github.com/moby/buildkit) daemon must be installed
+
+### Running the patch command
 
 The patch command can be run in 2 ways:
 1. **With sudo privileges**
@@ -148,11 +154,6 @@ The patch command can be run in 2 ways:
 
 We will demonstrate how to use the patch command with an example of [nginx](https://www.nginx.com/) image.
 
-### Pre-requisites
-
-- [docker](https://docs.docker.com/desktop/install/linux-install/#generic-installation-steps) daemon must be installed and running.
-- [buildkit](https://github.com/moby/buildkit) daemon must be installed
-    
 ### Steps
 
 1. Run `buildkitd` service:
