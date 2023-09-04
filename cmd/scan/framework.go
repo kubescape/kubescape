@@ -15,6 +15,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/cmd/utils"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/meta"
@@ -136,7 +137,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance-score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
 
-			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
+			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, utils.TerminateOnExceedingSeverity)
 			return nil
 		},
 	}
@@ -145,7 +146,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 // countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
 func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) (bool, error) {
 	targetSeverity := scanInfo.FailThresholdSeverity
-	if err := validateSeverity(targetSeverity); err != nil {
+	if err := utils.ValidateSeverity(targetSeverity); err != nil {
 		return false, err
 	}
 
@@ -178,11 +179,6 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 
 }
 
-// terminateOnExceedingSeverity terminates the application on exceeding severity
-func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
-}
-
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold
 //
 // The function forces the application to terminate with an exit code 1 if at least one control failed control that exceeds the set severity threshold
@@ -197,17 +193,6 @@ func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters,
 	} else if err != nil {
 		logger.L().Fatal(err.Error())
 	}
-}
-
-// validateSeverity returns an error if a given severity is not known, nil otherwise
-func validateSeverity(severity string) error {
-	for _, val := range reporthandlingapis.GetSupportedSeverities() {
-		if strings.EqualFold(severity, val) {
-			return nil
-		}
-	}
-	return ErrUnknownSeverity
-
 }
 
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
@@ -229,7 +214,7 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 		return ErrOmitRawResourcesOrSubmit
 	}
 	severity := scanInfo.FailThresholdSeverity
-	if err := validateSeverity(severity); severity != "" && err != nil {
+	if err := utils.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 

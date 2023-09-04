@@ -1,4 +1,4 @@
-package patch
+package image
 
 import (
 	"context"
@@ -21,21 +21,36 @@ import (
 var patchCmdExamples = fmt.Sprintf(`
   # Patch the nginx:1.22 image
   1) sudo buildkitd        # start buildkitd service, run in seperate terminal
-  2) sudo %[1]s patch --image docker.io/library/nginx:1.22   # patch the image
+  2) sudo %[1]s patch nginx:1.22   # patch the image
 
   # The patch command can also be run without sudo privileges
   # Documentation: https://github.com/kubescape/kubescape/tree/master/cmd/patch
 `, cautils.ExecName())
 
-func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
-	var patchInfo metav1.PatchInfo
+func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgScanInfo *metav1.ImageScanInfo) *cobra.Command {
+	patchInfo := metav1.PatchInfo{
+		Username: imgScanInfo.Username,
+		Password: imgScanInfo.Password,
+	}
 
 	patchCmd := &cobra.Command{
-		Use:     "patch --image <image-tag> [flags]",
+		Use:     "patch <image_name>:<image-tag> [flags]",
 		Short:   "Patch container images with vulnerabilities ",
 		Long:    `Patch command is for automatically patching images with vulnerabilities.`,
 		Example: patchCmdExamples,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("the command takes exactly one image name as an argument")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+
+			if err := validateImageScanInfo(scanInfo); err != nil {
+				return err
+			}
+
+			patchInfo.Image = args[0]
 
 			if err := validateImagePatchInfo(&patchInfo); err != nil {
 				return err
@@ -45,13 +60,9 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 
-	patchCmd.PersistentFlags().StringVarP(&patchInfo.Image, "image", "i", "", "Application image name and tag to patch")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.PatchedImageTag, "tag", "t", "", "Tag for the patched image. Defaults to '<image-tag>-patched' ")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.BuildkitAddress, "address", "a", "unix:///run/buildkit/buildkitd.sock", "Address of buildkitd service, defaults to local buildkitd.sock")
 	patchCmd.PersistentFlags().DurationVar(&patchInfo.Timeout, "timeout", 5*time.Minute, "Timeout for the operation, defaults to '5m'")
-
-	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login")
-	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")
 
 	return patchCmd
 }

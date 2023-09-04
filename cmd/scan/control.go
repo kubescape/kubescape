@@ -11,6 +11,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/cmd/utils"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 
@@ -114,7 +115,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if results.GetComplianceScore() < float32(scanInfo.ComplianceThreshold) {
 				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
-			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
+			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, utils.TerminateOnExceedingSeverity)
 
 			return nil
 		},
@@ -129,7 +130,7 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
 	}
 
-	if err := validateSeverity(severity); severity != "" && err != nil {
+	if err := utils.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 	return nil

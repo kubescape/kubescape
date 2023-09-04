@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/kubescape/v2/cmd/utils"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/meta"
@@ -111,9 +112,6 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
 
-	isi := &imageScanInfo{}
-	scanCmd.AddCommand(getImageCmd(ks, &scanInfo, isi))
-
 	return scanCmd
 }
 
@@ -140,7 +138,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
 		return err
 	}
 
-	enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo, terminateOnExceedingSeverity)
+	enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo, utils.TerminateOnExceedingSeverity)
 
 	return nil
 }

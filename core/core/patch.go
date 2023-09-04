@@ -97,9 +97,8 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo) e
 			Image:           patchedImageName,
 		},
 	}
-	resultsHandler.HandleResults(ctx)
 
-	return nil
+	return resultsHandler.HandleResults(ctx)
 }
 
 func disableCopaLogger() {
