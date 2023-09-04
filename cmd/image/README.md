@@ -24,7 +24,11 @@ kubescape image scan <image-name> [flags]
 
 ## Example
 
-1. In a seperate terminal, run the `kubescape scan` command: 
+We will demonstrate how to use the scan command with an example of [nginx](https://www.nginx.com/) image.
+
+### Steps
+
+1. In a terminal, run the `kubescape image scan` command: 
     
     ```bash
     sudo kubescape image scan nginx:1.22
@@ -121,8 +125,7 @@ The patch command can be run in 2 ways:
         "moby/buildkit:$BUILDKIT_VERSION" \
         --addr tcp://0.0.0.0:$BUILDKIT_PORT
 
-    kubescape patch \
-        -i <image-name> \
+    kubescape image patch <image-name> \
         -a tcp://0.0.0.0:$BUILDKIT_PORT
    ```
 
@@ -158,7 +161,7 @@ We will demonstrate how to use the patch command with an example of [nginx](http
     sudo buildkitd
     ```
 
-2. In a seperate terminal, run the `kubescape patch` command: 
+2. In a seperate terminal, run the `kubescape image patch` command: 
     
     ```bash
     sudo kubescape image patch docker.io/library/nginx:1.22
