@@ -40,8 +40,8 @@ func GetImageCmd(ks meta.IKubescape) *cobra.Command {
 	imageCmd.PersistentFlags().StringVarP(&imageCredentials.Username, "username", "u", "", "Username for registry login")
 	imageCmd.PersistentFlags().StringVarP(&imageCredentials.Password, "password", "p", "", "Password for registry login")
 
-	imageCmd.AddCommand(getScanCmd(ks, &scanInfo, imageCredentials))
-	imageCmd.AddCommand(getPatchCmd(ks, &scanInfo, imageCredentials))
+	imageCmd.AddCommand(getScanCmd(ks, &scanInfo, &imageCredentials))
+	imageCmd.AddCommand(getPatchCmd(ks, &scanInfo, &imageCredentials))
 
 	imageCmd.SetHelpFunc(func(command *cobra.Command, strings []string) {
 		// hide kube-context and server flags

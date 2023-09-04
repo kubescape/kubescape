@@ -27,7 +27,7 @@ var patchCmdExamples = fmt.Sprintf(`
   # Documentation: https://github.com/kubescape/kubescape/tree/master/cmd/patch
 `, cautils.ExecName())
 
-func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials imageCredentials) *cobra.Command {
+func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials *imageCredentials) *cobra.Command {
 
 	var patchInfo metav1.PatchInfo
 	patchCmd := &cobra.Command{
