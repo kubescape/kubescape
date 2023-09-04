@@ -78,14 +78,7 @@ func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.P
 	if scanResults == nil {
 		return fmt.Errorf("no image vulnerability data provided")
 	}
-
-	presenterConfig, err := presenter.ValidatedConfig("json", "", false)
-	if err != nil {
-		return err
-	}
-
-	pres := presenter.GetPresenter(presenterConfig, *scanResults)
-
+	pres := presenter.GetPresenter("json", "", false, *scanResults)
 	return pres.Present(jp.writer)
 }
 
