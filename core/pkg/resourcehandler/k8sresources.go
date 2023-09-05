@@ -146,16 +146,15 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	var wlIdentifierString string
-	if resource.GetApiVersion() != "" {
-		wlIdentifierString = strings.Join([]string{resource.GetApiVersion(), resource.GetKind()}, "/")
-	} else {
-		wlIdentifierString = resource.GetKind()
-	}
-
-	gvr, err := k8sinterface.GetGroupVersionResource(wlIdentifierString)
+	gvr, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
 	if err != nil {
 		return nil, err
+	}
+
+	if resource.GetApiVersion() != "" {
+		group, version := k8sinterface.SplitApiVersion(resource.GetApiVersion())
+		gvr.Group = group
+		gvr.Version = version
 	}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
@@ -186,6 +185,26 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 
 	wl := workloadinterface.NewWorkloadObj(metaObjs[0].GetObject())
 	return wl, nil
+}
+
+// TODO: copied from k8sinterface
+// updateResourceKind update kind from single to parallel
+func updateResourceKind(resource string) string {
+	resource = strings.ToLower(resource)
+
+	if resource == "ingress" {
+		return "ingresses"
+	}
+
+	if resource != "" && !strings.HasSuffix(resource, "s") {
+		if strings.HasSuffix(resource, "y") {
+			return fmt.Sprintf("%sies", strings.TrimSuffix(resource, "y")) // e.g. NetworkPolicy -> networkpolicies
+		} else {
+			return fmt.Sprintf("%ss", resource) // add 's' at the end of a resource
+		}
+	}
+	return resource
+
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {

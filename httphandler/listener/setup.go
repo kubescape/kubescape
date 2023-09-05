@@ -32,8 +32,6 @@ const (
 
 // SetupHTTPListener set up listening http servers
 func SetupHTTPListener() error {
-	initialize()
-
 	keyPair, err := loadTLSKey("", "") // TODO - support key and crt files
 	if err != nil {
 		return err
