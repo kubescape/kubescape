@@ -43,7 +43,6 @@ var (
   Run '%[1]s list frameworks' for the list of supported frameworks
 `, cautils.ExecName())
 
-	ErrUnknownSeverity          = errors.New("unknown severity")
 	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
 	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
 	ErrKeepLocalOrSubmit        = errors.New("you can use `keep-local` or `submit`, but not both")

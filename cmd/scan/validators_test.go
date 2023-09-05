@@ -3,6 +3,7 @@ package scan
 import (
 	"testing"
 
+	"github.com/kubescape/kubescape/v2/cmd/utils"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 )
 
@@ -26,7 +27,7 @@ func Test_validateControlScanInfo(t *testing.T) {
 		{
 			"Unknown severity should be invalid for scan info",
 			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
-			ErrUnknownSeverity,
+			utils.ErrUnknownSeverity,
 		},
 	}
 
@@ -66,7 +67,7 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 		{
 			"Unknown severity should be invalid for scan info",
 			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
-			ErrUnknownSeverity,
+			utils.ErrUnknownSeverity,
 		},
 		{
 			"Security view should be invalid for scan info",
