@@ -215,7 +215,7 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 
 	if len(summary.Images) == 1 {
 		cautils.SimpleDisplay(writer, "Image: %s\n", summary.Images[0])
-	} else {
+	} else if len(summary.Images) < 4 {
 		cautils.SimpleDisplay(writer, "Images: %s\n", strings.Join(summary.Images, ", "))
 	}
 
