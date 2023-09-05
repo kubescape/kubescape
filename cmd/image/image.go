@@ -23,7 +23,7 @@ var imageCmdExamples = fmt.Sprintf(`
 
 func GetImageCmd(ks meta.IKubescape) *cobra.Command {
 	var scanInfo cautils.ScanInfo
-	var imageCredentials imageCredentials
+	var imgCredentials imageCredentials
 
 	imageCmd := &cobra.Command{
 		Use:     "image",
@@ -37,11 +37,11 @@ func GetImageCmd(ks meta.IKubescape) *cobra.Command {
 
 	imageCmd.PersistentFlags().StringVarP(&scanInfo.FailThresholdSeverity, "severity-threshold", "s", "", "Severity threshold is the severity of a vulnerability at which the command fails and returns exit code 1")
 
-	imageCmd.PersistentFlags().StringVarP(&imageCredentials.Username, "username", "u", "", "Username for registry login")
-	imageCmd.PersistentFlags().StringVarP(&imageCredentials.Password, "password", "p", "", "Password for registry login")
+	imageCmd.PersistentFlags().StringVarP(&imgCredentials.Username, "username", "u", "", "Username for registry login")
+	imageCmd.PersistentFlags().StringVarP(&imgCredentials.Password, "password", "p", "", "Password for registry login")
 
-	imageCmd.AddCommand(getScanCmd(ks, &scanInfo, &imageCredentials))
-	imageCmd.AddCommand(getPatchCmd(ks, &scanInfo, &imageCredentials))
+	imageCmd.AddCommand(getScanCmd(ks, &scanInfo, &imgCredentials))
+	imageCmd.AddCommand(getPatchCmd(ks, &scanInfo, &imgCredentials))
 
 	imageCmd.SetHelpFunc(func(command *cobra.Command, strings []string) {
 		// hide kube-context and server flags
