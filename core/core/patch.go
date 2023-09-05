@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/anchore/grype/grype/presenter"
+	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 
@@ -20,7 +21,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) error {
+func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
 
 	// ===================== Scan the image =====================
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
@@ -35,7 +36,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 	// Scan the image
 	scanResults, err := svc.Scan(ctx, patchInfo.Image, creds)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Save the scan results to a file in json format
 	pres := presenter.GetPresenter("json", "", false, *scanResults)
@@ -46,7 +47,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 	writer := printer.GetWriter(ctx, fileName)
 
 	if err := pres.Present(writer); err != nil {
-		return err
+		return nil, err
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
 
@@ -59,7 +60,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 	}
 
 	if err := copa.Patch(ctx, patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchInfo.PatchedImageTag, ""); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Restore the output streams
@@ -74,7 +75,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 
 	scanResultsPatched, err := svc.Scan(ctx, patchedImageName, creds)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
 
@@ -97,7 +98,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 		},
 	}
 
-	return resultsHandler.HandleResults(ctx)
+	return scanResultsPatched, resultsHandler.HandleResults(ctx)
 }
 
 func disableCopaLogger() {

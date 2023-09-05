@@ -11,9 +11,11 @@ import (
 	"github.com/docker/distribution/reference"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v2/cmd/utils"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 
 	"github.com/spf13/cobra"
 )
@@ -55,7 +57,16 @@ func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials 
 				return err
 			}
 
-			return ks.Patch(context.Background(), &patchInfo, scanInfo)
+			results, err := ks.Patch(context.Background(), &patchInfo, scanInfo)
+			if err != nil {
+				return err
+			}
+
+			if imagescan.ExceedsSeverityThreshold(results, imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)) {
+				utils.TerminateOnExceedingSeverity(scanInfo, logger.L())
+			}
+
+			return nil
 		},
 	}
 

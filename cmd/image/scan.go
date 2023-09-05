@@ -55,7 +55,7 @@ func getScanCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials *
 				utils.TerminateOnExceedingSeverity(scanInfo, logger.L())
 			}
 
-			return err
+			return nil
 		},
 	}
 
