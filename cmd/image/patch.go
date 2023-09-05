@@ -26,14 +26,14 @@ var patchCmdExamples = fmt.Sprintf(`
   2) sudo %[1]s patch nginx:1.22   # patch the image
 
   # The patch command can also be run without sudo privileges
-  # Documentation: https://github.com/kubescape/kubescape/tree/master/cmd/patch
+  # Documentation: https://github.com/kubescape/kubescape/tree/master/cmd/image/README.md
 `, cautils.ExecName())
 
 func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials *imageCredentials) *cobra.Command {
 
 	var patchInfo metav1.PatchInfo
 	patchCmd := &cobra.Command{
-		Use:     "patch <image_name>:<image-tag> [flags]",
+		Use:     "patch <image>:<tag> [flags]",
 		Short:   "Patch container images with vulnerabilities ",
 		Long:    `Patch command is for automatically patching images with vulnerabilities.`,
 		Example: patchCmdExamples,

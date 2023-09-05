@@ -26,7 +26,7 @@ var (
 // imageCmd represents the image command
 func getScanCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials *imageCredentials) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:     "scan <image_name>:<image_tag> [flags]",
+		Use:     "scan <image>:<tag> [flags]",
 		Short:   "Scan container images for vulnerabilities",
 		Example: imageExample,
 		Args: func(cmd *cobra.Command, args []string) error {
