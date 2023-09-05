@@ -12,7 +12,7 @@ type PatchInfo struct {
 	Username string // username for registry login
 	Password string // password for registry login
 
-	// registry.com/namespace/<image-name>:<image-tag>
+	// registry.com/namespace/<image>:<tag>
 	ImageName string // image name
 	ImageTag  string // image tag
 }

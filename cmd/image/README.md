@@ -113,7 +113,7 @@ The patch command can be run in 2 ways:
 
     ```bash
     sudo buildkitd & 
-    sudo kubescape patch --image <image-name>
+    sudo kubescape image patch <image>
     ```
 
 2. **Without sudo privileges**

@@ -19,7 +19,7 @@ var (
   Scan an image for vulnerabilities. 
 
   # Scan the 'nginx' image
-  %[1]s scan image "nginx"
+  %[1]s image scan "nginx"
 `, cautils.ExecName())
 )
 

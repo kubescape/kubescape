@@ -227,11 +227,11 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 
 func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary) {
 	if len(summary.Images) > 3 {
-		cautils.SimpleDisplay(writer, "Receive full report by running: kubescape scan image <image>\n")
+		cautils.SimpleDisplay(writer, "Receive full report by running: kubescape image scan <image>\n")
 	} else {
 		for _, img := range summary.Images {
 			imgWithoutTag := strings.Split(img, ":")[0]
-			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape image scan %s'", img))))
 		}
 	}
 
