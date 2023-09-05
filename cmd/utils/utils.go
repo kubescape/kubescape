@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
@@ -10,7 +9,7 @@ import (
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
-var ErrUnknownSeverity = errors.New(fmt.Sprintf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", ")))
+var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
 
 // validateSeverity returns an error if a given severity is not known, nil otherwise
 func ValidateSeverity(severity string) error {
