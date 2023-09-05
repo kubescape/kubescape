@@ -47,11 +47,9 @@ func getPatchCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo, imgCredentials 
 				return err
 			}
 
-			patchInfo = metav1.PatchInfo{
-				Username: imgCredentials.Username,
-				Password: imgCredentials.Password,
-				Image:    args[0],
-			}
+			patchInfo.Username = imgCredentials.Username
+			patchInfo.Password = imgCredentials.Password
+			patchInfo.Image = args[0]
 
 			if err := validateImagePatchInfo(&patchInfo); err != nil {
 				return err
