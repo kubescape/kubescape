@@ -88,7 +88,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 			return nil, err
 		}
 	} else {
-		logger.L().Info("storage is not initialized")
+		logger.L().Debug("storage is not initialized - skipping storing results")
 	}
 
 	return nil, nil

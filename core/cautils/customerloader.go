@@ -46,6 +46,7 @@ type ConfigObj struct {
 	ClusterName    string `json:"clusterName,omitempty"`
 	CloudReportURL string `json:"cloudReportURL,omitempty"`
 	CloudAPIURL    string `json:"cloudAPIURL,omitempty"`
+	StorageEnabled bool   `json:"storageEnabled,omitempty"`
 }
 
 // Config - convert ConfigObj to config file
@@ -98,6 +99,7 @@ type ITenantConfig interface {
 	GetConfigObj() *ConfigObj
 	GetCloudReportURL() string
 	GetCloudAPIURL() string
+	IsStorageEnabled() bool
 }
 
 // ======================================================================================
@@ -141,6 +143,7 @@ func (lc *LocalConfig) GetAccountID() string      { return lc.configObj.AccountI
 func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterName }
 func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
 func (lc *LocalConfig) GetCloudAPIURL() string    { return lc.configObj.CloudAPIURL }
+func (lc *LocalConfig) IsStorageEnabled() bool    { return lc.configObj.StorageEnabled }
 
 func (lc *LocalConfig) GenerateAccountID() (string, error) {
 	lc.configObj.AccountID = uuid.NewString()
@@ -240,6 +243,7 @@ func (c *ClusterConfig) GetDefaultNS() string      { return c.configMapNamespace
 func (c *ClusterConfig) GetAccountID() string      { return c.configObj.AccountID }
 func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudReportURL }
 func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPIURL }
+func (c *ClusterConfig) IsStorageEnabled() bool    { return c.configObj.StorageEnabled }
 
 func (c *ClusterConfig) UpdateCachedConfig() error {
 	logger.L().Debug("updating cached config", helpers.Interface("configObj", c.configObj))

@@ -38,6 +38,9 @@ func (tcm *TenantConfigMock) GetContextName() string {
 func (tcm *TenantConfigMock) GetAccountID() string {
 	return tcm.accountID
 }
+func (tcm *TenantConfigMock) IsStorageEnabled() bool {
+	return true
+}
 func (tcm *TenantConfigMock) GetConfigObj() *cautils.ConfigObj {
 	return &cautils.ConfigObj{
 		AccountID:   tcm.accountID,

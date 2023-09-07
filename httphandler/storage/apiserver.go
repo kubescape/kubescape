@@ -11,7 +11,6 @@ import (
 	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/names"
-	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
 	"golang.org/x/exp/maps"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -36,7 +35,7 @@ import (
 var storageInstance *APIServerStore
 
 type PostureRepository interface {
-	GetWorkloadConfigurationScanResult(ctx context.Context, name string) (*v1beta1.WorkloadConfigurationScan, error)
+	GetWorkloadConfigurationScanResult(ctx context.Context, name, namespace string) (*v1beta1.WorkloadConfigurationScan, error)
 	StoreWorkloadConfigurationScanResult(ctx context.Context, report *v2.PostureReport, result *resourcesresults.Result) (*v1beta1.WorkloadConfigurationScan, error)
 	StoreWorkloadConfigurationScanResultSummary(ctx context.Context, workloadScan *v1beta1.WorkloadConfigurationScan) (*v1beta1.WorkloadConfigurationScanSummary, error)
 }
@@ -51,7 +50,7 @@ const (
 // APIServerStore implements both PostureRepository with in-cluster storage (apiserver) to be used for production
 type APIServerStore struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
-	Namespace     string
+	namespace     string
 }
 
 var _ PostureRepository = (*APIServerStore)(nil)
@@ -83,14 +82,14 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 	}
 	return &APIServerStore{
 		StorageClient: clientset.SpdxV1beta1(),
-		Namespace:     namespace,
+		namespace:     namespace,
 	}, nil
 }
 
 func NewFakeAPIServerStorage(namespace string) *APIServerStore {
 	return &APIServerStore{
 		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
-		Namespace:     namespace,
+		namespace:     namespace,
 	}
 }
 
@@ -109,12 +108,12 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 	return nil
 }
 
-func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Result, report *v2.PostureReport) map[string]v1beta1.ScannedControl {
+func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Result, controlSummaries reportsummary.ControlSummaries) map[string]v1beta1.ScannedControl {
 	m := map[string]v1beta1.ScannedControl{}
 
 	for i := range result.AssociatedControls {
 		control := result.AssociatedControls[i]
-		ctrlSummary := report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, control.GetID())
+		ctrlSummary := controlSummaries.GetControl(reportsummary.EControlCriteriaID, control.GetID())
 
 		m[control.GetID()] = v1beta1.ScannedControl{
 			ControlID: control.GetID(),
@@ -128,14 +127,14 @@ func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Resu
 	return m
 }
 
-func (a *APIServerStore) GetWorkloadConfigurationScanResult(ctx context.Context, name string) (*v1beta1.WorkloadConfigurationScan, error) {
+func (a *APIServerStore) GetWorkloadConfigurationScanResult(ctx context.Context, name, namespace string) (*v1beta1.WorkloadConfigurationScan, error) {
 	_, span := otel.Tracer("").Start(ctx, "APIServerStore.GetWorkloadConfigurationScanResult")
 	defer span.End()
 	if name == "" {
 		logger.L().Debug("empty name provided, skipping workload scan result retrieval")
 		return &v1beta1.WorkloadConfigurationScan{}, nil
 	}
-	manifest, err := a.StorageClient.WorkloadConfigurationScans(a.Namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.WorkloadConfigurationScans(namespace).Get(context.Background(), name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("workload configuration scan manifest not found in storage",
@@ -161,6 +160,13 @@ func findResourceInReport(resourceID string, report *v2.PostureReport) (*reporth
 	return nil, fmt.Errorf("resource %s not found in report", resourceID)
 }
 
+func (a *APIServerStore) getResourceNamespace(namespace string) string {
+	if namespace == "" {
+		return a.namespace
+	}
+	return namespace
+}
+
 func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Context, report *v2.PostureReport, result *resourcesresults.Result) (*v1beta1.WorkloadConfigurationScan, error) {
 	resource, err := findResourceInReport(result.ResourceID, report)
 	if err != nil {
@@ -169,6 +175,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 
 	relatedObjects := getRelatedObjects(resource)
 	name := GetWorkloadScanK8sResourceName(ctx, resource, relatedObjects)
+	namespace := a.getResourceNamespace(resource.GetNamespace())
 	labels, annotations, err := getManifestObjectLabelsAndAnnotations(ctx, resource, relatedObjects)
 	if err != nil {
 		return nil, err
@@ -179,15 +186,16 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 			Name:        name,
 			Annotations: annotations,
 			Labels:      labels,
+			Namespace:   namespace,
 		},
 		Spec: v1beta1.WorkloadConfigurationScanSpec{
-			Controls:       getControlsMapFromResult(ctx, result, report),
+			Controls:       getControlsMapFromResult(ctx, result, report.SummaryDetails.Controls),
 			RelatedObjects: parseWorkloadScanRelatedObjectList(relatedObjects),
 		},
 	}
 
 	// This is a workaround for the fact that the apiserver does not return already exist error on Create
-	existing, err := a.StorageClient.WorkloadConfigurationScans(a.Namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
+	existing, err := a.StorageClient.WorkloadConfigurationScans(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
 	if err == nil {
 		logger.L().Debug("found existing WorkloadConfigurationScan manifest in storage - merging manifests", helpers.String("name", manifest.Name))
 		manifest.Annotations = existing.Annotations
@@ -195,13 +203,13 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 		manifest.Spec = mergeWorkloadConfigurationScanSpec(existing.Spec, manifest.Spec)
 	}
 
-	_, err = a.StorageClient.WorkloadConfigurationScans(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err = a.StorageClient.WorkloadConfigurationScans(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.WorkloadConfigurationScans(a.Namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.WorkloadConfigurationScans(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
@@ -211,7 +219,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 			result.Spec = mergeWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
 			manifest = *result
 			// try to send the updated workload configuration scan manifest
-			_, updateErr := a.StorageClient.WorkloadConfigurationScans(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -276,10 +284,11 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 
 	controlsSummary := getControlsSummaryMapFromScannedControlMap(ctx, workloadScan.Spec.Controls)
 	severities := calculateSeveritiesSummaryFromControls(controlsSummary)
-
+	namespace := a.getResourceNamespace(workloadScan.GetNamespace())
 	manifest := v1beta1.WorkloadConfigurationScanSummary{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        workloadScan.Name,
+			Namespace:   namespace,
 			Annotations: workloadScan.Annotations,
 			Labels:      workloadScan.Labels,
 		},
@@ -290,7 +299,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 	}
 
 	// This is a workaround for the fact that the apiserver does not return already exist error on Create
-	existing, err := a.StorageClient.WorkloadConfigurationScanSummaries(a.Namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
+	existing, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
 	if err == nil {
 		logger.L().Debug("found existing WorkloadConfigurationScanSummary manifest in storage - merging manifests", helpers.String("name", manifest.Name))
 		manifest.Annotations = existing.Annotations
@@ -298,13 +307,13 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 		manifest.Spec = mergeWorkloadConfigurationScanSummarySpec(existing.Spec, manifest.Spec)
 	}
 
-	_, err = a.StorageClient.WorkloadConfigurationScanSummaries(a.Namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err = a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.WorkloadConfigurationScanSummaries(a.Namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
@@ -314,7 +323,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 			result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
 			manifest = *result
 			// try to send the updated manifest
-			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(a.Namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -358,7 +367,7 @@ func getManifestObjectLabelsAndAnnotations(ctx context.Context, resource workloa
 			}
 		}
 	}
-	m["kubescape.io/resource-id"] = resource.GetID()
+
 	m[v1.ApiGroupMetadataKey], m[v1.ApiVersionMetadataKey] = k8sinterface.SplitApiVersion(resource.GetApiVersion())
 	m[v1.KindMetadataKey] = resource.GetKind()
 	m[v1.NameMetadataKey] = resource.GetName()
@@ -376,12 +385,10 @@ func getManifestObjectLabelsAndAnnotations(ctx context.Context, resource workloa
 
 func getRelatedObjects(resource *reporthandling.Resource) []workloadinterface.IMetadata {
 	obj := resource.GetObject()
+
 	if objectsenvelopes.IsTypeRegoResponseVector(obj) {
-		if relatedObjects, ok := obj["relatedObjects"]; ok {
-			if relatedObjects, ok := relatedObjects.([]map[string]interface{}); ok {
-				return resourcehandler.ConvertMapListToMeta(relatedObjects)
-			}
-		}
+		regoResponseVectorObject := objectsenvelopes.NewRegoResponseVectorObject(obj)
+		return regoResponseVectorObject.GetRelatedObjects()
 	}
 
 	return []workloadinterface.IMetadata{}
@@ -450,6 +457,7 @@ func GetWorkloadScanK8sResourceName(ctx context.Context, resource workloadinterf
 		sb.WriteString(rbName)
 		sb.WriteString(nameSeparator)
 		sb.WriteString(roleKind)
+		sb.WriteString(nameSeparator)
 		if roleNamespace != "" {
 			sb.WriteString(roleNamespace)
 			sb.WriteString(nameSeparator)
@@ -508,23 +516,6 @@ func getControlsSummaryMapFromScannedControlMap(ctx context.Context, scannedCont
 	}
 	return m
 }
-
-/*
-func getControlsSummaryMapFromResult(ctx context.Context, result *resourcesresults.Result, report *v2.PostureReport) map[string]v1beta1.ScannedControlSummary {
-	m := map[string]v1beta1.ScannedControlSummary{}
-
-	for i := range result.AssociatedControls {
-		control := result.AssociatedControls[i]
-		ctrlSummary := report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, control.GetID())
-
-		m[control.GetID()] = v1beta1.ScannedControlSummary{
-			ControlID: control.GetID(),
-			Severity:  parseControlSeverity(ctrlSummary),
-			Status:    parseScannedControlStatus(&control),
-		}
-	}
-	return m
-}*/
 
 func parseControlSeverity(controlSummary reportsummary.IControlSummary) v1beta1.ControlSeverity {
 	scoreFactor := controlSummary.GetScoreFactor()

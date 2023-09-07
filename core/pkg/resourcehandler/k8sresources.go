@@ -187,26 +187,6 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 	return wl, nil
 }
 
-// TODO: copied from k8sinterface
-// updateResourceKind update kind from single to parallel
-func updateResourceKind(resource string) string {
-	resource = strings.ToLower(resource)
-
-	if resource == "ingress" {
-		return "ingresses"
-	}
-
-	if resource != "" && !strings.HasSuffix(resource, "s") {
-		if strings.HasSuffix(resource, "y") {
-			return fmt.Sprintf("%sies", strings.TrimSuffix(resource, "y")) // e.g. NetworkPolicy -> networkpolicies
-		} else {
-			return fmt.Sprintf("%ss", resource) // add 's' at the end of a resource
-		}
-	}
-	return resource
-
-}
-
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
 	provider := cloudsupport.GetCloudProvider()
 	if provider == "" {

@@ -19,6 +19,10 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
+const (
+	defaultNamespace = "kubescape"
+)
+
 func main() {
 	ctx := context.Background()
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
@@ -42,7 +46,14 @@ func main() {
 }
 
 func initializeStorage() {
-	s, err := storage.NewAPIServerStorage("kubescape")
+	if !cautils.GetTenantConfig("", "", "", nil).IsStorageEnabled() {
+		logger.L().Debug("storage disabled - skipping initialization")
+		return
+	}
+
+	namespace := getNamespace()
+	logger.L().Debug("storage enabled", helpers.String("namespace", namespace))
+	s, err := storage.NewAPIServerStorage(namespace)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}
@@ -96,4 +107,11 @@ func initializeSaaSEnv() {
 		getter.SetKSCloudAPIConnector(ksCloud)
 	}
 
+}
+
+func getNamespace() string {
+	if ns, ok := os.LookupEnv("NAMESPACE"); ok {
+		return ns
+	}
+	return defaultNamespace
 }
