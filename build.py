@@ -64,7 +64,7 @@ def main():
     if client_name:
         ldflags += " -X {}={}".format(client_var, client_name)
 
-    build_command = ["go", "build", "-buildmode=pie", "-tags=static,gitenabled", "-o", ks_file, "-ldflags" ,ldflags]
+    build_command = ["go", "build", "-buildmode=pie", "-tags=static,system_libgit2,gitenabled", "-o", ks_file, "-ldflags" ,ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))
