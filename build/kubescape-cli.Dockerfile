@@ -1,13 +1,15 @@
-FROM golang:1.20-bookworm as builder
+FROM --platform=$BUILDPLATFORM golang:1.20-bookworm as builder
 
 ENV GO111MODULE=on CGO_ENABLED=1
 WORKDIR /work
 ARG TARGETOS TARGETARCH
 
-RUN apt update && apt install -y golang-github-libgit2-git2go-v34-dev
+RUN dpkg --add-architecture arm64 && apt update && apt install -y gcc-aarch64-linux-gnu libgit2-dev:arm64
 RUN --mount=target=. \
     --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
+    PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/ \
+    CC=aarch64-linux-gnu-gcc \
     GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags=static,system_libgit2,gitenabled -o /out/kubescape .
 
 FROM gcr.io/distroless/static-debian11:nonroot
