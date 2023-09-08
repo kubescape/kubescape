@@ -1,4 +1,5 @@
 //go:build gitenabled
+
 package cautils
 
 import (
@@ -6,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-git-url/apis"
-	git2go "github.com/libgit2/git2go/v33"
+	git2go "github.com/libgit2/git2go/v34"
 )
 
 type gitRepository struct {
