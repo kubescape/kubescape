@@ -15,5 +15,5 @@ docker buildx build -t kubescape-cli -f build/kubescape-cli.Dockerfile --build-a
 
 3. Build kubescape Docker image
 ```
-docker buildx build -t kubescape -f build/kubescape.Dockerfile --load .
+docker buildx build -t kubescape -f build/Dockerfile --load .
 ```

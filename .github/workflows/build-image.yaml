@@ -19,16 +19,17 @@ on:
             required: false
             default: false
 jobs:
-  publish-image:
-    permissions:
-      id-token: write
-      packages: write
-      contents: read
-    uses: ./.github/workflows/d-publish-image.yaml
+  build-http-image:
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
-      client: ${{ inputs.CLIENT }}
-      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
-      image_tag: ${{ inputs.IMAGE_TAG }}
-      support_platforms: ${{ inputs.PLATFORMS }}
-      cosign: ${{ inputs.CO_SIGN }}
+      IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubescape
+      IMAGE_TAG: ${{ inputs.IMAGE_TAG }}
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 0
+      GO111MODULE: "on"
+      BUILD_PLATFORM: ${{ inputs.PLATFORMS }}
+      GO_VERSION: "1.20"
+      REQUIRED_TESTS: '[]'
+      COSIGN: ${{ inputs.CO_SIGN }}
+      HELM_E2E_TEST: false
     secrets: inherit
