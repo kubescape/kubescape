@@ -50,6 +50,8 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.SetAutoMergeCells(true)
 		summaryTable.SetHeaderLine(true)
 		summaryTable.SetRowLine(true)
+		summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+		summaryTable.SetAutoFormatHeaders(false)
 		summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 
 		resourceRows := [][]string{}

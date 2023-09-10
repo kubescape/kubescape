@@ -39,6 +39,8 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeaderLine(true)
+	summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	summaryTable.SetAutoFormatHeaders(false)
 	summaryTable.SetColumnAlignment(GetColumnsAlignments())
 	summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 

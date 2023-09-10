@@ -14,6 +14,8 @@ func renderTable(writer io.Writer, headers []string, columnAlignments []int, row
 	table := tablewriter.NewWriter(writer)
 	table.SetHeader(headers)
 	table.SetHeaderLine(true)
+	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	table.SetAutoFormatHeaders(false)
 	table.SetColumnAlignment(columnAlignments)
 	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
 
@@ -63,11 +65,11 @@ func generateRow(cve CVE) []string {
 
 func getImageScanningHeaders() []string {
 	headers := make([]string, 5)
-	headers[imageColumnSeverity] = "SEVERITY"
-	headers[imageColumnName] = "VULNERABILITY"
-	headers[imageColumnComponent] = "COMPONENT"
-	headers[imageColumnVersion] = "VERSION"
-	headers[imageColumnFixedIn] = "FIXED IN"
+	headers[imageColumnSeverity] = "Severity"
+	headers[imageColumnName] = "Vulnerability"
+	headers[imageColumnComponent] = "Component"
+	headers[imageColumnVersion] = "Version"
+	headers[imageColumnFixedIn] = "Fixed In"
 	return headers
 }
 
