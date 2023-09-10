@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/olekukonko/tablewriter"
 )
@@ -15,7 +16,7 @@ func renderTable(writer io.Writer, headers []string, columnAlignments []int, row
 	table.SetHeader(headers)
 	table.SetHeaderLine(true)
 	table.SetColumnAlignment(columnAlignments)
-	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 	var headerColors []tablewriter.Colors
 	for range rows[0] {
