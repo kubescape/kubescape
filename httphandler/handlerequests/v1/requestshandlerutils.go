@@ -151,7 +151,7 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	// *** end ***
 
 	// Set default KubeContext from current context
-	k8sinterface.SetClusterContextName(k8sinterface.GetContextName())
+	k8sinterface.SetClusterContextName(os.Getenv("KS_CONTEXT"))
 
 	return scanInfo
 }
