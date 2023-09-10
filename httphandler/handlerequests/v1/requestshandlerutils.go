@@ -11,7 +11,6 @@ import (
 	"github.com/armosec/utils-go/boolutils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/core"
@@ -161,9 +160,6 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	// DO NOT CHANGE
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
-
-	// Set default KubeContext from current context
-	k8sinterface.SetClusterContextName(os.Getenv("KS_CONTEXT"))
 
 	return scanInfo
 }

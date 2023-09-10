@@ -6,6 +6,7 @@ import (
 	"os"
 
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	_ "github.com/kubescape/kubescape/v2/httphandler/docs"
 	"github.com/kubescape/kubescape/v2/httphandler/listener"
@@ -34,6 +35,9 @@ func main() {
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
+
+	logger.L().Debug("setting cluster context name", helpers.String("context", os.Getenv("KS_CONTEXT")))
+	k8sinterface.SetClusterContextName(os.Getenv("KS_CONTEXT"))
 
 	initializeLoggerName()
 	initializeLoggerLevel()
