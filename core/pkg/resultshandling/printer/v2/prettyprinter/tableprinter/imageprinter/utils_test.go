@@ -140,7 +140,7 @@ func TestGenerateRow(t *testing.T) {
 func TestGetImageScanningHeaders(t *testing.T) {
 	headers := getImageScanningHeaders()
 
-	expectedHeaders := []string{"SEVERITY", "VULNERABILITY", "COMPONENT", "VERSION", "FIXED IN"}
+	expectedHeaders := []string{"Severity", "Vulnerability", "Component", "Version", "Fixed In"}
 
 	for i := range headers {
 		if headers[i] != expectedHeaders[i] {
