@@ -1,0 +1,6 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1alpha1
+kind: ControlConfiguration
+metadata:
+  name: controlconfiguration-1
+blob:
+  description: This is controlconfiguration-1

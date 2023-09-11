@@ -1,0 +1,6 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1alpha1
+kind: Exception
+metadata:
+  name: exception-1
+blob:
+  description: This is exception-1

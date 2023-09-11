@@ -1,0 +1,10 @@
+apiVersion: spdx.softwarecomposition.kubescape.io/v1alpha1
+kind: Control
+metadata:
+  name: control-1
+rulesRef:
+  - name: rule-1
+    kind: Rule
+    apiVersion: v1alpha1
+blob:
+  description: This is control-1
