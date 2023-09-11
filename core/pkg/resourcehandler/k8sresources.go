@@ -58,7 +58,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
-	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+
+	if scanInfo.DeletedScanObject {
+		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
+	} else {
+		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+	}
+
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -80,7 +86,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	// add single resource to k8s resources map (for single resource scan)
-	addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+	if !scanInfo.DeletedScanObject {
+		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
