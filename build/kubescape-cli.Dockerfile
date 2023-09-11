@@ -6,20 +6,17 @@ ARG TARGETOS TARGETARCH
 
 RUN dpkg --add-architecture arm64 && apt update && apt install -y gcc-aarch64-linux-gnu libgit2-dev:arm64
 RUN --mount=target=. \
-    --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg \
     PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig/ \
+    CGO_LDFLAGS="-static -tags nocgo -L/usr/lib/aarch64-linux-gnu -lgit2 -L/usr/lib/aarch64-linux-gnu -lmbedtls -lmbedx509 -lmbedcrypto -lhttp_parser -L/usr/lib/aarch64-linux-gnu -lssh2 -lrt -L/usr/lib/aarch64-linux-gnu -lpcre2-8 -lz" \
     CC=aarch64-linux-gnu-gcc \
-    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags=static,system_libgit2,gitenabled -o /out/kubescape .
+    GOOS=$TARGETOS GOARCH=$TARGETARCH go build -tags=gitenabled -o /out/kubescape .
 
-FROM gcr.io/distroless/static-debian11:nonroot
-
-USER nonroot
-WORKDIR /home/nonroot/
+FROM debian:bookworm
 
 COPY --from=builder /out/kubescape /usr/bin/kubescape
 
 ARG image_version client
 ENV RELEASE=$image_version CLIENT=$client
 
-ENTRYPOINT ["kubescape"]
+ENTRYPOINT ["sleep", "infinity"]
