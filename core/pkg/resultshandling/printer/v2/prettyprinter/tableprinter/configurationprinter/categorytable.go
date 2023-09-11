@@ -3,6 +3,7 @@ package configurationprinter
 import (
 	"io"
 
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -85,7 +86,7 @@ func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments 
 	table.SetHeaderLine(true)
 	table.SetColumnAlignment(columnAligments)
 	table.SetAutoWrapText(false)
-	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 	var headerColors []tablewriter.Colors
 	for range headers {
 		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
