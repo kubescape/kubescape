@@ -33,6 +33,7 @@ const (
 	accountIdEnvVar                 string = "KS_ACCOUNT_ID"
 	cloudApiUrlEnvVar               string = "KS_CLOUD_API_URL"
 	cloudReportUrlEnvVar            string = "KS_CLOUD_REPORT_URL"
+	storageEnabledEnvVar            string = "KS_STORAGE_ENABLED"
 )
 
 func ConfigFileFullPath() string { return getter.GetDefaultPath(configFileName + ".json") }
@@ -124,6 +125,7 @@ func NewLocalConfig(accountID, clusterName string, customClusterName string) *Lo
 
 	updateAccountID(lc.configObj, accountID)
 	updateCloudURLs(lc.configObj)
+	updateStorageEnabled(lc.configObj)
 
 	// If a custom cluster name is provided then set that name, else use the cluster's original name
 	if customClusterName != "" {
@@ -220,6 +222,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, clusterName st
 
 	updateAccountID(c.configObj, accountID)
 	updateCloudURLs(c.configObj)
+	updateStorageEnabled(c.configObj)
 
 	// If a custom cluster name is provided then set that name, else use the cluster's original name
 	if customClusterName != "" {
@@ -424,6 +427,10 @@ func updateAccountID(configObj *ConfigObj, accountID string) {
 	if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
 		configObj.AccountID = envAccountID
 	}
+}
+
+func updateStorageEnabled(configObj *ConfigObj, storageEnabled bool) {
+	configObj.StorageEnabled, _ = ParseBoolEnvVar(storageEnabledEnvVar, configObj.StorageEnabled)
 }
 
 func getCloudURLsFromEnv(cloudURLs *CloudURLs) {
