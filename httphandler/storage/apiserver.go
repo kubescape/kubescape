@@ -3,8 +3,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -24,7 +22,6 @@ import (
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
-	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -64,18 +61,7 @@ func GetStorage() *APIServerStore {
 }
 
 // NewAPIServerStorage initializes the APIServerStore struct
-func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
-	var config *rest.Config
-	var err error
-	if os.Getenv("LOCAL_STORAGE") == "true" { // For local testing
-		config = k8sinterface.GetK8sConfig()
-	} else {
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			return nil, err
-		}
-	}
-
+func NewAPIServerStorage(namespace string, config *rest.Config) (*APIServerStore, error) {
 	clientset, err := versioned.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -84,13 +70,6 @@ func NewAPIServerStorage(namespace string) (*APIServerStore, error) {
 		StorageClient: clientset.SpdxV1beta1(),
 		namespace:     namespace,
 	}, nil
-}
-
-func NewFakeAPIServerStorage(namespace string) *APIServerStore {
-	return &APIServerStore{
-		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
-		namespace:     namespace,
-	}
 }
 
 func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.PostureReport) error {
@@ -174,7 +153,10 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 	}
 
 	relatedObjects := getRelatedObjects(resource)
-	name := GetWorkloadScanK8sResourceName(ctx, resource, relatedObjects)
+	name, err := GetWorkloadScanK8sResourceName(ctx, resource, relatedObjects)
+	if err != nil {
+		return nil, err
+	}
 	namespace := a.getResourceNamespace(resource.GetNamespace())
 	labels, annotations, err := getManifestObjectLabelsAndAnnotations(ctx, resource, relatedObjects)
 	if err != nil {
@@ -240,18 +222,18 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
 	for ctrlID := range newSpec.Controls {
 		newCtrl := newSpec.Controls[ctrlID]
-		// new control
 		_, found := existingSpec.Controls[ctrlID]
 		if !found {
 			existingSpec.Controls[ctrlID] = newCtrl
 			continue
 		}
 
-		// TODO: decide what to do with existing control, compare statuses
+		// TODOs:
+		// 1. Decide what to do with existing controls (compare statuses, what is the merge strategy)
+		// 2. Do we need to merge the rules?
+		// 3. Do we need to remove non-existing controls?
 		existingSpec.Controls[ctrlID] = newCtrl
 	}
-
-	// TODO: remove non-existing controls?
 
 	existingSpec.RelatedObjects = newSpec.RelatedObjects
 	return existingSpec
@@ -260,19 +242,18 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 func mergeWorkloadConfigurationScanSummarySpec(existingSpec v1beta1.WorkloadConfigurationScanSummarySpec, newSpec v1beta1.WorkloadConfigurationScanSummarySpec) v1beta1.WorkloadConfigurationScanSummarySpec {
 	for ctrlID := range newSpec.Controls {
 		newCtrl := newSpec.Controls[ctrlID]
-		// new control
 		_, found := existingSpec.Controls[ctrlID]
 		if !found {
 			existingSpec.Controls[ctrlID] = newCtrl
 			continue
 		}
 
-		// TODO: decide what to do with existing control, compare statuses
+		// TODOs:
+		// 1. Decide what to do with existing controls (compare statuses, what is the merge strategy)
+		// 2. Do we need to merge the rules?
+		// 3. Do we need to remove non-existing controls?
 		existingSpec.Controls[ctrlID] = newCtrl
-
 	}
-
-	// TODO: remove non-existing controls?
 
 	existingSpec.Severities = calculateSeveritiesSummaryFromControls(existingSpec.Controls)
 	return existingSpec
@@ -344,35 +325,42 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 	return &manifest, nil
 }
 
-func getManifestObjectLabelsAndAnnotations(ctx context.Context, resource workloadinterface.IMetadata, relatedObjects []workloadinterface.IMetadata) (labels map[string]string, annotations map[string]string, err error) {
-	m := make(map[string]string)
-	if len(relatedObjects) > 0 {
-		m[v1.RbacResourceMetadataKey] = "true"
+func updateLabelsAndAnnotationsMapFromRelatedObjects(m map[string]string, relatedObjects []workloadinterface.IMetadata) error {
+	m[v1.RbacResourceMetadataKey] = "true"
 
-		for i := range relatedObjects {
-			relatedObject := relatedObjects[i]
-			switch relatedObject.GetKind() {
-			case "Role":
-				m[v1.RoleNameMetadataKey] = relatedObject.GetName()
-				m[v1.RoleNamespaceMetadataKey] = relatedObject.GetNamespace()
-			case "RoleBinding":
-				m[v1.RoleBindingNameMetadataKey] = relatedObject.GetName()
-				m[v1.RoleBindingNamespaceMetadataKey] = relatedObject.GetNamespace()
-			case "ClusterRole":
-				m[v1.ClusterRoleNameMetadataKey] = relatedObject.GetName()
-			case "ClusterRoleBinding":
-				m[v1.ClusterRoleBindingNameMetadataKey] = relatedObject.GetName()
-			default:
-				return nil, nil, fmt.Errorf("unknown related object kind %s", relatedObject.GetKind())
-			}
+	for i := range relatedObjects {
+		relatedObject := relatedObjects[i]
+		switch relatedObject.GetKind() {
+		case "Role":
+			m[v1.RoleNameMetadataKey] = relatedObject.GetName()
+			m[v1.RoleNamespaceMetadataKey] = relatedObject.GetNamespace()
+		case "RoleBinding":
+			m[v1.RoleBindingNameMetadataKey] = relatedObject.GetName()
+			m[v1.RoleBindingNamespaceMetadataKey] = relatedObject.GetNamespace()
+		case "ClusterRole":
+			m[v1.ClusterRoleNameMetadataKey] = relatedObject.GetName()
+		case "ClusterRoleBinding":
+			m[v1.ClusterRoleBindingNameMetadataKey] = relatedObject.GetName()
+		default:
+			return fmt.Errorf("unknown related object kind %s", relatedObject.GetKind())
 		}
 	}
+	return nil
+}
 
+func getManifestObjectLabelsAndAnnotations(ctx context.Context, resource workloadinterface.IMetadata, relatedObjects []workloadinterface.IMetadata) (labels map[string]string, annotations map[string]string, err error) {
+	m := make(map[string]string)
 	m[v1.ApiGroupMetadataKey], m[v1.ApiVersionMetadataKey] = k8sinterface.SplitApiVersion(resource.GetApiVersion())
 	m[v1.KindMetadataKey] = resource.GetKind()
 	m[v1.NameMetadataKey] = resource.GetName()
 	if k8sinterface.IsResourceInNamespaceScope(resource.GetKind()) {
 		m[v1.NamespaceMetadataKey] = resource.GetNamespace()
+	}
+
+	if len(relatedObjects) > 0 {
+		if err := updateLabelsAndAnnotationsMapFromRelatedObjects(m, relatedObjects); err != nil {
+			return nil, nil, err
+		}
 	}
 
 	annotations = m
@@ -383,90 +371,46 @@ func getManifestObjectLabelsAndAnnotations(ctx context.Context, resource workloa
 	return labels, annotations, nil
 }
 
+// getRelatedObjects returns a list of related objects for the given resource
+// This is only relevant for RegoResponseVector objects (which are a triplet of <Subject, Role, RoleBinding>
+// For other objects, an empty list is returned
 func getRelatedObjects(resource *reporthandling.Resource) []workloadinterface.IMetadata {
 	obj := resource.GetObject()
-
-	if objectsenvelopes.IsTypeRegoResponseVector(obj) {
-		regoResponseVectorObject := objectsenvelopes.NewRegoResponseVectorObject(obj)
-		return regoResponseVectorObject.GetRelatedObjects()
+	if !objectsenvelopes.IsTypeRegoResponseVector(obj) {
+		return []workloadinterface.IMetadata{}
 	}
-
-	return []workloadinterface.IMetadata{}
+	return objectsenvelopes.NewRegoResponseVectorObject(obj).GetRelatedObjects()
 }
 
-func GetWorkloadScanK8sResourceName(ctx context.Context, resource workloadinterface.IMetadata, relatedObjects []workloadinterface.IMetadata) string {
-	var sb strings.Builder
-
-	// apiVersion (optional for rego response vector)
-	apiVersion := resource.GetApiVersion()
-	if apiVersion != "" {
-		sb.WriteString(apiVersion)
-		sb.WriteString(nameSeparator)
+func getRoleAndRoleBindingFromRelatedObjects(relatedObjects []workloadinterface.IMetadata) (role workloadinterface.IMetadata, roleBinding workloadinterface.IMetadata, err error) {
+	if len(relatedObjects) != 2 {
+		return nil, nil, fmt.Errorf("expected 2 related objects, got %d", len(relatedObjects))
 	}
 
-	// kind
-	sb.WriteString(resource.GetKind())
-	sb.WriteString(nameSeparator)
+	for i := range relatedObjects {
+		switch relatedObjects[i].GetKind() {
+		case "Role", "ClusterRole":
+			role = relatedObjects[i]
+		case "RoleBinding", "ClusterRoleBinding":
+			roleBinding = relatedObjects[i]
+		default:
+			return nil, nil, fmt.Errorf("unknown related object kind %s", relatedObjects[i].GetKind())
+		}
+	}
+	return role, roleBinding, nil
+}
 
-	// namespace (optional)
-	namespace := resource.GetNamespace()
-	if namespace != "" {
-		sb.WriteString(namespace)
-		sb.WriteString(nameSeparator)
+func GetWorkloadScanK8sResourceName(ctx context.Context, resource workloadinterface.IMetadata, relatedObjects []workloadinterface.IMetadata) (string, error) {
+	if len(relatedObjects) == 0 {
+		return names.ResourceToSlug(resource)
 	}
 
-	// name
-	sb.WriteString(resource.GetName())
-
-	if len(relatedObjects) > 0 {
-		rbKind := ""
-		rbNamespace := ""
-		rbName := ""
-		roleKind := ""
-		roleNamespace := ""
-		roleName := ""
-
-		for i := range relatedObjects {
-			switch relatedObjects[i].GetKind() {
-			case "Role":
-				roleKind = relatedObjects[i].GetKind()
-				roleNamespace = relatedObjects[i].GetNamespace()
-				roleName = relatedObjects[i].GetName()
-			case "RoleBinding":
-				rbKind = relatedObjects[i].GetKind()
-				rbName = relatedObjects[i].GetName()
-				rbNamespace = relatedObjects[i].GetNamespace()
-			case "ClusterRole":
-				roleKind = relatedObjects[i].GetKind()
-				roleName = relatedObjects[i].GetName()
-			case "ClusterRoleBinding":
-				rbKind = relatedObjects[i].GetKind()
-				rbName = relatedObjects[i].GetName()
-			default:
-				logger.L().Error("unknown related object kind", helpers.String("kind", relatedObjects[i].GetKind()))
-			}
-		}
-
-		sb.WriteString(nameSeparator)
-		sb.WriteString(rbKind)
-		sb.WriteString(nameSeparator)
-		if rbNamespace != "" {
-			sb.WriteString(rbNamespace)
-			sb.WriteString(nameSeparator)
-		}
-		sb.WriteString(rbName)
-		sb.WriteString(nameSeparator)
-		sb.WriteString(roleKind)
-		sb.WriteString(nameSeparator)
-		if roleNamespace != "" {
-			sb.WriteString(roleNamespace)
-			sb.WriteString(nameSeparator)
-		}
-		sb.WriteString(roleName)
+	role, roleBinding, err := getRoleAndRoleBindingFromRelatedObjects(relatedObjects)
+	if err != nil {
+		return "", err
 	}
 
-	name, _ := names.ToValidDNSSubdomainName(sb.String())
-	return name
+	return names.RoleBindingResourceToSlug(resource, role, roleBinding)
 }
 
 func calculateSeveritiesSummaryFromControls(controls map[string]v1beta1.ScannedControlSummary) v1beta1.WorkloadConfigurationScanSeveritiesSummary {

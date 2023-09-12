@@ -10,8 +10,16 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
+	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
 )
+
+func NewFakeAPIServerStorage(namespace string) *APIServerStore {
+	return &APIServerStore{
+		StorageClient: fake.NewSimpleClientset().SpdxV1beta1(),
+		namespace:     namespace,
+	}
+}
 
 func Test_getControlsMapFromResult(t *testing.T) {
 
@@ -203,7 +211,7 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 				Name:       "mypod",
 			},
 			relatedObjects: nil,
-			expected:       "v1-pod-default-mypod",
+			expected:       "v1-pod-default-mypod-b5fd-df1b",
 		},
 		{
 			resource: &FakeMetadata{
@@ -213,7 +221,7 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 				Name:       "mypod",
 			},
 			relatedObjects: nil,
-			expected:       "pod-mypod",
+			expected:       "pod--mypod-8282-f27b",
 		},
 		{
 			name: "with related objects (role, rolebinding)",
@@ -234,7 +242,7 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 					Namespace: "namespace-2",
 				},
 			},
-			expected: "serviceaccount-kubescape-sa-2-rolebinding-namespace-2-myrolebinding-role-namespace-1-myrole",
+			expected: "serviceaccount-kubescape-sa-2--role-namespace-1-myrole--rolebinding-namespace-2-myrolebinding-eacf-57fc",
 		},
 		{
 			name: "with related objects (cluster role, cluster rolebinding)",
@@ -253,16 +261,17 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 					Name: "myrolebinding",
 				},
 			},
-			expected: "serviceaccount-kubescape-sa-1-clusterrolebinding-myrolebinding-clusterrole-myrole",
+			expected: "serviceaccount-kubescape-sa-1--clusterrole--myrole--clusterrolebinding--myrolebinding-af38-ce0e",
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := GetWorkloadScanK8sResourceName(context.Background(), tc.resource, tc.relatedObjects)
+			result, err := GetWorkloadScanK8sResourceName(context.Background(), tc.resource, tc.relatedObjects)
 			if result != tc.expected {
 				t.Errorf("Expected %s, but got %s", tc.expected, result)
 			}
+			assert.NoError(t, err)
 		})
 	}
 }

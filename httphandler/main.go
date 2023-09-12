@@ -11,6 +11,7 @@ import (
 	_ "github.com/kubescape/kubescape/v2/httphandler/docs"
 	"github.com/kubescape/kubescape/v2/httphandler/listener"
 	"github.com/kubescape/kubescape/v2/httphandler/storage"
+	"k8s.io/client-go/rest"
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
@@ -57,7 +58,20 @@ func initializeStorage() {
 
 	namespace := getNamespace()
 	logger.L().Debug("storage enabled", helpers.String("namespace", namespace))
-	s, err := storage.NewAPIServerStorage(namespace)
+
+	// for local storage, use the k8s config
+	var config *rest.Config
+	if os.Getenv("LOCAL_STORAGE") == "true" {
+		config = k8sinterface.GetK8sConfig()
+	} else {
+		var err error
+		config, err = rest.InClusterConfig()
+		if err != nil {
+			logger.L().Fatal("storage initialization error", helpers.Error(err))
+		}
+	}
+
+	s, err := storage.NewAPIServerStorage(namespace, config)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}

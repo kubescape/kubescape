@@ -13,9 +13,9 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/backend v0.0.2
 	github.com/kubescape/go-logger v0.0.20
-	github.com/kubescape/k8s-interface v0.0.143
+	github.com/kubescape/k8s-interface v0.0.144
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.268-0.20230911064554-dda35b8c0d52
+	github.com/kubescape/opa-utils v0.0.268
 	github.com/kubescape/storage v0.0.16
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0

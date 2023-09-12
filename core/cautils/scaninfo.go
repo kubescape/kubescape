@@ -134,7 +134,7 @@ type ScanInfo struct {
 	OmitRawResources      bool                         // true if omit raw resources from the output
 	PrintAttackTree       bool                         // true if print attack tree
 	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
-	DeletedScanObject     bool                         // indicates whether the ScanObject is a deleted K8S resource
+	IsDeletedScanObject   bool                         // indicates whether the ScanObject is a deleted K8S resource
 	ScanType              ScanTypes
 	ScanImages            bool
 	ChartPath             string

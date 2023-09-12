@@ -59,7 +59,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
 
-	if scanInfo.DeletedScanObject {
+	if scanInfo.IsDeletedScanObject {
 		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
 	} else {
 		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
@@ -86,7 +86,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	// add single resource to k8s resources map (for single resource scan)
-	if !scanInfo.DeletedScanObject {
+	if !scanInfo.IsDeletedScanObject {
 		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
 	}
 
