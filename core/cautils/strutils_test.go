@@ -135,3 +135,59 @@ func TestStringSlicesAreEqual(t *testing.T) {
 		})
 	}
 }
+
+func TestParseBoolEnvVar(t *testing.T) {
+	testCases := []struct {
+		expectedErr  string
+		name         string
+		varName      string
+		varValue     string
+		defaultValue bool
+		expected     bool
+	}{
+		{
+			name:         "Variable does not exist",
+			varName:      "DOES_NOT_EXIST",
+			varValue:     "",
+			defaultValue: true,
+			expected:     true,
+			expectedErr:  "",
+		},
+		{
+			name:         "Variable exists and is a valid bool",
+			varName:      "MY_VAR",
+			varValue:     "true",
+			defaultValue: false,
+			expected:     true,
+			expectedErr:  "",
+		},
+		{
+			name:         "Variable exists but is not a valid bool",
+			varName:      "MY_VAR",
+			varValue:     "not_a_boolean",
+			defaultValue: false,
+			expected:     false,
+			expectedErr:  "failed to parse MY_VAR env var as bool",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.varValue != "" {
+				os.Setenv(tc.varName, tc.varValue)
+			} else {
+				os.Unsetenv(tc.varName)
+			}
+
+			actual, err := ParseBoolEnvVar(tc.varName, tc.defaultValue)
+			if tc.expectedErr != "" {
+				assert.NotNil(t, err)
+				assert.ErrorContains(t, err, tc.expectedErr)
+			} else {
+				assert.Nil(t, err)
+			}
+
+			assert.Equalf(t, tc.expected, actual, "unexpected result")
+		})
+	}
+}

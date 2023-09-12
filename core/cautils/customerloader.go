@@ -429,7 +429,7 @@ func updateAccountID(configObj *ConfigObj, accountID string) {
 	}
 }
 
-func updateStorageEnabled(configObj *ConfigObj, storageEnabled bool) {
+func updateStorageEnabled(configObj *ConfigObj) {
 	configObj.StorageEnabled, _ = ParseBoolEnvVar(storageEnabledEnvVar, configObj.StorageEnabled)
 }
 
