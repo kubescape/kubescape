@@ -37,13 +37,6 @@ type PostureRepository interface {
 	StoreWorkloadConfigurationScanResultSummary(ctx context.Context, workloadScan *v1beta1.WorkloadConfigurationScan) (*v1beta1.WorkloadConfigurationScanSummary, error)
 }
 
-const (
-	maxNameLength          int    = 256
-	nameSeparator          string = "-"
-	resourceNameFormat     string = "%s-%s-%s-%s" // "<apiVersion>-<kind>-<namespace>-<name>"
-	rbacResourceNameFormat string = "%s-%s-%s"    // "<subjectname>-<kind>-<namespace>-<name>"
-)
-
 // APIServerStore implements both PostureRepository with in-cluster storage (apiserver) to be used for production
 type APIServerStore struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
