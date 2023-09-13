@@ -20,7 +20,7 @@ const (
 	configScanVerboseRunText = "Run with '--verbose'/'-v' flag for detailed resources view"
 	imageScanVerboseRunText  = "Run with '--verbose'/'-v' flag for detailed vulnerabilities view"
 	runCommandsText          = "Run one of the suggested commands to learn more about a failed control failure"
-	ksHelmChartLink          = "https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"
+	ksHelmChartLink          = "https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator"
 	highStakesWlsText        = "High-stakes workloads are defined as those which Kubescape estimates would have the highest impact if they were to be exploited.\n\n"
 )
 
