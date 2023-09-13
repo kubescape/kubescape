@@ -148,24 +148,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 
 	relatedObjects := getRelatedObjects(resource)
 	name, err := GetWorkloadScanK8sResourceName(ctx, resource, relatedObjects)
-	name1 := "rbac.authorization.k8s.io-group--system-serviceaccounts-rbac.authorization.k8s.io-v1-clusterrole--system-service-account-issuer-discovery-rbac.authorization.k8s.io-v1-clusterrolebinding--system-service-account-issuer-discovery-b4a3-66fa"
-	name2 := "serviceaccount-kube-system-expand-controller-rbac.authorization.k8s.io-v1-clusterrole--system-controller-expand-controller-rbac.authorization.k8s.io-v1-clusterrolebinding--system-controller-expand-controller-e022-82b2"
-	name3 := "rbac.authorization.k8s.io-user--system-kube-scheduler-rbac.authorization.k8s.io-v1-role-kube-system-system--leader-locking-kube-scheduler-rbac.authorization.k8s.io-v1-rolebinding-kube-system-system--leader-locking-kube-scheduler-169f-c8e9"
-	name4 := "serviceaccount-kube-system-kube-scheduler-rbac.authorization.k8s.io-v1-role-kube-system-system--leader-locking-kube-scheduler-rbac.authorization.k8s.io-v1-rolebinding-kube-system-system--leader-locking-kube-scheduler-ff4b-6277"
-	switch name {
-	case name1:
-		print("here")
-	case name2:
-		print("here")
-	case name3:
-		print("here")
-	case name4:
-		print("here")
-	}
 
-	if len(name) > 243 {
-		name = name[:243]
-	}
 	if err != nil {
 		return nil, err
 	}
