@@ -2,7 +2,6 @@ package cautils
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"testing"
 
@@ -75,9 +74,7 @@ func TestParseIntEnvVar(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.varValue != "" {
-				os.Setenv(tc.varName, tc.varValue)
-			} else {
-				os.Unsetenv(tc.varName)
+				t.Setenv(tc.varName, tc.varValue)
 			}
 
 			actual, err := ParseIntEnvVar(tc.varName, tc.defaultValue)
@@ -174,9 +171,7 @@ func TestParseBoolEnvVar(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			if tc.varValue != "" {
-				os.Setenv(tc.varName, tc.varValue)
-			} else {
-				os.Unsetenv(tc.varName)
+				t.Setenv(tc.varName, tc.varValue)
 			}
 
 			actual, err := ParseBoolEnvVar(tc.varName, tc.defaultValue)
