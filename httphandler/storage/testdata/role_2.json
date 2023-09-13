@@ -1,0 +1,108 @@
+{
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+        "annotations": {
+            "rbac.authorization.kubernetes.io/autoupdate": "true"
+        },
+        "creationTimestamp": "2023-09-11T09:59:01Z",
+        "labels": {
+            "kubernetes.io/bootstrapping": "rbac-defaults"
+        },
+        "name": "system:controller:expand-controller",
+        "resourceVersion": "112",
+        "uid": "3bf75500-9d3e-499c-9566-41a5c0f74625"
+    },
+    "rules": [
+        {
+            "apiGroups": [
+                ""
+            ],
+            "resources": [
+                "persistentvolumes"
+            ],
+            "verbs": [
+                "get",
+                "list",
+                "patch",
+                "update",
+                "watch"
+            ]
+        },
+        {
+            "apiGroups": [
+                ""
+            ],
+            "resources": [
+                "persistentvolumeclaims/status"
+            ],
+            "verbs": [
+                "patch",
+                "update"
+            ]
+        },
+        {
+            "apiGroups": [
+                ""
+            ],
+            "resources": [
+                "persistentvolumeclaims"
+            ],
+            "verbs": [
+                "get",
+                "list",
+                "watch"
+            ]
+        },
+        {
+            "apiGroups": [
+                "storage.k8s.io"
+            ],
+            "resources": [
+                "storageclasses"
+            ],
+            "verbs": [
+                "get",
+                "list",
+                "watch"
+            ]
+        },
+        {
+            "apiGroups": [
+                ""
+            ],
+            "resources": [
+                "endpoints",
+                "services"
+            ],
+            "verbs": [
+                "get"
+            ]
+        },
+        {
+            "apiGroups": [
+                ""
+            ],
+            "resources": [
+                "secrets"
+            ],
+            "verbs": [
+                "get"
+            ]
+        },
+        {
+            "apiGroups": [
+                "",
+                "events.k8s.io"
+            ],
+            "resources": [
+                "events"
+            ],
+            "verbs": [
+                "create",
+                "patch",
+                "update"
+            ]
+        }
+    ]
+}

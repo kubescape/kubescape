@@ -2,10 +2,14 @@ package storage
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -407,4 +411,101 @@ func TestGetManifestObjectLabelsAndAnnotations(t *testing.T) {
 			assert.Equal(t, tt.expectedAnnotations, annotations)
 		})
 	}
+}
+
+//go:embed testdata/role_1.json
+var roleJson1 []byte
+
+//go:embed testdata/rolebinding_1.json
+var roleBindingJson1 []byte
+
+//go:embed testdata/role_2.json
+var roleJson2 []byte
+
+//go:embed testdata/rolebinding_2.json
+var roleBindingJson2 []byte
+
+//go:embed testdata/role_3.json
+var roleJson3 []byte
+
+//go:embed testdata/rolebinding_3.json
+var roleBindingJson3 []byte
+
+func Test_RoleBindingResourceTripletToSlug(t *testing.T) {
+	tests := []struct {
+		name          string
+		role          []byte
+		roleBinding   []byte
+		expectedSlugs []string
+	}{
+		{
+			name:        "clusterrolebinding with clusterrole, subject with apigroup",
+			role:        roleJson1,
+			roleBinding: roleBindingJson1,
+			expectedSlugs: []string{
+				"rbac.authorization.k8s.io-group--system-serviceaccounts-rbac.authorization.k8s.io-v1-clusterrole--system-service-account-issuer-discovery-rbac.authorization.k8s.io-v1-clusterrolebinding--system-service-account-issuer-discovery-b4a3-66fa",
+			},
+		},
+		{
+			name:        "clusterrolebinding with clusterrole, subject without apigroup",
+			role:        roleJson2,
+			roleBinding: roleBindingJson2,
+			expectedSlugs: []string{
+				"serviceaccount-kube-system-expand-controller-rbac.authorization.k8s.io-v1-clusterrole--system-controller-expand-controller-rbac.authorization.k8s.io-v1-clusterrolebinding--system-controller-expand-controller-e022-82b2",
+			},
+		},
+		{
+			name:        "rolebinding with role, multiple subjects",
+			role:        roleJson3,
+			roleBinding: roleBindingJson3,
+			expectedSlugs: []string{
+				"rbac.authorization.k8s.io-user--system-kube-scheduler-rbac.authorization.k8s.io-v1-role-kube-system-system--leader-locking-kube-scheduler-rbac.authorization.k8s.io-v1-rolebinding-kube-system-system--leader-locking-kube-scheduler-169f-c8e9",
+				"serviceaccount-kube-system-kube-scheduler-rbac.authorization.k8s.io-v1-role-kube-system-system--leader-locking-kube-scheduler-rbac.authorization.k8s.io-v1-rolebinding-kube-system-system--leader-locking-kube-scheduler-ff4b-6277",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			var obj1 map[string]interface{}
+			_ = json.Unmarshal(tt.role, &obj1)
+			clusterRole := objectsenvelopes.NewObject(obj1)
+
+			var obj2 map[string]interface{}
+			_ = json.Unmarshal(tt.roleBinding, &obj2)
+			clusterRoleBinding := objectsenvelopes.NewObject(obj2)
+
+			slugs := []string{}
+
+			subjects, _ := workloadinterface.InspectMap(clusterRoleBinding.GetObject(), "subjects")
+			if val, ok := subjects.([]interface{}); ok {
+				for _, s := range val {
+					subject := workloadinterface.NewBaseObject(map[string]interface{}{})
+
+					if subjectObj, ok := s.(map[string]interface{}); ok {
+						if name, ok := subjectObj["name"]; ok {
+							subject.SetName(name.(string))
+						}
+						if kind, ok := subjectObj["kind"]; ok {
+							subject.SetKind(kind.(string))
+						}
+						if ns, ok := subjectObj["namespace"]; ok {
+							subject.SetNamespace(ns.(string))
+						}
+						if apiGroup, ok := subjectObj["apiGroup"]; ok {
+							subject.SetApiVersion(apiGroup.(string))
+						}
+
+						slug, err := names.RoleBindingResourceToSlug(subject, clusterRole, clusterRoleBinding)
+						assert.NoError(t, err)
+						slugs = append(slugs, slug)
+					}
+				}
+			}
+
+			assert.ElementsMatch(t, tt.expectedSlugs, slugs)
+		})
+	}
+
 }
