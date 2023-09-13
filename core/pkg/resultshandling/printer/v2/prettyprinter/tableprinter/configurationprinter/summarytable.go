@@ -32,14 +32,14 @@ func GetControlTableHeaders(short bool) []string {
 	var headers []string
 	if short {
 		headers = make([]string, 1)
-		headers[0] = "CONTROLS"
+		headers[0] = "Controls"
 	} else {
 		headers = make([]string, _summaryRowLen)
-		headers[summaryColumnName] = "CONTROL NAME"
-		headers[summaryColumnCounterFailed] = "FAILED RESOURCES"
-		headers[summaryColumnCounterAll] = "ALL RESOURCES"
-		headers[summaryColumnSeverity] = "SEVERITY"
-		headers[summaryColumnComplianceScore] = "% COMPLIANCE-SCORE"
+		headers[summaryColumnName] = "Control Name"
+		headers[summaryColumnCounterFailed] = "Failed Resources"
+		headers[summaryColumnCounterAll] = "All Resources"
+		headers[summaryColumnSeverity] = "Severity"
+		headers[summaryColumnComplianceScore] = "% Compliance-Score"
 	}
 	return headers
 }

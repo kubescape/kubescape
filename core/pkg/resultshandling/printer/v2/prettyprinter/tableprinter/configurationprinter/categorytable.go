@@ -13,11 +13,11 @@ import (
 const (
 	docsPrefix        = "https://hub.armosec.io/docs"
 	scanControlPrefix = "$ kubescape scan control"
-	controlNameHeader = "CONTROL NAME"
+	controlNameHeader = "Control Name"
 	statusHeader      = ""
-	docsHeader        = "DOCS"
-	resourcesHeader   = "RESOURCES"
-	runHeader         = "VIEW DETAILS"
+	docsHeader        = "Docs"
+	resourcesHeader   = "Resources"
+	runHeader         = "View Details"
 )
 
 // initializes the table headers and column alignments based on the category type
@@ -84,6 +84,8 @@ func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments 
 	table := tablewriter.NewWriter(writer)
 	table.SetHeader(headers)
 	table.SetHeaderLine(true)
+	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	table.SetAutoFormatHeaders(false)
 	table.SetColumnAlignment(columnAligments)
 	table.SetAutoWrapText(false)
 	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
