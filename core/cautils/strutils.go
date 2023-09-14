@@ -63,3 +63,17 @@ func ParseIntEnvVar(varName string, defaultValue int) (int, error) {
 
 	return intValue, nil
 }
+
+func ParseBoolEnvVar(varName string, defaultValue bool) (bool, error) {
+	varValue, exists := os.LookupEnv(varName)
+	if !exists {
+		return defaultValue, nil
+	}
+
+	boolValue, err := strconv.ParseBool(varValue)
+	if err != nil {
+		return defaultValue, fmt.Errorf("failed to parse %s env var as bool: %w", varName, err)
+	}
+
+	return boolValue, nil
+}

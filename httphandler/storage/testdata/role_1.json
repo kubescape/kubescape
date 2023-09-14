@@ -1,0 +1,27 @@
+{
+    "apiVersion": "rbac.authorization.k8s.io/v1",
+    "kind": "ClusterRole",
+    "metadata": {
+        "annotations": {
+            "rbac.authorization.kubernetes.io/autoupdate": "true"
+        },
+        "creationTimestamp": "2023-09-11T09:59:01Z",
+        "labels": {
+            "kubernetes.io/bootstrapping": "rbac-defaults"
+        },
+        "name": "system:service-account-issuer-discovery",
+        "resourceVersion": "100",
+        "uid": "1f65af2b-d30f-4a0a-9603-1a4bf5d601c0"
+    },
+    "rules": [
+        {
+            "nonResourceURLs": [
+                "/.well-known/openid-configuration",
+                "/openid/v1/jwks"
+            ],
+            "verbs": [
+                "get"
+            ]
+        }
+    ]
+}

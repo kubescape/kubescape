@@ -58,7 +58,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
-	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+
+	if scanInfo.IsDeletedScanObject {
+		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
+	} else {
+		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+	}
+
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -80,7 +86,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	// add single resource to k8s resources map (for single resource scan)
-	addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+	if !scanInfo.IsDeletedScanObject {
+		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
@@ -146,16 +154,15 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	var wlIdentifierString string
-	if resource.GetApiVersion() != "" {
-		wlIdentifierString = strings.Join([]string{resource.GetApiVersion(), resource.GetKind()}, "/")
-	} else {
-		wlIdentifierString = resource.GetKind()
-	}
-
-	gvr, err := k8sinterface.GetGroupVersionResource(wlIdentifierString)
+	gvr, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
 	if err != nil {
 		return nil, err
+	}
+
+	if resource.GetApiVersion() != "" {
+		group, version := k8sinterface.SplitApiVersion(resource.GetApiVersion())
+		gvr.Group = group
+		gvr.Version = version
 	}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)

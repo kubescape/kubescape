@@ -5,6 +5,7 @@ go 1.20
 replace github.com/kubescape/kubescape/v2 => ../
 
 require (
+	github.com/armosec/armoapi-go v0.0.220
 	github.com/armosec/utils-go v0.0.20
 	github.com/go-openapi/runtime v0.26.0
 	github.com/google/uuid v1.3.0
@@ -12,12 +13,15 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/backend v0.0.2
 	github.com/kubescape/go-logger v0.0.20
-	github.com/kubescape/k8s-interface v0.0.142
+	github.com/kubescape/k8s-interface v0.0.144
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.267
+	github.com/kubescape/opa-utils v0.0.268
+	github.com/kubescape/storage v0.0.16
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
 	go.opentelemetry.io/otel v1.16.0
+	k8s.io/apimachinery v0.27.4
+	k8s.io/client-go v0.27.4
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 )
 
@@ -26,7 +30,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.25.0 // indirect
 	golang.org/x/crypto v0.12.0 // indirect
-	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b // indirect
+	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
 	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/net v0.14.0 // indirect
 	golang.org/x/oauth2 v0.10.0 // indirect
@@ -98,7 +102,6 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20230627195312-cd49355d934e // indirect
 	github.com/anchore/syft v0.84.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/armosec/armoapi-go v0.0.220 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
 	github.com/armosec/utils-k8s-go v0.0.17 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
@@ -193,7 +196,7 @@ require (
 	github.com/go-restruct/restruct v1.2.0-alpha // indirect
 	github.com/go-test/deep v1.1.0 // indirect
 	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/goccy/go-json v0.9.11 // indirect
+	github.com/goccy/go-json v0.10.2 // indirect
 	github.com/goccy/go-yaml v1.9.6 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.0 // indirect
@@ -339,7 +342,7 @@ require (
 	github.com/titanous/rocacheck v0.0.0-20171023193734-afe73141d399 // indirect
 	github.com/tjfoc/gmsm v1.3.2 // indirect
 	github.com/transparency-dev/merkle v0.0.2 // indirect
-	github.com/ulikunitz/xz v0.5.10 // indirect
+	github.com/ulikunitz/xz v0.5.11 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelutil v0.2.2 // indirect
 	github.com/uptrace/opentelemetry-go-extra/otelzap v0.2.2 // indirect
 	github.com/uptrace/uptrace-go v1.16.0 // indirect
@@ -397,8 +400,6 @@ require (
 	helm.sh/helm/v3 v3.11.1 // indirect
 	k8s.io/api v0.27.4 // indirect
 	k8s.io/apiextensions-apiserver v0.27.2 // indirect
-	k8s.io/apimachinery v0.27.4 // indirect
-	k8s.io/client-go v0.27.4 // indirect
 	k8s.io/klog/v2 v2.100.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20230501164219-8b0f38b5fd1f // indirect
 	lukechampine.com/uint128 v1.3.0 // indirect
@@ -423,7 +424,6 @@ require (
 replace github.com/libgit2/git2go/v33 => ../git2go
 
 replace (
-
 	// Using the forked version of tablewriter
 	github.com/olekukonko/tablewriter => github.com/kubescape/tablewriter v0.0.6-0.20230907094812-c8c737a432a6
 	// TODO(vladklokun): Since later versions (e.g. v0.40.0) that get used without the pin introduce weird packaging issues probably due to package renames, pin to last known good.
