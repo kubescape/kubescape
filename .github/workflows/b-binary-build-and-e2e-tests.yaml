@@ -71,7 +71,7 @@ on:
         type: string
         required: false
         default: '[ "", "arm64"]'
-  
+
 jobs:
   wf-preparation:
     name: secret-validator
@@ -115,7 +115,20 @@ jobs:
           echo "ARCH_MATRIX=$input" >> $GITHUB_OUTPUT
         env:
           input: ${{ inputs.ARCH_MATRIX }}
-      
+
+  check-secret:
+    name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+    runs-on: ubuntu-latest
+    outputs:
+      is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
+    steps:
+      - name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+        id: check-secret-set
+        env:
+          QUAYIO_REGISTRY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
+          QUAYIO_REGISTRY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+        run: |
+          echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && env.QUAYIO_REGISTRY_PASSWORD != '' }}" >> $GITHUB_OUTPUT
 
   binary-build:
     name: Create cross-platform build
@@ -267,6 +280,33 @@ jobs:
           name: kubescape${{ matrix.arch }}-${{ matrix.os }}
           path: build/
           if-no-files-found: error
+
+  build-http-image:
+    needs: [check-secret]
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
+    with:
+      IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubescape
+      IMAGE_TAG: ${{ needs.retag.outputs.NEW_TAG }}
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 0
+      GO111MODULE: "on"
+      BUILD_PLATFORM: linux/amd64,linux/arm64
+      GO_VERSION: "1.20"
+      REQUIRED_TESTS: '[
+                "ks_microservice_create_2_cronjob_mitre_and_nsa_proxy", 
+                "ks_microservice_triggering_with_cron_job",
+                "ks_microservice_update_cronjob_schedule",
+                "ks_microservice_delete_cronjob",
+                "ks_microservice_create_2_cronjob_mitre_and_nsa",
+                "ks_microservice_ns_creation",
+                "ks_microservice_on_demand",
+                "ks_microservice_mitre_framework_on_demand",
+                "ks_microservice_nsa_and_mitre_framework_demand",
+                "scan_compliance_score"
+              ]'
+      COSIGN: true
+      HELM_E2E_TEST: true
+    secrets: inherit
 
   run-tests:
     strategy:
