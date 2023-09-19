@@ -9,6 +9,7 @@ import (
 
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/utils-go/httputils"
+	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	v1 "k8s.io/api/core/v1"
@@ -87,9 +88,11 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 }
 
 func (a *OperatorAdapter) OperatorScan() (string, error) {
+	logger.L().Info("Triggering scan initiated, Scan results will be available at the kubescape backend config in your cluster")
 	res, err := a.httpPostOperatorScanRequest(*a.OperatorScanInfo.GetRequestPayload())
 	if err != nil {
 		return "", err
 	}
+	logger.L().Info("Triggering scan finished successfully")
 	return res, nil
 }

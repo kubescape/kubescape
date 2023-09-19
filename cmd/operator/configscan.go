@@ -1,8 +1,6 @@
 package operator
 
 import (
-	"fmt"
-
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/core"
 	"github.com/kubescape/kubescape/v2/core/meta"
@@ -24,11 +22,10 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorI
 			if err != nil {
 				return err
 			}
-			resp, err := operatorAdapter.OperatorScan()
+			_, err = operatorAdapter.OperatorScan()
 			if err != nil {
 				return err
 			}
-			fmt.Printf("%s", resp)
 			return nil
 		},
 	}
