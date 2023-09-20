@@ -9,11 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func newTrue() *bool {
-	t := true
-	return &t
-}
-
 func newFalse() *bool {
 	f := false
 	return &f
@@ -37,7 +32,7 @@ func Test_GetRequestPayload(t *testing.T) {
 			},
 			result: &apis.Commands{
 				Commands: []apis.Command{
-					apis.Command{
+					{
 						CommandName: apis.TypeRunKubescape,
 						Args: map[string]interface{}{
 							KubescapeScanV1: utilsmetav1.PostScanRequest{
@@ -61,7 +56,7 @@ func Test_GetRequestPayload(t *testing.T) {
 			},
 			result: &apis.Commands{
 				Commands: []apis.Command{
-					apis.Command{
+					{
 						CommandName: apis.TypeScanImages,
 						WildWlid:    "wlid://cluster-any",
 					},
@@ -76,7 +71,7 @@ func Test_GetRequestPayload(t *testing.T) {
 			},
 			result: &apis.Commands{
 				Commands: []apis.Command{
-					apis.Command{
+					{
 						CommandName: apis.TypeScanImages,
 						WildWlid:    "wlid://cluster-any/namespace-123",
 					},

@@ -3,7 +3,6 @@ package cautils
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"
@@ -49,79 +48,6 @@ func Test_getPortForwardingPort(t *testing.T) {
 			}
 			assert.Equal(t, tc.expectedPort, getPortForwardingPort())
 		})
-	}
-}
-
-func getFakeEvents() *v1.EventList {
-	return &v1.EventList{
-		Items: []v1.Event{
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "bar-000",
-					Namespace: "foo",
-				},
-				InvolvedObject: v1.ObjectReference{
-					APIVersion: "apps/v1",
-					Kind:       "Deployment",
-					Name:       "bar",
-					Namespace:  "foo",
-					UID:        "00000000-0000-0000-0000-000000000001",
-				},
-				Type:                v1.EventTypeNormal,
-				Reason:              "ScalingReplicaSet",
-				Message:             "Scaled up replica set bar-002 to 1",
-				ReportingController: "deployment-controller",
-				EventTime:           metav1.NewMicroTime(time.Now().Add(-30 * time.Minute)),
-				Series: &v1.EventSeries{
-					Count:            3,
-					LastObservedTime: metav1.NewMicroTime(time.Now().Add(-20 * time.Minute)),
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "bar-001",
-					Namespace: "foo",
-				},
-				InvolvedObject: v1.ObjectReference{
-					APIVersion: "apps/v1",
-					Kind:       "Deployment",
-					Name:       "bar",
-					Namespace:  "foo",
-					UID:        "00000000-0000-0000-0000-000000000001",
-				},
-				Type:                v1.EventTypeWarning,
-				Reason:              "ScalingReplicaSet",
-				Message:             "Scaled up replica set bar-002 to 1",
-				ReportingController: "deployment-controller",
-				EventTime:           metav1.NewMicroTime(time.Now().Add(-28 * time.Minute)),
-				Series: &v1.EventSeries{
-					Count:            3,
-					LastObservedTime: metav1.NewMicroTime(time.Now().Add(-18 * time.Minute)),
-				},
-			},
-			{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "bar-002",
-					Namespace: "otherfoo",
-				},
-				InvolvedObject: v1.ObjectReference{
-					APIVersion: "apps/v1",
-					Kind:       "Deployment",
-					Name:       "bar",
-					Namespace:  "otherfoo",
-					UID:        "00000000-0000-0000-0000-000000000001",
-				},
-				Type:                v1.EventTypeNormal,
-				Reason:              "ScalingReplicaSet",
-				Message:             "Scaled up replica set bar-002 to 1",
-				ReportingController: "deployment-controller",
-				EventTime:           metav1.NewMicroTime(time.Now().Add(-25 * time.Minute)),
-				Series: &v1.EventSeries{
-					Count:            3,
-					LastObservedTime: metav1.NewMicroTime(time.Now().Add(-15 * time.Minute)),
-				},
-			},
-		},
 	}
 }
 
