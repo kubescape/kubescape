@@ -116,6 +116,15 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     > **Note**  
     > Kubescape will generate Kubernetes YAML objects using a `kustomize` file and scan them for security.
 
+* Trigger in cluster components for scanning your cluster:
+
+    If kubescape helm chart is install in your cluster we can trigger scanning of the in cluster components from the kubescape CLI.
+    ```sh
+    kubescape operator scan config
+    ```
+    ```sh
+    kubescape operator scan vulnerabilities
+    ```
 
 * Compliance Score
 
