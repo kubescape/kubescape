@@ -34,7 +34,7 @@ func GetUpdateCmd() *cobra.Command {
 				//your version == latest version
 				logger.L().Info(("Nothing to update, you are running the latest version"), helpers.String("Version", cautils.BuildNumber))
 			} else {
-				fmt.Printf("Please refer to our installation docs in the following link: %s", installationLink)
+				fmt.Printf("Please refer to our installation docs in the following link: %s\n", installationLink)
 			}
 			return nil
 		},

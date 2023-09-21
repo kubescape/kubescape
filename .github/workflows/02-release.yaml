@@ -44,7 +44,7 @@ jobs:
     needs: [create-release, retag]
     with:
       client: "image-release"
-      image_name: "quay.io/${{ github.repository_owner }}/kubescape"
+      image_name: "quay.io/${{ github.repository_owner }}/kubescape-cli"
       image_tag: ${{ needs.retag.outputs.NEW_TAG }}
       support_platforms: true
       cosign: true

@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -39,8 +40,10 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 
 	summaryTable.SetAutoWrapText(false)
 	summaryTable.SetHeaderLine(true)
+	summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	summaryTable.SetAutoFormatHeaders(false)
 	summaryTable.SetColumnAlignment(GetColumnsAlignments())
-	summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+	summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 	printAll := fp.getVerboseMode()
 	if summaryDetails.NumberOfResources().Failed() == 0 {

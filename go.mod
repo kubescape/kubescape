@@ -415,6 +415,9 @@ require (
 replace github.com/libgit2/git2go/v33 => ./git2go
 
 replace (
+
+	// Using the forked version of tablewriter
+	github.com/olekukonko/tablewriter => github.com/kubescape/tablewriter v0.0.6-0.20230907094812-c8c737a432a6
 	// TODO(vladklokun): Since later versions (e.g. v0.40.0) that get used without the pin introduce weird packaging issues probably due to package renames, pin to last known good.
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc => go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.35.0
 

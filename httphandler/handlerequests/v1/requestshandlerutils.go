@@ -11,10 +11,10 @@ import (
 	"github.com/armosec/utils-go/boolutils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/core"
+	"github.com/kubescape/kubescape/v2/httphandler/storage"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -79,6 +79,17 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	if err := result.HandleResults(ctx); err != nil {
 		return nil, err
 	}
+	storage := storage.GetStorage()
+	if storage != nil {
+		pr := result.GetResults()
+
+		if err := storage.StorePostureReportResults(ctx, pr); err != nil {
+			return nil, err
+		}
+	} else {
+		logger.L().Debug("storage is not initialized - skipping storing results")
+	}
+
 	return nil, nil
 }
 
@@ -149,9 +160,6 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	// DO NOT CHANGE
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
-
-	// Set default KubeContext from current context
-	k8sinterface.SetClusterContextName(k8sinterface.GetContextName())
 
 	return scanInfo
 }
