@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"errors"
+
 	"github.com/armosec/armoapi-go/apis"
 	"github.com/armosec/utils-k8s-go/wlid"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -22,7 +24,6 @@ type VulnerabilitiesScanInfo struct {
 }
 
 type ConfigScanInfo struct {
-	Submit             bool
 	ExcludedNamespaces []string
 	IncludedNamespaces []string
 	HostScanner        bool
@@ -42,6 +43,11 @@ type OperatorConnector interface {
 
 type OperatorScanInfo interface {
 	GetRequestPayload() *apis.Commands
+	ValidatePayload(*apis.Commands) error
+}
+
+func (v *VulnerabilitiesScanInfo) ValidatePayload(commands *apis.Commands) error {
+	return nil
 }
 
 func (v *VulnerabilitiesScanInfo) GetRequestPayload() *apis.Commands {
@@ -71,14 +77,23 @@ func (v *VulnerabilitiesScanInfo) GetRequestPayload() *apis.Commands {
 	}
 }
 
+func (c *ConfigScanInfo) ValidatePayload(commands *apis.Commands) error {
+	if len(c.IncludedNamespaces) != 0 && len(c.ExcludedNamespaces) != 0 {
+		return errors.New("invalid arguments: include-namespaces and exclude-namespaces can't pass together to the CLI")
+	}
+	return nil
+}
+
 func (c *ConfigScanInfo) GetRequestPayload() *apis.Commands {
+	if len(c.Frameworks) == 0 {
+		c.Frameworks = append(c.Frameworks, "all")
+	}
 	return &apis.Commands{
 		Commands: []apis.Command{
 			{
 				CommandName: apis.TypeRunKubescape,
 				Args: map[string]interface{}{
 					KubescapeScanV1: utilsmetav1.PostScanRequest{
-						Submit:             &c.Submit,
 						ExcludedNamespaces: c.ExcludedNamespaces,
 						IncludeNamespaces:  c.IncludedNamespaces,
 						TargetType:         apisv1.KindFramework,

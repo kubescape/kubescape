@@ -26,7 +26,7 @@ func GetOperatorCmd(ks meta.IKubescape) *cobra.Command {
 
 	operatorCmd := &cobra.Command{
 		Use:     "operator",
-		Short:   "Operator - use for communicate with the kubescape in cluster components",
+		Short:   "Operator use for communicate with the kubescape operator in the in-cluster components",
 		Long:    ``,
 		Example: operatorExamples,
 		Args: func(cmd *cobra.Command, args []string) error {

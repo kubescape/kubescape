@@ -11,7 +11,7 @@ import (
 func getOperatorScanCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
 	operatorCmd := &cobra.Command{
 		Use:     "scan",
-		Short:   "Scan - use for scan your cluster using the in cluster components",
+		Short:   "Scan use for scan your cluster using Kubescape operator in the in-cluster components",
 		Long:    ``,
 		Example: operatorExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
