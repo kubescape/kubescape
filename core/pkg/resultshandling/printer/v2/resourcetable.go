@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
@@ -50,7 +51,9 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.SetAutoMergeCells(true)
 		summaryTable.SetHeaderLine(true)
 		summaryTable.SetRowLine(true)
-		summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+		summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+		summaryTable.SetAutoFormatHeaders(false)
+		summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 		resourceRows := [][]string{}
 		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails); len(raw) > 0 {
@@ -125,7 +128,7 @@ func generateResourceHeader(short bool) []string {
 func shortFormatResource(resourceRows [][]string) [][]string {
 	rows := [][]string{}
 	for _, resourceRow := range resourceRows {
-		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.Replace(resourceRow[resourceColumnPath], "\n", "\n" + strings.Repeat(" ", 23), -1))})
+		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.Replace(resourceRow[resourceColumnPath], "\n", "\n"+strings.Repeat(" ", 23), -1))})
 	}
 	return rows
 }

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
@@ -95,8 +96,10 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 	policyTable.SetHeader([]string{header})
 	policyTable.SetHeaderLine(true)
 	policyTable.SetRowLine(true)
+	policyTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	policyTable.SetAutoFormatHeaders(false)
 	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
-	policyTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+	policyTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 	data := v2.Matrix{}
 
 	controlRows := generatePolicyRows(policies)
@@ -125,7 +128,9 @@ func prettyPrintControls(ctx context.Context, policies []string) {
 	controlsTable.SetAutoWrapText(false)
 	controlsTable.SetHeaderLine(true)
 	controlsTable.SetRowLine(true)
-	controlsTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+	controlsTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	controlsTable.SetAutoFormatHeaders(false)
+	controlsTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 	controlRows := generateControlRows(policies)
 

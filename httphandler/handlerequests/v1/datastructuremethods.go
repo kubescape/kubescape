@@ -61,6 +61,10 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		scanInfo.ScanObject = scanRequest.ScanObject
 	}
 
+	if scanRequest.IsDeletedScanObject != nil {
+		scanInfo.IsDeletedScanObject = *scanRequest.IsDeletedScanObject
+	}
+
 	return scanInfo
 }
 
