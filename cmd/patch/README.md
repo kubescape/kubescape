@@ -49,6 +49,9 @@ The patch command can be run in 2 ways:
 | --timeout      | Timeout for the patching process                       | No       | 5m                                  |
 | -u, --username | Username for the image registry login                  | No       |                                     |
 | -p, --password | Password for the image registry login                  | No       |                                     |
+| -f, --format   | Output file format.                                    | No       |                                     |
+| -o, --output   | Output file. Print output to file and not stdout       | No       |                                     |
+| -v, --verbose  | Display full report. Default to false                  | No       |                                     |
 | -h, --help     | help for patch                                         | No       |                                     |
 
 
