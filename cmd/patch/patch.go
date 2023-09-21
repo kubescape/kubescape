@@ -11,9 +11,11 @@ import (
 	"github.com/docker/distribution/reference"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v2/cmd/shared"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v2/pkg/imagescan"
 
 	"github.com/spf13/cobra"
 )
@@ -29,19 +31,38 @@ var patchCmdExamples = fmt.Sprintf(`
 
 func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	var patchInfo metav1.PatchInfo
+	var scanInfo cautils.ScanInfo
 
 	patchCmd := &cobra.Command{
-		Use:     "patch --image <image-tag> [flags]",
+		Use:     "patch --image <image>:<tag> [flags]",
 		Short:   "Patch container images with vulnerabilities ",
 		Long:    `Patch command is for automatically patching images with vulnerabilities.`,
 		Example: patchCmdExamples,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 0 {
+				return fmt.Errorf("the command takes no arguments")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
+				return err
+			}
 
 			if err := validateImagePatchInfo(&patchInfo); err != nil {
 				return err
 			}
 
-			return ks.Patch(context.Background(), &patchInfo)
+			results, err := ks.Patch(context.Background(), &patchInfo, &scanInfo)
+			if err != nil {
+				return err
+			}
+
+			if imagescan.ExceedsSeverityThreshold(results, imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)) {
+				shared.TerminateOnExceedingSeverity(&scanInfo, logger.L())
+			}
+
+			return nil
 		},
 	}
 
@@ -52,6 +73,12 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")
+
+	patchCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "", `Output file format. Supported formats: "pretty-printer", "json", "sarif"`)
+	patchCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
+	patchCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display full report. Default to false")
+
+	patchCmd.PersistentFlags().StringVarP(&scanInfo.FailThresholdSeverity, "severity-threshold", "s", "", "Severity threshold is the severity of a vulnerability at which the command fails and returns exit code 1")
 
 	return patchCmd
 }
