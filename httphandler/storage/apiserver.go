@@ -55,6 +55,9 @@ func GetStorage() *APIServerStore {
 
 // NewAPIServerStorage initializes the APIServerStore struct
 func NewAPIServerStorage(namespace string, config *rest.Config) (*APIServerStore, error) {
+	// disable rate limiting
+	config.QPS = 0
+	config.RateLimiter = nil
 	clientset, err := versioned.NewForConfig(config)
 	if err != nil {
 		return nil, err

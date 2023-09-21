@@ -1304,8 +1304,8 @@ github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/regolibrary v1.0.291-rc.0 h1:DztPS3NSKfiltO1wZvxRjuu5c99c6+dEgfTs6DcsVa8=
 github.com/kubescape/regolibrary v1.0.291-rc.0/go.mod h1:2j47Snl7jbbR0GenKlnbIQ+dk1J3XpX3x5T/SWY3OJ0=
-github.com/kubescape/storage v0.0.16 h1:4BR4h8oSE+Q9w5O7ZwzJeGO8a4j2p/QAfx4nFEKO0dI=
-github.com/kubescape/storage v0.0.16/go.mod h1:LDJDA+AxRosIer/1Ma/HSf2SvXgxCH8bYQ9eejAAv8s=
+github.com/kubescape/storage v0.0.20 h1:m78XUf08QZRTw3pIRkGi54AtH4ugRYisG6xfxC1zZnQ=
+github.com/kubescape/storage v0.0.20/go.mod h1:rP6g1ukp4zlytnBcZw+fJHu0j6woOiQ/KfTZfrdM8kw=
 github.com/kubescape/tablewriter v0.0.6-0.20230907094812-c8c737a432a6 h1:lUPN6vNOahuAs9Vd5IhoOndYja0zdF90VfcuB5XXkzQ=
 github.com/kubescape/tablewriter v0.0.6-0.20230907094812-c8c737a432a6/go.mod h1:g5pGEwPUwL4fTRUODq3fWP41Kn9IoBQrZni/kA1gxq4=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
