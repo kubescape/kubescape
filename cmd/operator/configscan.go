@@ -12,7 +12,6 @@ import (
 )
 
 var operatorScanConfigExamples = fmt.Sprintf(`
-  Operator command is for controling the Kubescape in-cluster Operator from the CLI 
   
   # Run a configuration scan
   %[1]s operator scan config
@@ -22,7 +21,7 @@ var operatorScanConfigExamples = fmt.Sprintf(`
 func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
 	configCmd := &cobra.Command{
 		Use:     "configurations",
-		Short:   "Trigger configuration scanning from the Kubescape operator microservice",
+		Short:   "Trigger configuration scanning from the Kubescape-Operator microservice",
 		Long:    ``,
 		Example: operatorScanConfigExamples,
 		Args: func(cmd *cobra.Command, args []string) error {

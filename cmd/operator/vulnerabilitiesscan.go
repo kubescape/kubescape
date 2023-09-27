@@ -13,9 +13,8 @@ import (
 )
 
 var operatorScanVulnerabilitiesExamples = fmt.Sprintf(`
-  Operator command is for control the cluster from the kubescape CLI 
 
-  # Run a vulnerabilities scan
+  # Trigger a vulnerabilities scan
   %[1]s operator scan vulnerabilities
 
 `, cautils.ExecName())
@@ -35,13 +34,13 @@ func getOperatorScanVulnerabilitiesCmd(ks meta.IKubescape, operatorInfo cautils.
 			if err != nil {
 				return err
 			}
-			logger.L().Start("Kubescape-Operator Triggering for vulnerability scanning")
+			logger.L().Start("Triggering the Kubescape-Operator for vulnerability scanning")
 			_, err = operatorAdapter.OperatorScan()
 			if err != nil {
-				logger.L().StopError("Failed to triggering Kubescape-Operator for vulnerability scanning", helpers.Error(err))
+				logger.L().StopError("Failed to trigger the Kubescape-Operator for vulnerability scanning", helpers.Error(err))
 				return err
 			}
-			logger.L().StopSuccess("Triggered Kubescape-Operator for vulnerability scanning. for view the results once they were ready, please run: \"kubectl get vulnerabilitysummaries\"")
+			logger.L().StopSuccess("Triggered Kubescape-Operator for vulnerability scanning. View the scanning results once they are ready using the following command: \"kubectl get vulnerabilitysummaries\"")
 			return err
 		},
 	}

@@ -2,16 +2,22 @@ package operator
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 	"github.com/spf13/cobra"
 )
 
+const (
+	vulnerabilitiesSubCommand string = "vulnerabilities"
+	configurationsSubCommand  string = "configurations"
+)
+
 func getOperatorScanCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
 	operatorCmd := &cobra.Command{
 		Use:     "scan",
-		Short:   "Scan use for scan your cluster using Kubescape operator in the in-cluster components",
+		Short:   "Scan your cluster using the Kubescape-operator within the cluster components",
 		Long:    ``,
 		Example: operatorExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -22,6 +28,12 @@ func getOperatorScanCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 1 {
+				return errors.New("for operator scan sub command, you must pass at least 1 more sub commands, see above examples")
+			}
+			if (args[0] != vulnerabilitiesSubCommand) && (args[0] != configurationsSubCommand) {
+				return errors.New(fmt.Sprintf("For the operator sub-command, only %s and %s are supported. Refer to the examples above.", vulnerabilitiesSubCommand, configurationsSubCommand))
+			}
 			return nil
 		},
 	}
