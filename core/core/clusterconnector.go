@@ -36,7 +36,7 @@ func getOperatorPod(k8sClient *k8sinterface.KubernetesApi) (*v1.Pod, error) {
 		return nil, err
 	}
 	if len(pods.Items) != 1 {
-		return nil, errors.New("in 'getOperatorPod' can't find specific operator pod")
+		return nil, errors.New("can't find Kubescape-Operator pod, please validate Kubescape-Operator is installed")
 	}
 
 	return &pods.Items[0], nil
