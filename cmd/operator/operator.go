@@ -18,7 +18,7 @@ var operatorExamples = fmt.Sprintf(`
   Operator command is for control the cluster from the kubescape CLI 
   
   # Trigger a configuration scan
-  %[1]s operator scan config
+  %[1]s operator scan configurations
 
   # Trigger a vulnerabilities scan
   %[1]s operator scan vulnerabilities

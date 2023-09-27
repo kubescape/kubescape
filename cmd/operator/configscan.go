@@ -14,7 +14,7 @@ import (
 var operatorScanConfigExamples = fmt.Sprintf(`
   
   # Run a configuration scan
-  %[1]s operator scan config
+  %[1]s operator scan configurations
 
 `, cautils.ExecName())
 
