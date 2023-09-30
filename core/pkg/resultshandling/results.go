@@ -124,6 +124,8 @@ func NewPrinter(ctx context.Context, printFormat, formatVersion string, verboseM
 		return printerv2.NewHtmlPrinter()
 	case printer.SARIFFormat:
 		return printerv2.NewSARIFPrinter()
+	case printer.YamlFormat:
+		return printerv2.NewYamlPrinter()
 	default:
 		if printFormat != printer.PrettyFormat {
 			logger.L().Ctx(ctx).Warning(fmt.Sprintf("Invalid format \"%s\", default format \"pretty-printer\" is applied", printFormat))
@@ -136,7 +138,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	if scanType == cautils.ScanTypeImage {
 		// supported types for image scanning
 		switch printFormat {
-		case printer.JsonFormat, printer.PrettyFormat, printer.SARIFFormat:
+		case printer.JsonFormat, printer.PrettyFormat, printer.SARIFFormat, printer.YamlFormat:
 			return nil
 		default:
 			return fmt.Errorf("format \"%s\"is not supported for image scanning", printFormat)

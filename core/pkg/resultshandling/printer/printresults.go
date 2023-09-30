@@ -21,6 +21,7 @@ const (
 	PdfFormat         string = "pdf"
 	HtmlFormat        string = "html"
 	SARIFFormat       string = "sarif"
+	YamlFormat        string = "yaml"
 )
 
 type IPrinter interface {
