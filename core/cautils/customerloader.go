@@ -48,6 +48,7 @@ type ConfigObj struct {
 	CloudReportURL string `json:"cloudReportURL,omitempty"`
 	CloudAPIURL    string `json:"cloudAPIURL,omitempty"`
 	StorageEnabled bool   `json:"storageEnabled,omitempty"`
+	AccessToken    string `json:"accessToken,omitempty"`
 }
 
 // Config - convert ConfigObj to config file
@@ -93,6 +94,8 @@ type ITenantConfig interface {
 	DeleteCachedConfig(ctx context.Context) error
 	GenerateAccountID() (string, error)
 	DeleteAccountID() error
+	SetAccessToken(string)
+	DeleteAccessToken()
 
 	// getters
 	GetContextName() string
@@ -101,6 +104,7 @@ type ITenantConfig interface {
 	GetCloudReportURL() string
 	GetCloudAPIURL() string
 	IsStorageEnabled() bool
+	GetAccessToken() string
 }
 
 // ======================================================================================
@@ -146,6 +150,7 @@ func (lc *LocalConfig) GetContextName() string    { return lc.configObj.ClusterN
 func (lc *LocalConfig) GetCloudReportURL() string { return lc.configObj.CloudReportURL }
 func (lc *LocalConfig) GetCloudAPIURL() string    { return lc.configObj.CloudAPIURL }
 func (lc *LocalConfig) IsStorageEnabled() bool    { return lc.configObj.StorageEnabled }
+func (lc *LocalConfig) GetAccessToken() string    { return lc.configObj.AccessToken }
 
 func (lc *LocalConfig) GenerateAccountID() (string, error) {
 	lc.configObj.AccountID = uuid.NewString()
@@ -153,7 +158,13 @@ func (lc *LocalConfig) GenerateAccountID() (string, error) {
 	return lc.configObj.AccountID, err
 }
 
+func (lc *LocalConfig) SetAccessToken(accessToken string) {
+	lc.configObj.AccessToken = accessToken
+}
+func (lc *LocalConfig) DeleteAccessToken() { lc.configObj.AccessToken = "" }
+
 func (lc *LocalConfig) DeleteAccountID() error {
+	lc.DeleteAccessToken()
 	lc.configObj.AccountID = ""
 	return lc.UpdateCachedConfig()
 }
@@ -194,6 +205,7 @@ type ClusterConfig struct {
 	configMapNamespace   string
 	ksConfigMapName      string
 	ksCloudConfigMapName string
+	accessToken          string
 }
 
 func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, clusterName string, customClusterName string) *ClusterConfig {
@@ -247,6 +259,13 @@ func (c *ClusterConfig) GetAccountID() string      { return c.configObj.AccountI
 func (c *ClusterConfig) GetCloudReportURL() string { return c.configObj.CloudReportURL }
 func (c *ClusterConfig) GetCloudAPIURL() string    { return c.configObj.CloudAPIURL }
 func (c *ClusterConfig) IsStorageEnabled() bool    { return c.configObj.StorageEnabled }
+func (c *ClusterConfig) GetAccessToken() string    { return c.accessToken }
+
+func (lc *ClusterConfig) SetAccessToken(accessToken string) {
+	lc.configObj.AccessToken = accessToken
+}
+
+func (lc *ClusterConfig) DeleteAccessToken() { lc.accessToken = "" }
 
 func (c *ClusterConfig) UpdateCachedConfig() error {
 	logger.L().Debug("updating cached config", helpers.Interface("configObj", c.configObj))
@@ -466,7 +485,8 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
 	}
 	getter.SetKSCloudAPIConnector(cloud)
-	return getter.GetKSCloudAPIConnector()
+
+	return &getter.GetKSCloudAPIConnector().KSCloudAPI
 }
 
 func GetTenantConfig(accountID, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {

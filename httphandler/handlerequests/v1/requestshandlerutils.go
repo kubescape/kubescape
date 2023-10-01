@@ -15,12 +15,17 @@ import (
 	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/core"
 	"github.com/kubescape/kubescape/v2/httphandler/storage"
+	secretconfig "github.com/kubescape/kubevuln/config"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+)
+
+const (
+	secretPath string = "/etc/access-token-secret"
 )
 
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
@@ -141,6 +146,15 @@ func findFile(targetDir string, fileName string) (string, error) {
 		}
 	}
 	return "", nil
+}
+
+func enrichScanCommand(scanInfo *cautils.ScanInfo) error {
+	secretData, err := secretconfig.LoadSecret(secretPath)
+	if err != nil {
+		return err
+	}
+	scanInfo.AccessToken = secretData.Token
+	return nil
 }
 
 func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *cautils.ScanInfo {

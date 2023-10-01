@@ -46,15 +46,23 @@ type ReportEventReceiver struct {
 	reportID           string
 	submitContext      SubmitContext
 	accountIdGenerated bool
+	accessToken        string
 }
 
-func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string, submitContext SubmitContext) *ReportEventReceiver {
+func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID, accessToken string, submitContext SubmitContext) *ReportEventReceiver {
 	return &ReportEventReceiver{
 		httpClient:    &http.Client{},
 		tenantConfig:  tenantConfig,
 		reportID:      reportID,
 		submitContext: submitContext,
+		accessToken:   accessToken,
 	}
+}
+
+func getAccessToken() (string, error) {
+	// here we need to make http request for getting the new access token for account ID
+
+	return "", nil
 }
 
 func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
@@ -70,6 +78,16 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 		}
 		report.accountIdGenerated = true
 		logger.L().Debug("generated account ID", helpers.String("account ID", accountID))
+		report.tenantConfig.GetConfigObj().AccessToken, err = getAccessToken()
+		if err != nil {
+			logger.L().Error("failed to generate access token for account ID", helpers.String("account ID", accountID), helpers.String("reason", err.Error()))
+			return err
+		}
+		err = report.tenantConfig.UpdateCachedConfig()
+		if err != nil {
+			logger.L().Error("failed to update access token in config file for account ID", helpers.String("account ID", accountID), helpers.String("reason", err.Error()))
+			return err
+		}
 	}
 
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.GetClusterName() == "" {
@@ -229,6 +247,13 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 	return nil
 }
 
+func (report *ReportEventReceiver) setPostResultHeaders() map[string]string {
+	return map[string]string{
+		"Content-Type":  "application/json",
+		"Authorization": "Bearer " + report.accessToken,
+	}
+}
+
 func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = apis.PaginationMarks{
 		ReportNumber: counter,
@@ -238,7 +263,8 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 	if err != nil {
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
 	}
-	strResponse, err := getter.HttpPost(report.httpClient, report.eventReceiverURL.String(), nil, reqBody)
+
+	strResponse, err := getter.HttpPost(report.httpClient, report.eventReceiverURL.String(), report.setPostResultHeaders(), reqBody)
 	if err != nil {
 		// in case of error, we need to revert the generated account ID
 		// otherwise the next run will fail using a non existing account ID

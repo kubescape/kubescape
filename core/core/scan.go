@@ -53,6 +53,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
+	setAccessTokenIfExist(scanInfo, tenantConfig)
 
 	if scanInfo.Submit {
 		// submit - Create tenant & Submit report
