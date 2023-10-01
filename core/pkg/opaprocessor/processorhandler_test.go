@@ -308,6 +308,7 @@ func TestProcessRule(t *testing.T) {
 					Status:                "failed",
 					SubStatus:             "",
 					Paths: []armotypes.PosturePaths{
+						{ResourceID: "/v1/default/Service/fake-service-1", FailedPath: "spec.type"},
 						{ResourceID: "/v1/default/Service/fake-service-1", ReviewPath: "spec.type"},
 					},
 					Exception: nil,
