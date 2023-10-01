@@ -140,7 +140,7 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 	}
 
 	scanInfo := getScanCommand(scanRequest, scanID)
-	err = enrichScanCommand(&scanInfo)
+	err = enrichScanCommand(scanInfo)
 	if err != nil {
 		return scanRequestParams, fmt.Errorf("failed to enrich scan command, reason: %s", err.Error())
 	}
