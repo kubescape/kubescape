@@ -405,6 +405,7 @@ func TestAppendPaths(t *testing.T) {
 			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
+				{ResourceID: "2", FailedPath: "path2"},
 				{ResourceID: "2", DeletePath: "path4"},
 				{ResourceID: "2", DeletePath: "path5"},
 				{ResourceID: "2", ReviewPath: "path6"},
