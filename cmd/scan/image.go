@@ -22,15 +22,14 @@ type imageScanInfo struct {
 // TODO(vladklokun): document image scanning on the Kubescape Docs Hub?
 var (
 	imageExample = fmt.Sprintf(`
-  This command is still in BETA. Feel free to contact the Kubescape maintainers for more information.
-  
   Scan an image for vulnerabilities. 
 
   # Scan the 'nginx' image
   %[1]s scan image "nginx"
 
-  # Image scan documentation:
-  # https://hub.armosec.io/docs/images
+  # Scan the 'nginx' image and see the full report 
+  %[1]s scan image "nginx" -v
+  
 `, cautils.ExecName())
 )
 

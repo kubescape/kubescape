@@ -17,8 +17,6 @@ import (
 
 var (
 	workloadExample = fmt.Sprintf(`
-  This command is still in BETA. Feel free to contact the Kubescape maintainers for more information.
-
   Scan a workload for misconfigurations and image vulnerabilities.
 
   # Scan an workload

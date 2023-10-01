@@ -166,7 +166,9 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 		return
 	}
 
-	cautils.InfoTextDisplay(writer, "\nMost vulnerable components:\n")
+	txt := "Components with most vulnerabilities"
+	cautils.InfoTextDisplay(writer, "\n"+txt+"\n")
+	cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
 
 	sortedPkgScores := getSortPackageScores(summary.PackageScores)
 
@@ -203,13 +205,13 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 	})
 
 	if len(summary.CVEs) == 0 {
-		txt := "Vulnerability summary - no vulnerabilities were found!"
+		txt := "No vulnerabilities were found!"
 		cautils.InfoTextDisplay(writer, txt+"\n")
 		cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
 		return
 	}
 
-	txt := fmt.Sprintf("Vulnerability summary - %d vulnerabilities found:", len(summary.CVEs))
+	txt := fmt.Sprintf("%d vulnerabilities found:", len(summary.CVEs))
 	cautils.InfoTextDisplay(writer, txt+"\n")
 	cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
 
