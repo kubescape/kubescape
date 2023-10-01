@@ -339,31 +339,19 @@ func TestProcessRule(t *testing.T) {
 
 func TestAppendPaths(t *testing.T) {
 	tests := []struct {
-		name        string
-		paths       []armotypes.PosturePaths
-		failedPaths []string
-		fixPaths    []armotypes.FixPath
-		fixCommand  string
-		resourceID  string
-		expected    []armotypes.PosturePaths
+		name                string
+		paths               []armotypes.PosturePaths
+		assistedRemediation reporthandling.AssistedRemediation
+		resourceID          string
+		expected            []armotypes.PosturePaths
 	}{
 		{
-			name:        "Only FailedPaths",
-			paths:       []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}},
-			failedPaths: []string{"path2", "path3"},
-			resourceID:  "2",
-			expected: []armotypes.PosturePaths{
-				{ResourceID: "1", FailedPath: "path1"},
-				{ResourceID: "2", FailedPath: "path2"},
-				{ResourceID: "2", FailedPath: "path3"},
-			},
-		},
-		{
-			name:  "Only FixPaths",
-			paths: []armotypes.PosturePaths{},
-			fixPaths: []armotypes.FixPath{
-				{Path: "path2", Value: "command2"},
-				{Path: "path3", Value: "command3"},
+			name: "Only FixPaths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				FixPaths: []armotypes.FixPath{
+					{Path: "path2", Value: "command2"},
+					{Path: "path3", Value: "command3"},
+				},
 			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
@@ -372,26 +360,54 @@ func TestAppendPaths(t *testing.T) {
 			},
 		},
 		{
-			name:       "Only FixCommand",
-			paths:      []armotypes.PosturePaths{},
-			fixCommand: "fix command",
+			name: "Only FixCommand",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				FixCommand: "fix command",
+			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
 				{ResourceID: "2", FixCommand: "fix command"},
 			},
 		},
 		{
-			name:        "All types of paths",
-			paths:       []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}},
-			failedPaths: []string{"path2"},
-			fixPaths: []armotypes.FixPath{
-				{Path: "path3", Value: "command3"},
+			name: "Only DeletePaths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				DeletePaths: []string{"path2", "path3"},
 			},
-			fixCommand: "fix command",
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
-				{ResourceID: "1", FailedPath: "path1"},
-				{ResourceID: "2", FailedPath: "path2"},
+				{ResourceID: "2", DeletePath: "path2"},
+				{ResourceID: "2", DeletePath: "path3"},
+			},
+		},
+		{
+			name: "Only ReviewPaths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				ReviewPaths: []string{"path2", "path3"},
+			},
+			resourceID: "2",
+			expected: []armotypes.PosturePaths{
+				{ResourceID: "2", ReviewPath: "path2"},
+				{ResourceID: "2", ReviewPath: "path3"},
+			},
+		},
+		{
+			name: "All types of paths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				FailedPaths: []string{"path2"},
+				DeletePaths: []string{"path4", "path5"},
+				ReviewPaths: []string{"path6", "path7"},
+				FixPaths: []armotypes.FixPath{
+					{Path: "path3", Value: "command3"},
+				},
+				FixCommand: "fix command",
+			},
+			resourceID: "2",
+			expected: []armotypes.PosturePaths{
+				{ResourceID: "2", DeletePath: "path4"},
+				{ResourceID: "2", DeletePath: "path5"},
+				{ResourceID: "2", ReviewPath: "path6"},
+				{ResourceID: "2", ReviewPath: "path7"},
 				{ResourceID: "2", FixPath: armotypes.FixPath{Path: "path3", Value: "command3"}},
 				{ResourceID: "2", FixCommand: "fix command"},
 			},
@@ -400,7 +416,7 @@ func TestAppendPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := appendPaths(tt.paths, tt.failedPaths, tt.fixPaths, tt.fixCommand, tt.resourceID)
+			result := appendPaths(tt.paths, tt.assistedRemediation, tt.resourceID)
 			if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("Expected %v, but got %v", tt.expected, result)
 			}

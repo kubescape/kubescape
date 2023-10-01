@@ -207,10 +207,7 @@ func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj,
 		return defaultLocation
 	}
 
-	fixPaths := failedPathsToString(ac)
-	if len(fixPaths) == 0 {
-		fixPaths = fixPathsToString(ac)
-	}
+	fixPaths := AssistedRemediationPathsToString(ac)
 	var fixPath string
 	if len(fixPaths) > 0 {
 		fixPath = fixPaths[0]

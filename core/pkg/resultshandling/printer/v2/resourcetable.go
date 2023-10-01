@@ -97,7 +97,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		row[resourceColumnPath] = strings.Join(append(failedPathsToString(&controls[i]), fixPathsToString(&controls[i])...), "\n")
+		row[resourceColumnPath] = strings.Join(AssistedRemediationPathsToString(&controls[i]), "\n")
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
@@ -149,19 +149,6 @@ func (a Matrix) Less(i, j int) bool {
 	return true
 }
 
-func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
-	var paths []string
-
-	for j := range control.ResourceAssociatedRules {
-		for k := range control.ResourceAssociatedRules[j].Paths {
-			if p := control.ResourceAssociatedRules[j].Paths[k].FailedPath; p != "" {
-				paths = append(paths, p)
-			}
-		}
-	}
-	return paths
-}
-
 func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	var paths []string
 
@@ -174,4 +161,34 @@ func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []str
 		}
 	}
 	return paths
+}
+
+func deletePathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].DeletePath; p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
+}
+
+func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].ReviewPath; p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
+}
+
+func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	return append(fixPathsToString(control), append(deletePathsToString(control), reviewPathsToString(control)...)...)
 }

@@ -7,7 +7,7 @@ require (
 	github.com/anchore/grype v0.63.1
 	github.com/anchore/stereoscope v0.0.0-20230627195312-cd49355d934e
 	github.com/anchore/syft v0.84.1
-	github.com/armosec/armoapi-go v0.0.220
+	github.com/armosec/armoapi-go v0.0.256-0.20230928144732-6dc515782a26
 	github.com/armosec/utils-go v0.0.20
 	github.com/armosec/utils-k8s-go v0.0.17
 	github.com/briandowns/spinner v1.23.0
@@ -24,7 +24,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.20
 	github.com/kubescape/k8s-interface v0.0.142
-	github.com/kubescape/opa-utils v0.0.267
+	github.com/kubescape/opa-utils v0.0.269-0.20230928144933-17ea723be430
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.291-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
@@ -415,7 +415,6 @@ require (
 replace github.com/libgit2/git2go/v33 => ./git2go
 
 replace (
-
 	// Using the forked version of tablewriter
 	github.com/olekukonko/tablewriter => github.com/kubescape/tablewriter v0.0.6-0.20230907094812-c8c737a432a6
 	// TODO(vladklokun): Since later versions (e.g. v0.40.0) that get used without the pin introduce weird packaging issues probably due to package renames, pin to last known good.
