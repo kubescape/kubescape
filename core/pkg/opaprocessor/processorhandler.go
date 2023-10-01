@@ -259,6 +259,10 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
 func appendPaths(paths []armotypes.PosturePaths, assistedRemediation reporthandling.AssistedRemediation, resourceID string) []armotypes.PosturePaths {
+	// TODO - deprecate failedPaths after all controls support reviewPaths and deletePaths
+	for _, failedPath := range assistedRemediation.FailedPaths {
+		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FailedPath: failedPath})
+	}
 	for _, deletePath := range assistedRemediation.DeletePaths {
 		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, DeletePath: deletePath})
 	}

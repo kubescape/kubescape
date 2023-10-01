@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
+	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -149,6 +150,20 @@ func (a Matrix) Less(i, j int) bool {
 	return true
 }
 
+// TODO - deprecate once all controls support review/delete paths
+func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].FailedPath; p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
+}
+
 func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	var paths []string
 
@@ -190,5 +205,17 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 }
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
-	return append(fixPathsToString(control), append(deletePathsToString(control), reviewPathsToString(control)...)...)
+	paths := append(fixPathsToString(control), append(deletePathsToString(control), reviewPathsToString(control)...)...)
+	// TODO - deprecate failedPaths once all controls support review/delete paths
+	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
+	return paths
+}
+
+func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
+	for _, failedPath := range failedPaths {
+		if !slices.Contains(paths, failedPath) {
+			paths = append(paths, failedPath)
+		}
+	}
+	return paths
 }
