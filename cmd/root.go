@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/kubescape/v2/cmd/download"
 	"github.com/kubescape/kubescape/v2/cmd/fix"
 	"github.com/kubescape/kubescape/v2/cmd/list"
+	"github.com/kubescape/kubescape/v2/cmd/operator"
 	"github.com/kubescape/kubescape/v2/cmd/patch"
 	"github.com/kubescape/kubescape/v2/cmd/scan"
 	"github.com/kubescape/kubescape/v2/cmd/update"
@@ -96,6 +97,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(update.GetUpdateCmd())
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
 	rootCmd.AddCommand(patch.GetPatchCmd(ks))
+	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 
 	// deprecated commands
 	rootCmd.AddCommand(&cobra.Command{
