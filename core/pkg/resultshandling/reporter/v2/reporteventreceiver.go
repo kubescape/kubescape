@@ -247,7 +247,7 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 	return nil
 }
 
-func (report *ReportEventReceiver) setPostResultHeaders() map[string]string {
+func (report *ReportEventReceiver) getRequestHeaders() map[string]string {
 	return map[string]string{
 		"Content-Type":  "application/json",
 		"Authorization": "Bearer " + report.accessToken,
@@ -264,7 +264,7 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
 	}
 
-	strResponse, err := getter.HttpPost(report.httpClient, report.eventReceiverURL.String(), report.setPostResultHeaders(), reqBody)
+	strResponse, err := getter.HttpPost(report.httpClient, report.eventReceiverURL.String(), report.getRequestHeaders(), reqBody)
 	if err != nil {
 		// in case of error, we need to revert the generated account ID
 		// otherwise the next run will fail using a non existing account ID

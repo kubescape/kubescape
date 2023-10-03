@@ -5,20 +5,21 @@ import (
 	"net/url"
 	"os"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
+	"github.com/kubescape/backend/pkg/utils"
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/httphandler/config"
 	_ "github.com/kubescape/kubescape/v2/httphandler/docs"
 	"github.com/kubescape/kubescape/v2/httphandler/listener"
 	"github.com/kubescape/kubescape/v2/httphandler/storage"
 	"k8s.io/client-go/rest"
-
-	v1 "github.com/kubescape/backend/pkg/client/v1"
-	"github.com/kubescape/backend/pkg/servicediscovery"
-	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/go-logger/zaplogger"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 const (
@@ -44,6 +45,7 @@ func main() {
 	initializeLoggerLevel()
 	initializeSaaSEnv()
 	initializeStorage()
+	loadAndSetAccessToken()
 
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
@@ -132,4 +134,14 @@ func getNamespace() string {
 		return ns
 	}
 	return defaultNamespace
+}
+
+func loadAndSetAccessToken() {
+	sd, err := utils.LoadTokenFromSecret("/etc/access-token-secret")
+	if err != nil {
+		logger.L().Fatal("failed to load access token", helpers.Error(err))
+	}
+
+	logger.L().Debug("access token loaded")
+	config.SetAccessToken(sd.Token)
 }

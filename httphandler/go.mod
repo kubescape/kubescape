@@ -11,11 +11,10 @@ require (
 	github.com/google/uuid v1.3.1
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
-	github.com/kubescape/backend v0.0.7
+	github.com/kubescape/backend v0.0.8-0.20231003075242-690fc75a1964
 	github.com/kubescape/go-logger v0.0.21
 	github.com/kubescape/k8s-interface v0.0.144
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/kubevuln v0.2.111-0.20230930222654-26a5470dd1c6
 	github.com/kubescape/opa-utils v0.0.269
 	github.com/kubescape/storage v0.0.20
 	github.com/stretchr/testify v1.8.4
