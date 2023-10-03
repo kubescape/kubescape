@@ -5,7 +5,7 @@ go 1.20
 replace github.com/kubescape/kubescape/v2 => ../
 
 require (
-	github.com/armosec/armoapi-go v0.0.254
+	github.com/armosec/armoapi-go v0.0.256
 	github.com/armosec/utils-go v0.0.40
 	github.com/go-openapi/runtime v0.26.0
 	github.com/google/uuid v1.3.1
@@ -16,7 +16,7 @@ require (
 	github.com/kubescape/k8s-interface v0.0.144
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
 	github.com/kubescape/kubevuln v0.2.111-0.20230930222654-26a5470dd1c6
-	github.com/kubescape/opa-utils v0.0.268
+	github.com/kubescape/opa-utils v0.0.269
 	github.com/kubescape/storage v0.0.20
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0

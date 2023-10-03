@@ -238,14 +238,14 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				}
 
 				ruleResult.SetStatus(apis.StatusFailed, nil)
-				ruleResult.Paths = appendPaths(ruleResult.Paths, ruleResponse.FailedPaths, ruleResponse.FixPaths, ruleResponse.FixCommand, failedResource.GetID())
+				ruleResult.Paths = appendPaths(ruleResult.Paths, ruleResponse.AssistedRemediation, failedResource.GetID())
 				// if ruleResponse has relatedObjects, add it to ruleResult
 				if len(ruleResponse.RelatedObjects) > 0 {
 					for _, relatedObject := range ruleResponse.RelatedObjects {
 						wl := objectsenvelopes.NewObject(relatedObject.Object)
 						if wl != nil {
 							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
-							ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.FailedPaths, relatedObject.FixPaths, relatedObject.FixCommand, wl.GetID())
+							ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
 						}
 					}
 				}
@@ -258,15 +258,22 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 }
 
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
-func appendPaths(paths []armotypes.PosturePaths, failedPaths []string, fixPaths []armotypes.FixPath, fixCommand string, resourceID string) []armotypes.PosturePaths {
-	for _, failedPath := range failedPaths {
+func appendPaths(paths []armotypes.PosturePaths, assistedRemediation reporthandling.AssistedRemediation, resourceID string) []armotypes.PosturePaths {
+	// TODO - deprecate failedPaths after all controls support reviewPaths and deletePaths
+	for _, failedPath := range assistedRemediation.FailedPaths {
 		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FailedPath: failedPath})
 	}
-	for _, fixPath := range fixPaths {
+	for _, deletePath := range assistedRemediation.DeletePaths {
+		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, DeletePath: deletePath})
+	}
+	for _, reviewPath := range assistedRemediation.ReviewPaths {
+		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, ReviewPath: reviewPath})
+	}
+	for _, fixPath := range assistedRemediation.FixPaths {
 		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FixPath: fixPath})
 	}
-	if fixCommand != "" {
-		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FixCommand: fixCommand})
+	if assistedRemediation.FixCommand != "" {
+		paths = append(paths, armotypes.PosturePaths{ResourceID: resourceID, FixCommand: assistedRemediation.FixCommand})
 	}
 	return paths
 }
