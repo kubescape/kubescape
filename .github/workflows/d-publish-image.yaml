@@ -25,6 +25,20 @@ on:
         type: boolean
         description: 'support amd64/arm64'
 jobs:
+  check-secret:
+    name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+    runs-on: ubuntu-latest
+    outputs:
+      is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
+    steps:
+      - name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+        id: check-secret-set
+        env:
+          QUAYIO_REGISTRY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
+          QUAYIO_REGISTRY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+        run: |
+          echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && env.QUAYIO_REGISTRY_PASSWORD != '' }}" >> $GITHUB_OUTPUT
+          
   build-cli-image:
     needs: [check-secret]
     if: needs.check-secret.outputs.is-secret-set == 'true'
