@@ -306,6 +306,7 @@ jobs:
               ]'
       COSIGN: true
       HELM_E2E_TEST: true
+      FORCE: true
     secrets: inherit
 
   run-tests:
