@@ -282,7 +282,7 @@ jobs:
           if-no-files-found: error
 
   build-http-image:
-    needs: [check-secret]
+    needs: [check-secret, retag]
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubescape
