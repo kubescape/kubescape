@@ -282,11 +282,11 @@ jobs:
           if-no-files-found: error
 
   build-http-image:
-    needs: [check-secret, retag]
+    needs: [check-secret]
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubescape
-      IMAGE_TAG: ${{ needs.retag.outputs.NEW_TAG }}
+      IMAGE_TAG: ${{ inputs.RELEASE }}
       COMPONENT_NAME: kubescape
       CGO_ENABLED: 0
       GO111MODULE: "on"
