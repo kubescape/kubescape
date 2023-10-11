@@ -221,11 +221,11 @@ jobs:
         if: matrix.os != 'windows-latest'
 
       - name: Test core pkg
-        run: ${{ env.DOCKER_CMD }} go test "-tags=static,gitenabled" -v ./...
+        run: ${{ env.DOCKER_CMD }} go test -v ./...
         if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Test httphandler pkg
-        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test "-tags=static,gitenabled" -v ./...'
+        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
         if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Build
