@@ -70,7 +70,11 @@ We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, on the firs
 
 The Kubescape project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
-## Contributions 
+### Adopters
+
+See [here](ADOPTERS.md) a list of adopters.
+
+## Contributions
 
 Thanks to all our contributors!  Check out our [CONTRIBUTING](CONTRIBUTING.md) file to learn how to join them.
 
@@ -83,6 +87,10 @@ Thanks to all our contributors!  Check out our [CONTRIBUTING](CONTRIBUTING.md) f
 <a href = "https://github.com/kubescape/kubescape/graphs/contributors">
   <img src = "https://contrib.rocks/image?repo=kubescape/kubescape"/>
 </a>
+
+## Changes
+
+Kubescape changes are tracked on the [release](https://github.com/kubescape/kubescape/releases) page
 
 ## License
 
