@@ -88,7 +88,7 @@ Thanks to all our contributors!  Check out our [CONTRIBUTING](CONTRIBUTING.md) f
   <img src = "https://contrib.rocks/image?repo=kubescape/kubescape"/>
 </a>
 
-## Changes
+## Changelog
 
 Kubescape changes are tracked on the [release](https://github.com/kubescape/kubescape/releases) page
 
