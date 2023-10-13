@@ -6,7 +6,7 @@ header:
   project-url: https://github.com/kubescape/kubescape/
   project-release: '1.0.0'
 project-lifecycle:
-  stage: active
+  status: active
   bug-fixes-only: false
   core-maintainers:
   - github:slashben
