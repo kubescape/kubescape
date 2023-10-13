@@ -1,5 +1,5 @@
 name: b-binary-build-and-e2e-tests
-
+permissions: read-all
 on:
   workflow_dispatch:
     inputs:
