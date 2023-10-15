@@ -37,7 +37,7 @@ var (
 
 // controlCmd represents the control command
 func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
-	return &cobra.Command{
+	controlCmd := &cobra.Command{
 		Use:     "control <control names list>/<control ids list>",
 		Short:   fmt.Sprintf("The controls you wish to use. Run '%[1]s list controls' for the list of supported controls", cautils.ExecName()),
 		Example: controlExample,
@@ -119,6 +119,8 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			return nil
 		},
 	}
+	controlCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.ResourceViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.ResourceViewType))
+	return controlCmd
 }
 
 // validateControlScanInfo validates the ScanInfo struct for the `control` command
