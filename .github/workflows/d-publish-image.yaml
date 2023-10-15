@@ -1,4 +1,5 @@
 name: d-publish-image
+permissions: read-all
 on:
   workflow_call:
     inputs:
@@ -38,7 +39,7 @@ jobs:
           QUAYIO_REGISTRY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
         run: |
           echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && env.QUAYIO_REGISTRY_PASSWORD != '' }}" >> $GITHUB_OUTPUT
-          
+
   build-cli-image:
     needs: [check-secret]
     if: needs.check-secret.outputs.is-secret-set == 'true'

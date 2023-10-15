@@ -1,4 +1,5 @@
 name: 03-post_release
+permissions: read-all
 on:
   release:
     types: [published]

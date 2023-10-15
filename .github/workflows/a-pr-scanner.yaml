@@ -1,4 +1,5 @@
 name: a-pr-scanner
+permissions: read-all
 on:
   workflow_call:
     inputs:
@@ -68,7 +69,7 @@ jobs:
 
       - name: Convert coverage count to lcov format
         uses: jandelgado/gcov2lcov-action@v1
-        
+
       - name: Submit coverage tests to Coveralls
         continue-on-error: true
         uses: coverallsapp/github-action@v1
