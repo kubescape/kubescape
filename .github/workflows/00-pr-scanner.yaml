@@ -35,7 +35,7 @@ jobs:
       CGO_ENABLED: 1
       GO111MODULE: ""
       GO_VERSION: "1.20"
-      RELEASE: ""
+      RELEASE: "latest"
       CLIENT: test
       ARCH_MATRIX: '[ "" ]'
       OS_MATRIX: '[ "ubuntu-20.04" ]'
