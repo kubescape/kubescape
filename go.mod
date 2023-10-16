@@ -7,7 +7,7 @@ require (
 	github.com/anchore/grype v0.65.0
 	github.com/anchore/stereoscope v0.0.0-20230727211946-d1f3d766295e
 	github.com/anchore/syft v0.86.1
-	github.com/armosec/armoapi-go v0.0.220
+	github.com/armosec/armoapi-go v0.0.256
 	github.com/armosec/utils-go v0.0.20
 	github.com/armosec/utils-k8s-go v0.0.17
 	github.com/briandowns/spinner v1.23.0
@@ -25,10 +25,11 @@ require (
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.20
 	github.com/kubescape/k8s-interface v0.0.142
-	github.com/kubescape/opa-utils v0.0.267
+	github.com/kubescape/opa-utils v0.0.270
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.291-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
+	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
 	github.com/mattn/go-isatty v0.0.19
 	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/olekukonko/tablewriter v0.0.6-0.20230417144759-edd1a71a5576
@@ -172,7 +173,7 @@ require (
 	github.com/cpuguy83/dockercfg v0.3.1 // indirect
 	github.com/cpuguy83/go-docker v0.2.1 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20220623050100-57a0ce2678a7 // indirect
-	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
+	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deitch/magic v0.0.0-20230404182410-1ff89d7342da // indirect
 	github.com/digitorus/pkcs7 v0.0.0-20221212123742-001c36b64ec3 // indirect

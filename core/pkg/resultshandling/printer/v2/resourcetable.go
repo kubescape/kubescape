@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
+	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -97,7 +98,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		row[resourceColumnPath] = strings.Join(append(failedPathsToString(&controls[i]), fixPathsToString(&controls[i])...), "\n")
+		row[resourceColumnPath] = strings.Join(AssistedRemediationPathsToString(&controls[i]), "\n")
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
@@ -149,6 +150,7 @@ func (a Matrix) Less(i, j int) bool {
 	return true
 }
 
+// TODO - deprecate once all controls support review/delete paths
 func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	var paths []string
 
@@ -171,6 +173,48 @@ func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []str
 				v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
 				paths = append(paths, fmt.Sprintf("%s=%s", p, v))
 			}
+		}
+	}
+	return paths
+}
+
+func deletePathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].DeletePath; p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
+}
+
+func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].ReviewPath; p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
+}
+
+func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	paths := append(fixPathsToString(control), append(deletePathsToString(control), reviewPathsToString(control)...)...)
+	// TODO - deprecate failedPaths once all controls support review/delete paths
+	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
+	return paths
+}
+
+func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
+	for _, failedPath := range failedPaths {
+		if !slices.Contains(paths, failedPath) {
+			paths = append(paths, failedPath)
 		}
 	}
 	return paths

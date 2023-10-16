@@ -1,4 +1,5 @@
 //go:build gitenabled
+
 package cautils
 
 import (
@@ -27,64 +28,7 @@ func newGitRepository(root string) (*gitRepository, error) {
 
 func (g *gitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error) {
 	if len(g.fileToLastCommit) == 0 {
-		filePathToCommitTime := map[string]time.Time{}
-		filePathToCommit := map[string]*git2go.Commit{}
-		allCommits, _ := g.getAllCommits()
-
-		// builds a map of all files to their last commit
-		for _, commit := range allCommits {
-			// Ignore merge commits (2+ parents)
-			if commit.ParentCount() <= 1 {
-				tree, err := commit.Tree()
-				if err != nil {
-					continue
-				}
-
-				// ParentCount can be either 1 or 0 (initial commit)
-				// In case it's the initial commit, prevTree is nil
-				var prevTree *git2go.Tree
-				if commit.ParentCount() == 1 {
-					prevCommit := commit.Parent(0)
-					prevTree, err = prevCommit.Tree()
-					if err != nil {
-						continue
-					}
-				}
-
-				diff, err := g.git2GoRepo.DiffTreeToTree(prevTree, tree, nil)
-				if err != nil {
-					continue
-				}
-
-				numDeltas, err := diff.NumDeltas()
-				if err != nil {
-					continue
-				}
-
-				for i := 0; i < numDeltas; i++ {
-					delta, err := diff.Delta(i)
-					if err != nil {
-						continue
-					}
-
-					deltaFilePath := delta.NewFile.Path
-					commitTime := commit.Author().When
-
-					// In case we have the commit information for the file which is not the latest - we override it
-					if currentCommitTime, exists := filePathToCommitTime[deltaFilePath]; exists {
-						if currentCommitTime.Before(commitTime) {
-							filePathToCommitTime[deltaFilePath] = commitTime
-							filePathToCommit[deltaFilePath] = commit
-						}
-					} else {
-						filePathToCommitTime[deltaFilePath] = commitTime
-						filePathToCommit[deltaFilePath] = commit
-					}
-				}
-			}
-		}
-
-		g.fileToLastCommit = filePathToCommit
+		g.buildCommitMap()
 	}
 
 	if relevantCommit, exists := g.fileToLastCommit[filePath]; exists {
@@ -92,6 +36,67 @@ func (g *gitRepository) GetFileLastCommit(filePath string) (*apis.Commit, error)
 	}
 
 	return nil, fmt.Errorf("failed to get commit information for file: %s", filePath)
+}
+
+func (g *gitRepository) buildCommitMap() {
+	filePathToCommitTime := map[string]time.Time{}
+	filePathToCommit := map[string]*git2go.Commit{}
+	allCommits, _ := g.getAllCommits()
+
+	// builds a map of all files to their last commit
+	for _, commit := range allCommits {
+		// Ignore merge commits (2+ parents)
+		if commit.ParentCount() <= 1 {
+			tree, err := commit.Tree()
+			if err != nil {
+				continue
+			}
+
+			// ParentCount can be either 1 or 0 (initial commit)
+			// In case it's the initial commit, prevTree is nil
+			var prevTree *git2go.Tree
+			if commit.ParentCount() == 1 {
+				prevCommit := commit.Parent(0)
+				prevTree, err = prevCommit.Tree()
+				if err != nil {
+					continue
+				}
+			}
+
+			diff, err := g.git2GoRepo.DiffTreeToTree(prevTree, tree, nil)
+			if err != nil {
+				continue
+			}
+
+			numDeltas, err := diff.NumDeltas()
+			if err != nil {
+				continue
+			}
+
+			for i := 0; i < numDeltas; i++ {
+				delta, err := diff.Delta(i)
+				if err != nil {
+					continue
+				}
+
+				deltaFilePath := delta.NewFile.Path
+				commitTime := commit.Author().When
+
+				// In case we have the commit information for the file which is not the latest - we override it
+				if currentCommitTime, exists := filePathToCommitTime[deltaFilePath]; exists {
+					if currentCommitTime.Before(commitTime) {
+						filePathToCommitTime[deltaFilePath] = commitTime
+						filePathToCommit[deltaFilePath] = commit
+					}
+				} else {
+					filePathToCommitTime[deltaFilePath] = commitTime
+					filePathToCommit[deltaFilePath] = commit
+				}
+			}
+		}
+	}
+
+	g.fileToLastCommit = filePathToCommit
 }
 
 func (g *gitRepository) getAllCommits() ([]*git2go.Commit, error) {

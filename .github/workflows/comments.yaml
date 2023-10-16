@@ -1,5 +1,5 @@
 name: pr-agent
-
+permissions: read-all
 on:
   issue_comment:
 
@@ -19,5 +19,3 @@ jobs:
         env:
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-   
-

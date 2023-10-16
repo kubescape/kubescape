@@ -5,7 +5,7 @@ go 1.20
 replace github.com/kubescape/kubescape/v2 => ../
 
 require (
-	github.com/armosec/armoapi-go v0.0.220
+	github.com/armosec/armoapi-go v0.0.256
 	github.com/armosec/utils-go v0.0.20
 	github.com/go-openapi/runtime v0.26.0
 	github.com/google/uuid v1.3.0
@@ -15,7 +15,7 @@ require (
 	github.com/kubescape/go-logger v0.0.20
 	github.com/kubescape/k8s-interface v0.0.144
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.268
+	github.com/kubescape/opa-utils v0.0.270
 	github.com/kubescape/storage v0.0.20
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
@@ -29,10 +29,10 @@ require (
 	go.opentelemetry.io/otel/trace v1.16.0
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.25.0 // indirect
-	golang.org/x/crypto v0.12.0 // indirect
+	golang.org/x/crypto v0.14.0 // indirect
 	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
 	golang.org/x/mod v0.12.0 // indirect
-	golang.org/x/net v0.14.0 // indirect
+	golang.org/x/net v0.17.0 // indirect
 	golang.org/x/oauth2 v0.10.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230807174057-1744710a1577 // indirect
@@ -157,7 +157,7 @@ require (
 	github.com/cpuguy83/dockercfg v0.3.1 // indirect
 	github.com/cpuguy83/go-docker v0.2.1 // indirect
 	github.com/cyberphone/json-canonicalization v0.0.0-20220623050100-57a0ce2678a7 // indirect
-	github.com/cyphar/filepath-securejoin v0.2.3 // indirect
+	github.com/cyphar/filepath-securejoin v0.2.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/deitch/magic v0.0.0-20230404182410-1ff89d7342da // indirect
 	github.com/digitorus/pkcs7 v0.0.0-20221212123742-001c36b64ec3 // indirect
@@ -277,6 +277,7 @@ require (
 	github.com/libgit2/git2go/v33 v33.0.9 // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
@@ -412,9 +413,9 @@ require (
 	go.starlark.net v0.0.0-20200306205701-8dd3e2ee1dd5 // indirect
 	go.step.sm/crypto v0.32.1 // indirect
 	golang.org/x/sync v0.3.0 // indirect
-	golang.org/x/sys v0.11.0 // indirect
-	golang.org/x/term v0.11.0 // indirect
-	golang.org/x/text v0.12.0 // indirect
+	golang.org/x/sys v0.13.0 // indirect
+	golang.org/x/term v0.13.0 // indirect
+	golang.org/x/text v0.13.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.10.0 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect

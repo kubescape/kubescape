@@ -1,4 +1,5 @@
 name: 04-publish_krew_plugin
+permissions: read-all
 on:
   push:
     tags:
