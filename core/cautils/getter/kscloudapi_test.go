@@ -35,15 +35,15 @@ func TestGlobalKSCloudAPIConnector(t *testing.T) {
 
 	t.Run("uninitialized global connector should yield an empty KS client", func(t *testing.T) {
 		empty := v1.NewEmptyKSCloudAPI()
-		require.EqualValues(t, *empty, GetKSCloudAPIConnector().KSCloudAPI)
+		require.EqualValues(t, *empty, GetKSCloudAPIConnector())
 	})
 
 	t.Run("initialized global connector should yield the same pointer", func(t *testing.T) {
-		ksCloud, _ := v1.NewKSCloudAPI("test-123", "test-456", "account")
+		ksCloud, _ := v1.NewKSCloudAPI("test-123", "test-456", "account", "token")
 		SetKSCloudAPIConnector(ksCloud)
 
-		client := GetKSCloudAPIConnector().KSCloudAPI
+		client := GetKSCloudAPIConnector()
 		require.Equal(t, ksCloud, &client)
-		require.Equal(t, client, GetKSCloudAPIConnector().KSCloudAPI)
+		require.Equal(t, client, GetKSCloudAPIConnector())
 	})
 }

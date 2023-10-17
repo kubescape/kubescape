@@ -28,11 +28,14 @@ const (
 
 func main() {
 	ctx := context.Background()
+
+	loadAndSetTokenAndAccountId()
+
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubescape",
 			os.Getenv(cautils.BuildNumber),
-			os.Getenv("ACCOUNT_ID"),
+			config.GetAccountId(),
 			os.Getenv("CLUSTER_NAME"),
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
@@ -45,7 +48,6 @@ func main() {
 	initializeLoggerLevel()
 	initializeSaaSEnv()
 	initializeStorage()
-	loadAndSetAccessToken()
 
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
@@ -121,12 +123,11 @@ func initializeSaaSEnv() {
 		return
 	}
 
-	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), ""); err != nil {
+	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccountId(), config.GetAccessToken()); err != nil {
 		logger.L().Fatal("failed to initialize cloud api", helpers.Error(err))
 	} else {
 		getter.SetKSCloudAPIConnector(ksCloud)
 	}
-
 }
 
 func getNamespace() string {
@@ -136,7 +137,7 @@ func getNamespace() string {
 	return defaultNamespace
 }
 
-func loadAndSetAccessToken() {
+func loadAndSetTokenAndAccountId() {
 	sd, err := utils.LoadTokenFromSecret("/etc/access-token-secret")
 	if err != nil {
 		logger.L().Fatal("failed to load access token", helpers.Error(err))
@@ -144,4 +145,5 @@ func loadAndSetAccessToken() {
 
 	logger.L().Debug("access token loaded")
 	config.SetAccessToken(sd.Token)
+	config.SetAccountId(sd.AccountId)
 }

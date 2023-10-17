@@ -480,13 +480,13 @@ func updateCloudURLs(configObj *ConfigObj) {
 
 func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 	logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))
-	cloud, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID())
+	cloud, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID(), c.GetAccessToken())
 	if err != nil {
 		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
 	}
 	getter.SetKSCloudAPIConnector(cloud)
 
-	return &getter.GetKSCloudAPIConnector().KSCloudAPI
+	return getter.GetKSCloudAPIConnector()
 }
 
 func GetTenantConfig(accountID, clusterName, customClusterName string, k8s *k8sinterface.KubernetesApi) ITenantConfig {

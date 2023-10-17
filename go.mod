@@ -20,7 +20,7 @@ require (
 	github.com/johnfercher/maroto v0.42.0
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
-	github.com/kubescape/backend v0.0.7
+	github.com/kubescape/backend v0.0.9-0.20231017131835-3a776c4dedc8
 	github.com/kubescape/go-git-url v0.0.25
 	github.com/kubescape/go-logger v0.0.21
 	github.com/kubescape/k8s-interface v0.0.142

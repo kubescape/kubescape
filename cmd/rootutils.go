@@ -99,6 +99,7 @@ func initEnvironment() {
 		services.GetApiServerUrl(),
 		services.GetReportReceiverHttpUrl(),
 		"",
+		"",
 	)
 	if err != nil {
 		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
