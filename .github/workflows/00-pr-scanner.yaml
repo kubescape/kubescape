@@ -21,7 +21,19 @@ concurrency:
 jobs:
   pr-scanner:
     permissions:
+      actions: read
+      checks: read
+      contents: read
+      deployments: read
+      id-token: read
+      issues: read
+      discussions: read
+      packages: read
+      pages: read
       pull-requests: write
+      repository-projects: read
+      security-events: read
+      statuses: read
     uses: ./.github/workflows/a-pr-scanner.yaml
     with:
       RELEASE: ""
