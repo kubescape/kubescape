@@ -179,7 +179,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.PolicyRule, fixedControlInputs map[string][]string) (map[string]*resourcesresults.ResourceAssociatedRule, error) {
 	resources := make(map[string]*resourcesresults.ResourceAssociatedRule)
 
-	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ConfigInputs, fixedControlInputs)
+	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
 	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule)
 	for i := range resourcesPerNS {
@@ -349,7 +349,7 @@ func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandlin
 		return k8sObjects, nil
 	}
 
-	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ConfigInputs, nil)
+	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, nil)
 	ruleResponse, err := opap.runOPAOnSingleRule(ctx, rule, k8sObjects, ruleEnumeratorData, ruleRegoDependenciesData)
 	if err != nil {
 		return nil, err
@@ -366,8 +366,8 @@ func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandlin
 // makeRegoDeps builds a resources.RegoDependenciesData struct for the current cloud provider.
 //
 // If some extra fixedControlInputs are provided, they are merged into the "posture" control inputs.
-func (opap *OPAProcessor) makeRegoDeps(configInputs []string, fixedControlInputs map[string][]string) resources.RegoDependenciesData {
-	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlInputs(configInputs) // get store
+func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConfigInputs, fixedControlInputs map[string][]string) resources.RegoDependenciesData {
+	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlConfigInputs(configInputs) // get store
 
 	// merge configurable control input and fixed control input
 	for k, v := range fixedControlInputs {

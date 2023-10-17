@@ -6,6 +6,12 @@
 curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 ```
 
+To install a previous version, you can specify it in the command line.
+
+```bash
+curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash -s -- -v v2.3.6
+```
+
 ### X86_64 Windows
 You must have PowerShell v5.0 or higher:
 ```powershell

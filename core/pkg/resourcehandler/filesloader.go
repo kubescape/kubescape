@@ -219,7 +219,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		if gitRepo != nil {
 			commitInfo, err := gitRepo.GetFileLastCommit(source)
 			if err != nil && !warnIssued {
-				logger.L().Ctx(ctx).Warning("Git scan skipped", helpers.Error(err))
+				logger.L().Debug("Git scan skipped", helpers.Error(err))
 				warnIssued = true // croak only once
 			}
 

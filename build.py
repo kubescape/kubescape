@@ -65,6 +65,9 @@ def main():
         ldflags += " -X {}={}".format(client_var, client_name)
 
     build_command = ["go", "build", "-buildmode=pie", "-tags=static,gitenabled", "-o", ks_file, "-ldflags" ,ldflags]
+    if CURRENT_PLATFORM == "Windows":
+        os.putenv("CGO_ENABLED", "0")
+        build_command = ["go", "build", "-o", ks_file, "-ldflags", ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))

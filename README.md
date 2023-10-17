@@ -4,7 +4,10 @@
 [![Gitpod Ready-to-Code](https://img.shields.io/badge/Gitpod-Ready--to--Code-blue?logo=gitpod)](https://gitpod.io/#https://github.com/kubescape/kubescape)
 [![GitHub](https://img.shields.io/github/license/kubescape/kubescape)](https://github.com/kubescape/kubescape/blob/master/LICENSE)
 [![CNCF](https://shields.io/badge/CNCF-Sandbox%20project-blue?logo=linux-foundation&style=flat)](https://landscape.cncf.io/card-mode?project=sandbox&selected=kubescape)
+[![Artifact HUB](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/kubescape)](https://artifacthub.io/packages/search?repo=kubescape)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fkubescape.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fkubescape?ref=badge_shield&issueType=license)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/6944/badge)](https://www.bestpractices.dev/projects/6944)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubescape/kubescape/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kubescape/kubescape)
 [![Twitter Follow](https://img.shields.io/twitter/follow/kubescape?style=social)](https://twitter.com/kubescape)
 
 # Kubescape
@@ -70,7 +73,11 @@ We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, on the firs
 
 The Kubescape project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
-## Contributions 
+### Adopters
+
+See [here](ADOPTERS.md) a list of adopters.
+
+## Contributions
 
 Thanks to all our contributors!  Check out our [CONTRIBUTING](CONTRIBUTING.md) file to learn how to join them.
 
@@ -83,6 +90,10 @@ Thanks to all our contributors!  Check out our [CONTRIBUTING](CONTRIBUTING.md) f
 <a href = "https://github.com/kubescape/kubescape/graphs/contributors">
   <img src = "https://contrib.rocks/image?repo=kubescape/kubescape"/>
 </a>
+
+## Changelog
+
+Kubescape changes are tracked on the [release](https://github.com/kubescape/kubescape/releases) page
 
 ## License
 

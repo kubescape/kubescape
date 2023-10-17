@@ -1,4 +1,5 @@
 name: c-create_release
+permissions: read-all
 on:
   workflow_call:
     inputs:

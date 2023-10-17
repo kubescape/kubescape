@@ -1,5 +1,5 @@
 name: b-binary-build-and-e2e-tests
-
+permissions: read-all
 on:
   workflow_dispatch:
     inputs:
@@ -207,11 +207,6 @@ jobs:
           echo "DOCKER_CMD=${DOCKER_CMD}" >> $GITHUB_ENV;
         if: matrix.os == 'ubuntu-20.04' && matrix.arch != ''
 
-      - name: Install MSYS2 & libgit2 (Windows)
-        shell: pwsh
-        run: .\build.ps1 all
-        if: matrix.os == 'windows-latest'
-
       - name: Install pkg-config (macOS)
         run: brew install pkg-config
         if: matrix.os == 'macos-latest'
@@ -221,11 +216,11 @@ jobs:
         if: matrix.os != 'windows-latest'
 
       - name: Test core pkg
-        run: ${{ env.DOCKER_CMD }} go test "-tags=static,gitenabled" -v ./...
+        run: ${{ env.DOCKER_CMD }} go test -v ./...
         if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Test httphandler pkg
-        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test "-tags=static,gitenabled" -v ./...'
+        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
         if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Build
@@ -286,7 +281,7 @@ jobs:
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
       IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubescape
-      IMAGE_TAG: ${{ needs.retag.outputs.NEW_TAG }}
+      IMAGE_TAG: ${{ inputs.RELEASE }}
       COMPONENT_NAME: kubescape
       CGO_ENABLED: 0
       GO111MODULE: "on"
@@ -306,6 +301,7 @@ jobs:
               ]'
       COSIGN: true
       HELM_E2E_TEST: true
+      FORCE: true
     secrets: inherit
 
   run-tests:
