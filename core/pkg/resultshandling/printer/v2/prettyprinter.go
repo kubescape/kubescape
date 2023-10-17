@@ -185,11 +185,13 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		return
 	}
 
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = prettyPrinterOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
-		outputFile = outputFile + prettyPrinterOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = prettyPrinterOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
+			outputFile = outputFile + prettyPrinterOutputExt
+		}
 	}
 
 	pp.writer = printer.GetWriter(ctx, outputFile)

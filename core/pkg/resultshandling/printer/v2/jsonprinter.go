@@ -32,11 +32,13 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = jsonOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
-		outputFile = outputFile + jsonOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = jsonOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
+			outputFile = outputFile + jsonOutputExt
+		}
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
 }
