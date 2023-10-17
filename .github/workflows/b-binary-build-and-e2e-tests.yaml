@@ -207,11 +207,6 @@ jobs:
           echo "DOCKER_CMD=${DOCKER_CMD}" >> $GITHUB_ENV;
         if: matrix.os == 'ubuntu-20.04' && matrix.arch != ''
 
-      - name: Install MSYS2 & libgit2 (Windows)
-        shell: pwsh
-        run: .\build.ps1 all
-        if: matrix.os == 'windows-latest'
-
       - name: Install pkg-config (macOS)
         run: brew install pkg-config
         if: matrix.os == 'macos-latest'
