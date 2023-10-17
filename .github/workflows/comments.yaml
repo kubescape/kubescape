@@ -3,12 +3,11 @@ permissions: read-all
 on:
   issue_comment:
 
-permissions:
-  issues: write
-  pull-requests: write
-
 jobs:
   pr_agent:
+    permissions:
+      issues: write
+      pull-requests: write
     runs-on: ubuntu-latest
     name: Run pr agent on every pull request, respond to user comments
     steps:
