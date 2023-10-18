@@ -16,6 +16,20 @@ jobs:
         with:
           SUB_STRING: "-rc"
   binary-build:
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      deployments: read
+      discussions: read
+      id-token: write
+      issues: read
+      packages: write
+      pages: read
+      pull-requests: read
+      repository-projects: read
+      security-events: read
+      statuses: read
     needs: [retag]
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
@@ -28,7 +42,19 @@ jobs:
     secrets: inherit
   create-release:
     permissions:
+      actions: read
+      checks: read
       contents: write
+      deployments: read
+      discussions: read
+      id-token: write
+      issues: read
+      packages: read
+      pages: read
+      pull-requests: read
+      repository-projects: read
+      statuses: read
+      security-events: read
     needs: [retag, binary-build]
     uses: ./.github/workflows/c-create-release.yaml
     with:
@@ -38,9 +64,19 @@ jobs:
     secrets: inherit
   publish-image:
     permissions:
-      id-token: write
-      packages: write
+      actions: read
+      checks: read
       contents: read
+      deployments: read
+      discussions: read
+      id-token: write
+      issues: read
+      packages: write
+      pages: read
+      pull-requests: read
+      repository-projects: read
+      security-events: read
+      statuses: read
     uses: ./.github/workflows/d-publish-image.yaml
     needs: [create-release, retag]
     with:
