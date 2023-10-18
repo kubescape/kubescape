@@ -142,9 +142,7 @@ func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults *models.
 
 	// Patch driver name
 	for i := range sarifReport.Runs {
-		if sarifReport.Runs[i].Tool.Driver.Name == "Grype" {
-			sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
-		}
+		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
 	}
 
 	// Write back to file
