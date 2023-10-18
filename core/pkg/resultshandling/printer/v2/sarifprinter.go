@@ -131,7 +131,7 @@ func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults *models.
 
 	jsonReport, err := os.ReadFile(sp.writer.Name())
 	if err != nil {
-		logger.L().Ctx(ctx).Info("failed to read json file - results will not be patched", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("failed to read json file - results will not be patched", helpers.Error(err))
 		return nil
 	}
 
