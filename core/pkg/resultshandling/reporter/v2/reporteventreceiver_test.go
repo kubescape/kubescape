@@ -89,7 +89,6 @@ func TestDisplayMessage(t *testing.T) {
 				accountID:   "1234",
 			},
 			"",
-			"",
 			SubmitContextScan,
 		)
 
@@ -113,7 +112,6 @@ func TestDisplayMessage(t *testing.T) {
 				clusterName: "test",
 				accountID:   "1234",
 			},
-			"",
 			"",
 			SubmitContextScan,
 		)
@@ -156,7 +154,6 @@ func TestPrepareReport(t *testing.T) {
 				accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
 			},
 			"",
-			"",
 			SubmitContextScan,
 		)
 
@@ -194,7 +191,6 @@ func TestSubmit(t *testing.T) {
 				accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
-			"",
 			SubmitContextScan,
 		)
 
@@ -213,7 +209,6 @@ func TestSubmit(t *testing.T) {
 				accountID:   "",
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
-			"",
 			SubmitContextScan,
 		)
 
@@ -246,7 +241,6 @@ func TestSubmit(t *testing.T) {
 				accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
-			"",
 			SubmitContextScan,
 		)
 
@@ -293,7 +287,6 @@ func TestSetters(t *testing.T) {
 			accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
 		},
 		"cbabd56f-bac6-416a-836b-b815ef347647",
-		"",
 		SubmitContextScan,
 	)
 

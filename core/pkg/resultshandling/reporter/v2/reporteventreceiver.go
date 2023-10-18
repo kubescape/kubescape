@@ -46,16 +46,14 @@ type ReportEventReceiver struct {
 	reportID           string
 	submitContext      SubmitContext
 	accountIdGenerated bool
-	accessToken        string
 }
 
-func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID, accessToken string, submitContext SubmitContext) *ReportEventReceiver {
+func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string, submitContext SubmitContext) *ReportEventReceiver {
 	return &ReportEventReceiver{
 		httpClient:    &http.Client{},
 		tenantConfig:  tenantConfig,
 		reportID:      reportID,
 		submitContext: submitContext,
-		accessToken:   accessToken,
 	}
 }
 
@@ -90,6 +88,10 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 
 func (report *ReportEventReceiver) SetTenantConfig(tenantConfig cautils.ITenantConfig) {
 	report.tenantConfig = tenantConfig
+}
+
+func (report *ReportEventReceiver) GetAccessToken() string {
+	return report.tenantConfig.GetAccessToken()
 }
 
 func (report *ReportEventReceiver) GetAccountID() string {
@@ -234,7 +236,7 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 func (report *ReportEventReceiver) getRequestHeaders() map[string]string {
 	return map[string]string{
 		"Content-Type":        "application/json",
-		v1.RequestTokenHeader: report.accessToken,
+		v1.RequestTokenHeader: report.GetAccessToken(),
 	}
 }
 
