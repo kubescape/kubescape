@@ -185,7 +185,7 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		return
 	}
 
-	if outputFile != "" {
+	if outputFile != "" && outputFile != os.DevNull {
 		if strings.TrimSpace(outputFile) == "" {
 			outputFile = prettyPrinterOutputFile
 		}
