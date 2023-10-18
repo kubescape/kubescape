@@ -6,6 +6,7 @@ import (
 )
 
 func main() {
+	logger.L().Info("Starting Kubescape")
 	if err := cmd.Execute(); err != nil {
 		logger.L().Fatal(err.Error())
 	}
