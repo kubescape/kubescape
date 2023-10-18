@@ -59,12 +59,6 @@ func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID, access
 	}
 }
 
-func getAccessToken() (string, error) {
-	// here we need to make http request for getting the new access token for account ID
-
-	return "", nil
-}
-
 func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *cautils.OPASessionObj) error {
 	ctx, span := otel.Tracer("").Start(ctx, "reportEventReceiver.Submit")
 	defer span.End()
@@ -78,16 +72,6 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 		}
 		report.accountIdGenerated = true
 		logger.L().Debug("generated account ID", helpers.String("account ID", accountID))
-		report.tenantConfig.GetConfigObj().AccessToken, err = getAccessToken()
-		if err != nil {
-			logger.L().Error("failed to generate access token for account ID", helpers.String("account ID", accountID), helpers.String("reason", err.Error()))
-			return err
-		}
-		err = report.tenantConfig.UpdateCachedConfig()
-		if err != nil {
-			logger.L().Error("failed to update access token in config file for account ID", helpers.String("account ID", accountID), helpers.String("reason", err.Error()))
-			return err
-		}
 	}
 
 	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reporthandlingv2.Cluster && report.GetClusterName() == "" {
@@ -249,8 +233,8 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 
 func (report *ReportEventReceiver) getRequestHeaders() map[string]string {
 	return map[string]string{
-		"Content-Type":  "application/json",
-		"Authorization": "Bearer " + report.accessToken,
+		"Content-Type":        "application/json",
+		v1.RequestTokenHeader: report.accessToken,
 	}
 }
 
