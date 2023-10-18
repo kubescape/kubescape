@@ -1292,6 +1292,8 @@ github.com/kubescape/backend v0.0.9-0.20231017130702-b73c341cb397 h1:ozwSCVd967A
 github.com/kubescape/backend v0.0.9-0.20231017130702-b73c341cb397/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
 github.com/kubescape/backend v0.0.9-0.20231017131835-3a776c4dedc8 h1:yMxwXjC8yCWxhXr5uxdk3pffVwRi9MGKSaFRUP3DV3s=
 github.com/kubescape/backend v0.0.9-0.20231017131835-3a776c4dedc8/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
+github.com/kubescape/backend v0.0.9-0.20231018083714-cccfd3c0f120 h1:T51gxyJA4r7lXzaeuWA/NJdeGspjVqGSW7DV6koCxgE=
+github.com/kubescape/backend v0.0.9-0.20231018083714-cccfd3c0f120/go.mod h1:ug9NFmmxT4DcQx3sgdLRzlLPWMKGHE/fpbcYUm5G5Qo=
 github.com/kubescape/go-git-url v0.0.25 h1:i7SSSC1+1m/Dg+4LV3erp0YklnWj1Z0cVlRxCT3Zy/0=
 github.com/kubescape/go-git-url v0.0.25/go.mod h1:IbVT7Wsxlghsa+YxI5KOx4k9VQJaa3z0kTaQz5D3nKM=
 github.com/kubescape/go-logger v0.0.21 h1:4ZRIEw3UGUH6BG/cH3yiqFipzQSfGAoCrxlsZuk37ys=

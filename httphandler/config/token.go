@@ -1,7 +1,7 @@
 package config
 
 var accessToken string
-var accountId string
+var account string
 
 func SetAccessToken(token string) {
 	accessToken = token
@@ -11,10 +11,10 @@ func GetAccessToken() string {
 	return accessToken
 }
 
-func SetAccountId(id string) {
-	accountId = id
+func SetAccount(accountId string) {
+	account = accountId
 }
 
-func GetAccountId() string {
-	return accountId
+func GetAccount() string {
+	return account
 }

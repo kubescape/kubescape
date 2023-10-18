@@ -143,17 +143,10 @@ func policyIdentifierIdentities(pi []cautils.PolicyIdentifier) string {
 	return policiesIdentities
 }
 
-func enrichKSCloudAPIConnector(scanInfo *cautils.ScanInfo) {
-	if scanInfo.AccessToken != "" {
-		getter.GetKSCloudAPIConnector()
-	}
-}
-
 func setAccessTokenIfExist(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig) {
 	if scanInfo.AccessToken != "" {
 		tenantConfig.SetAccessToken(scanInfo.AccessToken)
 	}
-	enrichKSCloudAPIConnector(scanInfo)
 }
 
 // setSubmitBehavior - Setup the desired cluster behavior regarding submitting to the Kubescape Cloud BE

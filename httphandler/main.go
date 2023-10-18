@@ -35,7 +35,7 @@ func main() {
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubescape",
 			os.Getenv(cautils.BuildNumber),
-			config.GetAccountId(),
+			config.GetAccount(),
 			os.Getenv("CLUSTER_NAME"),
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
@@ -123,7 +123,7 @@ func initializeSaaSEnv() {
 		return
 	}
 
-	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccountId(), config.GetAccessToken()); err != nil {
+	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccount(), config.GetAccessToken()); err != nil {
 		logger.L().Fatal("failed to initialize cloud api", helpers.Error(err))
 	} else {
 		getter.SetKSCloudAPIConnector(ksCloud)
@@ -138,12 +138,22 @@ func getNamespace() string {
 }
 
 func loadAndSetTokenAndAccountId() {
-	sd, err := utils.LoadTokenFromSecret("/etc/access-token-secret")
+	tokenSecretPath := "/etc/access-token-secret"
+	if envVar := os.Getenv("KS_TOKEN_SECRET_PATH"); envVar != "" {
+		tokenSecretPath = envVar
+	}
+
+	sd, err := utils.LoadTokenFromFile(tokenSecretPath)
 	if err != nil {
 		logger.L().Fatal("failed to load access token", helpers.Error(err))
 	}
 
-	logger.L().Debug("access token loaded")
-	config.SetAccessToken(sd.Token)
-	config.SetAccountId(sd.AccountId)
+	if sd.Token != "" {
+		logger.L().Debug("access token loaded from path", helpers.String("path", tokenSecretPath))
+		config.SetAccessToken(sd.Token)
+	}
+	if sd.Account != "" {
+		logger.L().Debug("account loaded from file path", helpers.String("path", tokenSecretPath))
+		config.SetAccount(sd.Account)
+	}
 }
