@@ -67,7 +67,7 @@ func initializeStorage() {
 		var err error
 		config, err = rest.InClusterConfig()
 		if err != nil {
-			logger.L().Fatal("storage initialization error", helpers.Error(err))
+			logger.L().Fatal("InClusterConfig initialization error", helpers.Error(err))
 		}
 	}
 
