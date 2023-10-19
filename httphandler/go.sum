@@ -812,8 +812,10 @@ github.com/digitorus/timestamp v0.0.0-20221019182153-ef3b63b79b31/go.mod h1:6V2N
 github.com/dimchansky/utfbom v1.1.0/go.mod h1:rO41eb7gLfo8SF1jd9F8HplJm1Fewwi4mQvIirEdv+8=
 github.com/dimchansky/utfbom v1.1.1 h1:vV6w1AhK4VMnhBno/TPVCoK9U/LP0PkLCS9tbxHdi/U=
 github.com/dimchansky/utfbom v1.1.1/go.mod h1:SxdoEBH5qIqFocHMyGOXVAybYJdr71b1Q/j0mACtrfE=
-github.com/distribution/distribution v2.8.2+incompatible h1:k9+4DKdOG+quPFZXT/mUsiQrGu9vYCp+dXpuPkuqhk8=
-github.com/distribution/distribution v2.8.2+incompatible/go.mod h1:EgLm2NgWtdKgzF9NpMzUKgzmR7AMmb0VQi2B+ZzDRjc=
+github.com/distribution/distribution v2.8.3+incompatible h1:RlpEXBLq/WPXYvBYMDAmBX/SnhD67qwtvW/DzKc8pAo=
+github.com/distribution/distribution v2.8.3+incompatible/go.mod h1:EgLm2NgWtdKgzF9NpMzUKgzmR7AMmb0VQi2B+ZzDRjc=
+github.com/distribution/reference v0.5.0 h1:/FUIFXtfc/x2gpa5/VGfiGLuOIdYa1t65IKK2OFGvA0=
+github.com/distribution/reference v0.5.0/go.mod h1:BbU0aIcezP1/5jX/8MP0YiH4SdvB5Y4f/wlDRiLyi3E=
 github.com/dnaeon/go-vcr v1.2.0 h1:zHCHvJYTMh1N7xnV7zf1m1GPBF9Ad0Jk/whtQ1663qI=
 github.com/docker/cli v24.0.5+incompatible h1:WeBimjvS0eKdH4Ygx+ihVq1Q++xg36M/rMi4aXAvodc=
 github.com/docker/cli v24.0.5+incompatible/go.mod h1:JLrzqnKDaYBop7H2jaqPtU4hHvMKP+vjCwu2uszcLI8=
@@ -1210,7 +1212,7 @@ github.com/hashicorp/go-getter v1.7.2/go.mod h1:W7TalhMmbPmsSMdNjD0ZskARur/9GJ17
 github.com/hashicorp/go-hclog v0.9.2/go.mod h1:5CU+agLiy3J7N7QjHK5d05KxGsuXiQLrjA0H7acj2lQ=
 github.com/hashicorp/go-hclog v0.12.0/go.mod h1:whpDNt7SSdeAju8AWKIWsul05p54N/39EeqMAyrmvFQ=
 github.com/hashicorp/go-hclog v1.0.0/go.mod h1:whpDNt7SSdeAju8AWKIWsul05p54N/39EeqMAyrmvFQ=
-github.com/hashicorp/go-hclog v1.3.1 h1:vDwF1DFNZhntP4DAjuTpOw3uEgMUpXh1pB5fW9DqHpo=
+github.com/hashicorp/go-hclog v1.2.0 h1:La19f8d7WIlm4ogzNHB0JGqs5AUDAZ2UfCY4sJXcJdM=
 github.com/hashicorp/go-immutable-radix v1.0.0/go.mod h1:0y9vanUI8NX6FsYoO3zeMjhV/C5i9g4Q3DwcSNZ4P60=
 github.com/hashicorp/go-immutable-radix v1.3.1/go.mod h1:0y9vanUI8NX6FsYoO3zeMjhV/C5i9g4Q3DwcSNZ4P60=
 github.com/hashicorp/go-msgpack v0.5.3/go.mod h1:ahLV/dePpqEmjfWmKiqvPkv/twdG7iPBM1vqhUKIvfM=
