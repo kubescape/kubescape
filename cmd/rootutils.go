@@ -83,7 +83,7 @@ func initEnvironment() {
 
 	logger.L().Debug("configuring service discovery URLs", helpers.String("cloudAPIURL", services.GetApiServerUrl()), helpers.String("cloudReportURL", services.GetReportReceiverHttpUrl()))
 
-	tenant := cautils.GetTenantConfig("", "", "", nil)
+	tenant := cautils.GetTenantConfig("", "", "", "", nil)
 	if services.GetApiServerUrl() != "" {
 		tenant.GetConfigObj().CloudAPIURL = services.GetApiServerUrl()
 	}

@@ -1,14 +1,14 @@
 package config
 
-var accessToken string
+var accessKey string
 var account string
 
-func SetAccessToken(token string) {
-	accessToken = token
+func SetAccessKey(key string) {
+	accessKey = key
 }
 
-func GetAccessToken() string {
-	return accessToken
+func GetAccessKey() string {
+	return accessKey
 }
 
 func SetAccount(accountId string) {

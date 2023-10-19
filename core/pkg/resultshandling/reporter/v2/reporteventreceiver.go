@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -17,7 +15,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
@@ -39,18 +36,17 @@ var _ reporter.IReport = &ReportEventReceiver{}
 
 type ReportEventReceiver struct {
 	reportTime         time.Time
-	httpClient         *http.Client
+	client             *client.KSCloudAPI
 	tenantConfig       cautils.ITenantConfig
-	eventReceiverURL   *url.URL
 	message            string
 	reportID           string
 	submitContext      SubmitContext
 	accountIdGenerated bool
 }
 
-func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string, submitContext SubmitContext) *ReportEventReceiver {
+func NewReportEventReceiver(tenantConfig cautils.ITenantConfig, reportID string, submitContext SubmitContext, client *client.KSCloudAPI) *ReportEventReceiver {
 	return &ReportEventReceiver{
-		httpClient:    &http.Client{},
+		client:        client,
 		tenantConfig:  tenantConfig,
 		reportID:      reportID,
 		submitContext: submitContext,
@@ -78,7 +74,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	}
 
 	if err := report.prepareReport(opaSessionObj); err != nil {
-		return fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.eventReceiverURL, err.Error())
+		return fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.getReportUrl(), err.Error())
 	}
 
 	logger.L().Debug("", helpers.String("account ID", report.GetAccountID()))
@@ -90,8 +86,8 @@ func (report *ReportEventReceiver) SetTenantConfig(tenantConfig cautils.ITenantC
 	report.tenantConfig = tenantConfig
 }
 
-func (report *ReportEventReceiver) GetAccessToken() string {
-	return report.tenantConfig.GetAccessToken()
+func (report *ReportEventReceiver) GetAccessKey() string {
+	return report.tenantConfig.GetAccessKey()
 }
 
 func (report *ReportEventReceiver) GetAccountID() string {
@@ -117,16 +113,18 @@ func (report *ReportEventReceiver) prepareReport(opaSessionObj *cautils.OPASessi
 		}()
 	}
 
-	var err error
-	report.eventReceiverURL, err = client.GetPostureReportUrl(getter.GetKSCloudAPIConnector().GetCloudReportURL(), report.GetAccountID(), report.GetClusterName(), report.reportID)
-	if err != nil {
-		return err
-	}
-
 	cautils.StartSpinner()
 	defer cautils.StopSpinner()
 
 	return report.sendResources(opaSessionObj)
+}
+
+func (report *ReportEventReceiver) getReportUrl() string {
+	url, err := client.GetPostureReportUrl(report.client.GetCloudReportURL(), report.GetAccountID(), report.GetClusterName(), report.reportID)
+	if err != nil {
+		return ""
+	}
+	return url.String()
 }
 
 func (report *ReportEventReceiver) sendResources(opaSessionObj *cautils.OPASessionObj) error {
@@ -233,32 +231,21 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 	return nil
 }
 
-func (report *ReportEventReceiver) getRequestHeaders() map[string]string {
-	return map[string]string{
-		"Content-Type":        "application/json",
-		v1.RequestTokenHeader: report.GetAccessToken(),
-	}
-}
-
 func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.PostureReport, counter int, isLastReport bool) error {
 	postureReport.PaginationInfo = apis.PaginationMarks{
 		ReportNumber: counter,
 		IsLastReport: isLastReport,
 	}
-	reqBody, err := json.Marshal(postureReport)
-	if err != nil {
-		return fmt.Errorf("in 'sendReport' failed to json.Marshal, reason: %v", err)
-	}
 
-	strResponse, err := getter.HttpPost(report.httpClient, report.eventReceiverURL.String(), report.getRequestHeaders(), reqBody)
+	strResponse, err := report.client.SubmitReport(postureReport)
 	if err != nil {
 		// in case of error, we need to revert the generated account ID
 		// otherwise the next run will fail using a non existing account ID
 		if report.accountIdGenerated {
-			report.tenantConfig.DeleteAccountID()
+			report.tenantConfig.DeleteCredentials()
 		}
 
-		return fmt.Errorf("%s, %v:%s", report.eventReceiverURL.String(), err, strResponse)
+		return fmt.Errorf("%s, %v:%s", report.getReportUrl(), err, strResponse)
 	}
 
 	// message is taken only from last report

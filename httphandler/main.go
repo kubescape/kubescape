@@ -29,7 +29,7 @@ const (
 func main() {
 	ctx := context.Background()
 
-	loadAndSetTokenAndAccountId()
+	loadAndSetCredentials()
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
@@ -55,7 +55,7 @@ func main() {
 }
 
 func initializeStorage() {
-	if !cautils.GetTenantConfig("", "", "", nil).IsStorageEnabled() {
+	if !cautils.GetTenantConfig("", "", "", "", nil).IsStorageEnabled() {
 		logger.L().Debug("storage disabled - skipping initialization")
 		return
 	}
@@ -123,7 +123,7 @@ func initializeSaaSEnv() {
 		return
 	}
 
-	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccount(), config.GetAccessToken()); err != nil {
+	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccount(), config.GetAccessKey()); err != nil {
 		logger.L().Fatal("failed to initialize cloud api", helpers.Error(err))
 	} else {
 		getter.SetKSCloudAPIConnector(ksCloud)
@@ -137,23 +137,23 @@ func getNamespace() string {
 	return defaultNamespace
 }
 
-func loadAndSetTokenAndAccountId() {
-	tokenSecretPath := "/etc/access-token-secret"
-	if envVar := os.Getenv("KS_TOKEN_SECRET_PATH"); envVar != "" {
-		tokenSecretPath = envVar
+func loadAndSetCredentials() {
+	credentialsPath := "/etc/credentials"
+	if envVar := os.Getenv("KS_CREDENTIALS_SECRET_PATH"); envVar != "" {
+		credentialsPath = envVar
 	}
 
-	sd, err := utils.LoadTokenFromFile(tokenSecretPath)
+	credentials, err := utils.LoadCredentialsFromFile(credentialsPath)
 	if err != nil {
-		logger.L().Fatal("failed to load access token", helpers.Error(err))
+		logger.L().Error("failed to load credentials", helpers.Error(err))
+		return
 	}
 
-	if sd.Token != "" {
-		logger.L().Debug("access token loaded from path", helpers.String("path", tokenSecretPath))
-		config.SetAccessToken(sd.Token)
-	}
-	if sd.Account != "" {
-		logger.L().Debug("account loaded from file path", helpers.String("path", tokenSecretPath))
-		config.SetAccount(sd.Account)
-	}
+	logger.L().Info("credentials loaded from path",
+		helpers.String("path", credentialsPath),
+		helpers.Int("accessKeyLength", len(credentials.AccessKey)),
+		helpers.Int("accountLength", len(credentials.Account)))
+
+	config.SetAccessKey(credentials.AccessKey)
+	config.SetAccount(credentials.Account)
 }

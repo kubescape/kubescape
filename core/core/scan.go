@@ -49,11 +49,10 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := cautils.GetTenantConfig(scanInfo.AccountID, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
+	tenantConfig := cautils.GetTenantConfig(scanInfo.AccountID, scanInfo.AccessKey, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
-	setAccessTokenIfExist(scanInfo, tenantConfig)
 
 	if scanInfo.Submit {
 		// submit - Create tenant & Submit report

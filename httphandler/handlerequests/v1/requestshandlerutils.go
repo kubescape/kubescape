@@ -162,7 +162,7 @@ func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *ca
 	scanInfo.Output = filepath.Join(OutputDir, scanID)
 	// *** end ***
 
-	scanInfo.AccessToken = config.GetAccessToken()
+	scanInfo.AccessKey = config.GetAccessKey()
 
 	return scanInfo
 }

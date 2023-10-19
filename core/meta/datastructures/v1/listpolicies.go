@@ -4,6 +4,7 @@ type ListPolicies struct {
 	Target    string
 	Format    string
 	AccountID string
+	AccessKey string
 }
 
 type ListResponse struct {

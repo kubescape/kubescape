@@ -15,7 +15,7 @@ func TestDefaultScanInfo(t *testing.T) {
 	assert.Equal(t, "", s.AccountID)
 	assert.Equal(t, "v2", s.FormatVersion)
 	assert.Equal(t, "json", s.Format)
-	assert.Equal(t, "", s.AccessToken)
+	assert.Equal(t, "", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
 	assert.False(t, s.Submit)
@@ -30,14 +30,14 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, "abc", s.ScanID)
 	assert.Equal(t, "v2", s.FormatVersion)
 	assert.Equal(t, "json", s.Format)
-	assert.Equal(t, "", s.AccessToken)
+	assert.Equal(t, "", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
 	assert.False(t, s.Submit)
 }
 
-func TestGetScanCommandWithAccessToken(t *testing.T) {
-	config.SetAccessToken("test-123")
+func TestGetScanCommandWithAccessKey(t *testing.T) {
+	config.SetAccessKey("test-123")
 
 	req := utilsmetav1.PostScanRequest{
 		TargetType: apisv1.KindFramework,
@@ -47,7 +47,7 @@ func TestGetScanCommandWithAccessToken(t *testing.T) {
 	assert.Equal(t, "abc", s.ScanID)
 	assert.Equal(t, "v2", s.FormatVersion)
 	assert.Equal(t, "json", s.Format)
-	assert.Equal(t, "test-123", s.AccessToken)
+	assert.Equal(t, "test-123", s.AccessKey)
 	assert.False(t, s.HostSensorEnabled.GetBool())
 	assert.False(t, s.Local)
 	assert.False(t, s.Submit)
