@@ -2,6 +2,7 @@ package printer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -111,14 +112,46 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) printImageScan(scanResults *models.PresenterConfig) error {
+func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
 	if scanResults == nil {
 		return fmt.Errorf("no no image vulnerability data provided")
 	}
 
-	pres := presenter.GetPresenter(printer.SARIFFormat, "", false, *scanResults)
+	presenterConfig, err := presenter.ValidatedConfig(printer.SARIFFormat, "", false)
+	if err != nil {
+		return err
+	}
 
-	return pres.Present(sp.writer)
+	pres := presenter.GetPresenter(presenterConfig, *scanResults)
+	if err := pres.Present(sp.writer); err != nil {
+		return err
+	}
+
+	// Change driver name to Kubescape
+
+	jsonReport, err := os.ReadFile(sp.writer.Name())
+	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to read json file - results will not be patched", helpers.Error(err))
+		return nil
+	}
+
+	var sarifReport sarif.Report
+	if err := json.Unmarshal(jsonReport, &sarifReport); err != nil {
+		return err
+	}
+
+	// Patch driver name
+	for i := range sarifReport.Runs {
+		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
+	}
+
+	// Write back to file
+	updatedSarifReport, err := json.MarshalIndent(sarifReport, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	return os.WriteFile(sp.writer.Name(), updatedSarifReport, os.ModePerm)
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {
@@ -133,7 +166,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(imageScanData[0].PresenterConfig); err != nil {
+		if err := sp.printImageScan(ctx, imageScanData[0].PresenterConfig); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return
 		}
