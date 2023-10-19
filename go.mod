@@ -11,7 +11,7 @@ require (
 	github.com/armosec/utils-go v0.0.20
 	github.com/armosec/utils-k8s-go v0.0.17
 	github.com/briandowns/spinner v1.23.0
-	github.com/distribution/distribution v2.8.2+incompatible
+	github.com/distribution/distribution v2.8.3+incompatible
 	github.com/docker/distribution v2.8.2+incompatible
 	github.com/enescakir/emoji v1.0.0
 	github.com/francoispqt/gojay v1.2.13
@@ -179,6 +179,7 @@ require (
 	github.com/digitorus/pkcs7 v0.0.0-20221212123742-001c36b64ec3 // indirect
 	github.com/digitorus/timestamp v0.0.0-20221019182153-ef3b63b79b31 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
+	github.com/distribution/reference v0.5.0 // indirect
 	github.com/docker/cli v24.0.5+incompatible // indirect
 	github.com/docker/docker v24.0.5+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.7.0 // indirect
@@ -249,7 +250,6 @@ require (
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
 	github.com/hashicorp/go-getter v1.7.2 // indirect
-	github.com/hashicorp/go-hclog v1.3.1 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-retryablehttp v0.7.2 // indirect
 	github.com/hashicorp/go-safetemp v1.0.0 // indirect

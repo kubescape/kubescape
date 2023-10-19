@@ -117,12 +117,7 @@ func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults *models.
 		return fmt.Errorf("no no image vulnerability data provided")
 	}
 
-	presenterConfig, err := presenter.ValidatedConfig(printer.SARIFFormat, "", false)
-	if err != nil {
-		return err
-	}
-
-	pres := presenter.GetPresenter(presenterConfig, *scanResults)
+	pres := presenter.GetPresenter(printer.SARIFFormat, "", false, *scanResults)
 	if err := pres.Present(sp.writer); err != nil {
 		return err
 	}
