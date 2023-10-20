@@ -17,6 +17,13 @@ contribution-policy:
   accepts-pull-requests: true
   accepts-automated-pull-requests: false
   code-of-conduct: https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md
+dependencies:
+  third-party-packages: true
+  dependencies-lists:
+  - https://github.com/kubescape/kubescape/blob/master/go.mod
+  - https://github.com/kubescape/kubescape/blob/master/httphandler/go.mod
+  env-dependencies-policy:
+    policy-url: https://github.com/kubescape/kubescape/blob/master/docs/environment-dependencies-policy.md
 documentation:
 - https://github.com/kubescape/kubescape/tree/master/docs
 distribution-points:
