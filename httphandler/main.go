@@ -29,14 +29,21 @@ const (
 func main() {
 	ctx := context.Background()
 
+	cfg, err := config.LoadConfig("/etc/config")
+	if err != nil {
+		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
+	}
+
 	loadAndSetCredentials()
+
+	clusterName := getClusterName(cfg)
 
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubescape",
 			os.Getenv(cautils.BuildNumber),
 			config.GetAccount(),
-			os.Getenv("CLUSTER_NAME"),
+			clusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
@@ -47,21 +54,19 @@ func main() {
 	initializeLoggerName()
 	initializeLoggerLevel()
 	initializeSaaSEnv()
-	initializeStorage()
-
+	initializeStorage(cfg)
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
 	logger.L().Ctx(ctx).Fatal(listener.SetupHTTPListener().Error())
 }
 
-func initializeStorage() {
-	if !cautils.GetTenantConfig("", "", "", "", nil).IsStorageEnabled() {
-		logger.L().Debug("storage disabled - skipping initialization")
+func initializeStorage(cfg config.Config) {
+	if !cfg.ContinuousPostureScan {
+		logger.L().Debug("continuous posture scan - skipping storage initialization")
 		return
 	}
-
-	namespace := getNamespace()
-	logger.L().Debug("storage enabled", helpers.String("namespace", namespace))
+	namespace := getNamespace(cfg)
+	logger.L().Debug("initializing storage", helpers.String("namespace", namespace))
 
 	// for local storage, use the k8s config
 	var config *rest.Config
@@ -130,10 +135,21 @@ func initializeSaaSEnv() {
 	}
 }
 
-func getNamespace() string {
+func getClusterName(cfg config.Config) string {
+	if clusterName, ok := os.LookupEnv("CLUSTER_NAME"); ok {
+		return clusterName
+	}
+	return cfg.ClusterName
+}
+
+func getNamespace(cfg config.Config) string {
 	if ns, ok := os.LookupEnv("NAMESPACE"); ok {
 		return ns
 	}
+	if cfg.Namespace != "" {
+		return cfg.Namespace
+	}
+
 	return defaultNamespace
 }
 

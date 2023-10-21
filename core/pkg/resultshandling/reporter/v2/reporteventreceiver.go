@@ -86,10 +86,6 @@ func (report *ReportEventReceiver) SetTenantConfig(tenantConfig cautils.ITenantC
 	report.tenantConfig = tenantConfig
 }
 
-func (report *ReportEventReceiver) GetAccessKey() string {
-	return report.tenantConfig.GetAccessKey()
-}
-
 func (report *ReportEventReceiver) GetAccountID() string {
 	return report.tenantConfig.GetAccountID()
 }
@@ -236,6 +232,12 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 		ReportNumber: counter,
 		IsLastReport: isLastReport,
 	}
+	logger.L().Debug("sending report",
+		helpers.String("url", report.getReportUrl()),
+		helpers.String("account", report.client.GetAccountID()),
+		helpers.Int("accessKey length", len(report.client.GetAccessKey())),
+		helpers.Int("reportNumber", counter),
+	)
 
 	strResponse, err := report.client.SubmitReport(postureReport)
 	if err != nil {

@@ -476,12 +476,29 @@ func updateCloudURLs(configObj *ConfigObj) {
 }
 
 func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
-	logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))
-	cloud, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID(), c.GetAccessKey())
-	if err != nil {
-		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+	if ksCloud := getter.GetKSCloudAPIConnector(); ksCloud != nil {
+		logger.L().Debug("KS Cloud API already initialized")
+		cloud, err := v1.NewKSCloudAPI(
+			firstNonEmpty(c.GetCloudAPIURL(), ksCloud.GetCloudAPIURL()),
+			firstNonEmpty(c.GetCloudReportURL(), ksCloud.GetCloudReportURL()),
+			firstNonEmpty(c.GetAccountID(), ksCloud.GetAccountID()),
+			firstNonEmpty(c.GetAccessKey(), ksCloud.GetAccessKey()))
+		if err != nil {
+			logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+		}
+		getter.SetKSCloudAPIConnector(cloud)
+	} else {
+		logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))
+		cloud, err := v1.NewKSCloudAPI(
+			c.GetCloudAPIURL(),
+			c.GetCloudReportURL(),
+			c.GetAccountID(),
+			c.GetAccessKey())
+		if err != nil {
+			logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+		}
+		getter.SetKSCloudAPIConnector(cloud)
 	}
-	getter.SetKSCloudAPIConnector(cloud)
 
 	return getter.GetKSCloudAPIConnector()
 }
@@ -491,4 +508,12 @@ func GetTenantConfig(accountID, accessKey, clusterName, customClusterName string
 		return NewLocalConfig(accountID, accessKey, clusterName, customClusterName)
 	}
 	return NewClusterConfig(k8s, accountID, accessKey, clusterName, customClusterName)
+}
+
+// firstNonEmpty returns the first non-empty string
+func firstNonEmpty(s1, s2 string) string {
+	if s1 != "" {
+		return s1
+	}
+	return s2
 }
