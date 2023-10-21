@@ -59,11 +59,9 @@ jobs:
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
       COMPONENT_NAME: kubescape
-      CGO_ENABLED: 1
+      CGO_ENABLED: 0
       GO111MODULE: ""
       GO_VERSION: "1.21"
       RELEASE: "latest"
       CLIENT: test
-      ARCH_MATRIX: '[ "" ]'
-      OS_MATRIX: '[ "ubuntu-20.04", "macos-latest", "windows-latest"]'
     secrets: inherit
