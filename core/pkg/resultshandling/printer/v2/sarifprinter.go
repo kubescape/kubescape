@@ -74,11 +74,13 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = sarifOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
-		outputFile = outputFile + sarifOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = sarifOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
+			outputFile = outputFile + sarifOutputExt
+		}
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
 }

@@ -281,7 +281,11 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
 
 		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
-		p.SetWriter(ctx, os.Stdout.Name())
+		if scanInfo.Format != "" && scanInfo.Output == "" {
+			p.SetWriter(ctx, os.DevNull)
+		} else {
+			p.SetWriter(ctx, os.Stdout.Name())
+		}
 	}
 
 	return p
