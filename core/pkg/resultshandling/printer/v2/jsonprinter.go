@@ -32,11 +32,13 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jp *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = jsonOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
-		outputFile = outputFile + jsonOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = jsonOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
+			outputFile = outputFile + jsonOutputExt
+		}
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
 }
@@ -78,14 +80,7 @@ func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.P
 	if scanResults == nil {
 		return fmt.Errorf("no image vulnerability data provided")
 	}
-
-	presenterConfig, err := presenter.ValidatedConfig("json", "", false)
-	if err != nil {
-		return err
-	}
-
-	pres := presenter.GetPresenter(presenterConfig, *scanResults)
-
+	pres := presenter.GetPresenter("json", "", false, *scanResults)
 	return pres.Present(jp.writer)
 }
 

@@ -1,4 +1,5 @@
 name: 00-pr_scanner
+permissions: read-all
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
@@ -12,7 +13,7 @@ on:
       - 'docs/*'
       - 'build/*'
       - '.github/*'
-      
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -20,21 +21,47 @@ concurrency:
 jobs:
   pr-scanner:
     permissions:
+      actions: read
+      checks: read
+      contents: read
+      deployments: read
+      id-token: write
+      issues: read
+      discussions: read
+      packages: read
+      pages: read
       pull-requests: write
+      repository-projects: read
+      security-events: read
+      statuses: read
     uses: ./.github/workflows/a-pr-scanner.yaml
     with:
       RELEASE: ""
       CLIENT: test
     secrets: inherit
- 
+
   binary-build:
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      deployments: read
+      discussions: read
+      id-token: write
+      issues: read
+      packages: write
+      pages: read
+      pull-requests: read
+      repository-projects: read
+      security-events: read
+      statuses: read
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
       COMPONENT_NAME: kubescape
       CGO_ENABLED: 1
       GO111MODULE: ""
       GO_VERSION: "1.20"
-      RELEASE: ""
+      RELEASE: "latest"
       CLIENT: test
       ARCH_MATRIX: '[ "" ]'
       OS_MATRIX: '[ "ubuntu-20.04" ]'

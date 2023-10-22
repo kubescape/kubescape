@@ -1,5 +1,5 @@
 name: build-image
-
+permissions: read-all
 on:
     workflow_dispatch:
       inputs:

@@ -48,7 +48,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 }
 
 func LogOutputFile(fileName string) {
-	if fileName != os.Stdout.Name() && fileName != os.Stderr.Name() {
+	if fileName != os.Stdout.Name() && fileName != os.Stderr.Name() && fileName != os.DevNull {
 		logger.L().Success("Scan results saved", helpers.String("filename", fileName))
 	}
 }

@@ -1,0 +1,52 @@
+header:
+  schema-version: 1.0.0
+  last-updated: '2023-10-12'
+  last-reviewed: '2023-10-12'
+  expiration-date: '2024-10-12T01:00:00.000Z'
+  project-url: https://github.com/kubescape/kubescape/
+  project-release: '1.0.0'
+project-lifecycle:
+  status: active
+  bug-fixes-only: false
+  core-maintainers:
+  - github:slashben
+  - github:craigbox
+  - github:matthyx
+  - github:dwertent
+contribution-policy:
+  accepts-pull-requests: true
+  accepts-automated-pull-requests: false
+  code-of-conduct: https://github.com/kubescape/kubescape/blob/master/CODE_OF_CONDUCT.md
+dependencies:
+  third-party-packages: true
+  dependencies-lists:
+  - https://github.com/kubescape/kubescape/blob/master/go.mod
+  - https://github.com/kubescape/kubescape/blob/master/httphandler/go.mod
+  env-dependencies-policy:
+    policy-url: https://github.com/kubescape/kubescape/blob/master/docs/environment-dependencies-policy.md
+documentation:
+- https://github.com/kubescape/kubescape/tree/master/docs
+distribution-points:
+- https://github.com/kubescape/kubescape/
+security-artifacts:
+  threat-model:
+    threat-model-created: false
+security-testing:
+- tool-type: sca
+  tool-name: Dependabot
+  tool-version: latest
+  integration:
+    ad-hoc: false
+    ci: true
+    before-release: true
+  comment: |
+    Dependabot is enabled for this repo.
+security-contacts:
+- type: email
+  value: cncf-kubescape-maintainers@lists.cncf.io
+vulnerability-reporting:
+  accepts-vulnerability-reports: true
+  security-policy: https://github.com/kubescape/kubescape/security/policy
+  email-contact: cncf-kubescape-maintainers@lists.cncf.io
+  comment: |
+    The first and best way to report a vulnerability is by using private security issues in GitHub.
