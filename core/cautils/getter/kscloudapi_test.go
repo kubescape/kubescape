@@ -39,7 +39,7 @@ func TestGlobalKSCloudAPIConnector(t *testing.T) {
 	})
 
 	t.Run("initialized global connector should yield the same pointer", func(t *testing.T) {
-		ksCloud, _ := v1.NewKSCloudAPI("test-123", "test-456", "account")
+		ksCloud, _ := v1.NewKSCloudAPI("test-123", "test-456", "account", "token")
 		SetKSCloudAPIConnector(ksCloud)
 
 		client := GetKSCloudAPIConnector()

@@ -11,6 +11,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/cmd/shared"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 
@@ -37,7 +38,7 @@ var (
 
 // controlCmd represents the control command
 func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
-	return &cobra.Command{
+	controlCmd := &cobra.Command{
 		Use:     "control <control names list>/<control ids list>",
 		Short:   fmt.Sprintf("The controls you wish to use. Run '%[1]s list controls' for the list of supported controls", cautils.ExecName()),
 		Example: controlExample,
@@ -119,6 +120,8 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			return nil
 		},
 	}
+	controlCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.ResourceViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.ResourceViewType))
+	return controlCmd
 }
 
 // validateControlScanInfo validates the ScanInfo struct for the `control` command
@@ -129,7 +132,7 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
 	}
 
-	if err := validateSeverity(severity); severity != "" && err != nil {
+	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 	return nil

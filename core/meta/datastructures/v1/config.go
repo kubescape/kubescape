@@ -4,6 +4,7 @@ import "io"
 
 type SetConfig struct {
 	Account        string
+	AccessKey      string
 	CloudReportURL string
 	CloudAPIURL    string
 }

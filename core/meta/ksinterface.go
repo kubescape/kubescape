@@ -3,6 +3,7 @@ package meta
 import (
 	"context"
 
+	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
@@ -22,4 +23,10 @@ type IKubescape interface {
 
 	// fix
 	Fix(ctx context.Context, fixInfo *metav1.FixInfo) error
+
+	// patch
+	Patch(ctx context.Context, patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error)
+
+	// scan image
+	ScanImage(ctx context.Context, imgScanInfo *metav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error)
 }

@@ -5,20 +5,21 @@ import (
 	"net/url"
 	"os"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/backend/pkg/servicediscovery"
+	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
+	"github.com/kubescape/backend/pkg/utils"
 	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v2/httphandler/config"
 	_ "github.com/kubescape/kubescape/v2/httphandler/docs"
 	"github.com/kubescape/kubescape/v2/httphandler/listener"
 	"github.com/kubescape/kubescape/v2/httphandler/storage"
 	"k8s.io/client-go/rest"
-
-	v1 "github.com/kubescape/backend/pkg/client/v1"
-	"github.com/kubescape/backend/pkg/servicediscovery"
-	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
-	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/go-logger/zaplogger"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 )
 
 const (
@@ -27,12 +28,22 @@ const (
 
 func main() {
 	ctx := context.Background()
+
+	cfg, err := config.LoadConfig("/etc/config")
+	if err != nil {
+		logger.L().Ctx(ctx).Error("load config error", helpers.Error(err))
+	}
+
+	loadAndSetCredentials()
+
+	clusterName := getClusterName(cfg)
+
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubescape",
 			os.Getenv(cautils.BuildNumber),
-			os.Getenv("ACCOUNT_ID"),
-			os.Getenv("CLUSTER_NAME"),
+			config.GetAccount(),
+			clusterName,
 			url.URL{Host: otelHost})
 		defer logger.ShutdownOtel(ctx)
 	}
@@ -43,21 +54,19 @@ func main() {
 	initializeLoggerName()
 	initializeLoggerLevel()
 	initializeSaaSEnv()
-	initializeStorage()
-
+	initializeStorage(cfg)
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
 	logger.L().Ctx(ctx).Fatal(listener.SetupHTTPListener().Error())
 }
 
-func initializeStorage() {
-	if !cautils.GetTenantConfig("", "", "", nil).IsStorageEnabled() {
-		logger.L().Debug("storage disabled - skipping initialization")
+func initializeStorage(cfg config.Config) {
+	if !cfg.ContinuousPostureScan {
+		logger.L().Debug("continuous posture scan - skipping storage initialization")
 		return
 	}
-
-	namespace := getNamespace()
-	logger.L().Debug("storage enabled", helpers.String("namespace", namespace))
+	namespace := getNamespace(cfg)
+	logger.L().Debug("initializing storage", helpers.String("namespace", namespace))
 
 	// for local storage, use the k8s config
 	var config *rest.Config
@@ -119,17 +128,51 @@ func initializeSaaSEnv() {
 		return
 	}
 
-	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), ""); err != nil {
+	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccount(), config.GetAccessKey()); err != nil {
 		logger.L().Fatal("failed to initialize cloud api", helpers.Error(err))
 	} else {
 		getter.SetKSCloudAPIConnector(ksCloud)
 	}
-
 }
 
-func getNamespace() string {
+func getClusterName(cfg config.Config) string {
+	if clusterName, ok := os.LookupEnv("CLUSTER_NAME"); ok {
+		return clusterName
+	}
+	return cfg.ClusterName
+}
+
+func getNamespace(cfg config.Config) string {
 	if ns, ok := os.LookupEnv("NAMESPACE"); ok {
 		return ns
 	}
+	if cfg.Namespace != "" {
+		return cfg.Namespace
+	}
+
 	return defaultNamespace
+}
+
+func loadAndSetCredentials() {
+	credentialsPath := "/etc/credentials"
+	if envVar := os.Getenv("KS_CREDENTIALS_SECRET_PATH"); envVar != "" {
+		credentialsPath = envVar
+	}
+
+	credentials, err := utils.LoadCredentialsFromFile(credentialsPath)
+	if err != nil {
+		logger.L().Error("failed to load credentials", helpers.Error(err))
+		// fallback (backward compatibility)
+		config.SetAccount(os.Getenv("ACCOUNT_ID"))
+
+		return
+	}
+
+	logger.L().Info("credentials loaded from path",
+		helpers.String("path", credentialsPath),
+		helpers.Int("accessKeyLength", len(credentials.AccessKey)),
+		helpers.Int("accountLength", len(credentials.Account)))
+
+	config.SetAccessKey(credentials.AccessKey)
+	config.SetAccount(credentials.Account)
 }

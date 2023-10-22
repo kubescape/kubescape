@@ -27,7 +27,7 @@ Kubescape scans clusters, YAML files, and Helm charts. It detects misconfigurati
 Kubescape was created by [ARMO](https://www.armosec.io/?utm_source=github&utm_medium=repository) and is a [Cloud Native Computing Foundation (CNCF) sandbox project](https://www.cncf.io/sandbox-projects/).
 
 ## Demo
-<img src="docs/img/demo.gif">
+<img src="docs/img/demo-v3.gif">
 
 _Please [star ⭐](https://github.com/kubescape/kubescape/stargazers) the repo if you want us to continue developing and improving Kubescape! 😀_
 
