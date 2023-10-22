@@ -21,6 +21,10 @@ var (
 
   # Scan the 'nginx' image
   %[1]s scan image "nginx"
+
+  # Scan the 'nginx' image and see the full report 
+  %[1]s scan image "nginx" -v
+
 `, cautils.ExecName())
 )
 
