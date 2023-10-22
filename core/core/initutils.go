@@ -68,7 +68,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 		if scanInfo.GetScanningContext() != cautils.ContextCluster {
 			submitData = reporterv2.SubmitContextRepository
 		}
-		return reporterv2.NewReportEventReceiver(tenantConfig, reportID, submitData)
+		return reporterv2.NewReportEventReceiver(tenantConfig, reportID, submitData, getter.GetKSCloudAPIConnector())
 	}
 	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework

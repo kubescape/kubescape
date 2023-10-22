@@ -64,6 +64,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	listCmd.PersistentFlags().StringVarP(&listPolicies.AccessKey, "accessKey", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-print'/'json'")
 	listCmd.PersistentFlags().MarkDeprecated("id", "Control ID's are included in list outputs")
 

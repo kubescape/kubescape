@@ -6,4 +6,5 @@ type DownloadInfo struct {
 	Target     string // type of artifact to download
 	Identifier string // identifier of artifact to download
 	AccountID  string
+	AccessKey  string
 }

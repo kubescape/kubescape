@@ -6,17 +6,18 @@ replace github.com/kubescape/kubescape/v2 => ../
 
 require (
 	github.com/armosec/armoapi-go v0.0.256
-	github.com/armosec/utils-go v0.0.20
+	github.com/armosec/utils-go v0.0.40
 	github.com/go-openapi/runtime v0.26.0
-	github.com/google/uuid v1.3.0
+	github.com/google/uuid v1.3.1
 	github.com/gorilla/mux v1.8.0
 	github.com/gorilla/schema v1.2.0
-	github.com/kubescape/backend v0.0.2
+	github.com/kubescape/backend v0.0.11
 	github.com/kubescape/go-logger v0.0.21
 	github.com/kubescape/k8s-interface v0.0.144
 	github.com/kubescape/kubescape/v2 v2.0.0-00010101000000-000000000000
 	github.com/kubescape/opa-utils v0.0.270
 	github.com/kubescape/storage v0.0.20
+	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.45.0
 	go.opentelemetry.io/otel v1.19.0
@@ -111,7 +112,7 @@ require (
 	github.com/aquasecurity/trivy v0.44.1 // indirect
 	github.com/aquasecurity/trivy-db v0.0.0-20230726112157-167ba4f2faeb // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
-	github.com/armosec/utils-k8s-go v0.0.17 // indirect
+	github.com/armosec/utils-k8s-go v0.0.18 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/aws/aws-sdk-go v1.44.312 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.20.0 // indirect
@@ -358,7 +359,6 @@ require (
 	github.com/spf13/cobra v1.7.0 // indirect
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
-	github.com/spf13/viper v1.16.0 // indirect
 	github.com/spiffe/go-spiffe/v2 v2.1.6 // indirect
 	github.com/stripe/stripe-go/v74 v74.28.0 // indirect
 	github.com/subosito/gotenv v1.4.2 // indirect
