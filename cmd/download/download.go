@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/core"
-	"github.com/kubescape/kubescape/v2/core/meta"
-	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v3/core/meta"
+	v1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 	"golang.org/x/exp/slices"
 )

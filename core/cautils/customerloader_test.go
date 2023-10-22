@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 )

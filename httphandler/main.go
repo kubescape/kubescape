@@ -13,12 +13,12 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/httphandler/config"
-	_ "github.com/kubescape/kubescape/v2/httphandler/docs"
-	"github.com/kubescape/kubescape/v2/httphandler/listener"
-	"github.com/kubescape/kubescape/v2/httphandler/storage"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/httphandler/config"
+	_ "github.com/kubescape/kubescape/v3/httphandler/docs"
+	"github.com/kubescape/kubescape/v3/httphandler/listener"
+	"github.com/kubescape/kubescape/v3/httphandler/storage"
 	"k8s.io/client-go/rest"
 )
 

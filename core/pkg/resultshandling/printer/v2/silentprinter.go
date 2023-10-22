@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 )
 
 var _ printer.IPrinter = &SilentPrinter{}

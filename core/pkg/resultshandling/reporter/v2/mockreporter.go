@@ -6,8 +6,8 @@ import (
 	"net/url"
 	"os"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 )
 
 var _ reporter.IReport = &ReportMock{}

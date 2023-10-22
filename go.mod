@@ -1,4 +1,4 @@
-module github.com/kubescape/kubescape/v2
+module github.com/kubescape/kubescape/v3
 
 go 1.20
 

@@ -5,7 +5,7 @@ import (
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/stretchr/testify/assert"
 )
 

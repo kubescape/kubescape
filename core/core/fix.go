@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 
-	"github.com/kubescape/kubescape/v2/core/pkg/fixhandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
 )
 
 const (

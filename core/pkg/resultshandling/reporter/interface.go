@@ -3,7 +3,7 @@ package reporter
 import (
 	"context"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 type IReport interface {

@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/spf13/cobra"
 )
 

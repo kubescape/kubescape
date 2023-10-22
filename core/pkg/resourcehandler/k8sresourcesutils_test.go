@@ -1,7 +1,7 @@
 package resourcehandler
 
 import (
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/stretchr/testify/assert"
 

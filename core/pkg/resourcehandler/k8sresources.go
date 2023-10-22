@@ -7,10 +7,10 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/metrics"
-	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/metrics"
+	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 

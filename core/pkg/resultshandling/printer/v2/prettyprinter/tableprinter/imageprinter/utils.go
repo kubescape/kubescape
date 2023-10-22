@@ -7,7 +7,7 @@ import (
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/olekukonko/tablewriter"
 )
 
