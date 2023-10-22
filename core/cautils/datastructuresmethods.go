@@ -4,7 +4,6 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/armosec/utils-go/boolutils"
-	cloudsupport "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -86,32 +85,6 @@ func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version
 		}
 	}
 	return true
-}
-
-func getCloudProvider(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
-	if cloudsupport.IsAKS() {
-		return reporthandling.ScopeCloudAKS
-	}
-	if cloudsupport.IsEKS() {
-		return reporthandling.ScopeCloudEKS
-	}
-	if cloudsupport.IsGKE() {
-		return reporthandling.ScopeCloudGKE
-	}
-	return ""
-}
-
-func GetScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
-
-	switch scanInfo.GetScanningContext() {
-	case ContextCluster:
-		if cloudProvider := getCloudProvider(scanInfo); cloudProvider != "" {
-			return cloudProvider
-		}
-		return reporthandling.ScopeCluster
-	default:
-		return reporthandling.ScopeFile
-	}
 }
 
 func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeType, controlScope reporthandling.ScanningScopeType) bool {
