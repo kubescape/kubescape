@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/go-logger/helpers"
 
+	"github.com/kubescape/kubescape/v2/cmd/shared"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -112,7 +113,7 @@ func TestExceedsSeverity(t *testing.T) {
 			ScanInfo:         &cautils.ScanInfo{FailThresholdSeverity: "unknown"},
 			SeverityCounters: &reportsummary.SeverityCounters{LowSeverityCounter: 1},
 			Want:             false,
-			Error:            ErrUnknownSeverity,
+			Error:            shared.ErrUnknownSeverity,
 		},
 	}
 

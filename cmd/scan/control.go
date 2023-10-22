@@ -11,6 +11,7 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v2/cmd/shared"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/meta"
 
@@ -129,7 +130,7 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
 	}
 
-	if err := validateSeverity(severity); severity != "" && err != nil {
+	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 	return nil
