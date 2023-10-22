@@ -97,6 +97,9 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }
 
+func (fileHandler *FileResourceHandler) GetCloudProvider() string {
+	return ""
+}
 func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	clonedRepo, err := cloneGitRepo(&helmPath)
 	if err != nil {
