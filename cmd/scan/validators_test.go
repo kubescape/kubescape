@@ -3,8 +3,8 @@ package scan
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/cmd/shared"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 // Test_validateControlScanInfo tests how scan info is validated for the `scan control` command

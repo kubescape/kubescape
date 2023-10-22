@@ -1,4 +1,4 @@
-module github.com/kubescape/kubescape/v2
+module github.com/kubescape/kubescape/v3
 
 go 1.20
 
@@ -447,7 +447,7 @@ require (
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
 
-replace github.com/libgit2/git2go/v33 => ./git2go
+// replace github.com/libgit2/git2go/v33 => ./git2go
 
 replace (
 	// Using the forked version of tablewriter

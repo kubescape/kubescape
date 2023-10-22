@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	v2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	v2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/olekukonko/tablewriter"
 )
 

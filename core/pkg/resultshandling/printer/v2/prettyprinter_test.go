@@ -3,7 +3,7 @@ package printer
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 func TestIsPrintSeparatorType(t *testing.T) {

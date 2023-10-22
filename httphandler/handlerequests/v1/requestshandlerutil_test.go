@@ -3,7 +3,7 @@ package v1
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/httphandler/config"
+	"github.com/kubescape/kubescape/v3/httphandler/config"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"github.com/stretchr/testify/assert"

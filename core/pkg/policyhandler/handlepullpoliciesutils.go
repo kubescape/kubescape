@@ -8,7 +8,7 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 func getScanKind(policyIdentifier []cautils.PolicyIdentifier) apisv1.NotificationPolicyKind {

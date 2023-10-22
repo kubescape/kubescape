@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/internal/testutils"
+	"github.com/kubescape/kubescape/v3/internal/testutils"
 	"github.com/stretchr/testify/require"
 )
 

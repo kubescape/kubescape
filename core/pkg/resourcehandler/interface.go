@@ -4,8 +4,8 @@ import (
 	"context"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"k8s.io/apimachinery/pkg/version"
 )
 

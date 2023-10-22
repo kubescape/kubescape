@@ -7,11 +7,11 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	printerv1 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v1"
-	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	printerv1 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v1"
+	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 

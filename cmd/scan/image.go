@@ -5,11 +5,11 @@ import (
 	"fmt"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/cmd/shared"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v2/pkg/imagescan"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/meta"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 
 	"github.com/spf13/cobra"
 )

@@ -1,6 +1,6 @@
 package shared
 
-import "github.com/kubescape/kubescape/v2/core/cautils"
+import "github.com/kubescape/kubescape/v3/core/cautils"
 
 type ImageCredentials struct {
 	Username string

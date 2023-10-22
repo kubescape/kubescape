@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	logger "github.com/kubescape/go-logger"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v2/internal/testutils"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/internal/testutils"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
