@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v2/core/cautils/getter"
 	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
@@ -65,6 +66,8 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 			return err
 		}
 		report.accountIdGenerated = true
+		report.client.SetAccountID(accountID)
+		getter.SetKSCloudAPIConnector(report.client)
 		logger.L().Debug("generated account ID", helpers.String("account ID", accountID))
 	}
 

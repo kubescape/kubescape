@@ -24,8 +24,11 @@ const (
 	configFileName     string = "config"
 	kubescapeNamespace string = "kubescape"
 
+	kubescapeConfigMapName      string = "kubescape-config" // deprecated - for backward compatibility
+	kubescapeCloudConfigMapName string = "ks-cloud-config"  // deprecated - for backward compatibility
+
 	cloudConfigMapLabelSelector string = "kubescape.io/infra=config"
-	credsLabelSelectors         string = "kubescape.io/infra=credentials"
+	credsLabelSelectors         string = "kubescape.io/infra=credentials" //nolint:gosec
 
 	// env vars
 	defaultConfigMapNamespaceEnvVar string = "KS_DEFAULT_CONFIGMAP_NAMESPACE"
@@ -268,34 +271,46 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
 	if err != nil {
 		return err
 	}
-
+	var ksConfigMap *corev1.ConfigMap
+	var urlsConfigMap *corev1.ConfigMap
 	if len(configMaps.Items) == 0 {
-		return nil
+		// try to find configmaps by name (for backward compatibility)
+		ksConfigMap, _ = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), kubescapeConfigMapName, metav1.GetOptions{})
+		urlsConfigMap, _ = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), kubescapeCloudConfigMapName, metav1.GetOptions{})
+	} else {
+		// use the first configmap with the label
+		ksConfigMap = &configMaps.Items[0]
+		urlsConfigMap = &configMaps.Items[0]
 	}
 
-	if jsonConf, ok := configMaps.Items[0].Data["clusterData"]; ok {
-		tempCO := ConfigObj{}
-		if err = json.Unmarshal([]byte(jsonConf), &tempCO); err != nil {
-			return err
-		}
-		c.configObj.updateEmptyFields(&tempCO)
-	}
-
-	if jsonConf, ok := configMaps.Items[0].Data["services"]; ok {
-		services, err := servicediscovery.GetServices(
-			servicediscoveryv1.NewServiceDiscoveryStreamV1([]byte(jsonConf)),
-		)
-		if err != nil {
-			return err
-		}
-
-		if services.GetApiServerUrl() != "" {
-			c.configObj.CloudAPIURL = services.GetApiServerUrl()
-		}
-		if services.GetReportReceiverHttpUrl() != "" {
-			c.configObj.CloudReportURL = services.GetReportReceiverHttpUrl()
+	if ksConfigMap != nil {
+		if jsonConf, ok := ksConfigMap.Data["clusterData"]; ok {
+			tempCO := ConfigObj{}
+			if err = json.Unmarshal([]byte(jsonConf), &tempCO); err != nil {
+				return err
+			}
+			c.configObj.updateEmptyFields(&tempCO)
 		}
 	}
+
+	if urlsConfigMap != nil {
+		if jsonConf, ok := urlsConfigMap.Data["services"]; ok {
+			services, err := servicediscovery.GetServices(
+				servicediscoveryv1.NewServiceDiscoveryStreamV1([]byte(jsonConf)),
+			)
+			if err != nil {
+				return err
+			}
+
+			if services.GetApiServerUrl() != "" {
+				c.configObj.CloudAPIURL = services.GetApiServerUrl()
+			}
+			if services.GetReportReceiverHttpUrl() != "" {
+				c.configObj.CloudReportURL = services.GetReportReceiverHttpUrl()
+			}
+		}
+	}
+
 	return err
 }
 
@@ -461,15 +476,24 @@ func updateCloudURLs(configObj *ConfigObj) {
 func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 	if ksCloud := getter.GetKSCloudAPIConnector(); ksCloud != nil {
 		logger.L().Debug("KS Cloud API already initialized")
-		cloud, err := v1.NewKSCloudAPI(
-			firstNonEmpty(c.GetCloudAPIURL(), ksCloud.GetCloudAPIURL()),
-			firstNonEmpty(c.GetCloudReportURL(), ksCloud.GetCloudReportURL()),
-			firstNonEmpty(c.GetAccountID(), ksCloud.GetAccountID()),
-			firstNonEmpty(c.GetAccessKey(), ksCloud.GetAccessKey()))
-		if err != nil {
-			logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
+
+		if val := c.GetCloudAPIURL(); val != "" && val != ksCloud.GetCloudAPIURL() {
+			logger.L().Debug("updating KS Cloud API from config", helpers.String("old", ksCloud.GetCloudAPIURL()), helpers.String("new", val))
+			ksCloud.SetCloudAPIURL(val)
 		}
-		getter.SetKSCloudAPIConnector(cloud)
+		if val := c.GetCloudReportURL(); val != "" && val != ksCloud.GetCloudReportURL() {
+			logger.L().Debug("updating KS Cloud Report from config", helpers.String("old", ksCloud.GetCloudReportURL()), helpers.String("new", val))
+			ksCloud.SetCloudReportURL(val)
+		}
+		if val := c.GetAccountID(); val != "" && val != ksCloud.GetAccountID() {
+			logger.L().Debug("updating Account ID from config", helpers.String("old", ksCloud.GetAccountID()), helpers.String("new", val))
+			ksCloud.SetAccountID(val)
+		}
+		if val := c.GetAccessKey(); val != "" && val != ksCloud.GetAccessKey() {
+			logger.L().Debug("updating Access Key from config", helpers.Int("old (len)", len(ksCloud.GetAccessKey())), helpers.Int("new (len)", len(val)))
+			ksCloud.SetAccessKey(val)
+		}
+		getter.SetKSCloudAPIConnector(ksCloud)
 	} else {
 		logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))
 		cloud, err := v1.NewKSCloudAPI(
