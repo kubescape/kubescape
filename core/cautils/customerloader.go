@@ -134,8 +134,7 @@ func NewLocalConfig(accountID, clusterName string, customClusterName string) *Lo
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 
-	updatedKsCloud := initializeCloudAPI(lc)
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
+	initializeCloudAPI(lc)
 
 	return lc
 }
@@ -236,8 +235,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, clusterName st
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
-	updatedKsCloud := initializeCloudAPI(c)
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
+	initializeCloudAPI(c)
 	return c
 }
 
@@ -460,7 +458,6 @@ func updateCloudURLs(configObj *ConfigObj) {
 }
 
 func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
-	logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))
 	cloud, err := v1.NewKSCloudAPI(c.GetCloudAPIURL(), c.GetCloudReportURL(), c.GetAccountID())
 	if err != nil {
 		logger.L().Fatal("failed to create KS Cloud client", helpers.Error(err))
