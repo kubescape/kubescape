@@ -54,7 +54,9 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler ho
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
 	}
-	k8sHandler.setCloudProvider()
+	if err := k8sHandler.setCloudProvider(); err != nil {
+		logger.L().Warning("failed to set cloud provider", helpers.Error(err))
+	}
 	return k8sHandler
 }
 
