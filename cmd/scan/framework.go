@@ -51,7 +51,7 @@ var (
 
 func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 
-	fwCmd := &cobra.Command{
+	return &cobra.Command{
 		Use:     "framework <framework names list> [`<glob pattern>`/`-`] [flags]",
 		Short:   fmt.Sprintf("The framework you wish to use. Run '%[1]s list frameworks' for the list of supported frameworks", cautils.ExecName()),
 		Example: frameworkExample,
@@ -141,8 +141,6 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		},
 	}
 
-	fwCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.ResourceViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.ResourceViewType))
-	return fwCmd
 }
 
 // countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
@@ -205,7 +203,7 @@ func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters,
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
 func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.View == string(cautils.SecurityViewType) {
-		return ErrSecurityViewNotSupported
+		scanInfo.View = string(cautils.ResourceViewType)
 	}
 
 	if scanInfo.Submit && scanInfo.Local {
