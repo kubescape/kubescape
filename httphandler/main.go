@@ -31,7 +31,7 @@ func main() {
 
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
-		logger.L().Ctx(ctx).Fatal("load config error", helpers.Error(err))
+		logger.L().Ctx(ctx).Error("load config error", helpers.Error(err))
 	}
 
 	loadAndSetCredentials()
@@ -162,6 +162,9 @@ func loadAndSetCredentials() {
 	credentials, err := utils.LoadCredentialsFromFile(credentialsPath)
 	if err != nil {
 		logger.L().Error("failed to load credentials", helpers.Error(err))
+		// fallback (backward compatibility)
+		config.SetAccount(os.Getenv("ACCOUNT_ID"))
+
 		return
 	}
 
