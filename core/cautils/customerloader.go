@@ -135,8 +135,7 @@ func NewLocalConfig(accountID, accessKey, clusterName, customClusterName string)
 		lc.configObj.ClusterName = AdoptClusterName(clusterName) // override config clusterName
 	}
 
-	updatedKsCloud := initializeCloudAPI(lc)
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
+	initializeCloudAPI(lc)
 
 	return lc
 }
@@ -229,8 +228,7 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, accessKey, clu
 	} else { // override the cluster name if it has unwanted characters
 		c.configObj.ClusterName = AdoptClusterName(c.configObj.ClusterName)
 	}
-	updatedKsCloud := initializeCloudAPI(c)
-	logger.L().Debug("Kubescape Cloud URLs", helpers.String("api", updatedKsCloud.GetCloudAPIURL()), helpers.String("report", updatedKsCloud.GetCloudReportURL()))
+	initializeCloudAPI(c)
 	return c
 }
 

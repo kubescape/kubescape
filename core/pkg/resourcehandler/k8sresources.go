@@ -37,20 +37,27 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 	cloudapis.CloudProviderPolicyVersionKind:           cloudsupport.GetPolicyVersionFromCloudProvider,
 }
 
+var _ IResourceHandler = &K8sResourceHandler{}
+
 type K8sResourceHandler struct {
 	clusterName       string
+	cloudProvider     string
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
 }
 
 func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
-	return &K8sResourceHandler{
+	k8sHandler := &K8sResourceHandler{
 		clusterName:       clusterName,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
 	}
+	if err := k8sHandler.setCloudProvider(); err != nil {
+		logger.L().Warning("failed to set cloud provider", helpers.Error(err))
+	}
+	return k8sHandler
 }
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
@@ -146,6 +153,10 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
 }
 
+func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
+	return k8sHandler.cloudProvider
+}
+
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
 func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
 	if resource == nil {
@@ -196,17 +207,18 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
-	provider := cloudsupport.GetCloudProvider()
-	if provider == "" {
+
+	if k8sHandler.cloudProvider == "" {
 		return fmt.Errorf("failed to get cloud provider, cluster: %s", k8sHandler.clusterName)
 	}
 
 	logger.L().Start("Downloading cloud resources")
 
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
-		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = k8sHandler.cloudProvider
 	}
-	logger.L().Debug("cloud", helpers.String("clusterName", k8sHandler.clusterName), helpers.String("provider", provider))
+
+	logger.L().Debug("cloud", helpers.String("clusterName", k8sHandler.clusterName), helpers.String("provider", k8sHandler.cloudProvider))
 
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
 		if !cloudResourceRequired(cloudResources, resourceKind) {
@@ -214,12 +226,12 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		}
 
 		logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
-		wl, err := resourceGetter(k8sHandler.clusterName, provider)
+		wl, err := resourceGetter(k8sHandler.clusterName, k8sHandler.cloudProvider)
 		if err != nil {
 			if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
 				// Return error with useful info on how to configure credentials for getting cloud provider info
 				logger.L().Debug("failed to get cloud data", helpers.String("resourceKind", resourceKind), helpers.Error(err))
-				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
+				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(k8sHandler.cloudProvider))
 				cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			}
 
@@ -443,6 +455,15 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
 		return 0, err
 	}
 	return len(scheduableNodes.Items), nil
+}
+
+func (k8sHandler *K8sResourceHandler) setCloudProvider() error {
+	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	k8sHandler.cloudProvider = cloudsupport.GetCloudProvider(nodeList)
+	return nil
 }
 
 // NoSchedule taint with empty value is usually applied to controlplane
