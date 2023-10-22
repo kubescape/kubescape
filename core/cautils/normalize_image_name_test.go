@@ -1,4 +1,4 @@
-package opaprocessor
+package cautils
 
 import (
 	"testing"
@@ -21,7 +21,7 @@ func Test_normalize_name(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			name, _ := normalize_image_name(tt.img)
+			name, _ := NormalizeImageName(tt.img)
 			assert.Equal(t, tt.want, name, tt.name)
 		})
 	}
