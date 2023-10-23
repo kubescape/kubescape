@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	ref "github.com/distribution/distribution/reference"
+	ref "github.com/distribution/reference"
 	"github.com/docker/distribution/reference"
 
 	"github.com/kubescape/go-logger"
@@ -70,6 +70,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.PatchedImageTag, "tag", "t", "", "Tag for the patched image. Defaults to '<image-tag>-patched' ")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.BuildkitAddress, "address", "a", "unix:///run/buildkit/buildkitd.sock", "Address of buildkitd service, defaults to local buildkitd.sock")
 	patchCmd.PersistentFlags().DurationVar(&patchInfo.Timeout, "timeout", 5*time.Minute, "Timeout for the operation, defaults to '5m'")
+	patchCmd.PersistentFlags().BoolVar(&patchInfo.IgnoreError, "ignore-errors", false, "Ignore errors and continue patching other images. Default to false")
 
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")
