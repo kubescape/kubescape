@@ -23,6 +23,7 @@ _An open-source Kubernetes security platform for your IDE, CI/CD pipelines, and 
 Kubescape is an open-source Kubernetes security platform. It includes risk analysis, security compliance, and misconfiguration scanning. Targeted at the DevSecOps practitioner or platform engineer, it offers an easy-to-use CLI interface, flexible output formats, and automated scanning capabilities. It saves Kubernetes users and admins precious time, effort, and resources.
 
 Kubescape scans clusters, YAML files, and Helm charts. It detects misconfigurations according to multiple frameworks (including [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.microsoft.com/security/blog/2021/03/23/secure-containerized-environments-with-updated-threat-matrix-for-kubernetes/) and the [CIS Benchmark](https://www.armosec.io/blog/cis-kubernetes-benchmark-framework-scanning-tools-comparison/?utm_source=github&utm_medium=repository)).
+In addition, you can scan container images for vulnerabilities.
 
 Kubescape was created by [ARMO](https://www.armosec.io/?utm_source=github&utm_medium=repository) and is a [Cloud Native Computing Foundation (CNCF) sandbox project](https://www.cncf.io/sandbox-projects/).
 
@@ -56,10 +57,11 @@ _Did you know you can use Kubescape in all these places?_
 ## Under the hood
 
 Kubescape uses [Open Policy Agent](https://github.com/open-policy-agent/opa) to verify Kubernetes objects against [a library of posture controls](https://github.com/kubescape/regolibrary).
+For images scanning, it uses [Grype](https://github.com/anchore/grype).
 
 By default, the results are printed in a console-friendly manner, but they can be:
 
-* exported to JSON or junit XML
+* exported to JSON, junit XML or SARIF
 * rendered to HTML or PDF
 * submitted to a [cloud service](docs/providers.md)
 
