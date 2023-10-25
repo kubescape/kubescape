@@ -61,7 +61,7 @@ func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler ho
 }
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
-	logger.L().Start("Accessing Kubernetes objects")
+	logger.L().Start("Accessing Kubernetes objects...")
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
@@ -130,7 +130,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
 		} else {
-			cautils.SetInfoMapForResources("This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("This control requires the Kubescape operator installed. To install it, go to\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -212,7 +212,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		return fmt.Errorf("failed to get cloud provider, cluster: %s", k8sHandler.clusterName)
 	}
 
-	logger.L().Start("Downloading cloud resources")
+	logger.L().Start("Downloading cloud resources...")
 
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
 		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = k8sHandler.cloudProvider
@@ -423,7 +423,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 		return nil
 	}
 
-	logger.L().Start("Collecting RBAC resources")
+	logger.L().Start("Collecting RBAC resources...")
 	allRbacResources, err := k8sHandler.rbacObjectsAPI.ListAllResources()
 	if err != nil {
 		return err

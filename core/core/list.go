@@ -134,13 +134,13 @@ func prettyPrintControls(ctx context.Context, policies []string) {
 
 	controlRows := generateControlRows(policies)
 
-	short := utils.CheckShortTerminalWidth(controlRows, []string{"Control ID", "Control Name", "Docs", "Frameworks"})
+	short := utils.CheckShortTerminalWidth(controlRows, []string{"Control ID", "Control name", "Docs", "Frameworks"})
 	if short {
 		controlsTable.SetAutoWrapText(false)
 		controlsTable.SetHeader([]string{"Controls"})
 		controlRows = shortFormatControlRows(controlRows)
 	} else {
-		controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
+		controlsTable.SetHeader([]string{"Control ID", "Control name", "Docs", "Frameworks"})
 	}
 	var headerColors []tablewriter.Colors
 	for range controlRows[0] {

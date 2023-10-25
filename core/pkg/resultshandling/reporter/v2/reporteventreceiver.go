@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/armosec/armoapi-go/apis"
@@ -275,10 +274,7 @@ func (report *ReportEventReceiver) DisplayMessage() {
 	// print if logger level is lower than warning (debug/info)
 	if report.message != "" && helpers.ToLevel(logger.L().GetLevel()) < helpers.WarningLevel {
 		txt := "View results"
-		cautils.InfoTextDisplay(os.Stderr, fmt.Sprintf("\n%s\n", txt))
-
-		cautils.SimpleDisplay(os.Stderr, strings.Repeat("─", len(txt)))
-
-		cautils.SimpleDisplay(os.Stderr, fmt.Sprintf("\n%s\n\n", report.message))
+		cautils.SectionHeadingDisplay(os.Stdout, txt)
+		cautils.SimpleDisplay(os.Stdout, fmt.Sprintf("%s\n\n", report.message))
 	}
 }

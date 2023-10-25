@@ -3,6 +3,7 @@ package configurationprinter
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/jwalton/gchalk"
@@ -30,11 +31,33 @@ func (fp *FrameworkPrinter) getVerboseMode() bool {
 
 func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
 	if summaryDetails.NumberOfControls().All() == 0 {
-		fmt.Fprintf(writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
+		fmt.Fprintf(writer, "\nKubescape did not scan any resources. Make sure you are scanning valid manifests (Deployments, Pods, etc.)\n")
 		return
 	}
-	cautils.InfoTextDisplay(writer, "\n"+ControlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
-	cautils.InfoTextDisplay(writer, renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters())+"\n\n")
+
+	// When scanning controls the framework list will be empty
+	cautils.SimpleDisplay(writer, utils.FrameworksScoresToString(summaryDetails.ListFrameworks())+"\n")
+
+	controlCountersTable := tablewriter.NewWriter(writer)
+
+	controlCountersTable.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
+	controlCountersTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+	controlCountersTable.AppendBulk(ControlCountersForSummary(summaryDetails.NumberOfControls()))
+	controlCountersTable.Render()
+
+	cautils.SimpleDisplay(writer, "\nFailed resources by severity:\n\n")
+
+	severityCountersTable := tablewriter.NewWriter(writer)
+	severityCountersTable.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
+	severityCountersTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+	severityCountersTable.AppendBulk(renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters()))
+	severityCountersTable.Render()
+
+	cautils.SimpleDisplay(writer, "\n")
+
+	if !fp.getVerboseMode() {
+		cautils.SimpleDisplay(writer, "Run with '--verbose'/'-v' to see control failures for each resource.\n\n")
+	}
 
 	summaryTable := tablewriter.NewWriter(writer)
 
@@ -82,9 +105,6 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	summaryTable.AppendBulk(dataRows)
 	summaryTable.Render()
 
-	// When scanning controls the framework list will be empty
-	cautils.InfoTextDisplay(writer, utils.FrameworksScoresToString(summaryDetails.ListFrameworks()))
-
 	utils.PrintInfo(writer, infoToPrintInfo)
 }
 
@@ -100,14 +120,13 @@ func (fp *FrameworkPrinter) PrintCategoriesTables(writer io.Writer, summaryDetai
 
 }
 
-func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) string {
-	critical := counters.NumberOfCriticalSeverity()
-	high := counters.NumberOfHighSeverity()
-	medium := counters.NumberOfMediumSeverity()
-	low := counters.NumberOfLowSeverity()
+func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) [][]string {
 
-	return fmt.Sprintf(
-		"Failed Resources by Severity: Critical — %d, High — %d, Medium — %d, Low — %d",
-		critical, high, medium, low,
-	)
+	rows := [][]string{}
+	rows = append(rows, []string{"Critical", utils.GetColorForVulnerabilitySeverity("Critical")(strconv.Itoa(counters.NumberOfCriticalSeverity()))})
+	rows = append(rows, []string{"High", utils.GetColorForVulnerabilitySeverity("High")(strconv.Itoa(counters.NumberOfHighSeverity()))})
+	rows = append(rows, []string{"Medium", utils.GetColorForVulnerabilitySeverity("Medium")(strconv.Itoa(counters.NumberOfMediumSeverity()))})
+	rows = append(rows, []string{"Low", utils.GetColorForVulnerabilitySeverity("Low")(strconv.Itoa(counters.NumberOfLowSeverity()))})
+
+	return rows
 }

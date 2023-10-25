@@ -71,7 +71,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 
 	// ===================== Re-scan the image =====================
 
-	logger.L().Start(fmt.Sprintf("Re-Scanning image: %s", patchedImageName))
+	logger.L().Start(fmt.Sprintf("Re-scanning image: %s", patchedImageName))
 
 	scanResultsPatched, err := svc.Scan(ctx, patchedImageName, creds)
 	if err != nil {

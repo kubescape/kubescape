@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/enescakir/emoji"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -90,16 +91,15 @@ func ImageSeverityToInt(severity string) int {
 func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
-			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
+			return fmt.Sprintf("Framework scanned: %s\n", frameworks[0].GetName())
 		}
 	} else if len(frameworks) > 1 {
-		p := "FRAMEWORKS: "
+		p := "Frameworks scanned: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (compliance: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+			p += fmt.Sprintf("%s (compliance score: %.2f%%), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		}
-		p += fmt.Sprintf("%s (compliance: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+		p += fmt.Sprintf("%s (compliance score: %.2f%%)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		return p
 	}
 	return ""
@@ -108,7 +108,7 @@ func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 func PrintInfo(writer io.Writer, infoToPrintInfo []InfoStars) {
 	fmt.Println()
 	for i := range infoToPrintInfo {
-		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
+		cautils.InfoDisplay(writer, fmt.Sprintf("%s %s %s\n", emoji.PoliceCarLight, infoToPrintInfo[i].Stars, infoToPrintInfo[i].Info))
 	}
 }
 

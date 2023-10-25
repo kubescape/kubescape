@@ -119,7 +119,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.L().Start("Kubescape scanner initializing")
+	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info
@@ -246,7 +246,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
 			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
 		}
-		logger.L().StopSuccess("Scanned successfully", helpers.String("image", img))
+		logger.L().StopSuccess("Scanned successful: ", helpers.String("image", img))
 	}
 }
 

@@ -70,7 +70,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getPolicies")
 	defer span.End()
 
-	logger.L().Start("Loading policies")
+	logger.L().Start("Loading policies...")
 
 	// get policies
 	policies, err = policyHandler.getScanPolicies(ctx, policyIdentifier)
@@ -82,7 +82,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	}
 
 	logger.L().StopSuccess("Loaded policies")
-	logger.L().Start("Loading exceptions")
+	logger.L().Start("Loading exceptions...")
 
 	// get exceptions
 	if exceptions, err = policyHandler.getExceptions(); err != nil {
@@ -90,7 +90,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	}
 
 	logger.L().StopSuccess("Loaded exceptions")
-	logger.L().Start("Loading account configurations")
+	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
 	if controlInputs, err = policyHandler.getControlInputs(); err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	spinnerpkg "github.com/briandowns/spinner"
@@ -27,7 +28,7 @@ func FailureTextDisplay(w io.Writer, format string, a ...interface{}) {
 }
 
 func InfoDisplay(w io.Writer, format string, a ...interface{}) {
-	fmt.Fprintf(w, gchalk.WithCyan().Bold(format), a...)
+	fmt.Fprintf(w, gchalk.WithBrightWhite().Bold(format), a...)
 }
 
 func InfoTextDisplay(w io.Writer, format string, a ...interface{}) {
@@ -48,6 +49,20 @@ func DescriptionDisplay(w io.Writer, format string, a ...interface{}) {
 
 func BoldDisplay(w io.Writer, format string, a ...interface{}) {
 	fmt.Fprintf(w, gchalk.Bold(format), a...)
+}
+
+func LineDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithAnsi256(238).Bold(format), a...)
+}
+
+func SectionHeadingDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, "\n"+
+		gchalk.WithBrightWhite().Bold(format)+
+		gchalk.WithAnsi256(238).Bold(fmt.Sprintf("\n%s\n\n", strings.Repeat("─", len(format)))), a...)
+}
+
+func StarDisplay(w io.Writer, format string, a ...interface{}) {
+	fmt.Fprintf(w, gchalk.WithAnsi256(238).Bold("* ")+gchalk.White(format), a...)
 }
 
 var spinner *spinnerpkg.Spinner

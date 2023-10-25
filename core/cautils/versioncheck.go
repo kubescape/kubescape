@@ -31,7 +31,7 @@ type IVersionCheckHandler interface {
 
 func NewIVersionCheckHandler(ctx context.Context) IVersionCheckHandler {
 	if BuildNumber == "" {
-		logger.L().Ctx(ctx).Warning("Unknown build number, this might affect your scan results. Please make sure that you are running the latest version")
+		logger.L().Ctx(ctx).Warning("Unknown build number: this might affect your scan results. Please ensure that you are running the latest version.")
 	}
 
 	if v, ok := os.LookupEnv(CLIENT_ENV); ok && v != "" {
