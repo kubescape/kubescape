@@ -21,6 +21,7 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/exp/slices"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -244,7 +245,10 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 					for _, relatedObject := range ruleResponse.RelatedObjects {
 						wl := objectsenvelopes.NewObject(relatedObject.Object)
 						if wl != nil {
-							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+							// avoid adding duplicate related resource IDs
+							if !slices.Contains(ruleResult.RelatedResourcesIDs, wl.GetID()) {
+								ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+							}
 							ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
 						}
 					}
