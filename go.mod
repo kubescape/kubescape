@@ -18,7 +18,7 @@ require (
 	github.com/go-git/go-git/v5 v5.8.1
 	github.com/google/go-containerregistry v0.16.1
 	github.com/google/uuid v1.3.1
-	github.com/johnfercher/maroto v0.42.0
+	github.com/johnfercher/maroto v1.0.0
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
 	github.com/kubescape/backend v0.0.13
