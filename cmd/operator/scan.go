@@ -38,6 +38,7 @@ func getOperatorScanCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *
 		},
 	}
 
+	operatorCmd.PersistentFlags().StringVar(&operatorInfo.Namespace, "namespace", "kubescape", "namespace of the Kubescape Operator")
 	operatorCmd.AddCommand(getOperatorScanConfigCmd(ks, operatorInfo))
 	operatorCmd.AddCommand(getOperatorScanVulnerabilitiesCmd(ks, operatorInfo))
 
