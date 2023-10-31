@@ -88,7 +88,7 @@ func TestDisplayMessage(t *testing.T) {
 			getter.GetKSCloudAPIConnector(),
 		)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
 		reporter.DisplayMessage()
@@ -114,7 +114,7 @@ func TestDisplayMessage(t *testing.T) {
 		)
 		reporter.setMessage("message returned from server")
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
 		reporter.DisplayMessage()
@@ -232,7 +232,7 @@ func TestSubmit(t *testing.T) {
 
 		opaSession := mockOPASessionObj(t)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -274,7 +274,7 @@ func TestSubmit(t *testing.T) {
 		opaSession := mockOPASessionObj(t)
 		opaSession.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -336,10 +336,10 @@ func TestSetters(t *testing.T) {
 	})
 }
 
-func captureStderr(t testing.TB) (*os.File, func()) {
+func captureStdout(t testing.TB) (*os.File, func()) {
 	mxStdio.Lock()
-	saved := os.Stderr
-	capture, err := os.CreateTemp("", "stderr")
+	saved := os.Stdout
+	capture, err := os.CreateTemp("", "stdout")
 	if !assert.NoError(t, err) {
 		mxStdio.Unlock()
 
@@ -347,13 +347,13 @@ func captureStderr(t testing.TB) (*os.File, func()) {
 
 		return nil, nil
 	}
-	os.Stderr = capture
+	os.Stdout = capture
 
 	return capture, func() {
 		_ = capture.Close()
 		_ = os.Remove(capture.Name())
 
-		os.Stderr = saved
+		os.Stdout = saved
 		mxStdio.Unlock()
 	}
 }
