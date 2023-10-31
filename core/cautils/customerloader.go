@@ -473,7 +473,6 @@ func updateCloudURLs(configObj *ConfigObj) {
 
 func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 	if ksCloud := getter.GetKSCloudAPIConnector(); ksCloud != nil {
-		logger.L().Debug("KS Cloud API already initialized")
 
 		if val := c.GetCloudAPIURL(); val != "" && val != ksCloud.GetCloudAPIURL() {
 			logger.L().Debug("updating KS Cloud API from config", helpers.String("old", ksCloud.GetCloudAPIURL()), helpers.String("new", val))

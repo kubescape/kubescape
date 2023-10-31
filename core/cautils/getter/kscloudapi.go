@@ -21,13 +21,11 @@ var (
 //
 // NOTE: cannot be used concurrently.
 func SetKSCloudAPIConnector(ksCloudAPI *v1.KSCloudAPI) {
-	if ksCloudAPI != nil {
+	if ksCloudAPI != nil && ksCloudAPI.GetCloudAPIURL() != "" {
 		logger.L().Debug("setting global KS Cloud API connector",
 			helpers.String("accountID", ksCloudAPI.GetAccountID()),
 			helpers.String("cloudAPIURL", ksCloudAPI.GetCloudAPIURL()),
 			helpers.String("cloudReportURL", ksCloudAPI.GetCloudReportURL()))
-	} else {
-		logger.L().Debug("setting global KS Cloud API connector (nil)")
 	}
 	globalKSCloudAPIConnector = ksCloudAPI
 }

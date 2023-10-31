@@ -41,7 +41,7 @@ func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary
 }
 
 func (rp *RepoPrinter) PrintNextSteps() {
-	printNextSteps(rp.writer, rp.getNextSteps(), false)
+	printNextSteps(rp.writer, rp.getNextSteps(), true)
 }
 
 func (rp *RepoPrinter) getNextSteps() []string {
