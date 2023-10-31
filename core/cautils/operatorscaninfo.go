@@ -19,20 +19,21 @@ const (
 )
 
 type VulnerabilitiesScanInfo struct {
-	IncludeNamespaces []string
 	ClusterName       string
+	IncludeNamespaces []string
 }
 
 type ConfigScanInfo struct {
 	ExcludedNamespaces []string
 	IncludedNamespaces []string
+	Frameworks         []string
 	HostScanner        bool
-	Frameworks         []string // Load frameworks for config scan
 }
 
 type OperatorInfo struct {
-	Subcommands []OperatorSubCommand
+	Namespace string
 	OperatorScanInfo
+	Subcommands []OperatorSubCommand
 }
 
 type OperatorConnector interface {

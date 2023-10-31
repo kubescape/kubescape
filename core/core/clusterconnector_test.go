@@ -73,7 +73,7 @@ func Test_getOperatorPod(t *testing.T) {
 				assert.Equal(t, nil, err)
 			}
 
-			pod, err := getOperatorPod(&k8sClient)
+			pod, err := getOperatorPod(&k8sClient, kubescapeNamespace)
 			assert.Equal(t, err, tc.expectedError)
 			if tc.expectedError == nil {
 				assert.Equal(t, pod, createdOperatorPod)
