@@ -1,0 +1,119 @@
+{
+    "apps/v1/default/Deployment/my-app": {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {
+            "name": "my-app",
+            "namespace": "default"
+        },
+        "spec": {
+            "selector": {
+                "matchLabels": {
+                    "app": "my-app"
+                }
+            },
+            "template": {
+                "metadata": {
+                    "labels": {
+                        "app": "my-app"
+                    }
+                },
+                "spec": {
+                    "containers": [
+                        {
+                            "args": [
+                                "server"
+                            ],
+                            "image": "argoproj/argocli:latest",
+                            "name": "argo-server"
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    "networking.k8s.io/v1/default/Ingress/my-ingress1": {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "Ingress",
+        "metadata": {
+            "name": "my-ingress1",
+            "namespace": "default"
+        },
+        "spec": {
+            "ingressClassName": "nginx",
+            "rules": [
+                {
+                    "host": "myservicea.foo.org",
+                    "http": {
+                        "paths": [
+                            {
+                                "path": "/",
+                                "pathType": "ImplementationSpecific",
+                                "backend": {
+                                    "service": {
+                                        "name": "my-service",
+                                        "port": {
+                                            "number": 80
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    },
+    "networking.k8s.io/v1/default/Ingress/my-ingress2": {
+        "apiVersion": "networking.k8s.io/v1",
+        "kind": "Ingress",
+        "metadata": {
+            "name": "my-ingress2",
+            "namespace": "default"
+        },
+        "spec": {
+            "ingressClassName": "nginx",
+            "rules": [
+                {
+                    "host": "myservicea.foo.org",
+                    "http": {
+                        "paths": [
+                            {
+                                "path": "/",
+                                "pathType": "ImplementationSpecific",
+                                "backend": {
+                                    "service": {
+                                        "name": "my-service",
+                                        "port": {
+                                            "number": 80
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    },
+    "/v1/default/Service/my-service": {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": "my-service",
+            "namespace": "default"
+        },
+        "spec": {
+            "selector": {
+                "app": "my-app"
+            },
+            "type": "ClusterIP",
+            "ports": [
+                {
+                    "targetPort": 80,
+                    "port": 80
+                }
+            ]
+        }
+    }
+}
