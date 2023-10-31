@@ -336,6 +336,28 @@ func TestSetters(t *testing.T) {
 	})
 }
 
+func captureStderr(t testing.TB) (*os.File, func()) {
+	mxStdio.Lock()
+	saved := os.Stderr
+	capture, err := os.CreateTemp("", "stderr")
+	if !assert.NoError(t, err) {
+		mxStdio.Unlock()
+
+		t.FailNow()
+
+		return nil, nil
+	}
+	os.Stderr = capture
+
+	return capture, func() {
+		_ = capture.Close()
+		_ = os.Remove(capture.Name())
+
+		os.Stderr = saved
+		mxStdio.Unlock()
+	}
+}
+
 func captureStdout(t testing.TB) (*os.File, func()) {
 	mxStdio.Lock()
 	saved := os.Stdout
