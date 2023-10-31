@@ -329,7 +329,7 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromCredentialsSecret() error {
 		}
 	}
 
-	if jsonConf, ok := secrets.Items[0].Data["accessKey"]; ok {
+	if jsonConf, ok := secrets.Items[0].Data["access-key"]; ok {
 		if accessKey := string(jsonConf); accessKey != "" {
 			c.configObj.AccessKey = accessKey
 		}

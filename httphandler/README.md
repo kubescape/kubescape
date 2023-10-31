@@ -104,6 +104,7 @@ When scanning is not in progress
   "hostScanner": <bool>,         // deploy Kubescape host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls
   "keepLocal": <bool>,           // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
   "account": <str>,              // account ID (same as 'kubescape scan --account')
+  "access-key": <str>,            // account ID (same as 'kubescape scan --accessKey')
   "targetType": <str>,           // framework/control
   "targetNames": [<str>]         // names. e.g. when targetType==framework, targetNames=["nsa", "mitre"]
 }
