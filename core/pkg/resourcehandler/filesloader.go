@@ -34,7 +34,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		return nil, nil, nil, nil, fmt.Errorf("missing input")
 	}
 
-	logger.L().Start("Accessing local objects")
+	logger.L().Start("Accessing local objects...")
 
 	// load resources from all input paths
 	mappedResources := map[string][]workloadinterface.IMetadata{}

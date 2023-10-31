@@ -13,7 +13,7 @@ import (
 )
 
 func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
-	logger.L().Start(fmt.Sprintf("Scanning image: %s", imgScanInfo.Image))
+	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
 	svc := imagescan.NewScanService(dbCfg)

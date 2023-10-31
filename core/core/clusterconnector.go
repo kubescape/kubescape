@@ -36,7 +36,7 @@ func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, 
 		return nil, err
 	}
 	if len(pods.Items) != 1 {
-		return nil, errors.New("Could not find the Kubescape-Operator chart, please validate that the Kubescape-Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
+		return nil, errors.New("Could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
 	}
 
 	return &pods.Items[0], nil

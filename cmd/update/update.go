@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	installationLink string = "https://github.com/kubescape/kubescape/blob/master/docs/installation.md"
+	installationLink string = "https://kubescape.io/docs/install-cli/"
 )
 
 var updateCmdExamples = fmt.Sprintf(`
@@ -32,9 +32,9 @@ func GetUpdateCmd() *cobra.Command {
 			//Checking the user's version of kubescape to the latest release
 			if cautils.BuildNumber == cautils.LatestReleaseVersion {
 				//your version == latest version
-				logger.L().Info(("Nothing to update, you are running the latest version"), helpers.String("Version", cautils.BuildNumber))
+				logger.L().Info(("Nothing to update: you are running the latest version"), helpers.String("Version", cautils.BuildNumber))
 			} else {
-				fmt.Printf("Please refer to our installation docs in the following link: %s\n", installationLink)
+				fmt.Printf("Please refer to our installation documentation: %s\n", installationLink)
 			}
 			return nil
 		},

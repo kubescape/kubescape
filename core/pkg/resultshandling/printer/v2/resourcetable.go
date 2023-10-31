@@ -119,9 +119,9 @@ func generateResourceHeader(short bool) []string {
 	} else {
 		headers = make([]string, _resourceRowLen)
 		headers[resourceColumnSeverity] = "Severity"
-		headers[resourceColumnName] = "Control Name"
+		headers[resourceColumnName] = "Control name"
 		headers[resourceColumnURL] = "Docs"
-		headers[resourceColumnPath] = "Assisted Remediation"
+		headers[resourceColumnPath] = "Assisted remediation"
 	}
 	return headers
 }

@@ -21,13 +21,13 @@ func TestInitCategoryTableData(t *testing.T) {
 		{
 			name:               "Test1",
 			categoryType:       TypeCounting,
-			expectedHeaders:    []string{"Control Name", "Resources", "View Details"},
+			expectedHeaders:    []string{"Control name", "Resources", "View details"},
 			expectedAlignments: []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT},
 		},
 		{
 			name:               "Test2",
 			categoryType:       TypeStatus,
-			expectedHeaders:    []string{"", "Control Name", "Docs"},
+			expectedHeaders:    []string{"", "Control name", "Docs"},
 			expectedAlignments: []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER},
 		},
 	}

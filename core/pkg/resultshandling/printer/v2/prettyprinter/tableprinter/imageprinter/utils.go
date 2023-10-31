@@ -70,7 +70,7 @@ func getImageScanningHeaders() []string {
 	headers[imageColumnName] = "Vulnerability"
 	headers[imageColumnComponent] = "Component"
 	headers[imageColumnVersion] = "Version"
-	headers[imageColumnFixedIn] = "Fixed In"
+	headers[imageColumnFixedIn] = "Fixed in"
 	return headers
 }
 

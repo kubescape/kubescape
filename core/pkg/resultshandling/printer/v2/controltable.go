@@ -144,11 +144,11 @@ func getControlTableHeaders(short bool) []string {
 		headers[0] = "Controls"
 	} else {
 		headers = make([]string, _rowLen)
-		headers[columnName] = "Control Name"
-		headers[columnCounterFailed] = "Failed Resources"
-		headers[columnCounterAll] = "All Resources"
+		headers[columnName] = "Control name"
+		headers[columnCounterFailed] = "Failed resources"
+		headers[columnCounterAll] = "All resources"
 		headers[columnSeverity] = "Severity"
-		headers[columnComplianceScore] = "% Compliane-Score"
+		headers[columnComplianceScore] = "Compliance score"
 	}
 	return headers
 }
