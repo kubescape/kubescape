@@ -33,7 +33,7 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 }
 
 var supportConfigSet = map[string]func(*metav1.SetConfig, string){
-	"access-key":     func(s *metav1.SetConfig, accessKey string) { s.AccessKey = accessKey },
+	"accessKey":      func(s *metav1.SetConfig, accessKey string) { s.AccessKey = accessKey },
 	"accountID":      func(s *metav1.SetConfig, account string) { s.Account = account },
 	"cloudAPIURL":    func(s *metav1.SetConfig, cloudAPIURL string) { s.CloudAPIURL = cloudAPIURL },
 	"cloudReportURL": func(s *metav1.SetConfig, cloudReportURL string) { s.CloudReportURL = cloudReportURL },
