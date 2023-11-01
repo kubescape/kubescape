@@ -256,7 +256,7 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/johnfercher/maroto v0.42.0 // indirect
+	github.com/johnfercher/maroto v1.0.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
