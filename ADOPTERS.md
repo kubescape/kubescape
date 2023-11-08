@@ -18,6 +18,7 @@ If you want to be listed here and share with others your experience, open a PR a
 | Name | Company | Use case | Contact for questions (optional) |
 | ---- | ------- | -------- | -------------------------------- |
 | Yonathan Amzallag | ARMO | Vulnerability monitoring | yonatana@armosec.io |
+| Engin Diri | Schwarz IT (SIT) | Ensure continuous compliance for edge k8s cluster | engin.diri@mail.schwarz |
 
 
 
