@@ -62,12 +62,14 @@ jobs:
         id: download-artifact
         with:
           path: .
+      - name: mv kubescape amd64 binary
+        run: mv kubescape-ubuntu-latest/kubescape-ubuntu-latest kubescape-amd64-ubuntu-latest
+      - name: mv kubescape arm64 binary
+        run: mv kubescape-ubuntu-latest/kubescape-arm64-ubuntu-latest kubescape-arm64-ubuntu-latest
       - name: chmod +x
-        run: chmod +x -v kubescape-*/kubescape-*
-      - name: Build and push image for linux/amd64
-        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --build-arg ks_binary=kubescape-ubuntu-latest/kubescape-ubuntu-latest --push --platform linux/amd64
-      - name: Build and push image for linux/arm64
-        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --build-arg ks_binary=kubescape-arm64-ubuntu-latest/kubescape-arm64-ubuntu-latest --push --platform linux/arm64
+        run: chmod +x -v kubescape-a*
+      - name: Build and push images
+        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --push --platform linux/amd64,linux/arm64
       - name: Install cosign
         uses: sigstore/cosign-installer@4079ad3567a89f68395480299c77e40170430341 # ratchet:sigstore/cosign-installer@main
         with:
