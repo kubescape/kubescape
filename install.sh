@@ -17,7 +17,7 @@ determine_os_and_arch() {
     case $arch in
         *aarch64*|*arm64*) arch="-arm64" ;;
         *x86_64*) arch="" ;;
-        *) 
+        *)
             echo -e "\033[33mArchitecture $arch may be unsupported, will try to install the amd64 one anyway."
             arch=""
             ;;
@@ -28,7 +28,7 @@ determine_os_and_arch() {
 remove_old_install() {
     local exec_path=$1
     if [ -f "$exec_path" ]; then
-        rm -f "$exec_path" && echo -e "\033[32mRemoved old installation at $exec_path" || echo -e "\033[31mFailed to remove old installation at $exec_path"
+        $SUDO rm -f "$exec_path" && echo -e "\033[32mRemoved old installation at $exec_path" || echo -e "\033[31mFailed to remove old installation at $exec_path"
     fi
 }
 
@@ -46,7 +46,7 @@ echo -e "\033[0;36mInstalling Kubescape..."
 
 determine_os_and_arch
 
-mkdir -p $BASE_DIR 
+mkdir -p $BASE_DIR
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
 DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/${RELEASE}/kubescape${arch}-${osName}-latest"
@@ -66,13 +66,15 @@ chmod +x $OUTPUT
 SUDO=""
 [ "$(id -u)" -ne 0 ] && [ -n "$(which sudo)" ] && [ -f /usr/local/bin/$KUBESCAPE_EXEC ] && SUDO=sudo
 
-$SUDO remove_old_install "/usr/local/bin/$KUBESCAPE_EXEC"
+remove_old_install "/usr/local/bin/$KUBESCAPE_EXEC"
 remove_old_install "$BASE_DIR/bin/$KUBESCAPE_EXEC"
 
 # Remove any old installations in user's PATH
 IFS=':' read -ra ADDR <<< "$PATH"
 for pdir in "${ADDR[@]}"; do
+  if [ "$pdir/$KUBESCAPE_EXEC" != "$OUTPUT" ]; then
     remove_old_install "$pdir/$KUBESCAPE_EXEC"
+  fi
 done
 
 # Move the new executable to the install directory
