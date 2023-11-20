@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/francoispqt/gojay"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDecodeScanWIthDangearousArtifacts(t *testing.T) {
@@ -87,4 +88,15 @@ func TestCalculateFixed(t *testing.T) {
 	if 0 != res {
 		t.Errorf("wrong fix status: %v", res)
 	}
+}
+
+func TestReturnsPointerIfPackageNameFound(t *testing.T) {
+    layer := &ScanResultLayer{
+        Packages: []LinuxPackage{
+            {PackageName: "pkg1", Files: PkgFiles{}},
+            {PackageName: "pkg2", Files: PkgFiles{}},
+        },
+    }
+    pkgFiles := layer.GetFilesByPackage("pkg1")
+    assert.NotNil(t, pkgFiles)
 }

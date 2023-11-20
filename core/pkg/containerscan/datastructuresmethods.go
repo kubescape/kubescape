@@ -6,6 +6,19 @@ import (
 	"github.com/armosec/armoapi-go/identifiers"
 )
 
+// GetFilesByPackage retrieves a list of files associated with a specific package name from the Packages field of the ScanResultLayer object.
+//
+// Inputs:
+// - pkgname (string): The name of the package to retrieve files for.
+//
+// Flow:
+// 1. Iterate over each package in the Packages field of the ScanResultLayer object.
+// 2. Check if the PackageName field of the current package matches the provided pkgname.
+// 3. If a match is found, return a pointer to the Files field of the package.
+// 4. If no match is found, return an empty PkgFiles object.
+//
+// Outputs:
+// - files (*PkgFiles): A pointer to the list of files associated with the specified package name. If no match is found, an empty PkgFiles object is returned.
 func (layer *ScanResultLayer) GetFilesByPackage(pkgname string) (files *PkgFiles) {
 	for _, pkg := range layer.Packages {
 		if pkg.PackageName == pkgname {
