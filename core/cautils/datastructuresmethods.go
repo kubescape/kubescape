@@ -59,8 +59,10 @@ func ruleWithKSOpaDependency(attributes map[string]interface{}) bool {
 	if attributes == nil {
 		return false
 	}
-	if s, ok := attributes["armoOpa"]; ok { // TODO - make global
-		return boolutils.StringToBool(s.(string))
+	if val, ok := attributes["armoOpa"]; ok { // TODO - make global
+		if s, ok := val.(string); ok {
+			return boolutils.StringToBool(s)
+		}
 	}
 	return false
 }
