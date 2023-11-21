@@ -7,7 +7,7 @@ import (
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
-	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
+	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/kubescape/backend/pkg/utils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -121,14 +121,14 @@ func initializeSaaSEnv() {
 	}
 
 	backendServices, err := servicediscovery.GetServices(
-		servicediscoveryv1.NewServiceDiscoveryFileV1(serviceDiscoveryFilePath),
+		servicediscoveryv2.NewServiceDiscoveryFileV2(serviceDiscoveryFilePath),
 	)
 	if err != nil {
 		logger.L().Fatal("failed to get backend services", helpers.Error(err))
 		return
 	}
 
-	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccount(), config.GetAccessKey()); err != nil {
+	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), config.GetAccount(), config.GetAccessKey()); err != nil {
 		logger.L().Fatal("failed to initialize cloud api", helpers.Error(err))
 	} else {
 		getter.SetKSCloudAPIConnector(ksCloud)
