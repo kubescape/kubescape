@@ -24,7 +24,6 @@ func (node *MappingNode) writeInfoToNode(objectID *ObjectID, path string, lineNu
 	node.ObjectID = objectID
 	node.Value = value
 	node.TemplateFileName = fileName
-	return
 }
 
 func NewMappingNodes() *MappingNodes {
