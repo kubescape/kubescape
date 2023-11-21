@@ -1,7 +1,12 @@
 package getter
 
 import (
+	"bytes"
+	"io"
+	"net/http"
+
 	v1 "github.com/kubescape/backend/pkg/client/v1"
+	utils "github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
@@ -44,4 +49,26 @@ func GetKSCloudAPIConnector() *v1.KSCloudAPI {
 	client.KsCloudOptions = &options
 
 	return &client
+}
+
+// HTTPPost provides a low-level utility that sends a POST request to a given url
+func HTTPPost(client *http.Client, fullURL string, body []byte, headers map[string]string) (io.ReadCloser, int64, error) {
+
+	req, err := http.NewRequest(http.MethodPost, fullURL, bytes.NewBuffer(body))
+	if err != nil {
+		return nil, 0, err
+	}
+	setHeaders(req, headers)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, 0, utils.ErrAPI(resp)
+	}
+
+	return resp.Body, resp.ContentLength, err
+
 }

@@ -82,14 +82,6 @@ func TestHttpMethods(t *testing.T) {
 		require.EqualValues(t, "body-get", resp)
 	})
 
-	t.Run("HttpPost should POST", func(t *testing.T) {
-		body := []byte("body-post")
-
-		resp, err := HttpPost(client, srv.URL(pathTestPost), hdrs, body)
-		require.NoError(t, err)
-		require.EqualValues(t, string(body), resp)
-	})
-
 	t.Run("HttpDelete should DELETE", func(t *testing.T) {
 		resp, err := HttpDelete(client, srv.URL(pathTestDelete), hdrs)
 		require.NoError(t, err)
