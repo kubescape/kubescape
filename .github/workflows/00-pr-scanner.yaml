@@ -20,6 +20,7 @@ concurrency:
 
 jobs:
   pr-scanner:
+    if: github.repository_owner == 'kubescape'
     permissions:
       actions: read
       checks: read
