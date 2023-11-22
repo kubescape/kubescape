@@ -3,7 +3,6 @@ package cautils
 import (
 	"golang.org/x/mod/semver"
 
-	"github.com/armosec/utils-go/boolutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -33,7 +32,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 					}
 				}
 
-				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
+				if isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
@@ -53,18 +52,6 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 		}
 
 	}
-}
-
-func ruleWithKSOpaDependency(attributes map[string]interface{}) bool {
-	if attributes == nil {
-		return false
-	}
-	if val, ok := attributes["armoOpa"]; ok { // TODO - make global
-		if s, ok := val.(string); ok {
-			return boolutils.StringToBool(s)
-		}
-	}
-	return false
 }
 
 // Checks that kubescape version is in range of use for this rule

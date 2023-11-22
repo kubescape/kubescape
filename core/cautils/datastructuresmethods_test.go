@@ -9,37 +9,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRuleWithKSOpaDependency(t *testing.T) {
-	t.Run("return false when attributes is nil", func(t *testing.T) {
-		result := ruleWithKSOpaDependency(nil)
-		assert.False(t, result)
-	})
-
-	t.Run("returns false when attributes does not contain armoOpa key", func(t *testing.T) {
-		attributes := map[string]interface{}{
-			"key": "value",
-		}
-		result := ruleWithKSOpaDependency(attributes)
-		assert.False(t, result)
-	})
-
-	t.Run("returns false when attributes contain armoOpa key with non bool value", func(t *testing.T) {
-		attributes := map[string]interface{}{
-			"armoOpa": true,
-		}
-		result := ruleWithKSOpaDependency(attributes)
-		assert.False(t, result)
-	})
-
-	t.Run("returns true when attributes contain armoOpa key with value true", func(t *testing.T) {
-		attributes := map[string]interface{}{
-			"armoOpa": "true",
-		}
-		result := ruleWithKSOpaDependency(attributes)
-		assert.True(t, result)
-	})
-}
-
 func TestIsScanningScopeMatchToControlScope(t *testing.T) {
 	tests := []struct {
 		scanScope    reporthandling.ScanningScopeType
