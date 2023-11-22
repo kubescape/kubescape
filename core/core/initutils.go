@@ -240,7 +240,7 @@ func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *gett
 func getDefaultFrameworksPaths() []string {
 	fwPaths := []string{}
 	for i := range getter.NativeFrameworks {
-		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]))
+		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]+".json")) // GetDefaultPath expects a filename, not just the framework name
 	}
 	return fwPaths
 }

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/kubescape/go-logger"
@@ -227,5 +228,15 @@ func TestIsScanTypeForSubmission(t *testing.T) {
 			got := isScanTypeForSubmission(tt.scanType)
 			assert.Equal(t, tt.want, got)
 		})
+	}
+}
+
+func TestGetDefaultFrameworksPaths(t *testing.T) {
+	result := getDefaultFrameworksPaths()
+
+	assert.NotEmpty(t, result)
+	for _, path := range result {
+		assert.NotEmpty(t, path)
+		assert.True(t, strings.HasSuffix(path, ".json"))
 	}
 }
