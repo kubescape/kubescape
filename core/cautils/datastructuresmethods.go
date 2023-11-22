@@ -59,25 +59,25 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 // returns true only if rule doesn't have the "until" attribute
 func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version string) bool {
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
-		if version != "" {
-			if sfrom, ok := from.(string); ok {
-				if semver.Compare(version, sfrom) == -1 {
-					return false
-				}
-			} else {
+		switch sfrom := from.(type) {
+		case string:
+			if version != "" && semver.Compare(version, sfrom) == -1 {
 				return false
 			}
-		}
-	}
-	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
-		if version == "" {
+		default:
+			// Handle case where useFromKubescapeVersion is not a string
 			return false
 		}
-		if suntil, ok := until.(string); ok {
-			if semver.Compare(version, suntil) >= 0 {
+	}
+
+	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
+		switch suntil := until.(type) {
+		case string:
+			if version == "" || semver.Compare(version, suntil) >= 0 {
 				return false
 			}
-		} else {
+		default:
+			// Handle case where useUntilKubescapeVersion is not a string
 			return false
 		}
 	}
