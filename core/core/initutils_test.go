@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"io"
+	"os"
 	"reflect"
 	"testing"
 
@@ -228,4 +230,28 @@ func TestIsScanTypeForSubmission(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestGetReporter_MessageSurvey(t *testing.T) {
+	ctx := context.TODO()
+	tenantConfig := cautils.GetTenantConfig("Test", "Fake Access key", "Temp cluster", "", nil)
+	reportID := "your-report-id"
+	submit := false
+	fwScan := false
+	scanInfo := cautils.ScanInfo{ScanType: cautils.ScanTypeWorkload}
+	result := getReporter(ctx, tenantConfig, reportID, submit, fwScan, scanInfo)
+
+	// Redirect stdout to a buffer
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result.DisplayMessage()
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	want := "Please fill a 3 question survey to help the Kubescape project! https://kubescape.io/project/survey/"
+	assert.Equal(t, want, string(got))
 }

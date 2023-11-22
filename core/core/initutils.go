@@ -74,7 +74,8 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 		// Add link only when scanning a cluster using a framework
 		return reporterv2.NewReportMock("", "")
 	}
-	var message string
+
+	message := "Please fill a 3 question survey to help the Kubescape project! https://kubescape.io/project/survey/"
 
 	if !fwScan && scanInfo.ScanType != cautils.ScanTypeWorkload {
 		message = "Kubescape does not submit scan results when scanning controls"
