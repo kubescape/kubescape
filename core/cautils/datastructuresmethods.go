@@ -60,7 +60,11 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version string) bool {
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		if version != "" {
-			if semver.Compare(version, from.(string)) == -1 {
+			if sfrom, ok := from.(string); ok {
+				if semver.Compare(version, sfrom) == -1 {
+					return false
+				}
+			} else {
 				return false
 			}
 		}
@@ -69,7 +73,11 @@ func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version
 		if version == "" {
 			return false
 		}
-		if semver.Compare(version, until.(string)) >= 0 {
+		if suntil, ok := until.(string); ok {
+			if semver.Compare(version, suntil) >= 0 {
+				return false
+			}
+		} else {
 			return false
 		}
 	}
