@@ -3,7 +3,6 @@ package containerscan
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -57,25 +56,6 @@ func TestUnmarshalScanReport1(t *testing.T) {
 	if err := GenerateVulnerability(&ds); err != nil {
 		t.Errorf("%v\n%v\n", ds, err)
 	}
-}
-
-func TestGetByPkgNameSuccess(t *testing.T) {
-	ds := GenerateContainerScanReportMock()
-	a := ds.Layers[0].GetFilesByPackage("coreutils")
-	if a != nil {
-
-		fmt.Printf("%+v\n", *a)
-	}
-
-}
-
-func TestGetByPkgNameMissing(t *testing.T) {
-	ds := GenerateContainerScanReportMock()
-	a := ds.Layers[0].GetFilesByPackage("s")
-	if a != nil && len(*a) > 0 {
-		t.Errorf("expected - no such package should be in that layer %v\n\n; found - %v", ds, a)
-	}
-
 }
 
 func TestCalculateFixed(t *testing.T) {

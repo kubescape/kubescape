@@ -6,16 +6,6 @@ import (
 	"github.com/armosec/armoapi-go/identifiers"
 )
 
-func (layer *ScanResultLayer) GetFilesByPackage(pkgname string) (files *PkgFiles) {
-	for _, pkg := range layer.Packages {
-		if pkg.PackageName == pkgname {
-			return &pkg.Files
-		}
-	}
-
-	return &PkgFiles{}
-}
-
 func (layer *ScanResultLayer) GetPackagesNames() []string {
 	pkgsNames := []string{}
 	for _, pkg := range layer.Packages {
