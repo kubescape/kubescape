@@ -6,6 +6,7 @@ import (
 	"github.com/armosec/armoapi-go/identifiers"
 )
 
+// GetPackagesNames retrieves the names of all the packages stored in the Packages field of the ScanResultLayer object and returns them as a slice of strings.
 func (layer *ScanResultLayer) GetPackagesNames() []string {
 	pkgsNames := []string{}
 	for _, pkg := range layer.Packages {
