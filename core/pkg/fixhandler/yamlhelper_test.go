@@ -2,6 +2,7 @@ package fixhandler
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -69,6 +70,44 @@ func TestAdjustContentLines_AdjustsLineNumbersForContentToAddBasedOnEmptyOrComme
 	assert.Equal(t, 10, contentToAdd[9].line)
 }
 
+// Adjusts line numbers for contentToAdd based on empty or comment lines before them
+func TestAdjustContentLines_TestEdgeCaseWHereContentToAddHaveMoreLines(t *testing.T) {
+
+	contentToAdd := []contentToAdd{
+		{line: 1},
+		{line: 2},
+		{line: 3},
+		{line: 4},
+		{line: 5},
+		{line: 6},
+		{line: 7},
+		{line: 8},
+		{line: 9},
+	}
+
+	linesSlice := []string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"",
+		"# comment",
+		"line 6",
+		"",
+	}
+
+	adjustContentLines(&contentToAdd, &linesSlice)
+
+	assert.Equal(t, 1, contentToAdd[0].line)
+	assert.Equal(t, 2, contentToAdd[1].line)
+	assert.Equal(t, 3, contentToAdd[2].line)
+	assert.Equal(t, 3, contentToAdd[3].line)
+	assert.Equal(t, 3, contentToAdd[4].line)
+	assert.Equal(t, 6, contentToAdd[5].line)
+	assert.Equal(t, 6, contentToAdd[6].line)
+	assert.Equal(t, 7, contentToAdd[7].line)
+	assert.Equal(t, 8, contentToAdd[8].line)
+}
+
 // If the differenceAtTop is less than or equal to 0, the function should return without modifying the fixedList.
 func TestAdjustFixedListLines_WhenDifferenceAtTopIsLessThanOrEqualTo0(t *testing.T) {
 	originalList := []nodeInfo{
@@ -89,6 +128,20 @@ func TestAdjustFixedListLines_WhenDifferenceAtTopIsLessThanOrEqualTo0(t *testing
 		{node: &yaml.Node{Line: 2}},
 		{node: &yaml.Node{Line: 3}},
 	}, fixedList)
+}
+
+// When the fixedList is empty, the function returns without modifying the line numbers of the fixedList.
+func TestAdjustFixedListLines_emptyFixedList(t *testing.T) {
+	originalList := []nodeInfo{
+		{node: &yaml.Node{Line: 1}},
+		{node: &yaml.Node{Line: 2}},
+		{node: &yaml.Node{Line: 3}},
+	}
+	fixedList := []nodeInfo{}
+
+	adjustFixedListLines(&originalList, &fixedList)
+
+	assert.Empty(t, fixedList)
 }
 
 // Encodes a YAML node into a string
@@ -118,11 +171,50 @@ func TestEncodeIntoYaml_EncodesYamlNodeIntoString(t *testing.T) {
 	assert.Equal(t, "key: value\n", result)
 }
 
+// Encodes a YAML node into a string
+func TestEncodeIntoYaml_EncodesNodeIntoStringWithNegativeTracker(t *testing.T) {
+	parentNode := &yaml.Node{
+		Kind: yaml.MappingNode,
+	}
+	nodeList := []nodeInfo{
+		{
+			node: &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Value: "key",
+			},
+		},
+		{
+			node: &yaml.Node{
+				Kind:  yaml.ScalarNode,
+				Value: "value",
+			},
+		},
+	}
+	tracker := -1
+
+	_, err := enocodeIntoYaml(parentNode, &nodeList, tracker)
+
+	assert.Error(t, err)
+}
+
 // Given a non-empty string content and a positive integer indentationSpaces, the function should return a string with each line of the content indented by the specified number of spaces.
 func TestIndentContentNonEmptyStringPositiveIndentationSpaces(t *testing.T) {
 	content := "line1\nline2\nline3"
 	indentationSpaces := 4
 	expected := "    line1\n    line2\n    line3\n"
+
+	result := indentContent(content, indentationSpaces)
+
+	if result != expected {
+		t.Errorf("Expected %q, but got %q", expected, result)
+	}
+}
+
+// Should correctly indent content with negative indentation spaces
+func TestIndentContentNegativeIndentationSpaces(t *testing.T) {
+	content := "line1\nline2\nline3"
+	indentationSpaces := -2
+	expected := "line1\nline2\nline3\n"
 
 	result := indentContent(content, indentationSpaces)
 
@@ -184,6 +276,20 @@ func TestGetNodeLine_ReturnsLineNumberOfNodeAtGivenTrackerPosition(t *testing.T)
 	assert.Equal(t, 2, line)
 }
 
+// Returns an error if the tracker position is a negative value.
+func TestGetNodeLine_TrackerPositionNegativeValue_ReturnsError(t *testing.T) {
+	nodeList := []nodeInfo{
+		{node: &yaml.Node{Line: 1}},
+		{node: &yaml.Node{Line: 2}},
+		{node: &yaml.Node{Line: 3}},
+	}
+	tracker := -2
+
+	line := getNodeLine(&nodeList, tracker)
+
+	assert.Equal(t, -1, line)
+}
+
 // Returns true if the node is a value node in a mapping node with an odd index
 func TestIsValueNodeInMapping_ReturnsTrueIfNodeIsValueNodeInMappingWithOddIndex(t *testing.T) {
 	node := &nodeInfo{
@@ -218,6 +324,24 @@ func TestIsSameNode_ReturnsTrueIfSameLineColumnKindAndValue(t *testing.T) {
 	assert.True(t, result)
 }
 
+func TestIsSameNode_ReturnsFalseIfEitherNodeIsNil(t *testing.T) {
+	nodeOne := &yaml.Node{
+		Line:   1,
+		Column: 2,
+		Kind:   yaml.ScalarNode,
+		Value:  "value",
+	}
+	var nodeTwo *yaml.Node
+
+	result := isSameNode(nodeOne, nodeTwo)
+
+	assert.False(t, result)
+
+	result = isSameNode(nodeTwo, nodeOne)
+
+	assert.False(t, result)
+}
+
 // Returns True for empty string
 func TestReturnsTrueForEmptyString(t *testing.T) {
 	lineContent := ""
@@ -240,6 +364,20 @@ func TestGetFirstNodeInLine_ReturnsIndex(t *testing.T) {
 	if result != expected {
 		t.Errorf("Expected %d, but got %d", expected, result)
 	}
+}
+
+// returns -1 when the given line is not found in the list
+func TestGetFirstNodeInLine_LineNotFound(t *testing.T) {
+	list := []nodeInfo{
+		{node: &yaml.Node{Line: 1}},
+		{node: &yaml.Node{Line: 2}},
+		{node: &yaml.Node{Line: 3}},
+	}
+	line := 4
+
+	index := getFirstNodeInLine(&list, line)
+
+	assert.Equal(t, -1, index)
 }
 
 // Function removes lines within specified range
@@ -265,6 +403,31 @@ func TestRemoveLinesWithinRange(t *testing.T) {
 		"line 5",
 	}
 	assert.Equal(t, expected, linesSlice)
+}
+
+// The function correctly handles cases where the startLine and endLine are out of range of the input slice.
+func TestRemoveOutOfRangeLines(t *testing.T) {
+	linesToRemove := []linesToRemove{
+		{startLine: 5, endLine: 7},
+	}
+	linesSlice := []string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+	}
+	expected := []string{
+		"line 1",
+		"line 2",
+		"line 3",
+		"line 4",
+	}
+
+	removeLines(&linesToRemove, &linesSlice)
+
+	if !reflect.DeepEqual(linesSlice, expected) {
+		t.Errorf("Expected %v, but got %v", expected, linesSlice)
+	}
 }
 
 // The function should correctly calculate the total number of children of the given node and add it to the current tracker.
