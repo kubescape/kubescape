@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -63,6 +64,74 @@ func TestAddInfoToMap(t *testing.T) {
 			addInfoToMap(tc.Resource, result, tc.Err)
 
 			require.EqualValues(t, tc.Expected, result)
+		})
+	}
+}
+
+func TestMapHostSensorResourceToApiGroup(t *testing.T) {
+	url := "hostdata.kubescape.cloud/v1beta0"
+
+	tests := []struct {
+		resource scannerResource
+		want     string
+	}{
+		{
+			resource: KubeletConfiguration,
+			want:     url,
+		},
+		{
+			resource: OsReleaseFile,
+			want:     url,
+		},
+		{
+			resource: KubeletCommandLine,
+			want:     url,
+		},
+		{
+			resource: KernelVersion,
+			want:     url,
+		},
+		{
+			resource: LinuxSecurityHardeningStatus,
+			want:     url,
+		},
+		{
+			resource: OpenPortsList,
+			want:     url,
+		},
+		{
+			resource: LinuxKernelVariables,
+			want:     url,
+		},
+		{
+			resource: KubeletInfo,
+			want:     url,
+		},
+		{
+			resource: KubeProxyInfo,
+			want:     url,
+		},
+		{
+			resource: ControlPlaneInfo,
+			want:     url,
+		},
+		{
+			resource: CloudProviderInfo,
+			want:     url,
+		},
+		{
+			resource: CNIInfo,
+			want:     url,
+		},
+		{
+			resource: "Fake value",
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, tt.want, mapHostSensorResourceToApiGroup(tt.resource))
 		})
 	}
 }

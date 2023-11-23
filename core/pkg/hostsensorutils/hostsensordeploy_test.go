@@ -8,6 +8,7 @@ import (
 
 	"github.com/kubescape/kubescape/v3/internal/testutils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -208,4 +209,16 @@ func TestHostSensorHandler(t *testing.T) {
 	// * explicit TearDown()
 	//
 	// Notice that the package doesn't current pass tests with the race detector enabled.
+}
+
+func TestLoadHostSensorFromFile_NoError(t *testing.T) {
+	content, err := loadHostSensorFromFile("hostsensor.yaml")
+	assert.NotEqual(t, "", content)
+	assert.Nil(t, err)
+}
+
+func TestLoadHostSensorFromFile_Error(t *testing.T) {
+	content, err := loadHostSensorFromFile("hostsensor_invalid.yaml")
+	assert.Equal(t, "", content)
+	assert.NotNil(t, err)
 }
