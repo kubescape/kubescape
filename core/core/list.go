@@ -164,13 +164,14 @@ func generateControlRows(policies []string) [][]string {
 
 		var id, control, framework string
 
-		if len(idAndControlAndFrameworks) == 0 {
+		switch len(idAndControlAndFrameworks) {
+		case 0:
 			continue
-		} else if len(idAndControlAndFrameworks) == 1 {
+		case 1:
 			id = idAndControlAndFrameworks[0]
-		} else if len(idAndControlAndFrameworks) == 2 {
+		case 2:
 			id, control = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1]
-		} else if len(idAndControlAndFrameworks) > 2 {
+		default:
 			id, control, framework = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
 		}
 

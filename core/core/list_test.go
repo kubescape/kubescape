@@ -206,15 +206,21 @@ func TestGenerateControlRowsHandlesPoliciesWithEmptyStringOrNoPipesOrOnePipeMiss
 	policies := []string{
 		"",
 		"1",
-		"2|Control 2",
-		"3",
+		"2|Control 2|Framework 2",
+		"3|Control 3|Framework 3|Extra 3",
+		"4||Framework 4",
+		"|",
+		"5|Control 5||Extra 5",
 	}
 
 	expectedRows := [][]string{
 		{"", "", "https://hub.armosec.io/docs/", ""},
 		{"1", "", "https://hub.armosec.io/docs/1", ""},
-		{"2", "Control 2", "https://hub.armosec.io/docs/2", ""},
-		{"3", "", "https://hub.armosec.io/docs/3", ""},
+		{"2", "Control 2", "https://hub.armosec.io/docs/2", "Framework\n2"},
+		{"3", "Control 3", "https://hub.armosec.io/docs/3", "Framework\n3"},
+		{"4", "", "https://hub.armosec.io/docs/4", "Framework\n4"},
+		{"", "", "https://hub.armosec.io/docs/", ""},
+		{"5", "Control 5", "https://hub.armosec.io/docs/5", ""},
 	}
 
 	rows := generateControlRows(policies)
@@ -255,6 +261,56 @@ func TestGenerateTableWithCorrectHeadersAndRows(t *testing.T) {
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ Framework  │
 │            │              │                               │          3 │
+└────────────┴──────────────┴───────────────────────────────┴────────────┘
+`
+
+	assert.Equal(t, want, string(got))
+}
+
+func TestGenerateTableWithMalformedPoliciesAndPrettyPrintHeadersAndRows(t *testing.T) {
+	// Arrange
+	ctx := context.Background()
+	policies := []string{
+		"",
+		"1",
+		"2|Control 2|Framework 2",
+		"3|Control 3|Framework 3|Extra 3",
+		"4||Framework 4",
+		"|",
+		"5|Control 5||Extra 5",
+	}
+
+	// Redirect stdout to a buffer
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	prettyPrintControls(ctx, policies)
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+
+	os.Stdout = rescueStdout
+
+	want := `┌────────────┬──────────────┬───────────────────────────────┬────────────┐
+│ Control ID │ Control name │ Docs                          │ Frameworks │
+├────────────┼──────────────┼───────────────────────────────┼────────────┤
+│            │              │ https://hub.armosec.io/docs/  │            │
+├────────────┼──────────────┼───────────────────────────────┼────────────┤
+│          1 │              │ https://hub.armosec.io/docs/1 │            │
+├────────────┼──────────────┼───────────────────────────────┼────────────┤
+│          2 │ Control 2    │ https://hub.armosec.io/docs/2 │ Framework  │
+│            │              │                               │          2 │
+├────────────┼──────────────┼───────────────────────────────┼────────────┤
+│          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ Framework  │
+│            │              │                               │          3 │
+├────────────┼──────────────┼───────────────────────────────┼────────────┤
+│          4 │              │ https://hub.armosec.io/docs/4 │ Framework  │
+│            │              │                               │          4 │
+├────────────┼──────────────┼───────────────────────────────┼────────────┤
+│            │              │ https://hub.armosec.io/docs/  │            │
+├────────────┼──────────────┼───────────────────────────────┼────────────┤
+│          5 │ Control 5    │ https://hub.armosec.io/docs/5 │            │
 └────────────┴──────────────┴───────────────────────────────┴────────────┘
 `
 
