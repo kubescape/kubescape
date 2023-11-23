@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/francoispqt/gojay"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecodeScanWIthDangearousArtifacts(t *testing.T) {
@@ -56,6 +58,14 @@ func TestUnmarshalScanReport1(t *testing.T) {
 	if err := GenerateVulnerability(&ds); err != nil {
 		t.Errorf("%v\n%v\n", ds, err)
 	}
+}
+
+func TestGetByPkgNameSuccess(t *testing.T) {
+	ds := GenerateContainerScanReportMock()
+	a := ds.Layers[0].GetPackagesNames()
+	require.Equal(t, 1, len(a))
+	assert.Equal(t, []string{"coreutils"}, a)
+
 }
 
 func TestCalculateFixed(t *testing.T) {
