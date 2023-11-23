@@ -49,20 +49,15 @@ func matchNodes(nodeOne, nodeTwo *yaml.Node) NodeRelation {
 func adjustContentLines(contentToAdd *[]contentToAdd, linesSlice *[]string) {
 	for contentIdx, content := range *contentToAdd {
 		line := content.line
-
 		// Adjust line numbers such that there are no "empty lines or comment lines of next nodes" before them
 		for idx := line - 1; idx >= 0; idx-- {
-
 			// If idx is exceeding the length of linesSlice, skip it
-
-			if idx >= len(*linesSlice) {
-				continue
-			}
-
-			if isEmptyLineOrComment((*linesSlice)[idx]) {
-				(*contentToAdd)[contentIdx].line -= 1
-			} else {
-				break
+			if idx < len(*linesSlice) {
+				if isEmptyLineOrComment((*linesSlice)[idx]) {
+					(*contentToAdd)[contentIdx].line -= 1
+				} else {
+					break
+				}
 			}
 		}
 	}
@@ -70,7 +65,7 @@ func adjustContentLines(contentToAdd *[]contentToAdd, linesSlice *[]string) {
 
 func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
 
-	if len(*originalList) == 0 || len(*fixedList) == 0 {
+	if originalList == nil || fixedList == nil || len(*originalList) == 0 || len(*fixedList) == 0 {
 		return // Check for empty slices to avoid index out of range errors
 	}
 
@@ -91,7 +86,7 @@ func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
 func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {
 
 	if tracker < 0 || tracker >= len(*nodeList) {
-		return "", fmt.Errorf("Index out of range for nodeList")
+		return "", fmt.Errorf("Index out of range for nodeList: tracker=%d, length=%d", tracker, len(*nodeList))
 	}
 
 	content := make([]*yaml.Node, 0)
@@ -140,6 +135,10 @@ func getContent(ctx context.Context, parentNode *yaml.Node, nodeList *[]nodeInfo
 }
 
 func indentContent(content string, indentationSpaces int) string {
+
+	if content == "" {
+		return ""
+	}
 
 	indentedContent := ""
 
