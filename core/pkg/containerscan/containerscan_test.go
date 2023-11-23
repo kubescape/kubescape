@@ -68,6 +68,89 @@ func TestGetByPkgNameSuccess(t *testing.T) {
 
 }
 
+func TestValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       ScanResultReport
+		expected bool
+	}{
+		{
+			name:     "empty report should return false",
+			in:       ScanResultReport{},
+			expected: false,
+		},
+		{
+			name: "report with empty CustomerGUID should return false",
+			in: ScanResultReport{
+				CustomerGUID: "",
+				ImgHash:      "aaa",
+				ImgTag:       "bbb",
+				Timestamp:    1,
+			},
+			expected: false,
+		},
+		{
+			name: "report with empty ImgHash and ImgTag should return false",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "",
+				ImgTag:       "",
+				Timestamp:    1,
+			},
+			expected: false,
+		},
+		{
+			name: "report with empty ImageHash and non-empty ImgTag should return true",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "",
+				ImgTag:       "bbb",
+				Timestamp:    1,
+			},
+			expected: true,
+		},
+		{
+			name: "report with non-empty ImageHash and empty ImgTag should return true",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "",
+				Timestamp:    1,
+			},
+			expected: true,
+		},
+		{
+			name: "report with non-empty ImageHash and non-empty ImgTag should return true",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "ccc",
+				Timestamp:    1,
+			},
+			expected: true,
+		},
+		{
+			name: "report with Timestamp <= 0 should return false",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "ccc",
+				Timestamp:    0,
+			},
+			expected: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res := test.in.Validate()
+			if test.expected != res {
+				t.Errorf("wrong validation status: %v", res)
+			}
+		})
+	}
+}
+
 func TestCalculateFixed(t *testing.T) {
 	tests := []struct {
 		name     string
