@@ -159,8 +159,21 @@ func generateControlRows(policies []string) [][]string {
 	rows := [][]string{}
 
 	for _, control := range policies {
+
 		idAndControlAndFrameworks := strings.Split(control, "|")
-		id, control, framework := idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
+
+		var id, control, framework string
+
+		switch len(idAndControlAndFrameworks) {
+		case 0:
+			continue
+		case 1:
+			id = idAndControlAndFrameworks[0]
+		case 2:
+			id, control = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1]
+		default:
+			id, control, framework = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
+		}
 
 		docs := cautils.GetControlLink(id)
 
