@@ -159,8 +159,20 @@ func generateControlRows(policies []string) [][]string {
 	rows := [][]string{}
 
 	for _, control := range policies {
+
 		idAndControlAndFrameworks := strings.Split(control, "|")
-		id, control, framework := idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
+
+		var id, control, framework string
+
+		if len(idAndControlAndFrameworks) == 0 {
+			continue
+		} else if len(idAndControlAndFrameworks) == 1 {
+			id = idAndControlAndFrameworks[0]
+		} else if len(idAndControlAndFrameworks) == 2 {
+			id, control = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1]
+		} else if len(idAndControlAndFrameworks) > 2 {
+			id, control, framework = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
+		}
 
 		docs := cautils.GetControlLink(id)
 

@@ -201,6 +201,27 @@ func TestGenerateControlRowsWithAllFields(t *testing.T) {
 	assert.Equal(t, want, got)
 }
 
+// Handles policies with no '|' characters in the string
+func TestGenerateControlRowsHandlesPoliciesWithEmptyStringOrNoPipesOrOnePipeMissing(t *testing.T) {
+	policies := []string{
+		"",
+		"1",
+		"2|Control 2",
+		"3",
+	}
+
+	expectedRows := [][]string{
+		{"", "", "https://hub.armosec.io/docs/", ""},
+		{"1", "", "https://hub.armosec.io/docs/1", ""},
+		{"2", "Control 2", "https://hub.armosec.io/docs/2", ""},
+		{"3", "", "https://hub.armosec.io/docs/3", ""},
+	}
+
+	rows := generateControlRows(policies)
+
+	assert.Equal(t, expectedRows, rows)
+}
+
 // The function generates a table with the correct headers and rows based on the input policies.
 func TestGenerateTableWithCorrectHeadersAndRows(t *testing.T) {
 	// Arrange
