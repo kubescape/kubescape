@@ -22,6 +22,13 @@ func Test_validateFramework(t *testing.T) {
 		wantErr bool
 	}{
 		{
+			name: "nil framework",
+			args: args{
+				framework: nil,
+			},
+			wantErr: true,
+		},
+		{
 			name: "empty framework",
 			args: args{
 				framework: &reporthandling.Framework{
@@ -102,11 +109,32 @@ func TestPolicyDownloadError(t *testing.T) {
 
 // Returns a time.Duration value when PoliciesCacheTtlEnvVar is set and valid.
 func TestGetPoliciesCacheTtl_Set(t *testing.T) {
-	os.Setenv(PoliciesCacheTtlEnvVar, "10")
-	defer os.Unsetenv(PoliciesCacheTtlEnvVar)
-	want := time.Duration(10) * time.Minute
+	tests := []struct {
+		envVarValue string
+		want        time.Duration
+	}{
+		{
+			envVarValue: "10",
+			want:        time.Duration(10) * time.Minute,
+		},
+		{
+			envVarValue: "0",
+			want:        time.Duration(0),
+		},
+		{
+			envVarValue: "text",
+			want:        time.Duration(0),
+		},
+	}
 
-	assert.Equal(t, want, getPoliciesCacheTtl())
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			os.Setenv(PoliciesCacheTtlEnvVar, tt.envVarValue)
+			defer os.Unsetenv(PoliciesCacheTtlEnvVar)
+
+			assert.Equal(t, tt.want, getPoliciesCacheTtl())
+		})
+	}
 }
 
 // Returns 0 when PoliciesCacheTtlEnvVar is not set.
@@ -114,4 +142,29 @@ func TestGetPoliciesCacheTtl_NotSet(t *testing.T) {
 	want := time.Duration(0)
 
 	assert.Equal(t, want, getPoliciesCacheTtl())
+}
+
+func TestPolicyIdentifierToSlice(t *testing.T) {
+	tests := []struct {
+		policyIdentifier []cautils.PolicyIdentifier
+		want             []string
+	}{
+		{
+			policyIdentifier: []cautils.PolicyIdentifier{
+				{Kind: "ClusterAdmissionRule", Identifier: "policy1"},
+				{Kind: "K8sPSP", Identifier: "policy2"},
+			},
+			want: []string{"ClusterAdmissionRule: policy1", "K8sPSP: policy2"},
+		},
+		{
+			policyIdentifier: []cautils.PolicyIdentifier{},
+			want:             []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			assert.Equal(t, tt.want, policyIdentifierToSlice(tt.policyIdentifier))
+		})
+	}
 }
