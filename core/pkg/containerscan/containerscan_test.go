@@ -79,12 +79,51 @@ func TestGetByPkgNameMissing(t *testing.T) {
 }
 
 func TestCalculateFixed(t *testing.T) {
-	res := CalculateFixed([]FixedIn{{
-		Name:    "",
-		ImgTag:  "",
-		Version: "",
-	}})
-	if 0 != res {
-		t.Errorf("wrong fix status: %v", res)
+	tests := []struct {
+		name     string
+		in       []FixedIn
+		expected int
+	}{
+		{
+			name:     "empty list should return 0",
+			in:       []FixedIn{},
+			expected: 0,
+		},
+		{
+			name: "None Version value should return 0",
+			in: []FixedIn{
+				{Version: "None"},
+				{Version: "None"},
+				{Version: "None"},
+			},
+			expected: 0,
+		},
+		{
+			name: "empty Version value should return 0",
+			in: []FixedIn{
+				{Version: ""},
+				{Version: ""},
+				{Version: ""},
+			},
+			expected: 0,
+		},
+		{
+			name: "non empty or non None Version value should return 1",
+			in: []FixedIn{
+				{Version: "1.23"},
+				{Version: ""},
+				{Version: ""},
+			},
+			expected: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res := CalculateFixed(test.in)
+			if test.expected != res {
+				t.Errorf("wrong fix status: %v", res)
+			}
+		})
 	}
 }
