@@ -31,7 +31,7 @@ func TestIsRuleKubescapeVersionCompatible(t *testing.T) {
 	// should not crash when the value of useUntilKubescapeVersion is not a string
 	buildNumberMock := "v1.0.135"
 	assert.False(t, isRuleKubescapeVersionCompatible(rule_invalid_from.Attributes, buildNumberMock))
-	assert.False(t, isRuleKubescapeVersionCompatible(rule_invalid_from.Attributes, buildNumberMock))
+	assert.False(t, isRuleKubescapeVersionCompatible(rule_invalid_until.Attributes, buildNumberMock))
 	// should use only rules that don't have "until"
 	buildNumberMock = ""
 	assert.False(t, isRuleKubescapeVersionCompatible(rule_v1_0_131.Attributes, buildNumberMock))
