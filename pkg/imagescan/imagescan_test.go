@@ -1,5 +1,12 @@
 package imagescan
 
+import (
+	"testing"
+
+	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/stretchr/testify/assert"
+)
+
 // import (
 // 	"context"
 // 	"testing"
@@ -219,3 +226,41 @@ package imagescan
 // 		})
 // 	}
 // }
+
+func TestParseSeverity(t *testing.T) {
+	tests := []struct {
+		name string
+		want vulnerability.Severity
+	}{
+		{
+			name: "",
+			want: vulnerability.UnknownSeverity,
+		},
+		{
+			name: "negligible",
+			want: vulnerability.NegligibleSeverity,
+		},
+		{
+			name: "low",
+			want: vulnerability.LowSeverity,
+		},
+		{
+			name: "medium",
+			want: vulnerability.MediumSeverity,
+		},
+		{
+			name: "high",
+			want: vulnerability.HighSeverity,
+		},
+		{
+			name: "critical",
+			want: vulnerability.CriticalSeverity,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ParseSeverity(tt.name)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
