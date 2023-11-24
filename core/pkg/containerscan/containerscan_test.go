@@ -293,3 +293,12 @@ func TestCalculateFixed(t *testing.T) {
 		})
 	}
 }
+
+func TestReturnsHashValueForValidInputValues(t *testing.T) {
+	report := ScanResultReport{}
+	expectedHash := "7416232187745851261"
+	actualHash := report.AsFNVHash()
+	if actualHash != expectedHash {
+		t.Errorf("Expected hash value %s, but got %s", expectedHash, actualHash)
+	}
+}
