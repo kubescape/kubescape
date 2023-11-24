@@ -118,7 +118,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(ctx context.Context, versionDat
 		return fmt.Errorf("failed to get latest version")
 	}
 
-	LatestReleaseVersion := latestVersion.ClientUpdate
+	LatestReleaseVersion = latestVersion.ClientUpdate
 
 	if latestVersion.ClientUpdate != "" {
 		if BuildNumber != "" && semver.Compare(BuildNumber, LatestReleaseVersion) == -1 {
