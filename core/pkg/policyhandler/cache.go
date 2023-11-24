@@ -14,14 +14,16 @@ type TimedCache[T any] struct {
 	value      T
 	isSet      bool
 	ttl        time.Duration
-	expiration int64
+	expiration time.Time
 	mutex      sync.RWMutex
+	stopChan   chan struct{} // to stop the invalidateTask goroutine
 }
 
 func NewTimedCache[T any](ttl time.Duration) *TimedCache[T] {
 	cache := &TimedCache[T]{
-		ttl:   ttl,
-		isSet: false,
+		ttl:      ttl,
+		isSet:    false,
+		stopChan: make(chan struct{}),
 	}
 
 	// start the invalidate task only when the ttl is greater than 0 (cache is enabled)
@@ -36,33 +38,64 @@ func (c *TimedCache[T]) Set(value T) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
 
-	// cache is disabled
 	if c.ttl == 0 {
 		return
 	}
 
 	c.isSet = true
 	c.value = value
-	c.expiration = time.Now().Add(c.ttl).UnixNano()
+	c.expiration = time.Now().Add(c.ttl)
+
+	// Signal invalidation to Get() if cache is already expired
+	if time.Now().After(c.expiration) {
+		c.Invalidate()
+	}
 }
 
 func (c *TimedCache[T]) Get() (T, bool) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	if !c.isSet || time.Now().UnixNano() > c.expiration {
+	// If the invalidateTask() goroutine is currently invalidating the cache,
+	// the Get() method may return the stale cached value before the invalidation is complete.
+	// To avoid the stale cached value, we're requiring the Get() method to wait for the invalidation signal before returning the value.
+	select {
+	case <-c.stopChan:
 		return c.value, false
+	default:
+		if !c.isSet || time.Now().After(c.expiration) {
+			return c.value, false
+		}
+		return c.value, true
 	}
-	return c.value, true
 }
 
 func (c *TimedCache[T]) invalidateTask() {
+	ticker := time.NewTicker(c.ttl)
+	defer ticker.Stop()
+
 	for {
-		<-time.After(c.ttl)
-		if time.Now().UnixNano() > c.expiration {
-			c.Invalidate()
+		select {
+		case <-ticker.C:
+			c.mutex.Lock()
+			expired := time.Now().After(c.expiration)
+			c.mutex.Unlock()
+			if expired {
+				c.Invalidate()
+			}
+		case <-c.stopChan:
+			return
+		default:
+			// Check if TTL is still non-zero and return if true, to avoid possible memory leaks
+			if c.ttl == 0 {
+				return
+			}
 		}
 	}
+}
+
+func (c *TimedCache[T]) Stop() {
+	close(c.stopChan)
 }
 
 func (c *TimedCache[T]) Invalidate() {
@@ -70,4 +103,6 @@ func (c *TimedCache[T]) Invalidate() {
 	defer c.mutex.Unlock()
 
 	c.isSet = false
+	close(c.stopChan)
+	c.stopChan = make(chan struct{})
 }
