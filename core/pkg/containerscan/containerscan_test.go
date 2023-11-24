@@ -144,9 +144,7 @@ func TestValidate(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			res := test.in.Validate()
-			if test.expected != res {
-				t.Errorf("wrong validation status: %v", res)
-			}
+			assert.Equal(t, test.expected, res)
 		})
 	}
 }
@@ -194,9 +192,7 @@ func TestCalculateFixed(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			res := CalculateFixed(test.in)
-			if test.expected != res {
-				t.Errorf("wrong fix status: %v", res)
-			}
+			assert.Equal(t, test.expected, res)
 		})
 	}
 }
