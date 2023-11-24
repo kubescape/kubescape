@@ -68,7 +68,7 @@ func TestGetByPkgNameSuccess(t *testing.T) {
 
 }
 
-func TestValidate(t *testing.T) {
+func TestScanResultReportValidate(t *testing.T) {
 	tests := []struct {
 		name     string
 		in       ScanResultReport
@@ -136,6 +136,103 @@ func TestValidate(t *testing.T) {
 				ImgHash:      "bbb",
 				ImgTag:       "ccc",
 				Timestamp:    0,
+			},
+			expected: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res := test.in.Validate()
+			assert.Equal(t, test.expected, res)
+		})
+	}
+}
+func TestScanElasticContainerScanSummaryResultValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       ElasticContainerScanSummaryResult
+		expected bool
+	}{
+		{
+			name:     "empty summary should return false",
+			in:       ElasticContainerScanSummaryResult{},
+			expected: false,
+		},
+		{
+			name: "summary with empty CustomerGUID should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "",
+				ContainerScanID: "aaa",
+				ImgHash:         "bbb",
+				ImgTag:          "ccc",
+				Timestamp:       1,
+			},
+			expected: false,
+		},
+		{
+			name: "summary with empty ContainerScanID should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "",
+				ImgHash:         "bbb",
+				ImgTag:          "ccc",
+				Timestamp:       1,
+			},
+			expected: false,
+		},
+		{
+			name: "summary with empty ImgHash and ImgTag should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "",
+				ImgTag:          "",
+				Timestamp:       1,
+			},
+			expected: false,
+		},
+		{
+			name: "summary with empty ImageHash and non-empty ImgTag should return true",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "",
+				ImgTag:          "ccc",
+				Timestamp:       1,
+			},
+			expected: true,
+		},
+		{
+			name: "summary with non-empty ImageHash and empty ImgTag should return true",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "ccc",
+				ImgTag:          "",
+				Timestamp:       1,
+			},
+			expected: true,
+		},
+		{
+			name: "summary with non-empty ImageHash and non-empty ImgTag should return true",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "ccc",
+				ImgTag:          "ddd",
+				Timestamp:       1,
+			},
+			expected: true,
+		},
+		{
+			name: "summary with Timestamp < 0 should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "ccc",
+				ImgTag:          "ddd",
+				Timestamp:       -1,
 			},
 			expected: false,
 		},
