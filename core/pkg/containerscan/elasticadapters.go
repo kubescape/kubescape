@@ -5,55 +5,7 @@ import (
 	cautils "github.com/armosec/utils-k8s-go/armometadata"
 )
 
-// ToFlatVulnerabilities - returnsgit p
-func (scanresult *ScanResultReport) ToFlatVulnerabilities() []*ElasticContainerVulnerabilityResult {
-	vuls := make([]*ElasticContainerVulnerabilityResult, 0)
-	vul2indx := make(map[string]int)
-	scanID := scanresult.AsFNVHash()
-	designatorsObj, ctxList := scanresult.GetDesignatorsNContext()
-	for _, layer := range scanresult.Layers {
-		for _, vul := range layer.Vulnerabilities {
-			esLayer := ESLayer{LayerHash: layer.LayerHash, ParentLayerHash: layer.ParentLayerHash}
-			if indx, isOk := vul2indx[vul.Name]; isOk {
-				vuls[indx].Layers = append(vuls[indx].Layers, esLayer)
-				continue
-			}
-			result := &ElasticContainerVulnerabilityResult{WLID: scanresult.WLID,
-				Timestamp:   scanresult.Timestamp,
-				Designators: *designatorsObj,
-				Context:     ctxList}
-
-			result.Vulnerability = vul
-			result.Layers = make([]ESLayer, 0)
-			result.Layers = append(result.Layers, esLayer)
-			result.ContainerScanID = scanID
-
-			result.IsFixed = CalculateFixed(vul.Fixes)
-			result.RelevantLinks = append(result.RelevantLinks, "https://nvd.nist.gov/vuln/detail/"+vul.Name)
-			result.RelevantLinks = append(result.RelevantLinks, vul.Link)
-			result.Vulnerability.Link = "https://nvd.nist.gov/vuln/detail/" + vul.Name
-
-			result.Categories.IsRCE = result.IsRCE()
-			vuls = append(vuls, result)
-			vul2indx[vul.Name] = len(vuls) - 1
-
-		}
-	}
-	// find first introduced
-	for i, v := range vuls {
-		earlyLayer := ""
-		for _, layer := range v.Layers {
-			if layer.ParentLayerHash == earlyLayer {
-				earlyLayer = layer.LayerHash
-			}
-		}
-		vuls[i].IntroducedInLayer = earlyLayer
-
-	}
-
-	return vuls
-}
-
+// Summarize generates a summary of the scan result report.
 func (scanresult *ScanResultReport) Summarize() *ElasticContainerScanSummaryResult {
 	designatorsObj, ctxList := scanresult.GetDesignatorsNContext()
 	summary := &ElasticContainerScanSummaryResult{
