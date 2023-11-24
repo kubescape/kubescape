@@ -167,7 +167,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	if getter.GetKSCloudAPIConnector().GetCloudReportURL() == "" {
+	if tenantConfig.GetCloudReportURL() == "" {
 		scanInfo.Submit = false
 		return
 	}
