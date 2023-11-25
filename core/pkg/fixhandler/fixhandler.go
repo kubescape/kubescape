@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -313,7 +314,7 @@ func reduceYamlExpressions(resource *ResourceFixInfo) string {
 	for expr := range resource.YamlExpressions {
 		expressions = append(expressions, expr)
 	}
-
+	sort.Strings(expressions)
 	return strings.Join(expressions, " | ")
 }
 
