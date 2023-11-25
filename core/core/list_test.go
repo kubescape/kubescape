@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"reflect"
 	"sort"
 	"testing"
 
@@ -375,4 +376,53 @@ func TestListExceptions(t *testing.T) {
 
 	assert.Nil(t, controls)
 	assert.NotNil(t, err)
+}
+
+func TestNaturalSortPolicies(t *testing.T) {
+	type args struct {
+		policies []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want []string
+	}{
+		{
+			name: "empty",
+			args: args{
+				policies: []string{},
+			},
+			want: []string{},
+		},
+		{
+			name: "one element",
+			args: args{
+				policies: []string{"policy-1"},
+			},
+			want: []string{"policy-1"},
+		},
+		{
+			name: "Natural sort",
+			args: args{
+				policies: []string{"policy-1", "policy-11", "policy-12", "policy-2"},
+			},
+			want: []string{"policy-1", "policy-2", "policy-11", "policy-12"},
+		},
+		{
+			name: "Natural sort 2",
+			args: args{
+				policies: []string{"exclude-aks-kube-system-daemonsets-10", "exclude-aks-kube-system-daemonsets-4", "exclude-aks-kube-system-daemonsets-1",
+					"exclude-gke-kube-public-resources", "exclude-kubescape-otel",
+				},
+			},
+			want: []string{"exclude-aks-kube-system-daemonsets-1", "exclude-aks-kube-system-daemonsets-4", "exclude-aks-kube-system-daemonsets-10", "exclude-gke-kube-public-resources", "exclude-kubescape-otel"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := naturalSortPolicies(tt.args.policies); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("sortPolicies() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
