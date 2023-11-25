@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
-	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -112,17 +111,14 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 }
 
 func generateResourceHeader(short bool) []string {
-	var headers []string
+	headers := make([]string, 0)
+
 	if short {
-		headers = make([]string, 1)
-		headers[0] = "Resources"
+		headers = append(headers, "Resources")
 	} else {
-		headers = make([]string, _resourceRowLen)
-		headers[resourceColumnSeverity] = "Severity"
-		headers[resourceColumnName] = "Control name"
-		headers[resourceColumnURL] = "Docs"
-		headers[resourceColumnPath] = "Assisted remediation"
+		headers = append(headers, []string{"Severity", "Control name", "Docs", "Assisted remediation"}...)
 	}
+
 	return headers
 }
 
@@ -212,10 +208,18 @@ func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociat
 }
 
 func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
+	// Create a set to efficiently check if a failed path already exists in the paths slice
+	pathSet := make(map[string]struct{})
+	for _, path := range paths {
+		pathSet[path] = struct{}{}
+	}
+
+	// Append failed paths if they are not already present
 	for _, failedPath := range failedPaths {
-		if !slices.Contains(paths, failedPath) {
+		if _, ok := pathSet[failedPath]; !ok {
 			paths = append(paths, failedPath)
 		}
 	}
+
 	return paths
 }
