@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	v2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/maruel/natural"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -43,7 +44,7 @@ func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies
 		if err != nil {
 			return err
 		}
-		sort.Strings(policies)
+		policies = naturalSortPolicies(policies)
 
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
 			listFormatFunction(ctx, listPolicies.Target, policies)
@@ -54,6 +55,13 @@ func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies
 		return nil
 	}
 	return fmt.Errorf("unknown command to download")
+}
+
+func naturalSortPolicies(policies []string) []string {
+	sort.Slice(policies, func(i, j int) bool {
+		return natural.Less(policies[i], policies[j])
+	})
+	return policies
 }
 
 func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
