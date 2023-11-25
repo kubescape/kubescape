@@ -181,3 +181,81 @@ func TestValidatePrinter(t *testing.T) {
 		})
 	}
 }
+
+func TestNewPrinter(t *testing.T) {
+	defaultVersion := "v2"
+	ctx := context.Background()
+	tests := []struct {
+		name     string
+		format   string
+		viewType string
+		version  string
+	}{
+		{
+			name:     "JSON printer v1",
+			format:   "json",
+			viewType: "resource",
+			version:  "v1",
+		},
+		{
+			name:     "JSON printer v2",
+			format:   "json",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "JSON printer unknown v3",
+			format:   "json",
+			viewType: "resource",
+			version:  "v3",
+		},
+		{
+			name:     "JUNIT printer",
+			format:   "junit",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Prometheus printer",
+			format:   "prometheus",
+			viewType: "control",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Pdf printer",
+			format:   "pdf",
+			viewType: "security",
+			version:  defaultVersion,
+		},
+		{
+			name:     "HTML printer",
+			format:   "html",
+			viewType: "control",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Sarif printer",
+			format:   "sarif",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Prettry printer",
+			format:   "pretty-printer",
+			viewType: "control",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Invalid format printer",
+			format:   "pretty",
+			viewType: "security",
+			version:  defaultVersion,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			printer := NewPrinter(ctx, tt.format, tt.version, false, false, cautils.ViewTypes(tt.viewType), "my-cluster")
+			assert.NotNil(t, printer)
+		})
+	}
+}

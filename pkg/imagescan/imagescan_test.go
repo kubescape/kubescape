@@ -1,8 +1,11 @@
 package imagescan
 
 import (
+	"errors"
 	"testing"
+	"time"
 
+	"github.com/anchore/grype/grype/db"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/stretchr/testify/assert"
 )
@@ -263,4 +266,168 @@ func TestParseSeverity(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestIsEmpty(t *testing.T) {
+	tests := []struct {
+		name  string
+		creds RegistryCredentials
+		want  bool
+	}{
+		{
+			name: "Both Non Empty",
+			creds: RegistryCredentials{
+				Username: "username",
+				Password: "password",
+			},
+			want: false,
+		},
+		{
+			name: "Password Empty",
+			creds: RegistryCredentials{
+				Username: "username",
+				Password: "",
+			},
+			want: true,
+		},
+		{
+			name: "Username Empty",
+			creds: RegistryCredentials{
+				Username: "",
+				Password: "password",
+			},
+			want: true,
+		},
+		{
+			name: "Both empty",
+			creds: RegistryCredentials{
+				Username: "",
+				Password: "",
+			},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.creds.IsEmpty())
+		})
+	}
+}
+
+func TestNewDefaultDBConfig(t *testing.T) {
+	config, shouldUpdate := NewDefaultDBConfig()
+	assert.NotNil(t, config)
+	assert.Equal(t, true, shouldUpdate)
+	assert.Contains(t, config.DBRootDir, "grypedb")
+	assert.Equal(t, "https://toolbox-data.anchore.io/grype/databases/listing.json", config.ListingURL)
+}
+
+func TestValidateDBLoad(t *testing.T) {
+	currentTime := time.Now()
+	tests := []struct {
+		name               string
+		loadErr            error
+		status             *db.Status
+		expectedErrMessage string
+	}{
+		{
+			name:               "status nil",
+			loadErr:            nil,
+			status:             nil,
+			expectedErrMessage: "unable to determine the status of the vulnerability db",
+		},
+		{
+			name:    "loadErr nil and status error nil",
+			loadErr: nil,
+			status: &db.Status{
+				Built:         currentTime,
+				SchemaVersion: 7,
+				Location:      "New Delhi",
+				Checksum:      "invalid",
+				Err:           nil,
+			},
+			expectedErrMessage: "",
+		},
+		{
+			name:    "loadErr nil but status error not nil",
+			loadErr: nil,
+			status: &db.Status{
+				Built:         currentTime,
+				SchemaVersion: 7,
+				Location:      "New Delhi",
+				Checksum:      "invalid",
+				Err:           errors.New("Some error"),
+			},
+			expectedErrMessage: "db could not be loaded: Some error",
+		},
+		{
+			name:    "loadErr not nil",
+			loadErr: errors.New("Some error"),
+			status: &db.Status{
+				Built:         currentTime,
+				SchemaVersion: 7,
+				Location:      "New Delhi",
+				Checksum:      "invalid",
+				Err:           errors.New("Some error"),
+			},
+			expectedErrMessage: "failed to load vulnerability db: Some error",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDBLoad(tt.loadErr, tt.status)
+			if err != nil {
+				assert.Equal(t, tt.expectedErrMessage, err.Error())
+			}
+		})
+	}
+}
+
+func TestGetProviderConfig(t *testing.T) {
+	tests := []struct {
+		name  string
+		creds RegistryCredentials
+	}{
+		{
+			name: "Both Non Empty",
+			creds: RegistryCredentials{
+				Username: "username",
+				Password: "password",
+			},
+		},
+		{
+			name: "Password Empty",
+			creds: RegistryCredentials{
+				Username: "username",
+				Password: "",
+			},
+		},
+		{
+			name: "Username Empty",
+			creds: RegistryCredentials{
+				Username: "",
+				Password: "password",
+			},
+		},
+		{
+			name: "Both empty",
+			creds: RegistryCredentials{
+				Username: "",
+				Password: "",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			providerConfig := getProviderConfig(tt.creds)
+			assert.NotNil(t, providerConfig)
+			assert.Equal(t, true, providerConfig.SynthesisConfig.GenerateMissingCPEs)
+		})
+	}
+}
+
+func TestNewScanService(t *testing.T) {
+	defaultConfig, _ := NewDefaultDBConfig()
+	svc := NewScanService(defaultConfig)
+	assert.Equal(t, defaultConfig, svc.dbCfg)
 }
