@@ -50,6 +50,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return fmt.Errorf("usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]")
 			}
 
+			// Looks strange, a bug maybe????
 			if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
 				return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
 			}

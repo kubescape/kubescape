@@ -4,8 +4,11 @@ import (
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/mocks"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestSetWorkloadScanInfo(t *testing.T) {
@@ -66,4 +69,28 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 			},
 		)
 	}
+}
+
+func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
+	// Create a mock Kubescape interface
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{
+		ChartPath: "temp",
+		FilePath:  "",
+	}
+
+	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+
+	// Verify the command name and short description
+	assert.Equal(t, "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]", cmd.Use)
+	assert.Equal(t, "Scan a workload for misconfigurations and image vulnerabilities", cmd.Short)
+	assert.Equal(t, workloadExample, cmd.Example)
+
+	err := cmd.Args(&cobra.Command{}, []string{})
+	expectedErrorMessage := "usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]"
+	assert.Equal(t, expectedErrorMessage, err.Error())
+
+	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
+	expectedErrorMessage = "invalid workload identifier"
+	assert.Equal(t, expectedErrorMessage, err.Error())
 }
