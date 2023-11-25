@@ -25,6 +25,20 @@ func TestValidateAccountID(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "empty account ID",
+			fields: fields{
+				Account: "",
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty account ID with a space",
+			fields: fields{
+				Account: "  ",
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

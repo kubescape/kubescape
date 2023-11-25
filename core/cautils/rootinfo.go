@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 )
@@ -22,6 +23,11 @@ type CloudURLs struct {
 
 // To check if the provided account ID is valid
 func ValidateAccountID(accountID string) error {
+
+	if strings.TrimSpace(accountID) == "" {
+		return fmt.Errorf("bad argument: accound ID must be a valid UUID")
+	}
+
 	// Check if the Account-ID is valid
 	if _, err := uuid.Parse(accountID); accountID != "" && err != nil {
 		return fmt.Errorf("bad argument: accound ID must be a valid UUID")
