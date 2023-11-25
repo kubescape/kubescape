@@ -29,6 +29,7 @@ require (
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.291-rc.0
 	github.com/libgit2/git2go/v33 v33.0.9
+	github.com/maruel/natural v1.1.1
 	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
 	github.com/mattn/go-isatty v0.0.19
 	github.com/mikefarah/yq/v4 v4.29.1
@@ -281,7 +282,6 @@ require (
 	github.com/letsencrypt/boulder v0.0.0-20221109233200-85aa52084eaf // indirect
 	github.com/magiconair/properties v1.8.7 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
-	github.com/maruel/natural v1.1.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
