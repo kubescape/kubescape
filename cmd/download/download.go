@@ -67,6 +67,11 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			if filepath.Ext(downloadInfo.Path) == ".json" {
 				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
 			}
+
+			if len(args) == 0 {
+				return fmt.Errorf("no arguements provided")
+			}
+
 			downloadInfo.Target = args[0]
 			if len(args) >= 2 {
 

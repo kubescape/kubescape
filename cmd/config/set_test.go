@@ -7,6 +7,7 @@ import (
 
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -15,13 +16,20 @@ func TestGetSetCmd(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 
 	// Call the GetConfigCmd function
-	configCmd := getSetCmd(mockKubescape)
+	configSetCmd := getSetCmd(mockKubescape)
 
 	// Verify the command name and short description
-	assert.Equal(t, "set", configCmd.Use)
-	assert.Equal(t, "Set configurations, supported: "+strings.Join(stringKeysToSlice(supportConfigSet), "/"), configCmd.Short)
-	assert.Equal(t, setConfigExample, configCmd.Example)
-	assert.Equal(t, stringKeysToSlice(supportConfigSet), configCmd.ValidArgs)
+	assert.Equal(t, "set", configSetCmd.Use)
+	assert.Equal(t, "Set configurations, supported: "+strings.Join(stringKeysToSlice(supportConfigSet), "/"), configSetCmd.Short)
+	assert.Equal(t, setConfigExample, configSetCmd.Example)
+	assert.Equal(t, stringKeysToSlice(supportConfigSet), configSetCmd.ValidArgs)
+
+	err := configSetCmd.RunE(&cobra.Command{}, []string{"accountID=value1"})
+	assert.Nil(t, err)
+
+	err = configSetCmd.RunE(&cobra.Command{}, []string{})
+	expectedErrorMessage := "key '' unknown . supported: accessKey/accountID/cloudAPIURL/cloudReportURL"
+	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
 // Should return a slice of keys when given a non-empty map

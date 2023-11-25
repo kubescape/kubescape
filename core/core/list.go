@@ -29,9 +29,12 @@ var listFormatFunc = map[string]func(context.Context, string, []string){
 
 func ListSupportActions() []string {
 	commands := []string{}
-	for k := range listFunc {
-		commands = append(commands, k)
+	for key := range listFunc {
+		commands = append(commands, key)
 	}
+
+	// Sort the keys
+	sort.Strings(commands)
 	return commands
 }
 func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies) error {

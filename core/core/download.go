@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
@@ -34,9 +35,12 @@ var downloadFunc = map[string]func(context.Context, *metav1.DownloadInfo) error{
 
 func DownloadSupportCommands() []string {
 	commands := []string{}
-	for k := range downloadFunc {
-		commands = append(commands, k)
+	for key := range downloadFunc {
+		commands = append(commands, key)
 	}
+
+	// Sort the keys of the map
+	sort.Strings(commands)
 	return commands
 }
 
