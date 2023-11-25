@@ -257,30 +257,32 @@ func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj,
 	return location
 }
 
-func addFix(result *sarif.Result, filepath string, startLine int, startColumn int, endLine int, endColumn int, text string) {
-	result.AddFix(
-		sarif.NewFix().
-			WithArtifactChanges([]*sarif.ArtifactChange{
-				sarif.NewArtifactChange(
-					sarif.NewSimpleArtifactLocation(filepath),
-				).WithReplacement(
-					sarif.NewReplacement(sarif.NewRegion().
-						WithStartLine(startLine).
-						WithStartColumn(startColumn).
-						WithEndLine(endLine).
-						WithEndColumn(endColumn),
-					).WithInsertedContent(
-						sarif.NewArtifactContent().WithText(text),
-					),
-				),
-			}),
-	)
+func addFix(result *sarif.Result, filepath string, startLine, startColumn, endLine, endColumn int, text string) {
+	// Create a new replacement with the specified start and end lines and columns, and the inserted text.
+	replacement := sarif.NewReplacement(
+		sarif.NewRegion().
+			WithStartLine(startLine).
+			WithStartColumn(startColumn).
+			WithEndLine(endLine).
+			WithEndColumn(endColumn),
+	).WithInsertedContent(sarif.NewArtifactContent().WithText(text))
+
+	// Create a new artifact change with the specified file path and replacement.
+	artifactChange := sarif.NewArtifactChange(
+		sarif.NewSimpleArtifactLocation(filepath),
+	).WithReplacement(replacement)
+
+	// Add the artifact change to the result's fixes.
+	result.AddFix(sarif.NewFix().WithArtifactChanges([]*sarif.ArtifactChange{artifactChange}))
 }
 
 func calculateMove(str string, file []string, endColumn int, endLine int) (int, int, bool) {
 	num, err := strconv.Atoi(str)
 	if err != nil {
-		logger.L().Debug("failed to get move from string "+str, helpers.Error(err))
+		logger.L().Debug(fmt.Sprintf("failed to get move from string %s", str), helpers.Error(err))
+		return 0, 0, false
+	}
+	if endLine > len(file) {
 		return 0, 0, false
 	}
 	for num+endColumn-1 > len(file[endLine-1]) {
