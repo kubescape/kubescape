@@ -73,3 +73,42 @@ func TestParseSetArgs_Single(t *testing.T) {
 	assert.Equal(t, "", setConfig.CloudReportURL)
 	assert.Equal(t, "", setConfig.CloudAPIURL)
 }
+
+func TestParseSetArgs_Multiple(t *testing.T) {
+	args := []string{"accountID", "value1"}
+	setConfig, _ := parseSetArgs(args)
+	assert.Equal(t, "value1", setConfig.Account)
+	assert.Equal(t, "", setConfig.AccessKey)
+	assert.Equal(t, "", setConfig.CloudReportURL)
+	assert.Equal(t, "", setConfig.CloudAPIURL)
+}
+
+func TestParseSetArgs_CloudAPIURL(t *testing.T) {
+	args := []string{"cloudAPIURL", "value1"}
+	setConfig, _ := parseSetArgs(args)
+	assert.Equal(t, "", setConfig.Account)
+	assert.Equal(t, "", setConfig.AccessKey)
+	assert.Equal(t, "", setConfig.CloudReportURL)
+	assert.Equal(t, "value1", setConfig.CloudAPIURL)
+}
+
+func TestParseSetArgs_CloudReportURL(t *testing.T) {
+	args := []string{"cloudReportURL", "value1"}
+	setConfig, _ := parseSetArgs(args)
+	assert.Equal(t, "", setConfig.Account)
+	assert.Equal(t, "", setConfig.AccessKey)
+	assert.Equal(t, "value1", setConfig.CloudReportURL)
+	assert.Equal(t, "", setConfig.CloudAPIURL)
+}
+
+func TestParseSetArgs_InvalidKey(t *testing.T) {
+	args := []string{"invalidKey", "value1"}
+	setConfig, err := parseSetArgs(args)
+	assert.Equal(t, "", setConfig.Account)
+	assert.Equal(t, "", setConfig.AccessKey)
+	assert.Equal(t, "", setConfig.CloudReportURL)
+	assert.Equal(t, "", setConfig.CloudAPIURL)
+
+	expectedErrorMessage := fmt.Sprintf("key '%s' unknown . supported: %s", "invalidKey", strings.Join(stringKeysToSlice(supportConfigSet), "/"))
+	assert.Equal(t, expectedErrorMessage, err.Error())
+}
