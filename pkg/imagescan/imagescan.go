@@ -44,6 +44,10 @@ func (c RegistryCredentials) IsEmpty() bool {
 //
 // Values equal to the threshold are considered failing, too.
 func ExceedsSeverityThreshold(scanResults *models.PresenterConfig, severity vulnerability.Severity) bool {
+	if scanResults.MetadataProvider == nil {
+		return false
+	}
+
 	return grype.HasSeverityAtOrAbove(scanResults.MetadataProvider, severity, scanResults.Matches)
 }
 
