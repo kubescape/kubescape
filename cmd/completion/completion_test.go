@@ -3,6 +3,7 @@ package completion
 import (
 	"io"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -102,6 +103,54 @@ func TestGetCompletionCmd_RunNotExpectedOutputs(t *testing.T) {
 
 			assert.NotEqual(t, notExpectedOutput1, string(got))
 			assert.NotEqual(t, notExpectedOutput2, string(got))
+		})
+	}
+}
+
+func TestGetCompletionCmd_RunProducesExpectedOutput(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       []string
+		wantPrefix string
+	}{
+		{
+			name:       "Bash completion",
+			args:       []string{"bash"},
+			wantPrefix: "# bash completion for",
+		},
+		{
+			name:       "Zsh completion",
+			args:       []string{"zsh"},
+			wantPrefix: "#compdef",
+		},
+		{
+			name:       "Fish completion",
+			args:       []string{"fish"},
+			wantPrefix: "complete -c",
+		},
+		{
+			name:       "PowerShell completion",
+			args:       []string{"powershell"},
+			wantPrefix: "Register-ArgumentCompleter -Native -CommandName",
+		},
+	}
+
+	completionCmd := GetCompletionCmd()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Redirect stdout to a buffer
+			rescueStdout := os.Stdout
+			r, w, _ := os.Pipe()
+			os.Stdout = w
+
+			completionCmd.Run(&cobra.Command{}, tt.args)
+
+			w.Close()
+			got, _ := io.ReadAll(r)
+			os.Stdout = rescueStdout
+
+			assert.True(t, strings.HasPrefix(string(got), tt.wantPrefix))
 		})
 	}
 }
