@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/armosec/utils-go/boolutils"
+	utils "github.com/kubescape/backend/pkg/utils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
@@ -145,15 +146,13 @@ func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest)
 		return nil, fmt.Errorf("in 'CheckLatestVersion' failed to json.Marshal, reason: %s", err.Error())
 	}
 
-	resp, err := getter.HttpPost(http.DefaultClient, v.versionURL, map[string]string{"Content-Type": "application/json"}, reqBody)
+	rdr, _, err := getter.HTTPPost(http.DefaultClient, v.versionURL, reqBody, map[string]string{"Content-Type": "application/json"})
+
+	vResp, err := utils.Decode[*VersionCheckResponse](rdr)
 	if err != nil {
 		return nil, err
 	}
 
-	vResp := &VersionCheckResponse{}
-	if err = getter.JSONDecoder(resp).Decode(vResp); err != nil {
-		return nil, err
-	}
 	return vResp, nil
 }
 
