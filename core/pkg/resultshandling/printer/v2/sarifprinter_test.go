@@ -1,10 +1,13 @@
 package printer
 
 import (
+	"context"
+	"os"
 	"testing"
 
 	"github.com/owenrumney/go-sarif/v2/sarif"
 	"github.com/sergi/go-diff/diffmatchpatch"
+	"github.com/stretchr/testify/assert"
 )
 
 func Test_scoreToSeverityLevel(t *testing.T) {
@@ -120,4 +123,156 @@ spec:
 			}
 		})
 	}
+}
+
+func TestNewSARIFPrinter(t *testing.T) {
+	sarifPrinter := NewSARIFPrinter()
+	expectedPrinter := SARIFPrinter{}
+	assert.Equal(t, expectedPrinter, *sarifPrinter)
+}
+
+func TestSetWriter_NonEmptyFileNames(t *testing.T) {
+	sarifPrinter := NewSARIFPrinter()
+	expectedPrinter := SARIFPrinter{}
+	assert.Equal(t, expectedPrinter, *sarifPrinter)
+
+	ctx := context.Background()
+
+	tests := []struct {
+		name         string
+		outputFile   string
+		expectedName string
+	}{
+		{
+			name:         "Non empty non sarif file",
+			outputFile:   "  test.json ",
+			expectedName: "  test.json .sarif",
+		},
+		{
+			name:         "Sarif file without whitespaces in name",
+			outputFile:   "temp.sarif",
+			expectedName: "temp.sarif",
+		},
+		{
+			name:         "Sarif file with whitespaces in name",
+			outputFile:   "  test.sarif ",
+			expectedName: "  test.sarif ",
+		},
+		{
+			name:         "Empty file name",
+			outputFile:   "",
+			expectedName: "/dev/stdout",
+		},
+		{
+			name:         "Empty file name with whitespaces",
+			outputFile:   "   ",
+			expectedName: "report.sarif",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sarifPrinter.SetWriter(ctx, tt.outputFile)
+			assert.NotNil(t, sarifPrinter.writer)
+			assert.Equal(t, tt.expectedName, sarifPrinter.writer.Name())
+			if tt.expectedName != "/dev/stdout" {
+
+				err := os.Remove(tt.expectedName)
+				assert.Nil(t, err)
+			}
+		})
+	}
+}
+
+// The function correctly converts a string to an integer and returns the new line and column position based on the input string and current line and column position.
+func TestCalculateMove(t *testing.T) {
+	str := "5"
+	file := []string{"line 1", "line 2", "line 3"}
+	endColumn := 3
+	endLine := 2
+
+	newColumn, newLine, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.True(t, success)
+	assert.Equal(t, 3, newColumn)
+	assert.Equal(t, 1, newLine)
+}
+
+// The function handles the case where the end line is greater than the length of the file and returns false.
+func TestCalculateMove_EndLineGreaterThanFileLength(t *testing.T) {
+	str := "5"
+	file := []string{"line 1", "line 2", "line 3"}
+	endColumn := 3
+	endLine := 5
+
+	_, _, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.False(t, success)
+}
+
+// The input string is an empty string and returns false.
+func TestCalculateMove_EmptyString(t *testing.T) {
+	str := ""
+	file := []string{"line 1", "line 2", "line 3"}
+	endColumn := 3
+	endLine := 2
+
+	_, _, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.False(t, success)
+}
+
+// The input file is an empty array and returns false.
+func TestCalculateMove_EmptyFile(t *testing.T) {
+	str := "5"
+	file := []string{}
+	endColumn := 3
+	endLine := 2
+
+	endLine, endColumn, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.Equal(t, 0, endLine)
+	assert.Equal(t, 0, endColumn)
+	assert.False(t, success)
+}
+
+// The input file contains an empty line and adjusts the end line and column accordingly.
+func TestCalculateMove_InvalidString(t *testing.T) {
+	str := "abc"
+	file := []string{"line 1", "line 2", "line 3"}
+	endColumn := 3
+	endLine := 2
+
+	_, _, success := calculateMove(str, file, endColumn, endLine)
+
+	assert.False(t, success)
+}
+
+// Adds a new fix to the result with the given filepath, start and end positions, and text.
+func TestAddFix_AddsNewFixToResult(t *testing.T) {
+	result := sarif.Result{}
+	filepath := "example/file.txt"
+	startLine := 1
+	startColumn := 1
+	endLine := 2
+	endColumn := 5
+	text := "example text"
+
+	addFix(&result, filepath, startLine, startColumn, endLine, endColumn, text)
+
+	expectedFix := sarif.NewFix().WithArtifactChanges([]*sarif.ArtifactChange{
+		sarif.NewArtifactChange(
+			sarif.NewSimpleArtifactLocation(filepath),
+		).WithReplacement(
+			sarif.NewReplacement(sarif.NewRegion().
+				WithStartLine(startLine).
+				WithStartColumn(startColumn).
+				WithEndLine(endLine).
+				WithEndColumn(endColumn),
+			).WithInsertedContent(
+				sarif.NewArtifactContent().WithText(text),
+			),
+		),
+	})
+
+	assert.Equal(t, expectedFix, result.Fixes[0])
 }
