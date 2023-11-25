@@ -8,6 +8,7 @@ import (
 	"sort"
 	"testing"
 
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -329,4 +330,49 @@ func TestListSupportActionsReturnsSupportedActions(t *testing.T) {
 	sort.Strings(got)
 
 	assert.Equal(t, want, got)
+}
+
+func TestListFrameworks(t *testing.T) {
+	ctx := context.Background()
+	listPolicies := &metav1.ListPolicies{
+		Target:    "all",
+		Format:    "json",
+		AccountID: "1234567890",
+		AccessKey: "myaccesskey",
+	}
+
+	frameworks, err := listFrameworks(ctx, listPolicies)
+
+	assert.NotEmpty(t, frameworks)
+	assert.Nil(t, err)
+}
+
+func TestListControls(t *testing.T) {
+	ctx := context.Background()
+	listPolicies := &metav1.ListPolicies{
+		Target:    "all",
+		Format:    "json",
+		AccountID: "1234567890",
+		AccessKey: "myaccesskey",
+	}
+
+	controls, err := listControls(ctx, listPolicies)
+
+	assert.NotNil(t, controls)
+	assert.Nil(t, err)
+}
+
+func TestListExceptions(t *testing.T) {
+	ctx := context.Background()
+	listPolicies := &metav1.ListPolicies{
+		Target:    "all",
+		Format:    "json",
+		AccountID: "1234567890",
+		AccessKey: "myaccesskey",
+	}
+
+	controls, err := listExceptions(ctx, listPolicies)
+
+	assert.Nil(t, controls)
+	assert.NotNil(t, err)
 }

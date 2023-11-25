@@ -1,11 +1,25 @@
 package core
 
 import (
+	"context"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestGetOutputPrinters(t *testing.T) {
+	ctx := context.Background()
+	scanInfo := &cautils.ScanInfo{
+		ScanType: "control",
+		Format:   "json,junit,html",
+	}
+
+	outputPrinters := GetOutputPrinters(scanInfo, ctx, "test-cluster")
+
+	assert.NotNil(t, outputPrinters)
+	assert.Equal(t, 3, len(outputPrinters))
+}
 
 func TestIsPrioritizationScanType(t *testing.T) {
 	tests := []struct {
