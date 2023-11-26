@@ -34,3 +34,19 @@ func TestGetPatchCmd(t *testing.T) {
 	err = cmd.RunE(&cobra.Command{}, []string{"patch", "--image", "docker.io/library/nginx:1.22"})
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
+
+func TestGetPatchCmdWithNonExistentImage(t *testing.T) {
+	// Create a mock Kubescape interface
+	mockKubescape := &mocks.MockIKubescape{}
+
+	// Call the GetPatchCmd function
+	cmd := GetPatchCmd(mockKubescape)
+
+	// Run the command with a non-existent image argument
+	err := cmd.RunE(&cobra.Command{}, []string{"patch", "--image", "non-existent-image"})
+
+	// Check that there is an error and the error message is as expected
+	expectedErrorMessage := "image tag is required"
+	assert.Error(t, err)
+	assert.Equal(t, expectedErrorMessage, err.Error())
+}
