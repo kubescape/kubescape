@@ -74,7 +74,7 @@ jobs:
         continue-on-error: true
         uses: coverallsapp/github-action@v1
         with:
-          github-token: ${{ secrets.ARMOSEC_GITHUB_ACCESS_TOKEN }}
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           path-to-lcov: coverage.lcov
 
       - name: Comment results to PR
