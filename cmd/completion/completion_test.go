@@ -3,7 +3,6 @@ package completion
 import (
 	"io"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
