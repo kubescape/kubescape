@@ -75,7 +75,8 @@ func TestFlagValidationDownload_NoError(t *testing.T) {
 		AccessKey: "",
 		AccountID: "",
 	}
-	assert.Equal(t, nil, flagValidationDownload(&downloadInfo))
+	expectedErrorMessage = "no arguements provided"
+	assert.Equal(t, expectedErrorMessage, flagValidationDownload(&downloadInfo))
 }
 
 func TestFlagValidationDownload_Error(t *testing.T) {

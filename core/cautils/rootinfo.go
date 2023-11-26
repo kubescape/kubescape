@@ -25,7 +25,7 @@ type CloudURLs struct {
 func ValidateAccountID(accountID string) error {
 
 	if strings.TrimSpace(accountID) == "" {
-		return nil
+		return fmt.Errorf("no arguements provided")
 	}
 
 	// Check if the Account-ID is valid
