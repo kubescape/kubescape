@@ -212,13 +212,21 @@ func TestHostSensorHandler(t *testing.T) {
 }
 
 func TestLoadHostSensorFromFile_NoError(t *testing.T) {
-	content, err := loadHostSensorFromFile("hostsensor.yaml")
+	content, err := loadHostSensorFromFile("testdata/hostsensor.yaml")
 	assert.NotEqual(t, "", content)
 	assert.Nil(t, err)
 }
 
 func TestLoadHostSensorFromFile_Error(t *testing.T) {
-	content, err := loadHostSensorFromFile("hostsensor_invalid.yaml")
+	content, err := loadHostSensorFromFile("testdata/hostsensor_invalid.yaml")
+	assert.Equal(t, "", content)
+	assert.NotNil(t, err)
+
+	content, err = loadHostSensorFromFile("testdata/empty_hostsensor.yaml")
+	assert.Equal(t, "", content)
+	assert.NotNil(t, err)
+
+	content, err = loadHostSensorFromFile("testdata/notAYamlFile.txt")
 	assert.Equal(t, "", content)
 	assert.NotNil(t, err)
 }
