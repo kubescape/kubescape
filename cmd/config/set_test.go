@@ -73,3 +73,9 @@ func TestParseSetArgs_Single(t *testing.T) {
 	assert.Equal(t, "", setConfig.CloudReportURL)
 	assert.Equal(t, "", setConfig.CloudAPIURL)
 }
+
+func TestParseSetArgs_InvalidKey(t *testing.T) {
+	args := []string{"invalidKey=value1"}
+	_, err := parseSetArgs(args)
+	assert.Equal(t, "key 'invalidKey' unknown . supported: accessKey/accountID/cloudAPIURL/cloudReportURL", err.Error())
+}
