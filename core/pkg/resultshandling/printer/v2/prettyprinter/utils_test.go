@@ -521,6 +521,11 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 			},
 			expectedResult: []string{"Critical", "High", "Medium", "Low"},
 		},
+		{
+			name:           "Empty input",
+			severityToCVEs: map[string]int{},
+			expectedResult: []string{},
+		},
 	}
 
 	for _, tc := range tests {
