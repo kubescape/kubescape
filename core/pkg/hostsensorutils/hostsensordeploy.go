@@ -416,7 +416,15 @@ func loadHostSensorFromFile(hostSensorYAMLFile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// TODO - Add file validation
+
+	if len(dat) == 0 {
+		return "", fmt.Errorf("empty file")
+	}
+
+	if !cautils.IsYaml(hostSensorYAMLFile) {
+		return "", fmt.Errorf("invalid file format")
+	}
+
 	return string(dat), err
 }
 

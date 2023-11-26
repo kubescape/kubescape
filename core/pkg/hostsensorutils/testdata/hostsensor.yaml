@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  labels:
+    app: kubescape-host-scanner
+    k8s-app: kubescape-host-scanner
+    kubernetes.io/metadata.name: kubescape-host-scanner
+    tier: kubescape-host-scanner-control-plane
+  name: kubescape
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: host-scanner
+  namespace: kubescape
+  labels:
+    app: host-scanner
+    k8s-app: kubescape-host-scanner
+    otel: enabled
+spec:
+  selector:
+    matchLabels:
+      name: host-scanner
+  template:
+    metadata:
+      labels:
+        name: host-scanner
+    spec:
+      tolerations:
+      # this toleration is to have the DaemonDet runnable on all nodes (including masters)
+      # remove it if your masters can't run pods
+      - operator: Exists
+      containers:
+      - name: host-sensor
+        image: quay.io/kubescape/host-scanner:v1.0.61
+        securityContext:
+          allowPrivilegeEscalation: true
+          privileged: true
+          readOnlyRootFilesystem: true
+          procMount: Unmasked
+        ports:
+          - name: scanner # Do not change port name
+            containerPort: 7888
+            protocol: TCP
+        resources:
+          limits:
+            cpu: 0.1m
+            memory: 200Mi
+          requests:
+            cpu: 1m
+            memory: 200Mi
+        volumeMounts:
+        - mountPath: /host_fs
+          name: host-filesystem
+        startupProbe:
+          httpGet:
+            path: /readyz
+            port: 7888
+          failureThreshold: 30
+          periodSeconds: 1
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 7888
+          periodSeconds: 10
+      terminationGracePeriodSeconds: 120
+      dnsPolicy: ClusterFirstWithHostNet
+      automountServiceAccountToken: false
+      volumes:
+      - hostPath:
+          path: /
+          type: Directory
+        name: host-filesystem
+      hostPID: true
+      hostIPC: true
