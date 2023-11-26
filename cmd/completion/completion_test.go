@@ -105,3 +105,83 @@ func TestGetCompletionCmd_RunNotExpectedOutputs(t *testing.T) {
 		})
 	}
 }
+
+func TestGetCompletionCmd_RunBashCompletionNotExpectedOutputs(t *testing.T) {
+	notExpectedOutput1 := "Unexpected output for bash completion test 1."
+	notExpectedOutput2 := "Unexpected output for bash completion test 2."
+
+	// Redirect stdout to a buffer
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	completionCmd := GetCompletionCmd()
+	completionCmd.Run(&cobra.Command{}, []string{"bash"})
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	assert.NotEqual(t, notExpectedOutput1, string(got))
+	assert.NotEqual(t, notExpectedOutput2, string(got))
+}
+
+func TestGetCompletionCmd_RunZshCompletionNotExpectedOutputs(t *testing.T) {
+	notExpectedOutput1 := "Unexpected output for zsh completion test 1."
+	notExpectedOutput2 := "Unexpected output for zsh completion test 2."
+
+	// Redirect stdout to a buffer
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	completionCmd := GetCompletionCmd()
+	completionCmd.Run(&cobra.Command{}, []string{"zsh"})
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	assert.NotEqual(t, notExpectedOutput1, string(got))
+	assert.NotEqual(t, notExpectedOutput2, string(got))
+}
+
+func TestGetCompletionCmd_RunFishCompletionNotExpectedOutputs(t *testing.T) {
+	notExpectedOutput1 := "Unexpected output for fish completion test 1."
+	notExpectedOutput2 := "Unexpected output for fish completion test 2."
+
+	// Redirect stdout to a buffer
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	completionCmd := GetCompletionCmd()
+	completionCmd.Run(&cobra.Command{}, []string{"fish"})
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	assert.NotEqual(t, notExpectedOutput1, string(got))
+	assert.NotEqual(t, notExpectedOutput2, string(got))
+}
+
+func TestGetCompletionCmd_RunPowerShellCompletionNotExpectedOutputs(t *testing.T) {
+	notExpectedOutput1 := "Unexpected output for powershell completion test 1."
+	notExpectedOutput2 := "Unexpected output for powershell completion test 2."
+
+	// Redirect stdout to a buffer
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	completionCmd := GetCompletionCmd()
+	completionCmd.Run(&cobra.Command{}, []string{"powershell"})
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
+	assert.NotEqual(t, notExpectedOutput1, string(got))
+	assert.NotEqual(t, notExpectedOutput2, string(got))
+}
