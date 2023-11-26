@@ -25,7 +25,7 @@ type CloudURLs struct {
 func ValidateAccountID(accountID string) error {
 
 	if strings.TrimSpace(accountID) == "" {
-		return fmt.Errorf("bad argument: accound ID must be a valid UUID")
+		return nil
 	}
 
 	// Check if the Account-ID is valid
