@@ -27,12 +27,97 @@ func TestConvertLabelsToString(t *testing.T) {
 	}
 }
 
+func TestConvertLabelsToString_EdgeCases(t *testing.T) {
+	// Test case 1: Empty map
+	emptyMap := make(map[string]string)
+	result := ConvertLabelsToString(emptyMap)
+	expected := ""
+	if result != expected {
+		t.Errorf("Empty map test failed, expected: '%s', got: '%s'", expected, result)
+	}
+
+	// Test case 2: Single pair in map
+	singlePairMap := map[string]string{"key": "value"}
+	result = ConvertLabelsToString(singlePairMap)
+	expected = "key=value"
+	if result != expected {
+		t.Errorf("Single pair test failed, expected: '%s', got: '%s'", expected, result)
+	}
+
+	// Test case 3: Multiple pairs in map
+	multiplePairsMap := map[string]string{"key1": "value1", "key2": "value2", "key3": "value3"}
+	result = ConvertLabelsToString(multiplePairsMap)
+	expected = "key1=value1;key2=value2;key3=value3"
+	if result != expected {
+		t.Errorf("Multiple pairs test failed, expected: '%s', got: '%s'", expected, result)
+	}
+
+	// Test case 4: Special characters in keys or values
+	specialCharsMap := map[string]string{"key with spaces": "value with symbols (!@#)", "key\nwith\nnewlines": "value\rwith\rreturns"}
+	result = ConvertLabelsToString(specialCharsMap)
+	expected = "key with spaces=value with symbols (!@#);key\nwith\nnewlines=value\rwith\rreturns"
+	if result != expected {
+		t.Errorf("Special characters test failed, expected: '%s', got: '%s'", expected, result)
+	}
+
+	// Test case 5: Reserved characters in keys or values
+	reservedCharsMap := map[string]string{"key=with=equal=sign": "value;with;semicolon", "key;with;semicolon": "value=with=equal=sign"}
+	result = ConvertLabelsToString(reservedCharsMap)
+	expected = "key=with=equal=sign=value;with;semicolon;key;with;semicolon=value=with=equal=sign"
+	if result != expected {
+		t.Errorf("Reserved characters test failed, expected: '%s', got: '%s'", expected, result)
+	}
+}
+
 func TestConvertStringToLabels(t *testing.T) {
 	str := "a=b;c=d"
 	strMap := map[string]string{"a": "b", "c": "d"}
 	rstrMap := ConvertStringToLabels(str)
 	if fmt.Sprintf("%v", rstrMap) != fmt.Sprintf("%v", strMap) {
 		t.Errorf("%s != %s", fmt.Sprintf("%v", rstrMap), fmt.Sprintf("%v", strMap))
+	}
+}
+
+func TestConvertStringToLabels_EdgeCases(t *testing.T) {
+	// Test case 1: Empty string
+	result := ConvertStringToLabels("")
+	expected := map[string]string{}
+	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
+		t.Errorf("Empty string test failed, expected: %v, got: %v", expected, result)
+	}
+
+	// Test case 2: Single pair in string
+	result = ConvertStringToLabels("key=value")
+	expected = map[string]string{"key": "value"}
+	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
+		t.Errorf("Single pair test failed, expected: %v, got: %v", expected, result)
+	}
+
+	// Test case 3: Multiple pairs in string
+	result = ConvertStringToLabels("key1=value1;key2=value2;key3=value3")
+	expected = map[string]string{"key1": "value1", "key2": "value2", "key3": "value3"}
+	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
+		t.Errorf("Multiple pairs test failed, expected: %v, got: %v", expected, result)
+	}
+
+	// Test case 4: Special characters in string
+	result = ConvertStringToLabels("key with spaces=value with symbols (!@#);key\nwith\nnewlines=value\rwith\rreturns")
+	expected = map[string]string{"key with spaces": "value with symbols (!@#)", "key\nwith\nnewlines": "value\rwith\rreturns"}
+	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
+		t.Errorf("Special characters test failed, expected: %v, got: %v", expected, result)
+	}
+
+	// Test case 5: Malformed string
+	result = ConvertStringToLabels("key=value;key2")
+	expected = map[string]string{"key": "value"}
+	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
+		t.Errorf("Malformed string test failed, expected: %v, got: %v", expected, result)
+	}
+
+	result = ConvertStringToLabels("k=y=val;u=e")
+	expected = map[string]string{"k": "y=val", "u": "e"}
+	if fmt.Sprintf("%v", result) != fmt.Sprintf("%v", expected) {
+		t.Errorf("Special characters test failed, expected: %v, got: %v", expected, result)
 	}
 }
 

@@ -8,25 +8,23 @@ import (
 	"strings"
 )
 
+// ConvertLabelsToString converts a map of labels to a semicolon-separated string
 func ConvertLabelsToString(labels map[string]string) string {
-	labelsStr := ""
+	var builder strings.Builder
 	delimiter := ""
 	for k, v := range labels {
-		labelsStr += fmt.Sprintf("%s%s=%s", delimiter, k, v)
+		builder.WriteString(fmt.Sprintf("%s%s=%s", delimiter, k, v))
 		delimiter = ";"
 	}
-	return labelsStr
+	return builder.String()
 }
 
-// ConvertStringToLabels convert a string "a=b;c=d" to map: {"a":"b", "c":"d"}
+// ConvertStringToLabels converts a semicolon-separated string to a map of labels
 func ConvertStringToLabels(labelsStr string) map[string]string {
 	labels := make(map[string]string)
 	labelsSlice := strings.Split(labelsStr, ";")
-	if len(labelsSlice)%2 != 0 {
-		return labels
-	}
-	for i := range labelsSlice {
-		kvSlice := strings.Split(labelsSlice[i], "=")
+	for _, label := range labelsSlice {
+		kvSlice := strings.SplitN(label, "=", 2)
 		if len(kvSlice) != 2 {
 			continue
 		}
