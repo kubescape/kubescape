@@ -21,6 +21,17 @@ type ResourcesPrioritizationHandler struct {
 	buildResourcesMap      bool
 }
 
+var supportedKinds = []string{
+	"Deployment",
+	"Pod",
+	"ReplicaSet",
+	"Node",
+	"DaemonSet",
+	"StatefulSet",
+	"Job",
+	"CronJob",
+}
+
 func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
 	handler := &ResourcesPrioritizationHandler{
 		attackTracks:           make([]v1alpha1.IAttackTrack, 0),
@@ -147,16 +158,10 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 func (handler *ResourcesPrioritizationHandler) isSupportedKind(obj workloadinterface.IMetadata) bool {
 	if obj != nil {
-		switch obj.GetKind() {
-		case "Deployment",
-			"Pod",
-			"ReplicaSet",
-			"Node",
-			"DaemonSet",
-			"StatefulSet",
-			"Job",
-			"CronJob":
-			return true
+		for _, kind := range supportedKinds {
+			if obj.GetKind() == kind {
+				return true
+			}
 		}
 	}
 	return false

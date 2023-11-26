@@ -5,33 +5,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
-	"strings"
 )
-
-// ConvertLabelsToString converts a map of labels to a semicolon-separated string
-func ConvertLabelsToString(labels map[string]string) string {
-	var builder strings.Builder
-	delimiter := ""
-	for k, v := range labels {
-		builder.WriteString(fmt.Sprintf("%s%s=%s", delimiter, k, v))
-		delimiter = ";"
-	}
-	return builder.String()
-}
-
-// ConvertStringToLabels converts a semicolon-separated string to a map of labels
-func ConvertStringToLabels(labelsStr string) map[string]string {
-	labels := make(map[string]string)
-	labelsSlice := strings.Split(labelsStr, ";")
-	for _, label := range labelsSlice {
-		kvSlice := strings.SplitN(label, "=", 2)
-		if len(kvSlice) != 2 {
-			continue
-		}
-		labels[kvSlice[0]] = kvSlice[1]
-	}
-	return labels
-}
 
 func StringSlicesAreEqual(a, b []string) bool {
 	if len(a) != len(b) {
