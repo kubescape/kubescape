@@ -39,3 +39,22 @@ func TestGetFrameworkCmd(t *testing.T) {
 	expectedErrorMessage = "bad argument: accound ID must be a valid UUID"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
+
+func TestGetFrameworkCmdWithNonExistentFramework(t *testing.T) {
+	// Create a mock Kubescape interface
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{
+		AccountID: "new",
+	}
+
+	// Call the GetFrameworkCmd function
+	cmd := getFrameworkCmd(mockKubescape, &scanInfo)
+
+	// Run the command with a non-existent framework argument
+	err := cmd.RunE(&cobra.Command{}, []string{"framework", "nsa,mitre"})
+
+	// Check that there is an error and the error message is as expected
+	expectedErrorMessage := "bad argument: accound ID must be a valid UUID"
+	assert.Error(t, err)
+	assert.Equal(t, expectedErrorMessage, err.Error())
+}
