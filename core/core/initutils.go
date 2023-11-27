@@ -202,7 +202,10 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
+	} else if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" && frameworkScope {
+		logger.L().Ctx(ctx).Warning("Kubescape Cloud API URL is not set, loading policies from cache")
 	}
+
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
@@ -249,6 +252,8 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	fw, err := policyGetter.ListFrameworks()
 	if err == nil {
 		return fw
+	} else {
+		logger.L().Warning("failed to list frameworks", helpers.Error(err))
 	}
 	return getter.NativeFrameworks
 }
