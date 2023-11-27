@@ -111,7 +111,21 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 func shortFormatRow(dataRows [][]string) [][]string {
 	rows := [][]string{}
 	for _, dataRow := range dataRows {
-		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 11)+": %+v\nControl Name"+strings.Repeat(" ", 7)+": %+v\nFailed Resources"+strings.Repeat(" ", 3)+": %+v\nAll Resources"+strings.Repeat(" ", 6)+": %+v\n%% Compliance-Score"+strings.Repeat(" ", 1)+": %+v", dataRow[summaryColumnSeverity], dataRow[summaryColumnName], dataRow[summaryColumnCounterFailed], dataRow[summaryColumnCounterAll], dataRow[summaryColumnComplianceScore])})
+		// Define the row content using a formatted string
+		rowContent := fmt.Sprintf("Severity%s: %+v\nControl Name%s: %+v\nFailed Resources%s: %+v\nAll Resources%s: %+v\n%% Compliance-Score%s: %+v",
+			strings.Repeat(" ", 11),
+			dataRow[summaryColumnSeverity],
+			strings.Repeat(" ", 7),
+			dataRow[summaryColumnName],
+			strings.Repeat(" ", 3),
+			dataRow[summaryColumnCounterFailed],
+			strings.Repeat(" ", 6),
+			dataRow[summaryColumnCounterAll],
+			strings.Repeat(" ", 1),
+			dataRow[summaryColumnComplianceScore])
+
+		// Append the formatted row content to the rows slice
+		rows = append(rows, []string{rowContent})
 	}
 	return rows
 }
