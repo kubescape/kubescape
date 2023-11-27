@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -27,7 +26,6 @@ import (
 
 const (
 	prettyPrinterOutputFile             = "report"
-	prettyPrinterOutputExt              = ".txt"
 	clusterScanningScopeInformationLink = "https://github.com/kubescape/regolibrary/tree/master#add-a-framework"
 )
 
@@ -201,15 +199,6 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
 		return
-	}
-
-	if outputFile != "" && outputFile != os.DevNull {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = prettyPrinterOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
-			outputFile = outputFile + prettyPrinterOutputExt
-		}
 	}
 
 	pp.writer = printer.GetWriter(ctx, outputFile)

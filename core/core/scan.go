@@ -110,7 +110,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 			logger.L().Ctx(ctx).Fatal(err.Error())
 		}
 
-		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View), clusterName)
+		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
 		printerHandler.SetWriter(ctx, scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
