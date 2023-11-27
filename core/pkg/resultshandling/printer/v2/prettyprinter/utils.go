@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jwalton/gchalk"
@@ -115,13 +116,17 @@ func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
 
 // filterCVEsBySeverities returns a list of CVEs only with the severities that are in the severities list
 func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imageprinter.CVE {
-	var filteredCVEs []imageprinter.CVE
+	// Create a map to efficiently check if a severity is present in the severities slice
+	severityMap := make(map[string]bool)
+	for _, severity := range severities {
+		severityMap[severity] = true
+	}
 
+	// Filter CVEs based on the severityMap
+	filteredCVEs := []imageprinter.CVE{}
 	for _, cve := range cves {
-		for _, severity := range severities {
-			if cve.Severity == severity {
-				filteredCVEs = append(filteredCVEs, cve)
-			}
+		if severityMap[cve.Severity] {
+			filteredCVEs = append(filteredCVEs, cve)
 		}
 	}
 
@@ -130,35 +135,54 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 
 // getSortPackageScores returns a slice of package names sorted by score
 func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []string {
-	var ss []string
-	for k := range pkgScores {
-		ss = append(ss, k)
+	// Create a slice of PackageScore pointers to avoid unnecessary map lookups
+	var pkgScoresPtrs []*imageprinter.PackageScore
+	for _, pkgScore := range pkgScores {
+		pkgScoresPtrs = append(pkgScoresPtrs, pkgScore)
 	}
 
-	// sort by score. If score is equal, sort by name
-	sort.Slice(ss, func(i, j int) bool {
-		if pkgScores[ss[i]].Score == pkgScores[ss[j]].Score {
-			return pkgScores[ss[i]].Name < pkgScores[ss[j]].Name
+	// Sort by score. If score is equal, sort by name
+	sort.Slice(pkgScoresPtrs, func(i, j int) bool {
+		if pkgScoresPtrs[i].Score == pkgScoresPtrs[j].Score {
+			return pkgScoresPtrs[i].Name < pkgScoresPtrs[j].Name
 		}
-		return pkgScores[ss[i]].Score > pkgScores[ss[j]].Score
+		return pkgScoresPtrs[i].Score > pkgScoresPtrs[j].Score
 	})
 
-	return ss
+	// Extract package names from the sorted slice of pointers
+	var sortedSlice []string
+	for _, pkgScorePtr := range pkgScoresPtrs {
+		sortedSlice = append(sortedSlice, pkgScorePtr.Name)
+	}
+
+	return sortedSlice
 }
 
 // getSortedCVEsBySeverity returns a slice of CVEs sorted by severity
 func getSortedCVEsBySeverity(mapSeverityToCVEsNumber map[string]int) []string {
-	ss := make([]string, 0, len(mapSeverityToCVEsNumber))
-	for k := range mapSeverityToCVEsNumber {
-		ss = append(ss, k)
+	if len(mapSeverityToCVEsNumber) == 0 {
+		// Handle empty mapSeverityToCVEsNumber map
+		return []string{} // Return an empty slice
 	}
 
-	sort.Slice(ss, func(i, j int) bool {
-		return utils.ImageSeverityToInt(ss[i]) > utils.ImageSeverityToInt(ss[j])
+	// Create a slice of severity-CVEs count pairs
+	severityToCVEsCountPairs := make([][2]string, 0, len(mapSeverityToCVEsNumber))
+	for severity, cvesCount := range mapSeverityToCVEsNumber {
+		severityToCVEsCountPairs = append(severityToCVEsCountPairs, [2]string{severity, strconv.Itoa(cvesCount)})
+	}
+
+	// Sort the severity-CVEs count pairs by severity
+	sort.Slice(severityToCVEsCountPairs, func(i, j int) bool {
+		return utils.ImageSeverityToInt(severityToCVEsCountPairs[i][0]) > utils.ImageSeverityToInt(severityToCVEsCountPairs[j][0])
 	})
 
-	return ss
+	// Extract severities from the sorted slice of pairs
+	var sortedSlice []string
+	for _, severityToCVEsCountPair := range severityToCVEsCountPairs {
+		sortedSlice = append(sortedSlice, severityToCVEsCountPair[0])
+	}
 
+	return sortedSlice
 }
 
 func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) {
