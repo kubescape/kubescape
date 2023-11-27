@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/armosec/utils-go/boolutils"
 	utils "github.com/kubescape/backend/pkg/utils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/mattn/go-isatty"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/mod/semver"
 )
@@ -65,6 +67,7 @@ type VersionCheckRequest struct {
 	FrameworkVersion string `json:"frameworkVersion"` // framework version
 	ScanningTarget   string `json:"target"`           // Deprecated
 	ScanningContext  string `json:"context"`          // scanning context- cluster/file/gitURL/localGit/dir
+	TriggeredBy      string `json:"triggeredBy"`      // triggered by - cli/ ci / microservice
 }
 
 type VersionCheckResponse struct {
@@ -80,16 +83,37 @@ func NewVersionCheckHandler() *VersionCheckHandler {
 		versionURL: "https://us-central1-elated-pottery-310110.cloudfunctions.net/ksgf1v1",
 	}
 }
+
+func getTriggerSource() string {
+	if strings.Contains(os.Args[0], "ksserver") {
+		return "microservice"
+	}
+
+	if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+		// non-interactive shell
+		return "pipeline"
+	}
+
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		return "pipeline"
+	}
+
+	return "cli"
+}
+
 func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanningTarget string) *VersionCheckRequest {
 	if buildNumber == "" {
 		buildNumber = UnknownBuildNumber
 	}
+
 	if scanningTarget == "" {
 		scanningTarget = "unknown"
 	}
+
 	if Client == "" {
 		Client = "local-build"
 	}
+
 	return &VersionCheckRequest{
 		Client:           "kubescape",
 		ClientBuild:      Client,
@@ -97,6 +121,7 @@ func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanni
 		Framework:        frameworkName,
 		FrameworkVersion: frameworkVersion,
 		ScanningTarget:   scanningTarget,
+		TriggeredBy:      getTriggerSource(),
 	}
 }
 
