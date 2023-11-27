@@ -18,7 +18,7 @@ on:
       GO_VERSION:
         required: false
         type: string
-        default: "1.20"
+        default: "1.21"
       GO111MODULE:
         required: false
         type: string
@@ -53,7 +53,7 @@ on:
         type: string
       GO_VERSION:
         type: string
-        default: "1.20"
+        default: "1.21"
       GO111MODULE:
         required: true
         type: string
@@ -291,7 +291,7 @@ jobs:
       CGO_ENABLED: 0
       GO111MODULE: "on"
       BUILD_PLATFORM: linux/amd64,linux/arm64
-      GO_VERSION: "1.20"
+      GO_VERSION: "1.21"
       REQUIRED_TESTS: '[
                 "ks_microservice_create_2_cronjob_mitre_and_nsa_proxy", 
                 "ks_microservice_triggering_with_cron_job",
