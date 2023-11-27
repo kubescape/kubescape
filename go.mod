@@ -1,6 +1,6 @@
 module github.com/kubescape/kubescape/v3
 
-go 1.20
+go 1.21
 
 require (
 	github.com/adrg/xdg v0.4.0
