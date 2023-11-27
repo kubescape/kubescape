@@ -254,7 +254,12 @@ func TestNewPrinter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			printer := NewPrinter(ctx, tt.format, tt.version, false, false, cautils.ViewTypes(tt.viewType), "my-cluster")
+			scanInfo := &cautils.ScanInfo{
+				Format:        tt.format,
+				FormatVersion: tt.version,
+				View:          tt.viewType,
+			}
+			printer := NewPrinter(ctx, tt.format, scanInfo, "my-cluster")
 			assert.NotNil(t, printer)
 		})
 	}
