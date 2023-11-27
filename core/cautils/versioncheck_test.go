@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
 
@@ -178,4 +179,15 @@ func TestVersionCheckHandler_getLatestVersion(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetTriggerSource(t *testing.T) {
+	// Running in github actions pipeline
+	os.Setenv("GITHUB_ACTIONS", "true")
+	source := getTriggerSource()
+	assert.Equal(t, "pipeline", source)
+
+	os.Args[0] = "ksserver"
+	source = getTriggerSource()
+	assert.Equal(t, "microservice", source)
 }

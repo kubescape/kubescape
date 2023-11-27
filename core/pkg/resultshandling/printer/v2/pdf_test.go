@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"context"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -80,6 +81,41 @@ func TestScore_Pdf(t *testing.T) {
 				panic(err)
 			}
 			assert.Equal(t, tt.want, string(got))
+		})
+	}
+}
+
+func TestSetWriter_Pdf(t *testing.T) {
+	tests := []struct {
+		name       string
+		outputFile string
+		expected   string
+	}{
+		{
+			name:       "Output file name contains doesn't contain any extension",
+			outputFile: "customFilename",
+			expected:   "customFilename.pdf",
+		},
+		{
+			name:       "Output file name contains .pdf",
+			outputFile: "customFilename.pdf",
+			expected:   "customFilename.pdf",
+		},
+		{
+			name:       "Output file name is empty",
+			outputFile: "",
+			expected:   "/dev/stdout",
+		},
+	}
+
+	pp := NewPdfPrinter()
+	ctx := context.Background()
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+
+			pp.SetWriter(ctx, tt.outputFile)
+			assert.Equal(t, tt.expected, pp.writer.Name())
 		})
 	}
 }
