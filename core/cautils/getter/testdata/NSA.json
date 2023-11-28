@@ -2,7 +2,6 @@
   "guid": "",
   "name": "NSA",
   "attributes": {
-    "armoBuiltin": true
   },
   "creationTime": "",
   "description": "Implement NSA security advices for K8s ",
@@ -11,7 +10,6 @@
       "guid": "",
       "name": "API server insecure port is enabled",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -35,7 +33,6 @@
           "guid": "",
           "name": "insecure-port-flag",
           "attributes": {
-            "armoBuiltin": true
           },
           "creationTime": "",
           "rule": "package armo_builtins\nimport data.cautils as cautils\n\n# Fails if pod has insecure-port flag enabled\ndeny[msga] {\n    pod := input[_]\n    pod.kind == \"Pod\"\n\tcontains(pod.metadata.name, \"kube-apiserver\")\n    container := pod.spec.containers[i]\n\tpath = is_insecure_port_flag(container, i)\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"The API server container: %v has insecure-port flag enabled\", [ container.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [path],\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [pod]\n\t\t}\n\t}\n}\n\t\nis_insecure_port_flag(container, i) = path {\n\tcommand := container.command[j]\n\tcontains(command, \"--insecure-port=1\")\n\tpath := sprintf(\"spec.containers[%v].command[%v]\", [format_int(i, 10), format_int(j, 10)])\n}",
