@@ -135,25 +135,17 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 
 // getSortPackageScores returns a slice of package names sorted by score
 func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []string {
-	// Create a slice of PackageScore pointers to avoid unnecessary map lookups
-	var pkgScoresPtrs []*imageprinter.PackageScore
-	for _, pkgScore := range pkgScores {
-		pkgScoresPtrs = append(pkgScoresPtrs, pkgScore)
+	sortedSlice := make([]string, 0, len(pkgScores))
+	for pkgName, _ := range pkgScores {
+		sortedSlice = append(sortedSlice, pkgName)
 	}
 
-	// Sort by score. If score is equal, sort by name
-	sort.Slice(pkgScoresPtrs, func(i, j int) bool {
-		if pkgScoresPtrs[i].Score == pkgScoresPtrs[j].Score {
-			return pkgScoresPtrs[i].Name < pkgScoresPtrs[j].Name
+	sort.Slice(sortedSlice, func(i, j int) bool {
+		if pkgScores[sortedSlice[i]].Score == pkgScores[sortedSlice[j]].Score {
+			return pkgScores[sortedSlice[i]].Name < pkgScores[sortedSlice[j]].Name
 		}
-		return pkgScoresPtrs[i].Score > pkgScoresPtrs[j].Score
+		return pkgScores[sortedSlice[i]].Score > pkgScores[sortedSlice[j]].Score
 	})
-
-	// Extract package names from the sorted slice of pointers
-	var sortedSlice []string
-	for _, pkgScorePtr := range pkgScoresPtrs {
-		sortedSlice = append(sortedSlice, pkgScorePtr.Name)
-	}
 
 	return sortedSlice
 }
