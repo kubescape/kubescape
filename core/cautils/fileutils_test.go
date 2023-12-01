@@ -27,7 +27,7 @@ func TestListFiles(t *testing.T) {
 
 	files, errs := listFiles(filesPath)
 	assert.Equal(t, 0, len(errs))
-	assert.Equal(t, 12, len(files))
+	assert.Equal(t, 13, len(files))
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
