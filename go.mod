@@ -9,7 +9,7 @@ require (
 	github.com/anchore/syft v0.86.1
 	github.com/armosec/armoapi-go v0.0.256
 	github.com/armosec/utils-go v0.0.40
-	github.com/armosec/utils-k8s-go v0.0.18
+	github.com/armosec/utils-k8s-go v0.0.23
 	github.com/briandowns/spinner v1.23.0
 	github.com/chainguard-dev/git-urls v1.0.2
 	github.com/distribution/distribution v2.8.3+incompatible
@@ -309,6 +309,7 @@ require (
 	github.com/nozzle/throttler v0.0.0-20180817012639-2ea982251481 // indirect
 	github.com/nwaples/rardecode v1.1.0 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
+	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc4 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect

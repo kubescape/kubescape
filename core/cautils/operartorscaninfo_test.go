@@ -57,7 +57,7 @@ func Test_GetRequestPayload(t *testing.T) {
 				Commands: []apis.Command{
 					{
 						CommandName: apis.TypeScanImages,
-						WildWlid:    "wlid://cluster-any",
+						WildWlid:    "wlid://cluster-any/namespace-",
 					},
 				},
 			},

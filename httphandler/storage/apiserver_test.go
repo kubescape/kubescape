@@ -306,11 +306,7 @@ func TestGetManifestObjectLabelsAndAnnotations(t *testing.T) {
 				"kubescape.io/workload-namespace":   "test-namespace",
 			},
 			expectedAnnotations: map[string]string{
-				"kubescape.io/workload-api-group":   "",
-				"kubescape.io/workload-api-version": "v1",
-				"kubescape.io/workload-kind":        "Pod",
-				"kubescape.io/workload-name":        "test-pod",
-				"kubescape.io/workload-namespace":   "test-namespace",
+				"kubescape.io/wlid": "wlid://cluster-minikube/namespace-test-namespace/pod-test-pod",
 			},
 		},
 		{
@@ -348,20 +344,11 @@ func TestGetManifestObjectLabelsAndAnnotations(t *testing.T) {
 				"kubescape.io/rolebinding-namespace": "test-namespace",
 			},
 			expectedAnnotations: map[string]string{
-				"kubescape.io/workload-api-group":    "",
-				"kubescape.io/workload-api-version":  "v1",
-				"kubescape.io/workload-kind":         "Pod",
-				"kubescape.io/workload-name":         "test-pod",
-				"kubescape.io/workload-namespace":    "test-namespace",
-				"kubescape.io/rbac-resource":         "true",
-				"kubescape.io/role-name":             "test-role",
-				"kubescape.io/role-namespace":        "test-namespace",
-				"kubescape.io/rolebinding-name":      "test-role-binding",
-				"kubescape.io/rolebinding-namespace": "test-namespace",
+				"kubescape.io/wlid": "wlid://cluster-minikube/namespace-test-namespace/rolebinding-test-role-binding",
 			},
 		},
 		{
-			name: "with related objects (role, rolebinding)",
+			name: "with related objects (clusterrole, clusterrolebinding)",
 			resource: &FakeMetadata{
 				Namespace:  "test-namespace",
 				ApiVersion: "v1",
@@ -391,22 +378,14 @@ func TestGetManifestObjectLabelsAndAnnotations(t *testing.T) {
 				"kubescape.io/clusterrolebinding-name": "test-role-binding",
 			},
 			expectedAnnotations: map[string]string{
-				"kubescape.io/workload-api-group":      "",
-				"kubescape.io/workload-api-version":    "v1",
-				"kubescape.io/workload-kind":           "Pod",
-				"kubescape.io/workload-name":           "test-pod",
-				"kubescape.io/workload-namespace":      "test-namespace",
-				"kubescape.io/rbac-resource":           "true",
-				"kubescape.io/clusterrole-name":        "test-role",
-				"kubescape.io/clusterrolebinding-name": "test-role-binding",
+				"kubescape.io/wlid": "wlid://cluster-minikube/namespace-/clusterrolebinding-test-role-binding",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			labels, annotations, err := getManifestObjectLabelsAndAnnotations(ctx, tt.resource, tt.relatedObjects)
+			labels, annotations, err := getManifestObjectLabelsAndAnnotations("minikube", tt.resource, tt.relatedObjects)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedLabels, labels)
 			assert.Equal(t, tt.expectedAnnotations, annotations)

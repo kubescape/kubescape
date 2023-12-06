@@ -7,6 +7,7 @@ replace github.com/kubescape/kubescape/v3 => ../
 require (
 	github.com/armosec/armoapi-go v0.0.256
 	github.com/armosec/utils-go v0.0.40
+	github.com/armosec/utils-k8s-go v0.0.23
 	github.com/go-openapi/runtime v0.26.0
 	github.com/google/uuid v1.3.1
 	github.com/gorilla/mux v1.8.0
@@ -112,7 +113,6 @@ require (
 	github.com/aquasecurity/trivy v0.44.1 // indirect
 	github.com/aquasecurity/trivy-db v0.0.0-20230726112157-167ba4f2faeb // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
-	github.com/armosec/utils-k8s-go v0.0.18 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
 	github.com/aws/aws-sdk-go v1.44.312 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.20.0 // indirect
@@ -312,6 +312,7 @@ require (
 	github.com/nwaples/rardecode v1.1.0 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/olekukonko/tablewriter v0.0.6-0.20230417144759-edd1a71a5576 // indirect
+	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/open-policy-agent/opa v0.55.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.0-rc4 // indirect
