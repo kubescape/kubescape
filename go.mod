@@ -2,7 +2,6 @@ module github.com/kubescape/kubescape/v3
 
 go 1.21
 
-
 require (
 	github.com/adrg/xdg v0.4.0
 	github.com/anchore/grype v0.65.0
@@ -12,6 +11,7 @@ require (
 	github.com/armosec/utils-go v0.0.40
 	github.com/armosec/utils-k8s-go v0.0.18
 	github.com/briandowns/spinner v1.23.0
+	github.com/chainguard-dev/git-urls v1.0.2
 	github.com/distribution/distribution v2.8.3+incompatible
 	github.com/docker/distribution v2.8.2+incompatible
 	github.com/enescakir/emoji v1.0.0
@@ -23,7 +23,7 @@ require (
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
 	github.com/kubescape/backend v0.0.15
-	github.com/kubescape/go-git-url v0.0.25
+	github.com/kubescape/go-git-url v0.0.26
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.146
 	github.com/kubescape/opa-utils v0.0.271
@@ -44,7 +44,6 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.7.0
 	github.com/stretchr/testify v1.8.4
-	github.com/whilp/git-urls v1.0.0
 	go.opentelemetry.io/otel v1.18.0
 	go.opentelemetry.io/otel/metric v1.18.0
 	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
