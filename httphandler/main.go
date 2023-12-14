@@ -54,13 +54,13 @@ func main() {
 	initializeLoggerName()
 	initializeLoggerLevel()
 	initializeSaaSEnv()
-	initializeStorage(cfg)
+	initializeStorage(clusterName, cfg)
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
 	logger.L().Ctx(ctx).Fatal(listener.SetupHTTPListener().Error())
 }
 
-func initializeStorage(cfg config.Config) {
+func initializeStorage(clusterName string, cfg config.Config) {
 	if !cfg.ContinuousPostureScan {
 		logger.L().Debug("continuous posture scan - skipping storage initialization")
 		return
@@ -80,7 +80,7 @@ func initializeStorage(cfg config.Config) {
 		}
 	}
 
-	s, err := storage.NewAPIServerStorage(namespace, config)
+	s, err := storage.NewAPIServerStorage(clusterName, namespace, config)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}
