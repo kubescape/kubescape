@@ -3,8 +3,8 @@ package prettyprinter
 import (
 	"os"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -41,7 +41,7 @@ func (ip *ImagePrinter) PrintImageScanningTable(summary imageprinter.ImageScanSu
 	}
 
 	ip.imageTablePrinter.PrintImageScanningTable(ip.writer, summary)
-	cautils.InfoTextDisplay(ip.writer, "\n")
+	cautils.SimpleDisplay(ip.writer, "\n")
 }
 
 func (ip *ImagePrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {

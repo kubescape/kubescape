@@ -5,9 +5,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/jwalton/gchalk"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
@@ -50,7 +51,9 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.SetAutoMergeCells(true)
 		summaryTable.SetHeaderLine(true)
 		summaryTable.SetRowLine(true)
-		summaryTable.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+		summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+		summaryTable.SetAutoFormatHeaders(false)
+		summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 		resourceRows := [][]string{}
 		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails); len(raw) > 0 {
@@ -94,7 +97,7 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		row[resourceColumnPath] = strings.Join(append(failedPathsToString(&controls[i]), fixPathsToString(&controls[i])...), "\n")
+		row[resourceColumnPath] = strings.Join(AssistedRemediationPathsToString(&controls[i]), "\n")
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
@@ -108,24 +111,21 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 }
 
 func generateResourceHeader(short bool) []string {
-	var headers []string
+	headers := make([]string, 0)
+
 	if short {
-		headers = make([]string, 1)
-		headers[0] = "Resources"
+		headers = append(headers, "Resources")
 	} else {
-		headers = make([]string, _resourceRowLen)
-		headers[resourceColumnSeverity] = "Severity"
-		headers[resourceColumnName] = "Control Name"
-		headers[resourceColumnURL] = "Docs"
-		headers[resourceColumnPath] = "Assisted Remediation"
+		headers = append(headers, []string{"Severity", "Control name", "Docs", "Assisted remediation"}...)
 	}
+
 	return headers
 }
 
 func shortFormatResource(resourceRows [][]string) [][]string {
 	rows := [][]string{}
 	for _, resourceRow := range resourceRows {
-		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.Replace(resourceRow[resourceColumnPath], "\n", "\n" + strings.Repeat(" ", 23), -1))})
+		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.Replace(resourceRow[resourceColumnPath], "\n", "\n"+strings.Repeat(" ", 23), -1))})
 	}
 	return rows
 }
@@ -146,6 +146,7 @@ func (a Matrix) Less(i, j int) bool {
 	return true
 }
 
+// TODO - deprecate once all controls support review/delete paths
 func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
 	var paths []string
 
@@ -170,5 +171,55 @@ func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []str
 			}
 		}
 	}
+	return paths
+}
+
+func deletePathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].DeletePath; p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
+}
+
+func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	var paths []string
+
+	for j := range control.ResourceAssociatedRules {
+		for k := range control.ResourceAssociatedRules[j].Paths {
+			if p := control.ResourceAssociatedRules[j].Paths[k].ReviewPath; p != "" {
+				paths = append(paths, p)
+			}
+		}
+	}
+	return paths
+}
+
+func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+	paths := append(fixPathsToString(control), append(deletePathsToString(control), reviewPathsToString(control)...)...)
+	// TODO - deprecate failedPaths once all controls support review/delete paths
+	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
+	return paths
+}
+
+func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
+	// Create a set to efficiently check if a failed path already exists in the paths slice
+	pathSet := make(map[string]struct{})
+	for _, path := range paths {
+		pathSet[path] = struct{}{}
+	}
+
+	// Append failed paths if they are not already present
+	for _, failedPath := range failedPaths {
+		if _, ok := pathSet[failedPath]; !ok {
+			paths = append(paths, failedPath)
+		}
+	}
+
 	return paths
 }

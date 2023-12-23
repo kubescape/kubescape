@@ -2,10 +2,11 @@ package configurationprinter
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
@@ -20,8 +21,14 @@ const (
 	_summaryRowLen               = iota
 )
 
-func ControlCountersForSummary(counters reportsummary.ICounters) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
+func ControlCountersForSummary(counters reportsummary.ICounters) [][]string {
+	rows := [][]string{}
+	rows = append(rows, []string{"Controls", strconv.Itoa(counters.All())})
+	rows = append(rows, []string{"Passed", strconv.Itoa(counters.Passed())})
+	rows = append(rows, []string{"Failed", strconv.Itoa(counters.Failed())})
+	rows = append(rows, []string{"Action Required", strconv.Itoa(counters.Skipped())})
+
+	return rows
 }
 
 func GetSeverityColumn(controlSummary reportsummary.IControlSummary) string {
@@ -32,24 +39,24 @@ func GetControlTableHeaders(short bool) []string {
 	var headers []string
 	if short {
 		headers = make([]string, 1)
-		headers[0] = "CONTROLS"
+		headers[0] = "Controls"
 	} else {
 		headers = make([]string, _summaryRowLen)
-		headers[summaryColumnName] = "CONTROL NAME"
-		headers[summaryColumnCounterFailed] = "FAILED RESOURCES"
-		headers[summaryColumnCounterAll] = "ALL RESOURCES"
-		headers[summaryColumnSeverity] = "SEVERITY"
-		headers[summaryColumnComplianceScore] = "% COMPLIANCE-SCORE"
+		headers[summaryColumnName] = "Control name"
+		headers[summaryColumnCounterFailed] = "Failed resources"
+		headers[summaryColumnCounterAll] = "All Resources"
+		headers[summaryColumnSeverity] = "Severity"
+		headers[summaryColumnComplianceScore] = "Compliance score"
 	}
 	return headers
 }
 
 func GetColumnsAlignments() []int {
 	alignments := make([]int, _summaryRowLen)
+	alignments[summaryColumnSeverity] = tablewriter.ALIGN_CENTER
 	alignments[summaryColumnName] = tablewriter.ALIGN_LEFT
 	alignments[summaryColumnCounterFailed] = tablewriter.ALIGN_CENTER
 	alignments[summaryColumnCounterAll] = tablewriter.ALIGN_CENTER
-	alignments[summaryColumnSeverity] = tablewriter.ALIGN_LEFT
 	alignments[summaryColumnComplianceScore] = tablewriter.ALIGN_CENTER
 	return alignments
 }

@@ -25,9 +25,7 @@ func IsKustomizeDirectory(path string) bool {
 		return false
 	}
 
-	if lastChar := path[len(path)-1:]; lastChar != "/" {
-		path += "/"
-	}
+	path = cleanPathDir(path)
 
 	matches := 0
 	for _, kustomizationFileMatcher := range kustomizationFileMatchers {
@@ -71,7 +69,18 @@ func GetKustomizeDirectoryName(path string) string {
 	if isKustomizeDirectory := IsKustomizeDirectory(path); !isKustomizeDirectory {
 		return ""
 	}
+
+	path = cleanPathDir(path)
+
 	return filepath.Dir(path)
+}
+
+func cleanPathDir(path string) string {
+	if lastChar := path[len(path)-1:]; lastChar != "/" {
+		path += "/"
+	}
+
+	return path
 }
 
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and

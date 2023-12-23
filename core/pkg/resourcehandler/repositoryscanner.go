@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	giturls "github.com/whilp/git-urls"
+	giturls "github.com/chainguard-dev/git-urls"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"k8s.io/utils/strings/slices"
 )
 

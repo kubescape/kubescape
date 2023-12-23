@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 )
@@ -88,13 +88,13 @@ func TestGetTopWorkloadsTitle(t *testing.T) {
 	assert.Equal(t, "", title)
 
 	title = getTopWorkloadsTitle(1)
-	assert.Equal(t, "Highest-stake workloads\n", title)
+	assert.Equal(t, "Highest-stake workloads", title)
 
 	title = getTopWorkloadsTitle(2)
-	assert.Equal(t, "Highest-stake workloads\n", title)
+	assert.Equal(t, "Highest-stake workloads", title)
 
 	title = getTopWorkloadsTitle(10)
-	assert.Equal(t, "Highest-stake workloads\n", title)
+	assert.Equal(t, "Highest-stake workloads", title)
 }
 
 func TestGetSeverityToSummaryMap(t *testing.T) {
@@ -520,6 +520,11 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 				"Low":      4,
 			},
 			expectedResult: []string{"Critical", "High", "Medium", "Low"},
+		},
+		{
+			name:           "Empty input",
+			severityToCVEs: map[string]int{},
+			expectedResult: []string{},
 		},
 	}
 

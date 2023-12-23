@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	METER_NAME         = "github.com/kubescape/kubescape/v2"
+	METER_NAME         = "github.com/kubescape/kubescape/v3"
 	METRIC_NAME_PREFIX = "kubescape"
 )
 

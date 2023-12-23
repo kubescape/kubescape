@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 
@@ -17,8 +17,6 @@ import (
 
 var (
 	workloadExample = fmt.Sprintf(`
-  This command is still in BETA. Feel free to contact the Kubescape maintainers for more information.
-
   Scan a workload for misconfigurations and image vulnerabilities.
 
   # Scan an workload
@@ -52,6 +50,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return fmt.Errorf("usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]")
 			}
 
+			// Looks strange, a bug maybe????
 			if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
 				return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
 			}

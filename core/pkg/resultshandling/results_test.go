@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
@@ -178,6 +178,89 @@ func TestValidatePrinter(t *testing.T) {
 			got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format)
 
 			assert.Equal(t, tt.expectErr, got)
+		})
+	}
+}
+
+func TestNewPrinter(t *testing.T) {
+	defaultVersion := "v2"
+	ctx := context.Background()
+	tests := []struct {
+		name     string
+		format   string
+		viewType string
+		version  string
+	}{
+		{
+			name:     "JSON printer v1",
+			format:   "json",
+			viewType: "resource",
+			version:  "v1",
+		},
+		{
+			name:     "JSON printer v2",
+			format:   "json",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "JSON printer unknown v3",
+			format:   "json",
+			viewType: "resource",
+			version:  "v3",
+		},
+		{
+			name:     "JUNIT printer",
+			format:   "junit",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Prometheus printer",
+			format:   "prometheus",
+			viewType: "control",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Pdf printer",
+			format:   "pdf",
+			viewType: "security",
+			version:  defaultVersion,
+		},
+		{
+			name:     "HTML printer",
+			format:   "html",
+			viewType: "control",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Sarif printer",
+			format:   "sarif",
+			viewType: "resource",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Prettry printer",
+			format:   "pretty-printer",
+			viewType: "control",
+			version:  defaultVersion,
+		},
+		{
+			name:     "Invalid format printer",
+			format:   "pretty",
+			viewType: "security",
+			version:  defaultVersion,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				Format:        tt.format,
+				FormatVersion: tt.version,
+				View:          tt.viewType,
+			}
+			printer := NewPrinter(ctx, tt.format, scanInfo, "my-cluster")
+			assert.NotNil(t, printer)
 		})
 	}
 }

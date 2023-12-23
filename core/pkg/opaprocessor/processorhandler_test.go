@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/mocks"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
@@ -29,12 +29,16 @@ var (
 	opaSessionObjMockData string
 	//go:embed testdata/opaSessionObjMock1.json
 	opaSessionObjMockData1 string
+	//go:embed testdata/opaSessionObjMock2.json
+	opaSessionObjMockData2 string
 	//go:embed testdata/regoDependenciesDataMock.json
 	regoDependenciesData string
 
 	allResourcesMockData []byte
 	//go:embed testdata/resourcesMock1.json
 	resourcesMock1 []byte
+	//go:embed testdata/resourcesMock2.json
+	resourcesMock2 []byte
 )
 
 func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error {
@@ -118,7 +122,7 @@ func monitorHeapSpace(maxHeap *uint64, quitChan chan bool) {
 
 /*
 goarch: arm64
-pkg: github.com/kubescape/kubescape/v2/core/pkg/opaprocessor
+pkg: github.com/kubescape/kubescape/v3/core/pkg/opaprocessor
 
 BenchmarkProcess/opaprocessor.Process_1-8         	       1	29714096083 ns/op	22309913416 B/op	498183685 allocs/op
 --- BENCH: BenchmarkProcess/opaprocessor.Process_1-8
@@ -186,8 +190,8 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj := cautils.NewOPASessionObjMock()
 	opaSessionObj.Policies = frameworks
 
-	scanningScope := cautils.GetScanningScope(&cautils.ScanInfo{InputPatterns: []string{""}})
-	policies := ConvertFrameworksToPolicies(opaSessionObj.Policies, "", nil, scanningScope)
+	scanningScope := reporthandling.ScopeCluster
+	policies := convertFrameworksToPolicies(opaSessionObj.Policies, "", nil, scanningScope)
 	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opaSessionObj.Policies, policies)
 
 	opaSessionObj.K8SResources = k8sResources
@@ -268,10 +272,9 @@ func TestProcessRule(t *testing.T) {
 				PortalBase: armotypes.PortalBase{
 					Name: "exposure-to-internet",
 					Attributes: map[string]interface{}{
-						"armoBuiltin": true,
 					},
 				},
-				Rule: "package armo_builtins\n\n# Checks if NodePort or LoadBalancer is connected to a workload to expose something\ndeny[msga] {\n    service := input[_]\n    service.kind == \"Service\"\n    is_exposed_service(service)\n    \n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, service)\n    failPath := [\"spec.type\"]\n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through service '%v'\", [wl.metadata.name, service.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"alertScore\": 7,\n        \"fixPaths\": [],\n        \"failedPaths\": [],\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": service,\n            \"failedPaths\": failPath,\n        }]\n    }\n}\n\n# Checks if Ingress is connected to a service and a workload to expose something\ndeny[msga] {\n    ingress := input[_]\n    ingress.kind == \"Ingress\"\n    \n    svc := input[_]\n    svc.kind == \"Service\"\n    # avoid duplicate alerts\n    # if service is already exposed through NodePort or LoadBalancer workload will fail on that\n    not is_exposed_service(svc)\n\n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, svc)\n\n    result := svc_connected_to_ingress(svc, ingress)\n    \n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through ingress '%v'\", [wl.metadata.name, ingress.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"failedPaths\": [],\n        \"fixPaths\": [],\n        \"alertScore\": 7,\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": ingress,\n            \"failedPaths\": result,\n        }]\n    }\n} \n\n# ====================================================================================\n\nis_exposed_service(svc) {\n    svc.spec.type == \"NodePort\"\n}\n\nis_exposed_service(svc) {\n    svc.spec.type == \"LoadBalancer\"\n}\n\nwl_connected_to_service(wl, svc) {\n    count({x | svc.spec.selector[x] == wl.metadata.labels[x]}) == count(svc.spec.selector)\n}\n\nwl_connected_to_service(wl, svc) {\n    wl.spec.selector.matchLabels == svc.spec.selector\n}\n\n# check if service is connected to ingress\nsvc_connected_to_ingress(svc, ingress) = result {\n    rule := ingress.spec.rules[i]\n    paths := rule.http.paths[j]\n    svc.metadata.name == paths.backend.service.name\n    result := [sprintf(\"ingress.spec.rules[%d].http.paths[%d].backend.service.name\", [i,j])]\n}\n\n",
+				Rule: "package armo_builtins\n\n# Checks if NodePort or LoadBalancer is connected to a workload to expose something\ndeny[msga] {\n    service := input[_]\n    service.kind == \"Service\"\n    is_exposed_service(service)\n    \n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, service)\n    failPath := [\"spec.type\"]\n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through service '%v'\", [wl.metadata.name, service.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"alertScore\": 7,\n        \"fixPaths\": [],\n        \"failedPaths\": [],\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": service,\n            \"failedPaths\": failPath,\n   \"reviewPaths\": failPath,\n      }]\n    }\n}\n\n# Checks if Ingress is connected to a service and a workload to expose something\ndeny[msga] {\n    ingress := input[_]\n    ingress.kind == \"Ingress\"\n    \n    svc := input[_]\n    svc.kind == \"Service\"\n    # avoid duplicate alerts\n    # if service is already exposed through NodePort or LoadBalancer workload will fail on that\n    not is_exposed_service(svc)\n\n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, svc)\n\n    result := svc_connected_to_ingress(svc, ingress)\n    \n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through ingress '%v'\", [wl.metadata.name, ingress.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"failedPaths\": [],\n        \"fixPaths\": [],\n        \"alertScore\": 7,\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": ingress,\n            \"failedPaths\": result,\n     \"reviewPaths\": result,\n    }]\n    }\n} \n\n# ====================================================================================\n\nis_exposed_service(svc) {\n    svc.spec.type == \"NodePort\"\n}\n\nis_exposed_service(svc) {\n    svc.spec.type == \"LoadBalancer\"\n}\n\nwl_connected_to_service(wl, svc) {\n    count({x | svc.spec.selector[x] == wl.metadata.labels[x]}) == count(svc.spec.selector)\n}\n\nwl_connected_to_service(wl, svc) {\n    wl.spec.selector.matchLabels == svc.spec.selector\n}\n\n# check if service is connected to ingress\nsvc_connected_to_ingress(svc, ingress) = result {\n    rule := ingress.spec.rules[i]\n    paths := rule.http.paths[j]\n    svc.metadata.name == paths.backend.service.name\n    result := [sprintf(\"ingress.spec.rules[%d].http.paths[%d].backend.service.name\", [i,j])]\n}\n\n",
 				Match: []reporthandling.RuleMatchObjects{
 					{
 						APIGroups:   []string{""},
@@ -309,6 +312,7 @@ func TestProcessRule(t *testing.T) {
 					SubStatus:             "",
 					Paths: []armotypes.PosturePaths{
 						{ResourceID: "/v1/default/Service/fake-service-1", FailedPath: "spec.type"},
+						{ResourceID: "/v1/default/Service/fake-service-1", ReviewPath: "spec.type"},
 					},
 					Exception: nil,
 					RelatedResourcesIDs: []string{
@@ -326,6 +330,92 @@ func TestProcessRule(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "TestMultipleRelatedResources",
+			rule: reporthandling.PolicyRule{
+				PortalBase: armotypes.PortalBase{
+					Name: "exposure-to-internet",
+					Attributes: map[string]interface{}{
+					},
+				},
+				Rule: "\npackage armo_builtins\n\n# Checks if NodePort or LoadBalancer is connected to a workload to expose something\ndeny[msga] {\n    service := input[_]\n    service.kind == \"Service\"\n    is_exposed_service(service)\n    \n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, service)\n    failPath := [\"spec.type\"]\n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through service '%v'\", [wl.metadata.name, service.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"alertScore\": 7,\n        \"fixPaths\": [],\n        \"failedPaths\": [],\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [{\n            \"object\": service,\n\t\t    \"reviewPaths\": failPath,\n            \"failedPaths\": failPath,\n        }]\n    }\n}\n\n# Checks if Ingress is connected to a service and a workload to expose something\ndeny[msga] {\n    ingress := input[_]\n    ingress.kind == \"Ingress\"\n    \n    svc := input[_]\n    svc.kind == \"Service\"\n\n    # Make sure that they belong to the same namespace\n    svc.metadata.namespace == ingress.metadata.namespace\n\n    # avoid duplicate alerts\n    # if service is already exposed through NodePort or LoadBalancer workload will fail on that\n    not is_exposed_service(svc)\n\n    wl := input[_]\n    spec_template_spec_patterns := {\"Deployment\", \"ReplicaSet\", \"DaemonSet\", \"StatefulSet\", \"Pod\", \"Job\", \"CronJob\"}\n    spec_template_spec_patterns[wl.kind]\n    wl_connected_to_service(wl, svc)\n\n    result := svc_connected_to_ingress(svc, ingress)\n    \n    msga := {\n        \"alertMessage\": sprintf(\"workload '%v' is exposed through ingress '%v'\", [wl.metadata.name, ingress.metadata.name]),\n        \"packagename\": \"armo_builtins\",\n        \"failedPaths\": [],\n        \"fixPaths\": [],\n        \"alertScore\": 7,\n        \"alertObject\": {\n            \"k8sApiObjects\": [wl]\n        },\n        \"relatedObjects\": [\n\t\t{\n\t            \"object\": ingress,\n\t\t    \"reviewPaths\": result,\n\t            \"failedPaths\": result,\n\t        },\n\t\t{\n\t            \"object\": svc,\n\t\t}\n        ]\n    }\n} \n\n# ====================================================================================\n\nis_exposed_service(svc) {\n    svc.spec.type == \"NodePort\"\n}\n\nis_exposed_service(svc) {\n    svc.spec.type == \"LoadBalancer\"\n}\n\nwl_connected_to_service(wl, svc) {\n    count({x | svc.spec.selector[x] == wl.metadata.labels[x]}) == count(svc.spec.selector)\n}\n\nwl_connected_to_service(wl, svc) {\n    wl.spec.selector.matchLabels == svc.spec.selector\n}\n\n# check if service is connected to ingress\nsvc_connected_to_ingress(svc, ingress) = result {\n    rule := ingress.spec.rules[i]\n    paths := rule.http.paths[j]\n    svc.metadata.name == paths.backend.service.name\n    result := [sprintf(\"spec.rules[%d].http.paths[%d].backend.service.name\", [i,j])]\n}\n\n",
+				Match: []reporthandling.RuleMatchObjects{
+					{
+						APIGroups:   []string{""},
+						APIVersions: []string{"v1"},
+						Resources:   []string{"Pod", "Service"},
+					},
+					{
+						APIGroups:   []string{"apps"},
+						APIVersions: []string{"v1"},
+						Resources:   []string{"Deployment", "ReplicaSet", "DaemonSet", "StatefulSet"},
+					},
+					{
+						APIGroups:   []string{"batch"},
+						APIVersions: []string{"*"},
+						Resources:   []string{"Job", "CronJob"},
+					},
+					{
+						APIGroups:   []string{"extensions", "networking.k8s.io"},
+						APIVersions: []string{"v1beta1", "v1"},
+						Resources:   []string{"Ingress"},
+					},
+				},
+				Description:  "fails in case the running workload has binded Service or Ingress that are exposing it on Internet.",
+				Remediation:  "",
+				RuleQuery:    "armo_builtins",
+				RuleLanguage: reporthandling.RegoLanguage,
+			},
+			resourcesMock:     resourcesMock2,
+			opaSessionObjMock: opaSessionObjMockData2,
+			expectedResult: map[string]*resourcesresults.ResourceAssociatedRule{
+				"apps/v1/default/Deployment/my-app": {
+					Name:                  "exposure-to-internet",
+					ControlConfigurations: map[string][]string{},
+					Status:                "failed",
+					SubStatus:             "",
+					Paths: []armotypes.PosturePaths{
+						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress1", FailedPath: "spec.rules[0].http.paths[0].backend.service.name"},
+						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress1", ReviewPath: "spec.rules[0].http.paths[0].backend.service.name"},
+						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress2", FailedPath: "spec.rules[0].http.paths[0].backend.service.name"},
+						{ResourceID: "networking.k8s.io/v1/default/Ingress/my-ingress2", ReviewPath: "spec.rules[0].http.paths[0].backend.service.name"},
+					},
+					Exception: nil,
+					RelatedResourcesIDs: []string{
+						"networking.k8s.io/v1/default/Ingress/my-ingress1",
+						"/v1/default/Service/my-service",
+						"networking.k8s.io/v1/default/Ingress/my-ingress2",
+					},
+				},
+				"networking.k8s.io/v1/default/Ingress/my-ingress1": {
+					Name:                  "exposure-to-internet",
+					ControlConfigurations: map[string][]string{},
+					Status:                "passed",
+					SubStatus:             "",
+					Paths:                 nil,
+					Exception:             nil,
+					RelatedResourcesIDs:   nil,
+				},
+				"networking.k8s.io/v1/default/Ingress/my-ingress2": {
+					Name:                  "exposure-to-internet",
+					ControlConfigurations: map[string][]string{},
+					Status:                "passed",
+					SubStatus:             "",
+					Paths:                 nil,
+					Exception:             nil,
+					RelatedResourcesIDs:   nil,
+				},
+				"/v1/default/Service/my-service": {
+					Name:                  "exposure-to-internet",
+					ControlConfigurations: map[string][]string{},
+					Status:                "passed",
+					SubStatus:             "",
+					Paths:                 nil,
+					Exception:             nil,
+					RelatedResourcesIDs:   nil,
+				},
+			},
+		},
 	}
 	for _, tc := range testCases {
 		// since all resources JSON is a large file, we need to unzip it and set the variable before running the benchmark
@@ -333,37 +423,25 @@ func TestProcessRule(t *testing.T) {
 		opap := NewOPAProcessorMock(tc.opaSessionObjMock, tc.resourcesMock)
 		resources, err := opap.processRule(context.Background(), &tc.rule, nil)
 		assert.NoError(t, err)
-		assert.Equal(t, tc.expectedResult, resources)
+		assert.Equal(t, tc.expectedResult, resources, t.Name)
 	}
 }
 
 func TestAppendPaths(t *testing.T) {
 	tests := []struct {
-		name        string
-		paths       []armotypes.PosturePaths
-		failedPaths []string
-		fixPaths    []armotypes.FixPath
-		fixCommand  string
-		resourceID  string
-		expected    []armotypes.PosturePaths
+		name                string
+		paths               []armotypes.PosturePaths
+		assistedRemediation reporthandling.AssistedRemediation
+		resourceID          string
+		expected            []armotypes.PosturePaths
 	}{
 		{
-			name:        "Only FailedPaths",
-			paths:       []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}},
-			failedPaths: []string{"path2", "path3"},
-			resourceID:  "2",
-			expected: []armotypes.PosturePaths{
-				{ResourceID: "1", FailedPath: "path1"},
-				{ResourceID: "2", FailedPath: "path2"},
-				{ResourceID: "2", FailedPath: "path3"},
-			},
-		},
-		{
-			name:  "Only FixPaths",
-			paths: []armotypes.PosturePaths{},
-			fixPaths: []armotypes.FixPath{
-				{Path: "path2", Value: "command2"},
-				{Path: "path3", Value: "command3"},
+			name: "Only FixPaths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				FixPaths: []armotypes.FixPath{
+					{Path: "path2", Value: "command2"},
+					{Path: "path3", Value: "command3"},
+				},
 			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
@@ -372,26 +450,55 @@ func TestAppendPaths(t *testing.T) {
 			},
 		},
 		{
-			name:       "Only FixCommand",
-			paths:      []armotypes.PosturePaths{},
-			fixCommand: "fix command",
+			name: "Only FixCommand",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				FixCommand: "fix command",
+			},
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
 				{ResourceID: "2", FixCommand: "fix command"},
 			},
 		},
 		{
-			name:        "All types of paths",
-			paths:       []armotypes.PosturePaths{{ResourceID: "1", FailedPath: "path1"}},
-			failedPaths: []string{"path2"},
-			fixPaths: []armotypes.FixPath{
-				{Path: "path3", Value: "command3"},
+			name: "Only DeletePaths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				DeletePaths: []string{"path2", "path3"},
 			},
-			fixCommand: "fix command",
 			resourceID: "2",
 			expected: []armotypes.PosturePaths{
-				{ResourceID: "1", FailedPath: "path1"},
+				{ResourceID: "2", DeletePath: "path2"},
+				{ResourceID: "2", DeletePath: "path3"},
+			},
+		},
+		{
+			name: "Only ReviewPaths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				ReviewPaths: []string{"path2", "path3"},
+			},
+			resourceID: "2",
+			expected: []armotypes.PosturePaths{
+				{ResourceID: "2", ReviewPath: "path2"},
+				{ResourceID: "2", ReviewPath: "path3"},
+			},
+		},
+		{
+			name: "All types of paths",
+			assistedRemediation: reporthandling.AssistedRemediation{
+				FailedPaths: []string{"path2"},
+				DeletePaths: []string{"path4", "path5"},
+				ReviewPaths: []string{"path6", "path7"},
+				FixPaths: []armotypes.FixPath{
+					{Path: "path3", Value: "command3"},
+				},
+				FixCommand: "fix command",
+			},
+			resourceID: "2",
+			expected: []armotypes.PosturePaths{
 				{ResourceID: "2", FailedPath: "path2"},
+				{ResourceID: "2", DeletePath: "path4"},
+				{ResourceID: "2", DeletePath: "path5"},
+				{ResourceID: "2", ReviewPath: "path6"},
+				{ResourceID: "2", ReviewPath: "path7"},
 				{ResourceID: "2", FixPath: armotypes.FixPath{Path: "path3", Value: "command3"}},
 				{ResourceID: "2", FixCommand: "fix command"},
 			},
@@ -400,7 +507,7 @@ func TestAppendPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := appendPaths(tt.paths, tt.failedPaths, tt.fixPaths, tt.fixCommand, tt.resourceID)
+			result := appendPaths(tt.paths, tt.assistedRemediation, tt.resourceID)
 			if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("Expected %v, but got %v", tt.expected, result)
 			}

@@ -8,7 +8,7 @@ import (
 
 func TestWorkloadScan_InitCategoryTableData(t *testing.T) {
 
-	expectedHeader := []string{"", "CONTROL NAME", "DOCS"}
+	expectedHeader := []string{"", "Control name", "Docs"}
 	expectedAlign := []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER}
 
 	workloadPrinter := NewWorkloadPrinter()

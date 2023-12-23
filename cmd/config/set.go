@@ -2,11 +2,12 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/meta"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/meta"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 )
 
@@ -33,16 +34,23 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 }
 
 var supportConfigSet = map[string]func(*metav1.SetConfig, string){
+	"accessKey":      func(s *metav1.SetConfig, accessKey string) { s.AccessKey = accessKey },
 	"accountID":      func(s *metav1.SetConfig, account string) { s.Account = account },
 	"cloudAPIURL":    func(s *metav1.SetConfig, cloudAPIURL string) { s.CloudAPIURL = cloudAPIURL },
 	"cloudReportURL": func(s *metav1.SetConfig, cloudReportURL string) { s.CloudReportURL = cloudReportURL },
 }
 
 func stringKeysToSlice(m map[string]func(*metav1.SetConfig, string)) []string {
-	l := []string{}
-	for i := range m {
-		l = append(l, i)
+	keys := []string{}
+	for key := range m {
+		keys = append(keys, key)
 	}
+
+	// Sort the keys of the map
+	sort.Strings(keys)
+
+	l := []string{}
+	l = append(l, keys...)
 	return l
 }
 

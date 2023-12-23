@@ -3,8 +3,6 @@ package cautils
 import (
 	"golang.org/x/mod/semver"
 
-	"github.com/armosec/utils-go/boolutils"
-	cloudsupport "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
@@ -34,7 +32,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 					}
 				}
 
-				if !ruleWithKSOpaDependency(frameworks[i].Controls[j].Rules[r].Attributes) && isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
+				if isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
 					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
 				}
 			}
@@ -56,62 +54,34 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 	}
 }
 
-func ruleWithKSOpaDependency(attributes map[string]interface{}) bool {
-	if attributes == nil {
-		return false
-	}
-	if s, ok := attributes["armoOpa"]; ok { // TODO - make global
-		return boolutils.StringToBool(s.(string))
-	}
-	return false
-}
-
 // Checks that kubescape version is in range of use for this rule
 // In local build (BuildNumber = ""):
 // returns true only if rule doesn't have the "until" attribute
 func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version string) bool {
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
-		if version != "" {
-			if semver.Compare(version, from.(string)) == -1 {
+		switch sfrom := from.(type) {
+		case string:
+			if version != "" && semver.Compare(version, sfrom) == -1 {
 				return false
 			}
-		}
-	}
-	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
-		if version == "" {
+		default:
+			// Handle case where useFromKubescapeVersion is not a string
 			return false
 		}
-		if semver.Compare(version, until.(string)) >= 0 {
+	}
+
+	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
+		switch suntil := until.(type) {
+		case string:
+			if version == "" || semver.Compare(version, suntil) >= 0 {
+				return false
+			}
+		default:
+			// Handle case where useUntilKubescapeVersion is not a string
 			return false
 		}
 	}
 	return true
-}
-
-func getCloudProvider(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
-	if cloudsupport.IsAKS() {
-		return reporthandling.ScopeCloudAKS
-	}
-	if cloudsupport.IsEKS() {
-		return reporthandling.ScopeCloudEKS
-	}
-	if cloudsupport.IsGKE() {
-		return reporthandling.ScopeCloudGKE
-	}
-	return ""
-}
-
-func GetScanningScope(scanInfo *ScanInfo) reporthandling.ScanningScopeType {
-
-	switch scanInfo.GetScanningContext() {
-	case ContextCluster:
-		if cloudProvider := getCloudProvider(scanInfo); cloudProvider != "" {
-			return cloudProvider
-		}
-		return reporthandling.ScopeCluster
-	default:
-		return reporthandling.ScopeFile
-	}
 }
 
 func isScanningScopeMatchToControlScope(scanScope reporthandling.ScanningScopeType, controlScope reporthandling.ScanningScopeType) bool {

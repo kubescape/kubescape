@@ -3,7 +3,7 @@ package v1
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	objectsenvelopes "github.com/kubescape/opa-utils/objectsenvelopes"

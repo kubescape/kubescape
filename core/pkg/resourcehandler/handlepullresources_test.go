@@ -7,14 +7,13 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/dynamic/fake"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
@@ -34,72 +33,33 @@ func getKubeConfigMock() *clientcmdapi.Config {
 	return &kubeConfig
 }
 func Test_getCloudMetadata(t *testing.T) {
-	type args struct {
-		opaSessionObj *cautils.OPASessionObj
-		kubeConfig    *clientcmdapi.Config
-		context       string
-	}
-	kubeConfig := getKubeConfigMock()
+
 	tests := []struct {
-		want apis.ICloudParser
-		args args
-		name string
+		want     apis.ICloudParser
+		provider string
+		name     string
 	}{
 		{
-			name: "Test_getCloudMetadata - GitVersion: GKE",
-			args: args{
-				opaSessionObj: &cautils.OPASessionObj{
-					Report: &reportv2.PostureReport{
-						ClusterAPIServerInfo: &version.Info{
-							GitVersion: "v1.25.4-gke.1600",
-						},
-					},
-				},
-				context:    "",
-				kubeConfig: kubeConfig,
-			},
-			want: helpersv1.NewGKEMetadata(""),
+			name:     "Test_getCloudMetadata - GitVersion: GKE",
+			provider: "gke",
+			want:     helpersv1.NewGKEMetadata(""),
 		},
 		{
-			name: "Test_getCloudMetadata_context_EKS",
-			args: args{
-				opaSessionObj: &cautils.OPASessionObj{
-					Report: &reportv2.PostureReport{
-						ClusterAPIServerInfo: &version.Info{
-							GitVersion: "v1.25.4-eks.1600",
-						},
-					},
-				},
-				kubeConfig: kubeConfig,
-				context:    "arn:aws:eks:eu-west-1:xxx:cluster/xxxx",
-			},
-			want: helpersv1.NewEKSMetadata(""),
+			name:     "Test_getCloudMetadata_context_EKS",
+			provider: "eks",
+			want:     helpersv1.NewEKSMetadata(""),
 		},
 		{
-			name: "Test_getCloudMetadata_context_AKS",
-			args: args{
-				opaSessionObj: &cautils.OPASessionObj{
-					Report: &reportv2.PostureReport{
-						ClusterAPIServerInfo: &version.Info{
-							GitVersion: "v1",
-						},
-					},
-				},
-				kubeConfig: kubeConfig,
-				context:    "xxxx-2",
-			},
-			want: helpersv1.NewAKSMetadata(""),
+			name:     "Test_getCloudMetadata_context_AKS",
+			provider: "aks",
+			want:     helpersv1.NewAKSMetadata(""),
 		},
 	}
 	k8sinterface.K8SConfig = &rest.Config{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			k8sinterface.SetClusterContextName(tt.args.context)
-			k8sinterface.SetClientConfigAPI(tt.args.kubeConfig)
-			k8sinterface.SetK8SGitServerVersion(tt.args.opaSessionObj.Report.ClusterAPIServerInfo.GitVersion)
-			k8sinterface.SetConnectedToCluster(true)
 
-			got := getCloudMetadata(tt.args.opaSessionObj)
+			got := newCloudMetadata(tt.provider)
 			if got == nil {
 				t.Errorf("getCloudMetadata() = %v, want %v", got, tt.want.Provider())
 				return
@@ -109,8 +69,6 @@ func Test_getCloudMetadata(t *testing.T) {
 			}
 		})
 	}
-	k8sinterface.SetClusterContextName("")
-	k8sinterface.SetClientConfigAPI(nil)
 }
 
 // https://github.com/kubescape/kubescape/pull/1004

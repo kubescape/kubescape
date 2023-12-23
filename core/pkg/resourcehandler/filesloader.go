@@ -14,8 +14,8 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 )
 
 // FileResourceHandler handle resources from files and URLs
@@ -34,7 +34,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		return nil, nil, nil, nil, fmt.Errorf("missing input")
 	}
 
-	logger.L().Start("Accessing local objects")
+	logger.L().Start("Accessing local objects...")
 
 	// load resources from all input paths
 	mappedResources := map[string][]workloadinterface.IMetadata{}
@@ -97,6 +97,9 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	return k8sResources, allResources, externalResources, excludedRulesMap, nil
 }
 
+func (fileHandler *FileResourceHandler) GetCloudProvider() string {
+	return ""
+}
 func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	clonedRepo, err := cloneGitRepo(&helmPath)
 	if err != nil {
@@ -219,7 +222,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		if gitRepo != nil {
 			commitInfo, err := gitRepo.GetFileLastCommit(source)
 			if err != nil && !warnIssued {
-				logger.L().Ctx(ctx).Warning("Git scan skipped", helpers.Error(err))
+				logger.L().Debug("Git scan skipped", helpers.Error(err))
 				warnIssued = true // croak only once
 			}
 

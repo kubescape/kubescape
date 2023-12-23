@@ -15,9 +15,10 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/meta"
 
 	"github.com/spf13/cobra"
 )
@@ -42,7 +43,6 @@ var (
   Run '%[1]s list frameworks' for the list of supported frameworks
 `, cautils.ExecName())
 
-	ErrUnknownSeverity          = errors.New("unknown severity")
 	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
 	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
 	ErrKeepLocalOrSubmit        = errors.New("you can use `keep-local` or `submit`, but not both")
@@ -126,9 +126,6 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				logger.L().Fatal(err.Error())
 			}
 
-			if !scanInfo.VerboseMode && scanInfo.ScanType == cautils.ScanTypeFramework {
-				logger.L().Info("Run with '--verbose'/'-v' flag for detailed resources view\n")
-			}
 			if results.GetRiskScore() > float32(scanInfo.FailThreshold) {
 				logger.L().Fatal("scan risk-score is above permitted threshold", helpers.String("risk-score", fmt.Sprintf("%.2f", results.GetRiskScore())), helpers.String("fail-threshold", fmt.Sprintf("%.2f", scanInfo.FailThreshold)))
 			}
@@ -140,12 +137,13 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 			return nil
 		},
 	}
+
 }
 
 // countersExceedSeverityThreshold returns true if severity of failed controls exceed the set severity threshold, else returns false
 func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCounters, scanInfo *cautils.ScanInfo) (bool, error) {
 	targetSeverity := scanInfo.FailThresholdSeverity
-	if err := validateSeverity(targetSeverity); err != nil {
+	if err := shared.ValidateSeverity(targetSeverity); err != nil {
 		return false, err
 	}
 
@@ -199,21 +197,10 @@ func enforceSeverityThresholds(severityCounters reportsummary.ISeverityCounters,
 	}
 }
 
-// validateSeverity returns an error if a given severity is not known, nil otherwise
-func validateSeverity(severity string) error {
-	for _, val := range reporthandlingapis.GetSupportedSeverities() {
-		if strings.EqualFold(severity, val) {
-			return nil
-		}
-	}
-	return ErrUnknownSeverity
-
-}
-
 // validateFrameworkScanInfo validates the scan info struct for the `scan framework` command
 func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.View == string(cautils.SecurityViewType) {
-		return ErrSecurityViewNotSupported
+		scanInfo.View = string(cautils.ResourceViewType)
 	}
 
 	if scanInfo.Submit && scanInfo.Local {
@@ -229,7 +216,7 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 		return ErrOmitRawResourcesOrSubmit
 	}
 	severity := scanInfo.FailThresholdSeverity
-	if err := validateSeverity(severity); severity != "" && err != nil {
+	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 

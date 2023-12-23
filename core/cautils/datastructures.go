@@ -27,7 +27,7 @@ type ImageScanData struct {
 type ScanTypes string
 
 const (
-	TopWorkloadsNumber           = 5
+	TopWorkloadsNumber           = 3
 	ScanTypeCluster    ScanTypes = "cluster"
 	ScanTypeRepo       ScanTypes = "repo"
 	ScanTypeImage      ScanTypes = "image"

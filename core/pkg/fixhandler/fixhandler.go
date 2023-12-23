@@ -8,11 +8,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -313,7 +314,7 @@ func reduceYamlExpressions(resource *ResourceFixInfo) string {
 	for expr := range resource.YamlExpressions {
 		expressions = append(expressions, expr)
 	}
-
+	sort.Strings(expressions)
 	return strings.Join(expressions, " | ")
 }
 
@@ -378,6 +379,10 @@ func determineNewlineSeparator(contents string) string {
 // - Since `yaml/v3` fails to serialize documents starting with a document
 // separator, we comment it out to be compatible.
 func sanitizeYaml(fileAsString string) string {
+	if len(fileAsString) < 3 {
+		return fileAsString
+	}
+
 	if fileAsString[:3] == "---" {
 		fileAsString = "# " + fileAsString
 	}
@@ -388,6 +393,10 @@ func sanitizeYaml(fileAsString string) string {
 //
 // For sanitization details, refer to the sanitizeYaml() function.
 func revertSanitizeYaml(fixedYamlString string) string {
+	if len(fixedYamlString) < 3 {
+		return fixedYamlString
+	}
+
 	if fixedYamlString[:5] == "# ---" {
 		fixedYamlString = fixedYamlString[2:]
 	}

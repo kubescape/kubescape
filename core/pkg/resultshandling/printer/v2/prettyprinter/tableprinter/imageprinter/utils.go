@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/jwalton/gchalk"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -14,8 +15,10 @@ func renderTable(writer io.Writer, headers []string, columnAlignments []int, row
 	table := tablewriter.NewWriter(writer)
 	table.SetHeader(headers)
 	table.SetHeaderLine(true)
+	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
+	table.SetAutoFormatHeaders(false)
 	table.SetColumnAlignment(columnAlignments)
-	table.SetUnicodeHV(tablewriter.Regular, tablewriter.Regular)
+	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 	var headerColors []tablewriter.Colors
 	for range rows[0] {
@@ -63,11 +66,11 @@ func generateRow(cve CVE) []string {
 
 func getImageScanningHeaders() []string {
 	headers := make([]string, 5)
-	headers[imageColumnSeverity] = "SEVERITY"
-	headers[imageColumnName] = "VULNERABILITY"
-	headers[imageColumnComponent] = "COMPONENT"
-	headers[imageColumnVersion] = "VERSION"
-	headers[imageColumnFixedIn] = "FIXED IN"
+	headers[imageColumnSeverity] = "Severity"
+	headers[imageColumnName] = "Vulnerability"
+	headers[imageColumnComponent] = "Component"
+	headers[imageColumnVersion] = "Version"
+	headers[imageColumnFixedIn] = "Fixed in"
 	return headers
 }
 

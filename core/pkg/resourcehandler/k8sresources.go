@@ -7,10 +7,10 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/metrics"
-	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/metrics"
+	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 
@@ -37,28 +37,41 @@ var cloudResourceGetterMapping = map[string]cloudResourceGetter{
 	cloudapis.CloudProviderPolicyVersionKind:           cloudsupport.GetPolicyVersionFromCloudProvider,
 }
 
+var _ IResourceHandler = &K8sResourceHandler{}
+
 type K8sResourceHandler struct {
 	clusterName       string
+	cloudProvider     string
 	k8s               *k8sinterface.KubernetesApi
 	hostSensorHandler hostsensorutils.IHostSensor
 	rbacObjectsAPI    *cautils.RBACObjects
 }
 
 func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
-	return &K8sResourceHandler{
+	k8sHandler := &K8sResourceHandler{
 		clusterName:       clusterName,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
 	}
+	if err := k8sHandler.setCloudProvider(); err != nil {
+		logger.L().Warning("failed to set cloud provider", helpers.Error(err))
+	}
+	return k8sHandler
 }
 
 func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
-	logger.L().Start("Accessing Kubernetes objects")
+	logger.L().Start("Accessing Kubernetes objects...")
 	var err error
 
 	globalFieldSelectors := getFieldSelectorFromScanInfo(scanInfo)
-	sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+
+	if scanInfo.IsDeletedScanObject {
+		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
+	} else {
+		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+	}
+
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -80,7 +93,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	// add single resource to k8s resources map (for single resource scan)
-	addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+	if !scanInfo.IsDeletedScanObject {
+		addSingleResourceToResourceMaps(k8sResourcesMap, allResources, sessionObj.SingleResourceScan)
+	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
 	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
@@ -115,7 +130,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
 		} else {
-			cautils.SetInfoMapForResources("This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("This control requires the Kubescape operator installed. To install it, go to\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
 		}
 	}
 
@@ -138,6 +153,10 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, nil
 }
 
+func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
+	return k8sHandler.cloudProvider
+}
+
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
 func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
 	if resource == nil {
@@ -146,16 +165,15 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	var wlIdentifierString string
-	if resource.GetApiVersion() != "" {
-		wlIdentifierString = strings.Join([]string{resource.GetApiVersion(), resource.GetKind()}, "/")
-	} else {
-		wlIdentifierString = resource.GetKind()
-	}
-
-	gvr, err := k8sinterface.GetGroupVersionResource(wlIdentifierString)
+	gvr, err := k8sinterface.GetGroupVersionResource(resource.GetKind())
 	if err != nil {
 		return nil, err
+	}
+
+	if resource.GetApiVersion() != "" {
+		group, version := k8sinterface.SplitApiVersion(resource.GetApiVersion())
+		gvr.Group = group
+		gvr.Version = version
 	}
 
 	fieldSelectors := getNameFieldSelectorString(resource.GetName(), FieldSelectorsEqualsOperator)
@@ -189,17 +207,18 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 }
 
 func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context, sessionObj *cautils.OPASessionObj, allResources map[string]workloadinterface.IMetadata, externalResourceMap cautils.ExternalResources, cloudResources []string, progressListener opaprocessor.IJobProgressNotificationClient) error {
-	provider := cloudsupport.GetCloudProvider()
-	if provider == "" {
+
+	if k8sHandler.cloudProvider == "" {
 		return fmt.Errorf("failed to get cloud provider, cluster: %s", k8sHandler.clusterName)
 	}
 
-	logger.L().Start("Downloading cloud resources")
+	logger.L().Start("Downloading cloud resources...")
 
 	if sessionObj.Metadata != nil && sessionObj.Metadata.ContextMetadata.ClusterContextMetadata != nil {
-		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = provider
+		sessionObj.Metadata.ContextMetadata.ClusterContextMetadata.CloudProvider = k8sHandler.cloudProvider
 	}
-	logger.L().Debug("cloud", helpers.String("clusterName", k8sHandler.clusterName), helpers.String("provider", provider))
+
+	logger.L().Debug("cloud", helpers.String("clusterName", k8sHandler.clusterName), helpers.String("provider", k8sHandler.cloudProvider))
 
 	for resourceKind, resourceGetter := range cloudResourceGetterMapping {
 		if !cloudResourceRequired(cloudResources, resourceKind) {
@@ -207,12 +226,12 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		}
 
 		logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
-		wl, err := resourceGetter(k8sHandler.clusterName, provider)
+		wl, err := resourceGetter(k8sHandler.clusterName, k8sHandler.cloudProvider)
 		if err != nil {
 			if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
 				// Return error with useful info on how to configure credentials for getting cloud provider info
 				logger.L().Debug("failed to get cloud data", helpers.String("resourceKind", resourceKind), helpers.Error(err))
-				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(provider))
+				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(k8sHandler.cloudProvider))
 				cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			}
 
@@ -404,7 +423,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 		return nil
 	}
 
-	logger.L().Start("Collecting RBAC resources")
+	logger.L().Start("Collecting RBAC resources...")
 	allRbacResources, err := k8sHandler.rbacObjectsAPI.ListAllResources()
 	if err != nil {
 		return err
@@ -436,6 +455,15 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
 		return 0, err
 	}
 	return len(scheduableNodes.Items), nil
+}
+
+func (k8sHandler *K8sResourceHandler) setCloudProvider() error {
+	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+	k8sHandler.cloudProvider = cloudsupport.GetCloudProvider(nodeList)
+	return nil
 }
 
 // NoSchedule taint with empty value is usually applied to controlplane

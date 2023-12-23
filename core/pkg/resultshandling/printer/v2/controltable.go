@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/jwalton/gchalk"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
@@ -94,7 +94,7 @@ func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
 	return getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor()))(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
 
-func getColor(controlSeverity int) (func(...string) string) {
+func getColor(controlSeverity int) func(...string) string {
 	switch controlSeverity {
 	case apis.SeverityCritical:
 		return gchalk.WithAnsi256(1).Bold
@@ -141,14 +141,14 @@ func getControlTableHeaders(short bool) []string {
 	var headers []string
 	if short {
 		headers = make([]string, 1)
-		headers[0] = "CONTROLS"
+		headers[0] = "Controls"
 	} else {
 		headers = make([]string, _rowLen)
-		headers[columnName] = "CONTROL NAME"
-		headers[columnCounterFailed] = "FAILED RESOURCES"
-		headers[columnCounterAll] = "ALL RESOURCES"
-		headers[columnSeverity] = "SEVERITY"
-		headers[columnComplianceScore] = "% COMPLIANCE-SCORE"
+		headers[columnName] = "Control name"
+		headers[columnCounterFailed] = "Failed resources"
+		headers[columnCounterAll] = "All resources"
+		headers[columnSeverity] = "Severity"
+		headers[columnComplianceScore] = "Compliance score"
 	}
 	return headers
 }

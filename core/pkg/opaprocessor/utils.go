@@ -3,9 +3,11 @@ package opaprocessor
 import (
 	"fmt"
 
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -16,8 +18,8 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-// ConvertFrameworksToPolicies convert list of frameworks to list of policies
-func ConvertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) *cautils.Policies {
+// convertFrameworksToPolicies convert list of frameworks to list of policies
+func convertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) *cautils.Policies {
 	policies := cautils.NewPolicies()
 	policies.Set(frameworks, version, excludedRules, scanningScope)
 	return policies
@@ -106,6 +108,16 @@ var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
-	normalizedName, err := normalize_image_name(string(aStr))
+	normalizedName, err := cautils.NormalizeImageName(string(aStr))
 	return ast.StringTerm(normalizedName), err
+}
+
+func getScanningScope(ContextMetadata reporthandlingv2.ContextMetadata) reporthandling.ScanningScopeType {
+	if ContextMetadata.ClusterContextMetadata != nil {
+		if ContextMetadata.ClusterContextMetadata.CloudMetadata != nil && ContextMetadata.ClusterContextMetadata.CloudMetadata.CloudProvider != "" {
+			return reporthandling.ScanningScopeType(ContextMetadata.ClusterContextMetadata.CloudMetadata.CloudProvider)
+		}
+		return reporthandling.ScopeCluster
+	}
+	return reporthandling.ScopeFile
 }

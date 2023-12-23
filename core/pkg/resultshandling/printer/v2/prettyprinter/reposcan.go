@@ -3,11 +3,10 @@ package prettyprinter
 import (
 	"fmt"
 	"os"
-	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -42,7 +41,7 @@ func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary
 }
 
 func (rp *RepoPrinter) PrintNextSteps() {
-	printNextSteps(rp.writer, rp.getNextSteps(), false)
+	printNextSteps(rp.writer, rp.getNextSteps(), true)
 }
 
 func (rp *RepoPrinter) getNextSteps() []string {
@@ -56,10 +55,7 @@ func (rp *RepoPrinter) getNextSteps() []string {
 
 func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IResource) {
 	txt := getTopWorkloadsTitle(len(topWorkloadsByScore))
-	cautils.InfoTextDisplay(rp.writer, txt)
-
-	cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
-
+	cautils.SectionHeadingDisplay(rp.writer, txt)
 	cautils.SimpleDisplay(rp.writer, highStakesWlsText)
 
 	for i, wl := range topWorkloadsByScore {
@@ -71,7 +67,7 @@ func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IR
 		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
 	}
 
-	cautils.InfoTextDisplay(rp.writer, "\n")
+	cautils.SimpleDisplay(rp.writer, "\n")
 }
 
 func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source reporthandling.Source) string {

@@ -1,5 +1,6 @@
 *.vs*
 *kubescape*
+!*Dockerfile*
 *debug*
 *vendor*
 *.pyc*

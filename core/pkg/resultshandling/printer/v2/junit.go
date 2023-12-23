@@ -12,8 +12,8 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/shared"
@@ -99,16 +99,25 @@ func NewJunitPrinter(verbose bool) *JunitPrinter {
 }
 
 func (jp *JunitPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = junitOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
-		outputFile = outputFile + junitOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = junitOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
+			outputFile = outputFile + junitOutputExt
+		}
 	}
 	jp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (jp *JunitPrinter) Score(score float32) {
+	// Handle invalid scores
+	if score > 100 {
+		score = 100
+	} else if score < 0 {
+		score = 0
+	}
+
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 

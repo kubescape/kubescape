@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -416,7 +416,15 @@ func loadHostSensorFromFile(hostSensorYAMLFile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// TODO - Add file validation
+
+	if len(dat) == 0 {
+		return "", fmt.Errorf("empty file")
+	}
+
+	if !cautils.IsYaml(hostSensorYAMLFile) {
+		return "", fmt.Errorf("invalid file format")
+	}
+
 	return string(dat), err
 }
 

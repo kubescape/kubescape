@@ -1,4 +1,5 @@
 name: d-publish-image
+permissions: read-all
 on:
   workflow_call:
     inputs:
@@ -38,7 +39,8 @@ jobs:
           QUAYIO_REGISTRY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
         run: |
           echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && env.QUAYIO_REGISTRY_PASSWORD != '' }}" >> $GITHUB_OUTPUT
-  build-image:
+
+  build-cli-image:
     needs: [check-secret]
     if: needs.check-secret.outputs.is-secret-set == 'true'
     name: Build image and upload to registry
@@ -56,12 +58,16 @@ jobs:
           QUAY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
           QUAY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
         run: docker login -u="${QUAY_USERNAME}" -p="${QUAY_PASSWORD}" quay.io
-      - name: Build and push image
-        if: ${{ inputs.support_platforms }}
-        run: docker buildx build . --file build/Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --push --platform linux/amd64,linux/arm64
-      - name: Build and push image without amd64/arm64 support
-        if: ${{ !inputs.support_platforms }}
-        run: docker buildx build . --file build/Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --push
+      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # ratchet:actions/download-artifact@v3.0.2
+        id: download-artifact
+        with:
+          path: .
+      - name: chmod +x
+        run: chmod +x -v kubescape-*/kubescape-*
+      - name: Build and push image for linux/amd64
+        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --build-arg ks_binary=kubescape-ubuntu-latest/kubescape-ubuntu-latest --push --platform linux/amd64
+      - name: Build and push image for linux/arm64
+        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --build-arg ks_binary=kubescape-arm64-ubuntu-latest/kubescape-arm64-ubuntu-latest --push --platform linux/arm64
       - name: Install cosign
         uses: sigstore/cosign-installer@4079ad3567a89f68395480299c77e40170430341 # ratchet:sigstore/cosign-installer@main
         with:

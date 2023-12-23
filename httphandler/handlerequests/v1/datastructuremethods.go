@@ -7,8 +7,8 @@ import (
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"k8s.io/utils/strings/slices"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 )
 
 func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
@@ -18,6 +18,9 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 
 	if scanRequest.Account != "" {
 		scanInfo.AccountID = scanRequest.Account
+	}
+	if scanRequest.AccessKey != "" {
+		scanInfo.AccessKey = scanRequest.AccessKey
 	}
 	if len(scanRequest.ExcludedNamespaces) > 0 {
 		scanInfo.ExcludedNamespaces = strings.Join(scanRequest.ExcludedNamespaces, ",")
@@ -59,6 +62,10 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	// single resource scan
 	if scanRequest.ScanObject != nil {
 		scanInfo.ScanObject = scanRequest.ScanObject
+	}
+
+	if scanRequest.IsDeletedScanObject != nil {
+		scanInfo.IsDeletedScanObject = *scanRequest.IsDeletedScanObject
 	}
 
 	return scanInfo

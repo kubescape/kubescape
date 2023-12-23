@@ -12,8 +12,8 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 
 	"github.com/johnfercher/maroto/pkg/color"
@@ -43,18 +43,27 @@ func NewPdfPrinter() *PdfPrinter {
 }
 
 func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
-	// Ensure to have an available output file, otherwise create it.
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = pdfOutputFile
-	}
-	// Ensure to have the right file extension.
-	if filepath.Ext(strings.TrimSpace(outputFile)) != pdfOutputExt {
-		outputFile = outputFile + pdfOutputExt
+	if outputFile != "" {
+		// Ensure to have an available output file, otherwise create it.
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = pdfOutputFile
+		}
+		// Ensure to have the right file extension.
+		if filepath.Ext(strings.TrimSpace(outputFile)) != pdfOutputExt {
+			outputFile = outputFile + pdfOutputExt
+		}
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (pp *PdfPrinter) Score(score float32) {
+	// Handle invalid scores
+	if score > 100 {
+		score = 100
+	} else if score < 0 {
+		score = 0
+	}
+
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap []infoStars) {

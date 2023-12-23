@@ -2,6 +2,7 @@ package printer
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -14,10 +15,10 @@ import (
 	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/fixhandler"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/locationresolver"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/locationresolver"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -73,11 +74,13 @@ func (sp *SARIFPrinter) Score(score float32) {
 }
 
 func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = sarifOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
-		outputFile = outputFile + sarifOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = sarifOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != sarifOutputExt {
+			outputFile = outputFile + sarifOutputExt
+		}
 	}
 	sp.writer = printer.GetWriter(ctx, outputFile)
 }
@@ -111,19 +114,41 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) printImageScan(scanResults *models.PresenterConfig) error {
+func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
 	if scanResults == nil {
 		return fmt.Errorf("no no image vulnerability data provided")
 	}
 
-	presenterConfig, err := presenter.ValidatedConfig(printer.SARIFFormat, "", false)
+	pres := presenter.GetPresenter(printer.SARIFFormat, "", false, *scanResults)
+	if err := pres.Present(sp.writer); err != nil {
+		return err
+	}
+
+	// Change driver name to Kubescape
+
+	jsonReport, err := os.ReadFile(sp.writer.Name())
+	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to read json file - results will not be patched", helpers.Error(err))
+		return nil
+	}
+
+	var sarifReport sarif.Report
+	if err := json.Unmarshal(jsonReport, &sarifReport); err != nil {
+		return err
+	}
+
+	// Patch driver name
+	for i := range sarifReport.Runs {
+		sarifReport.Runs[i].Tool.Driver.Name = "Kubescape"
+	}
+
+	// Write back to file
+	updatedSarifReport, err := json.MarshalIndent(sarifReport, "", "  ")
 	if err != nil {
 		return err
 	}
 
-	pres := presenter.GetPresenter(presenterConfig, *scanResults)
-
-	return pres.Present(sp.writer)
+	return os.WriteFile(sp.writer.Name(), updatedSarifReport, os.ModePerm)
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {
@@ -138,7 +163,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(imageScanData[0].PresenterConfig); err != nil {
+		if err := sp.printImageScan(ctx, imageScanData[0].PresenterConfig); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return
 		}
@@ -207,10 +232,7 @@ func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj,
 		return defaultLocation
 	}
 
-	fixPaths := failedPathsToString(ac)
-	if len(fixPaths) == 0 {
-		fixPaths = fixPathsToString(ac)
-	}
+	fixPaths := AssistedRemediationPathsToString(ac)
 	var fixPath string
 	if len(fixPaths) > 0 {
 		fixPath = fixPaths[0]
@@ -235,30 +257,32 @@ func (sp *SARIFPrinter) resolveFixLocation(opaSessionObj *cautils.OPASessionObj,
 	return location
 }
 
-func addFix(result *sarif.Result, filepath string, startLine int, startColumn int, endLine int, endColumn int, text string) {
-	result.AddFix(
-		sarif.NewFix().
-			WithArtifactChanges([]*sarif.ArtifactChange{
-				sarif.NewArtifactChange(
-					sarif.NewSimpleArtifactLocation(filepath),
-				).WithReplacement(
-					sarif.NewReplacement(sarif.NewRegion().
-						WithStartLine(startLine).
-						WithStartColumn(startColumn).
-						WithEndLine(endLine).
-						WithEndColumn(endColumn),
-					).WithInsertedContent(
-						sarif.NewArtifactContent().WithText(text),
-					),
-				),
-			}),
-	)
+func addFix(result *sarif.Result, filepath string, startLine, startColumn, endLine, endColumn int, text string) {
+	// Create a new replacement with the specified start and end lines and columns, and the inserted text.
+	replacement := sarif.NewReplacement(
+		sarif.NewRegion().
+			WithStartLine(startLine).
+			WithStartColumn(startColumn).
+			WithEndLine(endLine).
+			WithEndColumn(endColumn),
+	).WithInsertedContent(sarif.NewArtifactContent().WithText(text))
+
+	// Create a new artifact change with the specified file path and replacement.
+	artifactChange := sarif.NewArtifactChange(
+		sarif.NewSimpleArtifactLocation(filepath),
+	).WithReplacement(replacement)
+
+	// Add the artifact change to the result's fixes.
+	result.AddFix(sarif.NewFix().WithArtifactChanges([]*sarif.ArtifactChange{artifactChange}))
 }
 
 func calculateMove(str string, file []string, endColumn int, endLine int) (int, int, bool) {
 	num, err := strconv.Atoi(str)
 	if err != nil {
-		logger.L().Debug("failed to get move from string "+str, helpers.Error(err))
+		logger.L().Debug(fmt.Sprintf("failed to get move from string %s", str), helpers.Error(err))
+		return 0, 0, false
+	}
+	if endLine > len(file) {
 		return 0, 0, false
 	}
 	for num+endColumn-1 > len(file[endLine-1]) {

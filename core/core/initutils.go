@@ -8,14 +8,14 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	printerv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
-	reporterv2 "github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter/v2"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
+	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
 	"go.opentelemetry.io/otel"
 
 	"github.com/google/uuid"
@@ -68,7 +68,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 		if scanInfo.GetScanningContext() != cautils.ContextCluster {
 			submitData = reporterv2.SubmitContextRepository
 		}
-		return reporterv2.NewReportEventReceiver(tenantConfig, reportID, submitData)
+		return reporterv2.NewReportEventReceiver(tenantConfig, reportID, submitData, getter.GetKSCloudAPIConnector())
 	}
 	if tenantConfig.GetAccountID() == "" {
 		// Add link only when scanning a cluster using a framework
@@ -167,7 +167,7 @@ func setSubmitBehavior(scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantC
 		return
 	}
 
-	if getter.GetKSCloudAPIConnector().GetCloudReportURL() == "" {
+	if tenantConfig.GetCloudReportURL() == "" {
 		scanInfo.Submit = false
 		return
 	}
@@ -202,7 +202,10 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 	if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() != "" && frameworkScope {
 		g := getter.GetKSCloudAPIConnector() // download policy from Kubescape Cloud backend
 		return g
+	} else if accountID != "" && getter.GetKSCloudAPIConnector().GetCloudAPIURL() == "" && frameworkScope {
+		logger.L().Ctx(ctx).Warning("Kubescape Cloud API URL is not set, loading policies from cache")
 	}
+
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
@@ -240,7 +243,7 @@ func getDownloadReleasedPolicy(ctx context.Context, downloadReleasedPolicy *gett
 func getDefaultFrameworksPaths() []string {
 	fwPaths := []string{}
 	for i := range getter.NativeFrameworks {
-		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]))
+		fwPaths = append(fwPaths, getter.GetDefaultPath(getter.NativeFrameworks[i]+".json")) // GetDefaultPath expects a filename, not just the framework name
 	}
 	return fwPaths
 }
@@ -249,6 +252,8 @@ func listFrameworksNames(policyGetter getter.IPolicyGetter) []string {
 	fw, err := policyGetter.ListFrameworks()
 	if err == nil {
 		return fw
+	} else {
+		logger.L().Warning("failed to list frameworks", helpers.Error(err))
 	}
 	return getter.NativeFrameworks
 }
@@ -281,7 +286,11 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 		p = printerv2.NewPrettyPrinter(scanInfo.VerboseMode, scanInfo.FormatVersion, scanInfo.PrintAttackTree, cautils.ViewTypes(scanInfo.View), scanInfo.ScanType, scanInfo.InputPatterns, clusterName)
 
 		// Since the UI of the program is a CLI (Stdout), it means that it should always print to Stdout
-		p.SetWriter(ctx, os.Stdout.Name())
+		if scanInfo.Format != "" && scanInfo.Output == "" {
+			p.SetWriter(ctx, os.DevNull)
+		} else {
+			p.SetWriter(ctx, os.Stdout.Name())
+		}
 	}
 
 	return p

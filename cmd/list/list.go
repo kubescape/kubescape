@@ -2,14 +2,15 @@ package list
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/core"
-	"github.com/kubescape/kubescape/v2/core/meta"
-	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v3/core/meta"
+	v1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
 	"golang.org/x/exp/slices"
 )
@@ -55,6 +56,10 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
+			if len(args) < 1 {
+				return errors.New("no arguements provided")
+			}
+
 			listPolicies.Target = args[0]
 
 			if err := ks.List(context.TODO(), &listPolicies); err != nil {
@@ -64,6 +69,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 	listCmd.PersistentFlags().StringVarP(&listPolicies.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	listCmd.PersistentFlags().StringVarP(&listPolicies.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	listCmd.PersistentFlags().StringVar(&listPolicies.Format, "format", "pretty-print", "output format. supported: 'pretty-print'/'json'")
 	listCmd.PersistentFlags().MarkDeprecated("id", "Control ID's are included in list outputs")
 

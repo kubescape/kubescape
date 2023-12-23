@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/spf13/cobra"
 )
@@ -59,6 +59,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	}
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
@@ -68,12 +69,12 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"`)
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"`)
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.VerboseMode, "verbose", "v", false, "Display all of the input resources and not only failed resources")
-	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.ResourceViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.ResourceViewType))
+	scanCmd.PersistentFlags().StringVar(&scanInfo.View, "view", string(cautils.SecurityViewType), fmt.Sprintf("View results based on the %s/%s/%s. default is --view=%s", cautils.ResourceViewType, cautils.ControlViewType, cautils.SecurityViewType, cautils.SecurityViewType))
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.UseDefault, "use-default", false, "Load local policy object from default path. If not used will download latest")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.UseFrom, "use-from", nil, "Load local policy object from specified path. If not used will download latest")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.HostSensorYamlPath, "host-scan-yaml", "", "Override default host scanner DaemonSet. Use this flag cautiously")
@@ -84,16 +85,13 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 
-	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
-
-	scanCmd.PersistentFlags().MarkDeprecated("client-id", "Client ID is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Create account is no longer supported. In case of a missing Account ID and a configured backend server, a new account id will be generated automatically by Kubescape. Feel free to contact the Kubescape maintainers for more information.")
-	scanCmd.PersistentFlags().MarkDeprecated("secret-key", "Secret Key is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("omit-raw-resources")
 	scanCmd.PersistentFlags().MarkHidden("print-attack-tree")
+	scanCmd.PersistentFlags().MarkHidden("format-version")
 
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
@@ -102,17 +100,16 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	hostF.NoOptDefVal = "true"
 	hostF.DefValue = "false, for no TTY in stdin"
 	scanCmd.PersistentFlags().MarkHidden("enable-host-scan")
-	scanCmd.PersistentFlags().MarkDeprecated("enable-host-scan", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator. The flag will be removed at 1.Dec.2023")
+	scanCmd.PersistentFlags().MarkDeprecated("enable-host-scan", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator. The flag will be removed at 1.Dec.2023")
 
 	scanCmd.PersistentFlags().MarkHidden("host-scan-yaml") // this flag should be used very cautiously. We prefer users will not use it at all unless the DaemonSet can not run pods on the nodes
-	scanCmd.PersistentFlags().MarkDeprecated("host-scan-yaml", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator. The flag will be removed at 1.Dec.2023")
+	scanCmd.PersistentFlags().MarkDeprecated("host-scan-yaml", "To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator. The flag will be removed at 1.Dec.2023")
 
 	scanCmd.AddCommand(getControlCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getFrameworkCmd(ks, &scanInfo))
 	scanCmd.AddCommand(getWorkloadCmd(ks, &scanInfo))
 
-	isi := &imageScanInfo{}
-	scanCmd.AddCommand(getImageCmd(ks, &scanInfo, isi))
+	scanCmd.AddCommand(getImageCmd(ks, &scanInfo))
 
 	return scanCmd
 }

@@ -7,18 +7,20 @@ import (
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/cmd/completion"
-	"github.com/kubescape/kubescape/v2/cmd/config"
-	"github.com/kubescape/kubescape/v2/cmd/download"
-	"github.com/kubescape/kubescape/v2/cmd/fix"
-	"github.com/kubescape/kubescape/v2/cmd/list"
-	"github.com/kubescape/kubescape/v2/cmd/scan"
-	"github.com/kubescape/kubescape/v2/cmd/update"
-	"github.com/kubescape/kubescape/v2/cmd/version"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/core/core"
-	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v3/cmd/completion"
+	"github.com/kubescape/kubescape/v3/cmd/config"
+	"github.com/kubescape/kubescape/v3/cmd/download"
+	"github.com/kubescape/kubescape/v3/cmd/fix"
+	"github.com/kubescape/kubescape/v3/cmd/list"
+	"github.com/kubescape/kubescape/v3/cmd/operator"
+	"github.com/kubescape/kubescape/v3/cmd/patch"
+	"github.com/kubescape/kubescape/v3/cmd/scan"
+	"github.com/kubescape/kubescape/v3/cmd/update"
+	"github.com/kubescape/kubescape/v3/cmd/version"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v3/core/meta"
 
 	"github.com/spf13/cobra"
 )
@@ -69,7 +71,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		rootCmd.SetUsageTemplate(newUsageTemplate)
 	}
 
-	rootCmd.PersistentFlags().StringVar(&rootInfo.DiscoveryServerURL, "server", "api.armosec.io", "Backend discovery server URL") // TODO: remove default value
+	rootCmd.PersistentFlags().StringVar(&rootInfo.DiscoveryServerURL, "server", "", "Backend discovery server URL")
 
 	rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
 	rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
@@ -94,6 +96,8 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
 	rootCmd.AddCommand(update.GetUpdateCmd())
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
+	rootCmd.AddCommand(patch.GetPatchCmd(ks))
+	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 
 	// deprecated commands
 	rootCmd.AddCommand(&cobra.Command{

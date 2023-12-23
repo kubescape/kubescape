@@ -1,13 +1,16 @@
 package resourcehandler
 
 import (
+	"fmt"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/utils/strings/slices"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 )
 
 var (
@@ -162,4 +165,15 @@ func getFieldSelectorFromScanInfo(scanInfo *cautils.ScanInfo) IFieldSelector {
 	}
 
 	return &EmptySelector{}
+}
+
+func getWorkloadFromScanObject(resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
+	if resource == nil {
+		return nil, nil
+	}
+	obj := resource.GetObject()
+	if k8sinterface.IsTypeWorkload(obj) {
+		return workloadinterface.NewWorkloadObj(obj), nil
+	}
+	return nil, fmt.Errorf("resource %s is not a valid workload", getReadableID(resource))
 }

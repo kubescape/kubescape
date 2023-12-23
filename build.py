@@ -5,7 +5,7 @@ import platform
 import subprocess
 import tarfile
 
-BASE_GETTER_CONST = "github.com/kubescape/kubescape/v2/core/cautils/getter"
+BASE_GETTER_CONST = "github.com/kubescape/kubescape/v3/core/cautils/getter"
 CURRENT_PLATFORM = platform.system()
 
 platformSuffixes = {
@@ -41,10 +41,10 @@ def main():
 
     # Set some variables
     package_name = get_package_name()
-    build_url = "github.com/kubescape/kubescape/v2/core/cautils.BuildNumber"
+    build_url = "github.com/kubescape/kubescape/v3/core/cautils.BuildNumber"
     release_version = os.getenv("RELEASE")
 
-    client_var = "github.com/kubescape/kubescape/v2/core/cautils.Client"
+    client_var = "github.com/kubescape/kubescape/v3/core/cautils.Client"
     client_name = os.getenv("CLIENT")
 
     # Create build directory
@@ -65,6 +65,9 @@ def main():
         ldflags += " -X {}={}".format(client_var, client_name)
 
     build_command = ["go", "build", "-buildmode=pie", "-tags=static,gitenabled", "-o", ks_file, "-ldflags" ,ldflags]
+    if CURRENT_PLATFORM == "Windows":
+        os.putenv("CGO_ENABLED", "0")
+        build_command = ["go", "build", "-o", ks_file, "-ldflags", ldflags]
 
     print("Building kubescape and saving here: {}".format(ks_file))
     print("Build command: {}".format(" ".join(build_command)))

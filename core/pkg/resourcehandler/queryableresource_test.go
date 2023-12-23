@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 func TestString(t *testing.T) {

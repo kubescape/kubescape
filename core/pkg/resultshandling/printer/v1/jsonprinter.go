@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 )
 
 const (
@@ -29,11 +29,13 @@ func NewJsonPrinter() *JsonPrinter {
 }
 
 func (jsonPrinter *JsonPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = jsonOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
-		outputFile = outputFile + jsonOutputExt
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = jsonOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != jsonOutputExt {
+			outputFile = outputFile + jsonOutputExt
+		}
 	}
 	jsonPrinter.writer = printer.GetWriter(ctx, outputFile)
 }

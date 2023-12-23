@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 
 	"github.com/armosec/utils-go/boolutils"
+	utils "github.com/kubescape/backend/pkg/utils"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/mattn/go-isatty"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/mod/semver"
 )
@@ -31,7 +34,7 @@ type IVersionCheckHandler interface {
 
 func NewIVersionCheckHandler(ctx context.Context) IVersionCheckHandler {
 	if BuildNumber == "" {
-		logger.L().Ctx(ctx).Warning("Unknown build number, this might affect your scan results. Please make sure that you are running the latest version")
+		logger.L().Ctx(ctx).Warning("Unknown build number: this might affect your scan results. Please ensure that you are running the latest version.")
 	}
 
 	if v, ok := os.LookupEnv(CLIENT_ENV); ok && v != "" {
@@ -64,6 +67,7 @@ type VersionCheckRequest struct {
 	FrameworkVersion string `json:"frameworkVersion"` // framework version
 	ScanningTarget   string `json:"target"`           // Deprecated
 	ScanningContext  string `json:"context"`          // scanning context- cluster/file/gitURL/localGit/dir
+	TriggeredBy      string `json:"triggeredBy"`      // triggered by - cli/ ci / microservice
 }
 
 type VersionCheckResponse struct {
@@ -79,16 +83,37 @@ func NewVersionCheckHandler() *VersionCheckHandler {
 		versionURL: "https://us-central1-elated-pottery-310110.cloudfunctions.net/ksgf1v1",
 	}
 }
+
+func getTriggerSource() string {
+	if strings.Contains(os.Args[0], "ksserver") {
+		return "microservice"
+	}
+
+	if !isatty.IsTerminal(os.Stdin.Fd()) && !isatty.IsCygwinTerminal(os.Stdin.Fd()) {
+		// non-interactive shell
+		return "pipeline"
+	}
+
+	if os.Getenv("GITHUB_ACTIONS") == "true" {
+		return "pipeline"
+	}
+
+	return "cli"
+}
+
 func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanningTarget string) *VersionCheckRequest {
 	if buildNumber == "" {
 		buildNumber = UnknownBuildNumber
 	}
+
 	if scanningTarget == "" {
 		scanningTarget = "unknown"
 	}
+
 	if Client == "" {
 		Client = "local-build"
 	}
+
 	return &VersionCheckRequest{
 		Client:           "kubescape",
 		ClientBuild:      Client,
@@ -96,6 +121,7 @@ func NewVersionCheckRequest(buildNumber, frameworkName, frameworkVersion, scanni
 		Framework:        frameworkName,
 		FrameworkVersion: frameworkVersion,
 		ScanningTarget:   scanningTarget,
+		TriggeredBy:      getTriggerSource(),
 	}
 }
 
@@ -118,7 +144,7 @@ func (v *VersionCheckHandler) CheckLatestVersion(ctx context.Context, versionDat
 		return fmt.Errorf("failed to get latest version")
 	}
 
-	LatestReleaseVersion := latestVersion.ClientUpdate
+	LatestReleaseVersion = latestVersion.ClientUpdate
 
 	if latestVersion.ClientUpdate != "" {
 		if BuildNumber != "" && semver.Compare(BuildNumber, LatestReleaseVersion) == -1 {
@@ -145,15 +171,13 @@ func (v *VersionCheckHandler) getLatestVersion(versionData *VersionCheckRequest)
 		return nil, fmt.Errorf("in 'CheckLatestVersion' failed to json.Marshal, reason: %s", err.Error())
 	}
 
-	resp, err := getter.HttpPost(http.DefaultClient, v.versionURL, map[string]string{"Content-Type": "application/json"}, reqBody)
+	rdr, _, err := getter.HTTPPost(http.DefaultClient, v.versionURL, reqBody, map[string]string{"Content-Type": "application/json"})
+
+	vResp, err := utils.Decode[*VersionCheckResponse](rdr)
 	if err != nil {
 		return nil, err
 	}
 
-	vResp := &VersionCheckResponse{}
-	if err = getter.JSONDecoder(resp).Decode(vResp); err != nil {
-		return nil, err
-	}
 	return vResp, nil
 }
 

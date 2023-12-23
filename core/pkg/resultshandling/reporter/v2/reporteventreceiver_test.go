@@ -8,9 +8,11 @@ import (
 	"sync"
 	"testing"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/prettylogger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -22,6 +24,7 @@ var mxStdio sync.Mutex
 type TenantConfigMock struct {
 	clusterName string
 	accountID   string
+	accessKey   string
 }
 
 const testGeneratedAccountIDString = "6a1ff233-5297-4193-bb51-5d67bc841cbf"
@@ -37,6 +40,9 @@ func (tcm *TenantConfigMock) GetContextName() string {
 }
 func (tcm *TenantConfigMock) GetAccountID() string {
 	return tcm.accountID
+}
+func (tcm *TenantConfigMock) IsStorageEnabled() bool {
+	return true
 }
 func (tcm *TenantConfigMock) GetConfigObj() *cautils.ConfigObj {
 	return &cautils.ConfigObj{
@@ -56,9 +62,14 @@ func (tcm *TenantConfigMock) GenerateAccountID() (string, error) {
 	return testGeneratedAccountIDString, nil
 }
 
-func (tcm *TenantConfigMock) DeleteAccountID() error {
+func (tcm *TenantConfigMock) DeleteCredentials() error {
 	tcm.accountID = ""
+	tcm.accessKey = ""
 	return nil
+}
+
+func (tcm *TenantConfigMock) GetAccessKey() string {
+	return tcm.accessKey
 }
 
 func TestDisplayMessage(t *testing.T) {
@@ -74,9 +85,10 @@ func TestDisplayMessage(t *testing.T) {
 			},
 			"",
 			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
 		)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
 		reporter.DisplayMessage()
@@ -98,10 +110,11 @@ func TestDisplayMessage(t *testing.T) {
 			},
 			"",
 			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
 		)
 		reporter.setMessage("message returned from server")
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
 		reporter.DisplayMessage()
@@ -139,6 +152,7 @@ func TestPrepareReport(t *testing.T) {
 			},
 			"",
 			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
 		)
 
 		for _, tc := range testCases {
@@ -168,25 +182,44 @@ func TestSubmit(t *testing.T) {
 	srv := mockAPIServer(t)
 	t.Cleanup(srv.Close)
 
+	const account = "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb"
+	const accessKey = "ef871116-b4c9-4dbc-9abb-f422f025429f"
+
 	t.Run("should submit simple report", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			account,
+			accessKey,
+			v1.WithHTTPClient(hijackedClient(t, srv))) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
+		require.NoError(t, err)
+
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
 				clusterName: "test",
-				accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
+				accountID:   account,
+				accessKey:   accessKey,
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
 			SubmitContextScan,
+			ksCloud,
 		)
 
 		opaSession := mockOPASessionObj(t)
-		reporter.httpClient = hijackedClient(t, srv) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
-
 		require.NoError(t,
 			reporter.Submit(ctx, opaSession),
 		)
 	})
 
-	t.Run("should generate new customerGUID when no customerGUID", func(t *testing.T) {
+	t.Run("should generate new account if account is empty", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			"",
+			"",
+			v1.WithHTTPClient(hijackedClient(t, srv))) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
+		require.NoError(t, err)
+
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
 				clusterName: "test",
@@ -194,12 +227,12 @@ func TestSubmit(t *testing.T) {
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
 			SubmitContextScan,
+			ksCloud,
 		)
 
 		opaSession := mockOPASessionObj(t)
-		reporter.httpClient = hijackedClient(t, srv)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -219,21 +252,29 @@ func TestSubmit(t *testing.T) {
 	})
 
 	t.Run("should warn when no cluster name", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			account,
+			accessKey,
+			v1.WithHTTPClient(hijackedClient(t, srv))) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
+		require.NoError(t, err)
+
 		reporter := NewReportEventReceiver(
 			&TenantConfigMock{
 				clusterName: "",
-				accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
+				accountID:   account,
+				accessKey:   accessKey,
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
 			SubmitContextScan,
+			ksCloud,
 		)
 
 		opaSession := mockOPASessionObj(t)
 		opaSession.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 
-		reporter.httpClient = hijackedClient(t, srv)
-
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -272,6 +313,7 @@ func TestSetters(t *testing.T) {
 		},
 		"cbabd56f-bac6-416a-836b-b815ef347647",
 		SubmitContextScan,
+		getter.GetKSCloudAPIConnector(),
 	)
 
 	t.Run("should set tenantConfig", func(t *testing.T) {
@@ -312,6 +354,28 @@ func captureStderr(t testing.TB) (*os.File, func()) {
 		_ = os.Remove(capture.Name())
 
 		os.Stderr = saved
+		mxStdio.Unlock()
+	}
+}
+
+func captureStdout(t testing.TB) (*os.File, func()) {
+	mxStdio.Lock()
+	saved := os.Stdout
+	capture, err := os.CreateTemp("", "stdout")
+	if !assert.NoError(t, err) {
+		mxStdio.Unlock()
+
+		t.FailNow()
+
+		return nil, nil
+	}
+	os.Stdout = capture
+
+	return capture, func() {
+		_ = capture.Close()
+		_ = os.Remove(capture.Name())
+
+		os.Stdout = saved
 		mxStdio.Unlock()
 	}
 }

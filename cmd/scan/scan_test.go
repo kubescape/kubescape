@@ -4,8 +4,11 @@ import (
 	"context"
 
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/stretchr/testify/assert"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/mocks"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -112,7 +115,7 @@ func TestExceedsSeverity(t *testing.T) {
 			ScanInfo:         &cautils.ScanInfo{FailThresholdSeverity: "unknown"},
 			SeverityCounters: &reportsummary.SeverityCounters{LowSeverityCounter: 1},
 			Want:             false,
-			Error:            ErrUnknownSeverity,
+			Error:            shared.ErrUnknownSeverity,
 		},
 	}
 
@@ -360,4 +363,17 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 		})
 	}
 
+}
+
+func TestGetScanCommand(t *testing.T) {
+	// Create a mock Kubescape interface
+	mockKubescape := &mocks.MockIKubescape{}
+
+	cmd := GetScanCommand(mockKubescape)
+
+	// Verify the command name and short description
+	assert.Equal(t, "scan", cmd.Use)
+	assert.Equal(t, "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations", cmd.Short)
+	assert.Equal(t, "The action you want to perform", cmd.Long)
+	assert.Equal(t, scanCmdExamples, cmd.Example)
 }

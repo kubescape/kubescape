@@ -8,8 +8,8 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	cloudsupportv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -22,8 +22,8 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 	opaSessionObj.Report.ClusterAPIServerInfo = rsrcHandler.GetClusterAPIServerInfo(ctx)
 
 	// set cloud metadata only when scanning a cluster
-	if opaSessionObj.Metadata.ScanMetadata.ScanningTarget == reportv2.Cluster {
-		setCloudMetadata(opaSessionObj)
+	if rsrcHandler.GetCloudProvider() != "" {
+		setCloudMetadata(opaSessionObj, rsrcHandler.GetCloudProvider())
 	}
 
 	resourcesMap, allResources, externalResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, progressListener, scanInfo)
@@ -43,8 +43,8 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 	return nil
 }
 
-func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
-	iCloudMetadata := getCloudMetadata(opaSessionObj)
+func setCloudMetadata(opaSessionObj *cautils.OPASessionObj, provider string) {
+	iCloudMetadata := newCloudMetadata(provider)
 	if iCloudMetadata == nil {
 		return
 	}
@@ -64,8 +64,8 @@ func setCloudMetadata(opaSessionObj *cautils.OPASessionObj) {
 // 1. Get cloud provider from API server git version (EKS, GKE)
 // 2. Get cloud provider from kubeconfig by parsing the cluster context (EKS, GKE)
 // 3. Get cloud provider from kubeconfig by parsing the server URL (AKS)
-func getCloudMetadata(opaSessionObj *cautils.OPASessionObj) apis.ICloudParser {
-	switch cloudsupportv1.GetCloudProvider() {
+func newCloudMetadata(provider string) apis.ICloudParser {
+	switch provider {
 	case cloudsupportv1.AKS:
 		return helpersv1.NewAKSMetadata(k8sinterface.GetContextName())
 	case cloudsupportv1.EKS:

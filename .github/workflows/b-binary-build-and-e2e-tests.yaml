@@ -1,5 +1,5 @@
 name: b-binary-build-and-e2e-tests
-
+permissions: read-all
 on:
   workflow_dispatch:
     inputs:
@@ -18,7 +18,7 @@ on:
       GO_VERSION:
         required: false
         type: string
-        default: "1.20"
+        default: "1.21"
       GO111MODULE:
         required: false
         type: string
@@ -38,7 +38,7 @@ on:
       BINARY_TESTS:
         type: string
         required: false
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score" ]'
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "control_cluster_from_CLI_config_scan_exclude_namespaces", "control_cluster_from_CLI_config_scan_include_namespaces", "control_cluster_from_CLI_config_scan_host_scanner_enabled", "control_cluster_from_CLI_config_scan_MITRE_framework", "control_cluster_from_CLI_vulnerabilities_scan_default", "control_cluster_from_CLI_vulnerabilities_scan_include_namespaces" ]'
 
   workflow_call:
     inputs:
@@ -53,7 +53,7 @@ on:
         type: string
       GO_VERSION:
         type: string
-        default: "1.20"
+        default: "1.21"
       GO111MODULE:
         required: true
         type: string
@@ -62,7 +62,7 @@ on:
         default: 1
       BINARY_TESTS:
         type: string
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "scan_custom_framework_scanning_file_scope_testing", "scan_custom_framework_scanning_cluster_scope_testing", "scan_custom_framework_scanning_cluster_and_file_scope_testing", "unified_configuration_config_view", "unified_configuration_config_set", "unified_configuration_config_delete" ]'
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "scan_custom_framework_scanning_file_scope_testing", "scan_custom_framework_scanning_cluster_scope_testing", "scan_custom_framework_scanning_cluster_and_file_scope_testing" ]'
       OS_MATRIX:
         type: string
         required: false
@@ -71,7 +71,7 @@ on:
         type: string
         required: false
         default: '[ "", "arm64"]'
-  
+
 jobs:
   wf-preparation:
     name: secret-validator
@@ -115,7 +115,20 @@ jobs:
           echo "ARCH_MATRIX=$input" >> $GITHUB_OUTPUT
         env:
           input: ${{ inputs.ARCH_MATRIX }}
-      
+
+  check-secret:
+    name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+    runs-on: ubuntu-latest
+    outputs:
+      is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
+    steps:
+      - name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
+        id: check-secret-set
+        env:
+          QUAYIO_REGISTRY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
+          QUAYIO_REGISTRY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
+        run: |
+          echo "is-secret-set=${{ env.QUAYIO_REGISTRY_USERNAME != '' && env.QUAYIO_REGISTRY_PASSWORD != '' }}" >> $GITHUB_OUTPUT
 
   binary-build:
     name: Create cross-platform build
@@ -194,11 +207,6 @@ jobs:
           echo "DOCKER_CMD=${DOCKER_CMD}" >> $GITHUB_ENV;
         if: matrix.os == 'ubuntu-20.04' && matrix.arch != ''
 
-      - name: Install MSYS2 & libgit2 (Windows)
-        shell: pwsh
-        run: .\build.ps1 all
-        if: matrix.os == 'windows-latest'
-
       - name: Install pkg-config (macOS)
         run: brew install pkg-config
         if: matrix.os == 'macos-latest'
@@ -208,11 +216,11 @@ jobs:
         if: matrix.os != 'windows-latest'
 
       - name: Test core pkg
-        run: ${{ env.DOCKER_CMD }} go test "-tags=static,gitenabled" -v ./...
+        run: ${{ env.DOCKER_CMD }} go test -v ./...
         if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Test httphandler pkg
-        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test "-tags=static,gitenabled" -v ./...'
+        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
         if: "!startsWith(github.ref, 'refs/tags') && matrix.os == 'ubuntu-20.04' && matrix.arch == '' || startsWith(github.ref, 'refs/tags') && (matrix.os != 'macos-latest' || matrix.arch != 'arm64')"
 
       - name: Build
@@ -267,6 +275,39 @@ jobs:
           name: kubescape${{ matrix.arch }}-${{ matrix.os }}
           path: build/
           if-no-files-found: error
+
+  build-http-image:
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      pull-requests: read
+    needs: [check-secret]
+    uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
+    with:
+      IMAGE_NAME: quay.io/${{ github.repository_owner }}/kubescape
+      IMAGE_TAG: ${{ inputs.RELEASE }}
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 0
+      GO111MODULE: "on"
+      BUILD_PLATFORM: linux/amd64,linux/arm64
+      GO_VERSION: "1.21"
+      REQUIRED_TESTS: '[
+                "ks_microservice_create_2_cronjob_mitre_and_nsa_proxy", 
+                "ks_microservice_triggering_with_cron_job",
+                "ks_microservice_update_cronjob_schedule",
+                "ks_microservice_delete_cronjob",
+                "ks_microservice_create_2_cronjob_mitre_and_nsa",
+                "ks_microservice_ns_creation",
+                "ks_microservice_on_demand",
+                "ks_microservice_mitre_framework_on_demand",
+                "ks_microservice_nsa_and_mitre_framework_demand",
+                "scan_compliance_score"
+              ]'
+      COSIGN: true
+      HELM_E2E_TEST: true
+      FORCE: true
+    secrets: inherit
 
   run-tests:
     strategy:

@@ -1,4 +1,5 @@
 name: a-pr-scanner
+permissions: read-all
 on:
   workflow_call:
     inputs:
@@ -22,11 +23,11 @@ jobs:
     name: PR Scanner
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
-      - uses: actions/setup-go@6edd4406fa81c3da01a34fa6f6343087c207a568 # Install go because go-licenses use it ratchet:actions/setup-go@v3
+      - uses: actions/setup-go@v4
         name: Installing go
         with:
           go-version: '1.20'
@@ -68,12 +69,12 @@ jobs:
 
       - name: Convert coverage count to lcov format
         uses: jandelgado/gcov2lcov-action@v1
-        
+
       - name: Submit coverage tests to Coveralls
         continue-on-error: true
         uses: coverallsapp/github-action@v1
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           path-to-lcov: coverage.lcov
 
       - name: Comment results to PR

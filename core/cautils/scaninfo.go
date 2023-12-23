@@ -12,7 +12,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -129,11 +129,13 @@ type ScanInfo struct {
 	HostSensorYamlPath    string                       // Path to hostsensor file
 	Local                 bool                         // Do not submit results
 	AccountID             string                       // account ID
+	AccessKey             string                       // access key
 	FrameworkScan         bool                         // false if scanning control
 	ScanAll               bool                         // true if scan all frameworks
 	OmitRawResources      bool                         // true if omit raw resources from the output
 	PrintAttackTree       bool                         // true if print attack tree
 	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
+	IsDeletedScanObject   bool                         // indicates whether the ScanObject is a deleted K8S resource
 	ScanType              ScanTypes
 	ScanImages            bool
 	ChartPath             string

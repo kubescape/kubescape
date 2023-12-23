@@ -3,11 +3,12 @@ package containerscan
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/francoispqt/gojay"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestDecodeScanWIthDangearousArtifacts(t *testing.T) {
@@ -61,30 +62,243 @@ func TestUnmarshalScanReport1(t *testing.T) {
 
 func TestGetByPkgNameSuccess(t *testing.T) {
 	ds := GenerateContainerScanReportMock()
-	a := ds.Layers[0].GetFilesByPackage("coreutils")
-	if a != nil {
-
-		fmt.Printf("%+v\n", *a)
-	}
+	a := ds.Layers[0].GetPackagesNames()
+	require.Equal(t, 1, len(a))
+	assert.Equal(t, []string{"coreutils"}, a)
 
 }
 
-func TestGetByPkgNameMissing(t *testing.T) {
-	ds := GenerateContainerScanReportMock()
-	a := ds.Layers[0].GetFilesByPackage("s")
-	if a != nil && len(*a) > 0 {
-		t.Errorf("expected - no such package should be in that layer %v\n\n; found - %v", ds, a)
+func TestScanResultReportValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       ScanResultReport
+		expected bool
+	}{
+		{
+			name:     "empty report should return false",
+			in:       ScanResultReport{},
+			expected: false,
+		},
+		{
+			name: "report with empty CustomerGUID should return false",
+			in: ScanResultReport{
+				CustomerGUID: "",
+				ImgHash:      "aaa",
+				ImgTag:       "bbb",
+				Timestamp:    1,
+			},
+			expected: false,
+		},
+		{
+			name: "report with empty ImgHash and ImgTag should return false",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "",
+				ImgTag:       "",
+				Timestamp:    1,
+			},
+			expected: false,
+		},
+		{
+			name: "report with empty ImageHash and non-empty ImgTag should return true",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "",
+				ImgTag:       "bbb",
+				Timestamp:    1,
+			},
+			expected: true,
+		},
+		{
+			name: "report with non-empty ImageHash and empty ImgTag should return true",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "",
+				Timestamp:    1,
+			},
+			expected: true,
+		},
+		{
+			name: "report with non-empty ImageHash and non-empty ImgTag should return true",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "ccc",
+				Timestamp:    1,
+			},
+			expected: true,
+		},
+		{
+			name: "report with Timestamp <= 0 should return false",
+			in: ScanResultReport{
+				CustomerGUID: "aaa",
+				ImgHash:      "bbb",
+				ImgTag:       "ccc",
+				Timestamp:    0,
+			},
+			expected: false,
+		},
 	}
 
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res := test.in.Validate()
+			assert.Equal(t, test.expected, res)
+		})
+	}
+}
+func TestScanElasticContainerScanSummaryResultValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		in       ElasticContainerScanSummaryResult
+		expected bool
+	}{
+		{
+			name:     "empty summary should return false",
+			in:       ElasticContainerScanSummaryResult{},
+			expected: false,
+		},
+		{
+			name: "summary with empty CustomerGUID should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "",
+				ContainerScanID: "aaa",
+				ImgHash:         "bbb",
+				ImgTag:          "ccc",
+				Timestamp:       1,
+			},
+			expected: false,
+		},
+		{
+			name: "summary with empty ContainerScanID should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "",
+				ImgHash:         "bbb",
+				ImgTag:          "ccc",
+				Timestamp:       1,
+			},
+			expected: false,
+		},
+		{
+			name: "summary with empty ImgHash and ImgTag should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "",
+				ImgTag:          "",
+				Timestamp:       1,
+			},
+			expected: false,
+		},
+		{
+			name: "summary with empty ImageHash and non-empty ImgTag should return true",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "",
+				ImgTag:          "ccc",
+				Timestamp:       1,
+			},
+			expected: true,
+		},
+		{
+			name: "summary with non-empty ImageHash and empty ImgTag should return true",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "ccc",
+				ImgTag:          "",
+				Timestamp:       1,
+			},
+			expected: true,
+		},
+		{
+			name: "summary with non-empty ImageHash and non-empty ImgTag should return true",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "ccc",
+				ImgTag:          "ddd",
+				Timestamp:       1,
+			},
+			expected: true,
+		},
+		{
+			name: "summary with Timestamp < 0 should return false",
+			in: ElasticContainerScanSummaryResult{
+				CustomerGUID:    "aaa",
+				ContainerScanID: "bbb",
+				ImgHash:         "ccc",
+				ImgTag:          "ddd",
+				Timestamp:       -1,
+			},
+			expected: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res := test.in.Validate()
+			assert.Equal(t, test.expected, res)
+		})
+	}
 }
 
 func TestCalculateFixed(t *testing.T) {
-	res := CalculateFixed([]FixedIn{{
-		Name:    "",
-		ImgTag:  "",
-		Version: "",
-	}})
-	if 0 != res {
-		t.Errorf("wrong fix status: %v", res)
+	tests := []struct {
+		name     string
+		in       []FixedIn
+		expected int
+	}{
+		{
+			name:     "empty list should return 0",
+			in:       []FixedIn{},
+			expected: 0,
+		},
+		{
+			name: "None Version value should return 0",
+			in: []FixedIn{
+				{Version: "None"},
+				{Version: "None"},
+				{Version: "None"},
+			},
+			expected: 0,
+		},
+		{
+			name: "empty Version value should return 0",
+			in: []FixedIn{
+				{Version: ""},
+				{Version: ""},
+				{Version: ""},
+			},
+			expected: 0,
+		},
+		{
+			name: "non empty or non None Version value should return 1",
+			in: []FixedIn{
+				{Version: "1.23"},
+				{Version: ""},
+				{Version: ""},
+			},
+			expected: 1,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			res := CalculateFixed(test.in)
+			assert.Equal(t, test.expected, res)
+		})
+	}
+}
+
+func TestReturnsHashValueForValidInputValues(t *testing.T) {
+	report := ScanResultReport{}
+	expectedHash := "7416232187745851261"
+	actualHash := report.AsFNVHash()
+	if actualHash != expectedHash {
+		t.Errorf("Expected hash value %s, but got %s", expectedHash, actualHash)
 	}
 }

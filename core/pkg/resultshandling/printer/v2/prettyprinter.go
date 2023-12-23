@@ -4,28 +4,28 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/enescakir/emoji"
+	"github.com/jwalton/gchalk"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/olekukonko/tablewriter"
 	"k8s.io/utils/strings/slices"
 )
 
 const (
 	prettyPrinterOutputFile             = "report"
-	prettyPrinterOutputExt              = ".txt"
 	clusterScanningScopeInformationLink = "https://github.com/kubescape/regolibrary/tree/master#add-a-framework"
 )
 
@@ -118,8 +118,11 @@ func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
 
 func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
 	if opaSessionObj != nil {
+		// TODO line is currently printed on framework scan only
 		if isPrintSeparatorType(pp.scanType) {
-			fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+			fmt.Fprintf(pp.writer, "\n"+
+				gchalk.WithAnsi256(238).Bold(fmt.Sprintf("%s\n", strings.Repeat("─", 50)))+
+				"\n")
 		} else {
 			fmt.Fprintf(pp.writer, "\n")
 		}
@@ -166,13 +169,26 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nKubescape security posture overview for cluster: %s\n\n", pp.clusterName))
 		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
 	} else if pp.scanType == cautils.ScanTypeWorkload {
+		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
 		ns := opaSessionObj.SingleResourceScan.GetNamespace()
-		if ns == "" {
-			cautils.InfoDisplay(pp.writer, "Workload - Kind: %s, Name: %s\n\n", opaSessionObj.SingleResourceScan.GetKind(), opaSessionObj.SingleResourceScan.GetName())
-		} else {
-			cautils.InfoDisplay(pp.writer, "Workload - Namespace: %s, Kind: %s, Name: %s\n\n", opaSessionObj.SingleResourceScan.GetNamespace(), opaSessionObj.SingleResourceScan.GetKind(), opaSessionObj.SingleResourceScan.GetName())
+		rows := [][]string{}
+		if ns != "" {
+			rows = append(rows, []string{"Namespace", gchalk.WithBrightWhite().Bold(opaSessionObj.SingleResourceScan.GetNamespace())})
 		}
+		rows = append(rows, []string{"Kind", gchalk.WithBrightWhite().Bold(opaSessionObj.SingleResourceScan.GetKind())})
+		rows = append(rows, []string{"Name", gchalk.WithBrightWhite().Bold(opaSessionObj.SingleResourceScan.GetName())})
+
+		table := tablewriter.NewWriter(pp.writer)
+
+		table.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
+		table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+		table.AppendBulk(rows)
+
+		table.Render()
+
+		cautils.SimpleDisplay(pp.writer, "\nIn this overview, Kubescape shows you a summary of the security posture of a workload, including key controls that apply to its configuration, and the vulnerability status of the container image.\n\n\n")
 	}
+
 }
 
 func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
@@ -183,13 +199,6 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
 		return
-	}
-
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = prettyPrinterOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
-		outputFile = outputFile + prettyPrinterOutputExt
 	}
 
 	pp.writer = printer.GetWriter(ctx, outputFile)
@@ -315,16 +324,15 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
 	if len(frameworks) == 1 {
 		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
-			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
+			return fmt.Sprintf("Framework scanned: %s\n", frameworks[0].GetName())
 		}
 	} else if len(frameworks) > 1 {
-		p := "FRAMEWORKS: "
+		p := "Frameworks scanned: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (compliance: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+			p += fmt.Sprintf("%s (compliance score: %.2f%%), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		}
-		p += fmt.Sprintf("%s (compliance: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+		p += fmt.Sprintf("%s (compliance score: %.2f%%)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		return p
 	}
 	return ""

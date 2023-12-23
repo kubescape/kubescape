@@ -8,17 +8,17 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/core/pkg/hostsensorutils"
-	"github.com/kubescape/kubescape/v2/core/pkg/opaprocessor"
-	"github.com/kubescape/kubescape/v2/core/pkg/policyhandler"
-	"github.com/kubescape/kubescape/v2/core/pkg/resourcehandler"
-	"github.com/kubescape/kubescape/v2/core/pkg/resourcesprioritization"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
-	"github.com/kubescape/kubescape/v2/pkg/imagescan"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
+	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcehandler"
+	"github.com/kubescape/kubescape/v3/core/pkg/resourcesprioritization"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slices"
@@ -49,7 +49,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 
 	// ================== setup tenant object ======================================
-	tenantConfig := cautils.GetTenantConfig(scanInfo.AccountID, k8sinterface.GetContextName(), scanInfo.CustomClusterName, k8s)
+	tenantConfig := cautils.GetTenantConfig(scanInfo.AccountID, scanInfo.AccessKey, k8sinterface.GetContextName(), scanInfo.CustomClusterName, getKubernetesApi())
 
 	// Set submit behavior AFTER loading tenant config
 	setSubmitBehavior(scanInfo, tenantConfig)
@@ -110,7 +110,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 			logger.L().Ctx(ctx).Fatal(err.Error())
 		}
 
-		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo.FormatVersion, scanInfo.PrintAttackTree, scanInfo.VerboseMode, cautils.ViewTypes(scanInfo.View), clusterName)
+		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
 		printerHandler.SetWriter(ctx, scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
 	}
@@ -119,7 +119,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	ctxInit, spanInit := otel.Tracer("").Start(ctx, "initialization")
-	logger.L().Start("Kubescape scanner initializing")
+	logger.L().Start("Kubescape scanner initializing...")
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info
@@ -177,7 +177,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
 	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName())
-	if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler(""), scanInfo); err != nil {
+	if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 		// TODO - do something
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
@@ -246,7 +246,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
 			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))
 		}
-		logger.L().StopSuccess("Scanned successfully", helpers.String("image", img))
+		logger.L().StopSuccess("Scan successful: ", helpers.String("image", img))
 	}
 }
 
