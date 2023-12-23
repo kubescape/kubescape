@@ -589,6 +589,8 @@ github.com/armon/go-radix v1.0.0/go.mod h1:ufUuZ+zHj4x4TnLV4JWEpy2hxWSpsRywHrMgI
 github.com/armon/go-socks5 v0.0.0-20160902184237-e75332964ef5 h1:0CwZNZbxp69SHPdPJAN/hZIm0C4OItdklCFmMRWYpio=
 github.com/armosec/armoapi-go v0.0.220 h1:gfg2UmcFgcyStjp5ZXfwE8yb0H43eaRX9H/KkqFIv6w=
 github.com/armosec/armoapi-go v0.0.220/go.mod h1:Y1ZcqPUTQ+F8JiQzErrToK5ULrPvClxZoshHmV9PIlU=
+github.com/armosec/armoapi-go v0.0.278 h1:YmZWrjF7pQdGNzxeHuuQ6IahejlkgcUurF4ldbIzbWM=
+github.com/armosec/armoapi-go v0.0.278/go.mod h1:CJT5iH5VF30zjdQYXaQhsAm8IEHtM1T87HcFVXeLX54=
 github.com/armosec/gojay v1.2.15 h1:sSB2vnAvacUNkw9nzUYZKcPzhJOyk6/5LK2JCNdmoZY=
 github.com/armosec/gojay v1.2.15/go.mod h1:vzVAaay2TWJAngOpxu8aqLbye9jMgoKleuAOK+xsOts=
 github.com/armosec/utils-go v0.0.20 h1:bvr+TMumEYdMsGFGSsaQysST7K02nNROFvuajNuKPlw=

@@ -8,10 +8,13 @@ import (
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v2/core/cautils"
 	"github.com/kubescape/kubescape/v2/core/metrics"
 	"github.com/kubescape/kubescape/v2/httphandler/docs"
 	handlerequestsv1 "github.com/kubescape/kubescape/v2/httphandler/handlerequests/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 
 	"github.com/gorilla/mux"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
@@ -57,6 +60,15 @@ func SetupHTTPListener() error {
 	rtr.HandleFunc(readyPath, httpHandler.Ready)
 	rtr.PathPrefix(docs.OpenAPIV2Prefix).Methods("GET").Handler(openApiHandler)
 
+	k8sApi := k8sinterface.NewKubernetesApi()
+
+	// load all CRDs to getter.SaveInFile
+	loadExceptions(k8sApi)
+	loadControlConfigurations(k8sApi)
+	loadRules(k8sApi)
+	loadControls(k8sApi)
+	loadFrameworks(k8sApi)
+
 	// OpenTelemetry middleware for monitored endpoints
 	otelMiddleware := otelmux.Middleware("kubescape-svc")
 	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
@@ -65,6 +77,14 @@ func SetupHTTPListener() error {
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan)
 	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
 	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.Results)
+
+	// watch for changes to crds and update to getter.SaveInFile
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(k8sApi.DynamicClient, 0, metav1.NamespaceAll, nil)
+	exceptionListener(factory)
+	controlConfigurationListener(factory)
+	ruleListener(factory)
+	controlListener(factory)
+	frameworkListener(factory)
 
 	// OpenTelemetry metrics initialization
 	metrics.Init()

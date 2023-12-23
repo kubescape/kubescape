@@ -1,7 +1,0 @@
-apiVersion: spdx.softwarecomposition.kubescape.io/v1alpha1
-kind: Rule
-metadata:
-  name: rule-1
-rego: 'sprintf("sample")'
-blob:
-  description: This is rule-1
