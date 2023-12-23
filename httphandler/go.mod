@@ -5,6 +5,7 @@ go 1.20
 replace github.com/kubescape/kubescape/v2 => ../
 
 require (
+	github.com/armosec/armoapi-go v0.0.278
 	github.com/armosec/utils-go v0.0.20
 	github.com/go-openapi/runtime v0.26.0
 	github.com/google/uuid v1.3.0
@@ -18,6 +19,8 @@ require (
 	github.com/stretchr/testify v1.8.4
 	go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux v0.38.0
 	go.opentelemetry.io/otel v1.16.0
+	k8s.io/apimachinery v0.27.4
+	k8s.io/client-go v0.27.4
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 )
 
@@ -98,7 +101,6 @@ require (
 	github.com/anchore/stereoscope v0.0.0-20230627195312-cd49355d934e // indirect
 	github.com/anchore/syft v0.84.1 // indirect
 	github.com/andybalholm/brotli v1.0.4 // indirect
-	github.com/armosec/armoapi-go v0.0.278 // indirect
 	github.com/armosec/gojay v1.2.15 // indirect
 	github.com/armosec/utils-k8s-go v0.0.17 // indirect
 	github.com/asaskevich/govalidator v0.0.0-20230301143203-a9d515a09cc2 // indirect
@@ -397,8 +399,6 @@ require (
 	helm.sh/helm/v3 v3.11.1 // indirect
 	k8s.io/api v0.27.4 // indirect
 	k8s.io/apiextensions-apiserver v0.27.2 // indirect
-	k8s.io/apimachinery v0.27.4 // indirect
-	k8s.io/client-go v0.27.4 // indirect
 	k8s.io/klog/v2 v2.100.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20230501164219-8b0f38b5fd1f // indirect
 	lukechampine.com/uint128 v1.3.0 // indirect
