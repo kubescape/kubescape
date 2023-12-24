@@ -16,7 +16,7 @@ require (
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.156
 	github.com/kubescape/kubescape/v3 v3.0.0-00010101000000-000000000000
-	github.com/kubescape/opa-utils v0.0.271
+	github.com/kubescape/opa-utils v0.0.273
 	github.com/kubescape/storage v0.0.20
 	github.com/spf13/viper v1.16.0
 	github.com/stretchr/testify v1.8.4
@@ -272,7 +272,7 @@ require (
 	github.com/knqyf263/go-rpmdb v0.0.0-20230517124904-b97c85e63254 // indirect
 	github.com/kubescape/go-git-url v0.0.27 // indirect
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 // indirect
-	github.com/kubescape/regolibrary v1.0.291-rc.0 // indirect
+	github.com/kubescape/regolibrary v1.0.300 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/leodido/go-urn v1.2.4 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20221109233200-85aa52084eaf // indirect
