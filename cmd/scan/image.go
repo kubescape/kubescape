@@ -30,6 +30,8 @@ var (
 // getImageCmd returns the scan image command
 func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	var imgCredentials shared.ImageCredentials
+	var exceptions []string
+
 	cmd := &cobra.Command{
 		Use:     "image <image>:<tag> [flags]",
 		Short:   "Scan an image for vulnerabilities",
@@ -50,9 +52,10 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			imgScanInfo := &metav1.ImageScanInfo{
-				Image:    args[0],
-				Username: imgCredentials.Username,
-				Password: imgCredentials.Password,
+				Image:      args[0],
+				Username:   imgCredentials.Username,
+				Password:   imgCredentials.Password,
+				Exceptions: exceptions,
 			}
 
 			results, err := ks.ScanImage(context.Background(), imgScanInfo, scanInfo)
@@ -67,6 +70,9 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			return nil
 		},
 	}
+
+	// The exceptions flag
+	cmd.Flags().StringSliceVarP(&exceptions, "exceptions", "E", []string{}, "List of CVEs to exclude")
 
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Username, "username", "u", "", "Username for registry login")
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Password, "password", "p", "", "Password for registry login")

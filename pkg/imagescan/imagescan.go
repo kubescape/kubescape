@@ -10,6 +10,7 @@ import (
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db"
 	"github.com/anchore/grype/grype/grypeerr"
+	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/matcher"
 	"github.com/anchore/grype/grype/matcher/dotnet"
 	"github.com/anchore/grype/grype/matcher/golang"
@@ -116,7 +117,11 @@ type Service struct {
 	dbCfg db.Config
 }
 
-func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials) (*models.PresenterConfig, error) {
+func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, exceptions []string) (*models.PresenterConfig, error) {
+	if exceptions == nil {
+		exceptions = []string{}
+	}
+
 	var err error
 
 	store, status, dbCloser, err := NewVulnerabilityDB(s.dbCfg, true)
@@ -133,9 +138,18 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 		defer dbCloser.Close()
 	}
 
+	var ignoreRules []match.IgnoreRule
+	for _, exception := range exceptions {
+		rule := match.IgnoreRule{
+			Vulnerability: exception,
+		}
+		ignoreRules = append(ignoreRules, rule)
+	}
+
 	matcher := grype.VulnerabilityMatcher{
-		Store:    *store,
-		Matchers: getMatchers(),
+		Store:       *store,
+		Matchers:    getMatchers(),
+		IgnoreRules: ignoreRules,
 	}
 
 	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, pkgContext)

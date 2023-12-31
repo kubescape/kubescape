@@ -1,6 +1,7 @@
 package imagescan
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -39,40 +40,50 @@ import (
 // 	assert.IsType(t, Service{}, svc)
 // }
 
-// func TestScan(t *testing.T) {
-// 	tt := []struct {
-// 		name  string
-// 		image string
-// 		creds RegistryCredentials
-// 	}{
-// 		{
-// 			name:  "Valid image name produces a non-nil scan result",
-// 			image: "nginx",
-// 		},
-// 		{
-// 			name:  "Scanning a valid image with provided credentials should produce a non-nil scan result",
-// 			image: "nginx",
-// 			creds: RegistryCredentials{
-// 				Username: "test",
-// 				Password: "password",
-// 			},
-// 		},
-// 	}
+func TestScan(t *testing.T) {
+	dbCfg, _ := NewDefaultDBConfig()
+	svc := NewScanService(dbCfg)
+	ctx := context.Background()
+	image := "nginx"
+	creds := RegistryCredentials{}
 
-// 	for _, tc := range tt {
-// 		t.Run(tc.name, func(t *testing.T) {
-// 			ctx := context.Background()
-// 			dbCfg, _ := NewDefaultDBConfig()
-// 			svc := NewScanService(dbCfg)
-// 			creds := RegistryCredentials{}
+	tests := []struct {
+		name          string
+		image         string
+		exceptions    []string
+		checkNotEmpty bool
+		err           error
+	}{
+		{
+			name:          "Without exceptions",
+			image:         image,
+			exceptions:    []string{},
+			checkNotEmpty: false,
+			err:           nil,
+		},
+		{
+			name:          "With exceptions",
+			image:         image,
+			exceptions:    []string{"CVE-2023-6879", "CVE-2023-45853"},
+			checkNotEmpty: true,
+			err:           nil,
+		},
+	}
 
-// 			scanResults, err := svc.Scan(ctx, tc.image, creds)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			scanResults, err := svc.Scan(ctx, tc.image, creds, tc.exceptions)
 
-// 			assert.NoError(t, err)
-// 			assert.IsType(t, &models.PresenterConfig{}, scanResults)
-// 		})
-// 	}
-// }
+			assert.NoError(t, err)
+			assert.IsType(t, &models.PresenterConfig{}, scanResults)
+			if tc.checkNotEmpty {
+				assert.NotEmpty(t, scanResults.IgnoredMatches)
+			} else {
+				assert.Empty(t, scanResults.IgnoredMatches)
+			}
+		})
+	}
+}
 
 // fakeMetaProvider is a test double that fakes an actual MetadataProvider
 type fakeMetaProvider struct {
