@@ -23,7 +23,7 @@ func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageS
 		Password: imgScanInfo.Password,
 	}
 
-	scanResults, err := svc.Scan(ctx, imgScanInfo.Image, creds)
+	scanResults, err := svc.Scan(ctx, imgScanInfo.Image, creds, imgScanInfo.Exceptions)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to scan image: %s", imgScanInfo.Image))
 		return nil, err
