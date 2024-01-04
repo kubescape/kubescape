@@ -14,7 +14,7 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/backend v0.0.17
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.153
+	github.com/kubescape/k8s-interface v0.0.156
 	github.com/kubescape/kubescape/v3 v3.0.0-00010101000000-000000000000
 	github.com/kubescape/opa-utils v0.0.273
 	github.com/kubescape/storage v0.0.20
@@ -270,7 +270,7 @@ require (
 	github.com/knqyf263/go-deb-version v0.0.0-20230223133812-3ed183d23422 // indirect
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
 	github.com/knqyf263/go-rpmdb v0.0.0-20230517124904-b97c85e63254 // indirect
-	github.com/kubescape/go-git-url v0.0.26 // indirect
+	github.com/kubescape/go-git-url v0.0.27 // indirect
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 // indirect
 	github.com/kubescape/regolibrary v1.0.300 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
