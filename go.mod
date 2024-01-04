@@ -22,13 +22,13 @@ require (
 	github.com/johnfercher/maroto v1.0.0
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
-	github.com/kubescape/backend v0.0.15
+	github.com/kubescape/backend v0.0.17
 	github.com/kubescape/go-git-url v0.0.26
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.146
-	github.com/kubescape/opa-utils v0.0.271
+	github.com/kubescape/k8s-interface v0.0.153
+	github.com/kubescape/opa-utils v0.0.273
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
-	github.com/kubescape/regolibrary v1.0.291-rc.0
+	github.com/kubescape/regolibrary v1.0.300
 	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/maruel/natural v1.1.1
 	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
