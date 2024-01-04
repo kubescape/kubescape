@@ -14,7 +14,7 @@ require (
 	github.com/gorilla/schema v1.2.0
 	github.com/kubescape/backend v0.0.17
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.146
+	github.com/kubescape/k8s-interface v0.0.156
 	github.com/kubescape/kubescape/v3 v3.0.0-00010101000000-000000000000
 	github.com/kubescape/opa-utils v0.0.271
 	github.com/kubescape/storage v0.0.20
