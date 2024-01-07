@@ -207,7 +207,7 @@ func TestGetFileFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
-			assert.Equal(t, tt.want, GetFileFormat(tt.path))
+			assert.Equal(t, tt.want, getFileFormat(tt.path))
 		})
 	}
 

@@ -2,6 +2,7 @@ package cautils
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -12,29 +13,21 @@ func TestGetKustomizeDirectoryName(t *testing.T) {
 	tests := []struct {
 		name                string
 		args                args
-		createKustomization bool // create kustomization.yml file in the path
 		want                string
+		createKustomization bool
 	}{
 		{
-			name: "kustomize directory without trailing slash",
+			name: "kustomize directory",
 			args: args{
-				path: "/tmp",
+				path: os.TempDir(),
 			},
 			createKustomization: true,
-			want:                "/tmp",
-		},
-		{
-			name: "kustomize directory with trailing slash",
-			args: args{
-				path: "/tmp/",
-			},
-			createKustomization: true,
-			want:                "/tmp",
+			want:                os.TempDir(),
 		},
 		{
 			name: "not kustomize directory",
 			args: args{
-				path: "/tmp",
+				path: os.TempDir(),
 			},
 			createKustomization: false,
 			want:                "",
@@ -42,7 +35,7 @@ func TestGetKustomizeDirectoryName(t *testing.T) {
 		{
 			name: "inexistent directory",
 			args: args{
-				path: "/mohaidoss",
+				path: filepath.Join(os.TempDir(), "bla"),
 			},
 			createKustomization: false,
 			want:                "",
@@ -57,46 +50,14 @@ func TestGetKustomizeDirectoryName(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tempFile := filepath.Join(tt.args.path, "kustomization.yaml")
 			if tt.createKustomization {
-				_ = os.WriteFile(tt.args.path+"/kustomization.yml", []byte(""), 0644)
+				_ = os.WriteFile(tempFile, []byte(""), 0644)
 			}
-			if got := GetKustomizeDirectoryName(tt.args.path); got != tt.want {
+			if got := getKustomizeDirectoryName(tt.args.path); got != tt.want {
 				t.Errorf("GetKustomizeDirectoryName() = %v, want %v", got, tt.want)
 			}
-			os.Remove(tt.args.path + "/kustomization.yml")
-		})
-	}
-}
-
-func Test_cleanPathDir(t *testing.T) {
-	type args struct {
-		path string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "No trailing slash",
-			args: args{
-				path: "/tmp",
-			},
-			want: "/tmp/",
-		},
-		{
-			name: "With trailing slash",
-			args: args{
-				path: "/tmp/",
-			},
-			want: "/tmp/",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := cleanPathDir(tt.args.path); got != tt.want {
-				t.Errorf("cleanPathDir() = %v, want %v", got, tt.want)
-			}
+			os.Remove(tempFile)
 		})
 	}
 }

@@ -599,13 +599,13 @@ func TestGetLocalPath(t *testing.T) {
 						},
 						ContextMetadata: reporthandlingv2.ContextMetadata{
 							RepoContextMetadata: &reporthandlingv2.RepoContextMetadata{
-								LocalRootPath: "/tmp",
+								LocalRootPath: os.TempDir(),
 							},
 						},
 					},
 				},
 			},
-			want: "/tmp",
+			want: os.TempDir(),
 		},
 		{
 			name: "Scan target Directory",
@@ -617,7 +617,7 @@ func TestGetLocalPath(t *testing.T) {
 						},
 						ContextMetadata: reporthandlingv2.ContextMetadata{
 							DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
-								BasePath: "/tmp",
+								BasePath: os.TempDir(),
 							},
 						},
 					},
@@ -634,13 +634,13 @@ func TestGetLocalPath(t *testing.T) {
 						},
 						ContextMetadata: reporthandlingv2.ContextMetadata{
 							FileContextMetadata: &reporthandlingv2.FileContextMetadata{
-								FilePath: "/tmp/target.yaml",
+								FilePath: filepath.Join(os.TempDir(), "target.yaml"),
 							},
 						},
 					},
 				},
 			},
-			want: "/tmp",
+			want: filepath.Dir(os.TempDir()),
 		},
 	}
 	for _, tt := range tests {

@@ -20,16 +20,14 @@ type KustomizeDirectory struct {
 // Used for checking if there is "Kustomization" file in the given Directory
 var kustomizationFileMatchers = [3]string{"kustomization.yml", "kustomization.yaml", "Kustomization"}
 
-func IsKustomizeDirectory(path string) bool {
-	if isDir := IsDir(path); !isDir {
+func isKustomizeDirectory(path string) bool {
+	if ok := isDir(path); !ok {
 		return false
 	}
 
-	path = cleanPathDir(path)
-
 	matches := 0
 	for _, kustomizationFileMatcher := range kustomizationFileMatchers {
-		checkPath := path + kustomizationFileMatcher
+		checkPath := filepath.Join(path, kustomizationFileMatcher)
 		if _, err := os.Stat(checkPath); err == nil {
 			matches++
 		}
@@ -41,7 +39,7 @@ func IsKustomizeDirectory(path string) bool {
 	case 1:
 		return true
 	default:
-		logger.L().Info("Multiple kustomize files found while checking Kustomize Directory")
+		logger.L().Info("Multiple kustomize files found while checking the Kustomize Directory")
 		return false
 	}
 }
@@ -65,19 +63,9 @@ func NewKustomizeDirectory(path string) *KustomizeDirectory {
 	}
 }
 
-func GetKustomizeDirectoryName(path string) string {
-	if isKustomizeDirectory := IsKustomizeDirectory(path); !isKustomizeDirectory {
+func getKustomizeDirectoryName(path string) string {
+	if ok := isKustomizeDirectory(path); !ok {
 		return ""
-	}
-
-	path = cleanPathDir(path)
-
-	return filepath.Dir(path)
-}
-
-func cleanPathDir(path string) string {
-	if lastChar := path[len(path)-1:]; lastChar != "/" {
-		path += "/"
 	}
 
 	return path

@@ -45,7 +45,7 @@ func DownloadSupportCommands() []string {
 }
 
 func (ks *Kubescape) Download(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
-	setPathandFilename(downloadInfo)
+	setPathAndFilename(downloadInfo)
 	if err := os.MkdirAll(downloadInfo.Path, os.ModePerm); err != nil {
 		return err
 	}
@@ -65,17 +65,19 @@ func downloadArtifact(ctx context.Context, downloadInfo *metav1.DownloadInfo, do
 	return fmt.Errorf("unknown command to download")
 }
 
-func setPathandFilename(downloadInfo *metav1.DownloadInfo) {
+func setPathAndFilename(downloadInfo *metav1.DownloadInfo) {
 	if downloadInfo.Path == "" {
 		downloadInfo.Path = getter.GetDefaultPath("")
-	} else {
-		dir, file := filepath.Split(downloadInfo.Path)
-		if dir == "" {
-			downloadInfo.Path = file
-		} else if strings.Contains(file, ".json") {
-			downloadInfo.Path = dir
-			downloadInfo.FileName = file
-		}
+		return
+	}
+	dir, file := filepath.Split(downloadInfo.Path)
+	if dir == "" {
+		downloadInfo.Path = file
+		return
+	}
+	if strings.Contains(file, ".json") {
+		downloadInfo.Path = filepath.Clean(dir)
+		downloadInfo.FileName = file
 	}
 }
 
