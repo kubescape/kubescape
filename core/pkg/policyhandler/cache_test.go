@@ -123,19 +123,16 @@ func TestCache_Invalidate(t *testing.T) {
 }
 
 func TestCache_ConcurrentAccess(t *testing.T) {
-	cache := NewTimedCache[int](time.Second * 1)
+	cache := NewTimedCache[int](time.Second * 5)
 
 	go func() {
 		cache.Set(42)
 	}()
 
-	go func() {
-		time.Sleep(time.Millisecond * 500)
-		value, exists := cache.Get()
-		if !exists || value != 42 {
-			t.Errorf("Expected value: %v, Got: %v, Exists: %v", 42, value, exists)
-		}
-	}()
+	time.Sleep(time.Second * 1)
+	value, exists := cache.Get()
+	if !exists || value != 42 {
+		t.Errorf("Expected value: %v, Got: %v, Exists: %v", 42, value, exists)
+	}
 
-	time.Sleep(time.Second)
 }

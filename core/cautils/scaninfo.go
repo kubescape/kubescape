@@ -326,7 +326,7 @@ func GetScanningContext(input string) ScanningContext {
 	}
 
 	//  single file
-	if IsFile(input) {
+	if isFile(input) {
 		return ContextFile
 	}
 

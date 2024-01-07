@@ -159,11 +159,6 @@ func TestSetWriter_NonEmptyFileNames(t *testing.T) {
 			expectedName: "  test.sarif ",
 		},
 		{
-			name:         "Empty file name",
-			outputFile:   "",
-			expectedName: "/dev/stdout",
-		},
-		{
 			name:         "Empty file name with whitespaces",
 			outputFile:   "   ",
 			expectedName: "report.sarif",
@@ -174,11 +169,9 @@ func TestSetWriter_NonEmptyFileNames(t *testing.T) {
 			sarifPrinter.SetWriter(ctx, tt.outputFile)
 			assert.NotNil(t, sarifPrinter.writer)
 			assert.Equal(t, tt.expectedName, sarifPrinter.writer.Name())
-			if tt.expectedName != "/dev/stdout" {
 
-				err := os.Remove(tt.expectedName)
-				assert.Nil(t, err)
-			}
+			err := os.Remove(tt.expectedName)
+			assert.Nil(t, err)
 		})
 	}
 }

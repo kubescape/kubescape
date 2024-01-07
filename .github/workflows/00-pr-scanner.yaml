@@ -41,7 +41,7 @@ jobs:
     secrets: inherit
 
   binary-build:
-    if: ${{ github.actor == 'kubescape' }}
+    if: ${{ github.repository_owner == 'kubescape' }}
     permissions:
       actions: read
       checks: read
@@ -65,5 +65,5 @@ jobs:
       RELEASE: "latest"
       CLIENT: test
       ARCH_MATRIX: '[ "" ]'
-      OS_MATRIX: '[ "ubuntu-20.04" ]'
+      OS_MATRIX: '[ "ubuntu-20.04", "macos-latest", "windows-latest"]'
     secrets: inherit

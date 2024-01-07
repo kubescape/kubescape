@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -31,7 +32,7 @@ func TestSetWriter(t *testing.T) {
 	assert.Equal(t, os.Stdout, promPrinter.writer)
 
 	// Test case 2: Valid outputFile
-	outputFile = "/tmp/test.log"
+	outputFile = filepath.Join(os.TempDir(), "test.log")
 	promPrinter = &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), outputFile)
 	f, err := os.Open(outputFile)
