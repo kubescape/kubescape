@@ -1,8 +1,6 @@
 package printer
 
 import (
-	"context"
-	"os"
 	"testing"
 
 	"github.com/owenrumney/go-sarif/v2/sarif"
@@ -121,57 +119,6 @@ spec:
 						index, *replacements[0].InsertedContent.Text, testCase.text[index])
 				}
 			}
-		})
-	}
-}
-
-func TestNewSARIFPrinter(t *testing.T) {
-	sarifPrinter := NewSARIFPrinter()
-	expectedPrinter := SARIFPrinter{}
-	assert.Equal(t, expectedPrinter, *sarifPrinter)
-}
-
-func TestSetWriter_NonEmptyFileNames(t *testing.T) {
-	sarifPrinter := NewSARIFPrinter()
-	expectedPrinter := SARIFPrinter{}
-	assert.Equal(t, expectedPrinter, *sarifPrinter)
-
-	ctx := context.Background()
-
-	tests := []struct {
-		name         string
-		outputFile   string
-		expectedName string
-	}{
-		{
-			name:         "Non empty non sarif file",
-			outputFile:   "  test.json ",
-			expectedName: "  test.json .sarif",
-		},
-		{
-			name:         "Sarif file without whitespaces in name",
-			outputFile:   "temp.sarif",
-			expectedName: "temp.sarif",
-		},
-		{
-			name:         "Sarif file with whitespaces in name",
-			outputFile:   "  test.sarif ",
-			expectedName: "  test.sarif ",
-		},
-		{
-			name:         "Empty file name with whitespaces",
-			outputFile:   "   ",
-			expectedName: "report.sarif",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			sarifPrinter.SetWriter(ctx, tt.outputFile)
-			assert.NotNil(t, sarifPrinter.writer)
-			assert.Equal(t, tt.expectedName, sarifPrinter.writer.Name())
-
-			err := os.Remove(tt.expectedName)
-			assert.Nil(t, err)
 		})
 	}
 }

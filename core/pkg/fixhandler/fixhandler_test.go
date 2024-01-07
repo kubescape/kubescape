@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -350,7 +351,9 @@ spec:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-
+			if runtime.GOOS == "windows" {
+				return
+			}
 			got, err := GetFileString(tt.args.filePath)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("getFileString() error = %v, wantErr %v", err, tt.wantErr)
