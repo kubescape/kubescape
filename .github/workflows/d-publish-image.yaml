@@ -73,7 +73,7 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@main
         with:
-          cosign-release: 'v2.3.0'
+          cosign-release: 'v2.2.2'
       - name: sign kubescape container image
         if: ${{ inputs.cosign }}
         env:
@@ -83,7 +83,7 @@ jobs:
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY_V1 }}
         run: |
             # Sign the image with keyless mode
-            cosign sign ${{ inputs.image_name }}:${{ inputs.image_tag }}
+            cosign sign -y ${{ inputs.image_name }}:${{ inputs.image_tag }}
 
             # Sign the image with key for verifier clients without keyless support
             # Put the key from environment variable to a file
