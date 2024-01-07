@@ -83,7 +83,7 @@ jobs:
           COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY_V1 }}
         run: |
             # Sign the image with keyless mode
-            cosign sign --force ${{ inputs.image_name }}
+            cosign sign ${{ inputs.image_name }}:${{ inputs.image_tag }}
 
             # Sign the image with key for verifier clients without keyless support
             # Put the key from environment variable to a file
