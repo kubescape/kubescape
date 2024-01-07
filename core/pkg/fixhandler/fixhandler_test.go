@@ -640,7 +640,7 @@ func TestGetLocalPath(t *testing.T) {
 					},
 				},
 			},
-			want: os.TempDir(),
+			want: filepath.Dir(filepath.Join(os.TempDir(), "target.yaml")),
 		},
 	}
 	for _, tt := range tests {
