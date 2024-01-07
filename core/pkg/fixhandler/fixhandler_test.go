@@ -351,7 +351,7 @@ spec:
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if runtime.GOOS == "runtime.GOOS" {
+			if runtime.GOOS == "windows" {
 				return
 			}
 			got, err := GetFileString(tt.args.filePath)
