@@ -640,7 +640,7 @@ func TestGetLocalPath(t *testing.T) {
 					},
 				},
 			},
-			want: filepath.Dir(os.TempDir()),
+			want: os.TempDir(),
 		},
 	}
 	for _, tt := range tests {
