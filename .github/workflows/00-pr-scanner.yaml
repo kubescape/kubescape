@@ -65,5 +65,5 @@ jobs:
       RELEASE: "latest"
       CLIENT: test
       ARCH_MATRIX: '[ "" ]'
-      OS_MATRIX: '[ "ubuntu-20.04" ]'
+      OS_MATRIX: '[ "ubuntu-20.04", "macos-latest", "windows-latest"]'
     secrets: inherit
