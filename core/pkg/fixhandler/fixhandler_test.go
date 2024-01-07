@@ -330,7 +330,7 @@ func TestGetFileString(t *testing.T) {
 		{
 			name: "file found",
 			args: args{
-				filePath: "testdata/inserts/tc-01-00-input-mapping-insert-mapping.yaml",
+				filePath: filepath.Join("testdata", "inserts", "tc-01-00-input-mapping-insert-mapping.yaml"),
 			},
 			want: `# Fix to Apply:
 # "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"
