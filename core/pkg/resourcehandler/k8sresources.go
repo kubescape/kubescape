@@ -76,10 +76,12 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		return nil, nil, nil, nil, err
 	}
 
+	scanningScope := cautils.GetScanningScope(sessionObj.Metadata.ContextMetadata)
+
 	resourceToControl := make(map[string][]string)
 	// build resources map
 	// map resources based on framework required resources: map["/group/version/kind"][]<k8s workloads ids>
-	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan)
+	queryableResources, excludedRulesMap := getQueryableResourceMapFromPolicies(sessionObj.Policies, sessionObj.SingleResourceScan, scanningScope)
 	ksResourceMap := setKSResourceMap(sessionObj.Policies, resourceToControl)
 
 	// map of Kubescape resources to control_ids
@@ -320,6 +322,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors, globalFieldSelectors)
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
+				logger.L().Error("failed to pull resource", helpers.String("resource", queryableResources[i].GroupVersionResourceTriplet), helpers.Error(err))
 				// handle error
 				if errs == nil {
 					errs = err
@@ -342,6 +345,13 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 			k8sResources[key] = append(k8sResources[key], workloadinterface.ListMetaIDs(metaObjs)...)
 		}
 	}
+
+	// we don't want to fail the scan if we failed to pull only some resources
+	// in that case, we return nil error (and errors are logged in the loop above)
+	if errs != nil && len(allResources) > 0 {
+		errs = nil
+	}
+
 	return k8sResources, allResources, errs
 }
 

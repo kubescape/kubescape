@@ -22,7 +22,7 @@ func addSingleResourceToResourceMaps(k8sResources cautils.K8SResources, allResou
 	k8sResources[resourceGroup] = append(k8sResources[resourceGroup], wl.GetID())
 }
 
-func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload) (QueryableResources, map[string]bool) {
+func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, resource workloadinterface.IWorkload, scanningScope reporthandling.ScanningScopeType) (QueryableResources, map[string]bool) {
 	queryableResources := make(QueryableResources)
 	excludedRulesMap := make(map[string]bool)
 	namespace := getScannedResourceNamespace(resource)
@@ -30,6 +30,11 @@ func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, 
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
 			for _, rule := range control.Rules {
+				// check if the rule should be skipped according to the scanning scope and the rule attributes
+				if cautils.ShouldSkipRule(control, rule, scanningScope) {
+					continue
+				}
+
 				var resourcesFilterMap map[string]bool = nil
 				// for single resource scan, we need to filter the rules and which resources to query according to the given resource
 				if resource != nil {
@@ -39,8 +44,8 @@ func getQueryableResourceMapFromPolicies(frameworks []reporthandling.Framework, 
 						continue
 					}
 				}
-				for _, match := range rule.Match {
-					updateQueryableResourcesMapFromRuleMatchObject(&match, resourcesFilterMap, queryableResources, namespace)
+				for i := range rule.Match {
+					updateQueryableResourcesMapFromRuleMatchObject(&rule.Match[i], resourcesFilterMap, queryableResources, namespace)
 				}
 			}
 		}
