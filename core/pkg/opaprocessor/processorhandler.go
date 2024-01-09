@@ -54,8 +54,8 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
-	scanningScope := getScanningScope(opap.Metadata.ContextMetadata)
-	opap.OPASessionObj.AllPolicies = convertFrameworksToPolicies(opap.Policies, cautils.BuildNumber, opap.ExcludedRules, scanningScope)
+	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
+	opap.OPASessionObj.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 

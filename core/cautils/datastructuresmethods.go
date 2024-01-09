@@ -5,6 +5,7 @@ import (
 
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 func NewPolicies() *Policies {
@@ -14,7 +15,7 @@ func NewPolicies() *Policies {
 	}
 }
 
-func (policies *Policies) Set(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) {
+func (policies *Policies) Set(frameworks []reporthandling.Framework, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) {
 	for i := range frameworks {
 		if !isFrameworkFitToScanScope(frameworks[i], scanningScope) {
 			continue
@@ -32,9 +33,12 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 					}
 				}
 
-				if isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
-					compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
+				if ShouldSkipRule(frameworks[i].Controls[j], frameworks[i].Controls[j].Rules[r], scanningScope) {
+					continue
 				}
+				// if isRuleKubescapeVersionCompatible(frameworks[i].Controls[j].Rules[r].Attributes, version) && isControlFitToScanScope(frameworks[i].Controls[j], scanningScope) {
+				compatibleRules = append(compatibleRules, frameworks[i].Controls[j].Rules[r])
+				// }
 			}
 			if len(compatibleRules) > 0 {
 				frameworks[i].Controls[j].Rules = compatibleRules
@@ -52,6 +56,20 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, version str
 		}
 
 	}
+}
+
+// ShouldSkipRule checks if the rule should be skipped
+// It checks the following:
+//  1. Rule is compatible with the current kubescape version
+//  2. Rule fits the current scanning scope
+func ShouldSkipRule(control reporthandling.Control, rule reporthandling.PolicyRule, scanningScope reporthandling.ScanningScopeType) bool {
+	if !isRuleKubescapeVersionCompatible(rule.Attributes, BuildNumber) {
+		return true
+	}
+	if !isControlFitToScanScope(control, scanningScope) {
+		return true
+	}
+	return false
 }
 
 // Checks that kubescape version is in range of use for this rule
@@ -134,4 +152,14 @@ func isFrameworkFitToScanScope(framework reporthandling.Framework, scanScopeMatc
 		}
 	}
 	return false
+}
+
+func GetScanningScope(ContextMetadata reporthandlingv2.ContextMetadata) reporthandling.ScanningScopeType {
+	if ContextMetadata.ClusterContextMetadata != nil {
+		if ContextMetadata.ClusterContextMetadata.CloudMetadata != nil && ContextMetadata.ClusterContextMetadata.CloudMetadata.CloudProvider != "" {
+			return reporthandling.ScanningScopeType(ContextMetadata.ClusterContextMetadata.CloudMetadata.CloudProvider)
+		}
+		return reporthandling.ScopeCluster
+	}
+	return reporthandling.ScopeFile
 }
