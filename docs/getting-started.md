@@ -80,7 +80,7 @@ _Some documentation on using Kubescape is yet to move here from the [ARMO Platfo
     kubescape scan *.yaml
     ```
 
-    Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI).
+    [Take a look at the demonstration](https://youtu.be/Ox6DaR7_4ZI).
 
 * Scan Kubernetes manifest files from a Git repository:
 
