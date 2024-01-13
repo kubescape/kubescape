@@ -4,5 +4,5 @@ type ImageScanInfo struct {
 	Username   string
 	Password   string
 	Image      string
-	Exceptions []string
+	Exceptions string
 }
