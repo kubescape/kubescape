@@ -257,7 +257,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 
 func scanSingleImage(ctx context.Context, img string, svc imagescan.Service, resultsHandling *resultshandling.ResultsHandler) error {
 
-	scanResults, err := svc.Scan(ctx, img, imagescan.RegistryCredentials{}, nil)
+	scanResults, err := svc.Scan(ctx, img, imagescan.RegistryCredentials{}, nil, nil)
 	if err != nil {
 		return err
 	}

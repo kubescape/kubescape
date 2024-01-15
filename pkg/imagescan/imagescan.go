@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
@@ -117,9 +118,40 @@ type Service struct {
 	dbCfg db.Config
 }
 
-func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, exceptions []string) (*models.PresenterConfig, error) {
-	if exceptions == nil {
-		exceptions = []string{}
+// Filter the remaing matches based on severity exceptions.
+func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, store *store.Store) match.Matches {
+	filteredMatches := match.NewMatches()
+
+	for m := range remainingMatches.Enumerate() {
+		metadata, err := store.GetMetadata(m.Vulnerability.ID, m.Vulnerability.Namespace)
+		if err != nil {
+			continue
+		}
+
+		// Skip this match if the severity of this match is present in severityExceptions.
+		excludeSeverity := false
+		for _, sever := range severityExceptions {
+			if strings.ToUpper(metadata.Severity) == sever {
+				excludeSeverity = true
+				continue
+			}
+		}
+
+		if !excludeSeverity {
+			filteredMatches.Add(m)
+		}
+	}
+
+	return filteredMatches
+}
+
+func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*models.PresenterConfig, error) {
+	if vulnerabilityExceptions == nil {
+		vulnerabilityExceptions = []string{}
+	}
+
+	if severityExceptions == nil {
+		severityExceptions = []string{}
 	}
 
 	var err error
@@ -139,7 +171,7 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 	}
 
 	var ignoreRules []match.IgnoreRule
-	for _, exception := range exceptions {
+	for _, exception := range vulnerabilityExceptions {
 		rule := match.IgnoreRule{
 			Vulnerability: exception,
 		}
@@ -159,8 +191,10 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 		}
 	}
 
+	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, store)
+
 	pb := models.PresenterConfig{
-		Matches:          *remainingMatches,
+		Matches:          filteredMatches,
 		IgnoredMatches:   ignoredMatches,
 		Packages:         packages,
 		Context:          pkgContext,

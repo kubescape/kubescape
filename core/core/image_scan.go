@@ -60,29 +60,38 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 	return policies, nil
 }
 
-func getUniqueVulnerabilities(policies []VulnerabilitiesIgnorePolicy) []string {
-	// Create a map to store unique vulnerabilities (case-insensitive)
-	uniqueVulns := make(map[string]bool)
+func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy) ([]string, []string) {
+	// Create maps with slices as values to store unique vulnerabilities and severities (case-insensitive)
+	uniqueVulns := make(map[string][]string)
+	uniqueSevers := make(map[string][]string)
 
-	// Iterate over each policy
+	// Iterate over each policy and its vulnerabilities/severities
 	for _, policy := range policies {
-		// Iterate over each vulnerability in the policy
-		for _, vuln := range policy.Vulnerabilities {
-			// Convert to uppercase for case-insensitive comparison
-			vulnLower := strings.ToUpper(vuln)
+		for _, vulnerability := range policy.Vulnerabilities {
+			// Add to slice directly
+			vulnerabilityUppercase := strings.ToUpper(vulnerability)
+			uniqueVulns[vulnerabilityUppercase] = append(uniqueVulns[vulnerabilityUppercase], vulnerability)
+		}
 
-			// Add the vulnerability to the map (only if it's not already present)
-			uniqueVulns[vulnLower] = true
+		for _, severity := range policy.Severities {
+			// Add to slice directly
+			severityUppercase := strings.ToUpper(severity)
+			uniqueSevers[severityUppercase] = append(uniqueSevers[severityUppercase], severity)
 		}
 	}
 
-	// Convert the map keys (unique vulnerabilities) to a slice
+	// Extract unique keys (which are unique vulnerabilities/severities) and their slices
 	uniqueVulnsList := make([]string, 0, len(uniqueVulns))
 	for vuln := range uniqueVulns {
 		uniqueVulnsList = append(uniqueVulnsList, vuln)
 	}
 
-	return uniqueVulnsList
+	uniqueSeversList := make([]string, 0, len(uniqueSevers))
+	for sever := range uniqueSevers {
+		uniqueSeversList = append(uniqueSeversList, sever)
+	}
+
+	return uniqueVulnsList, uniqueSeversList
 }
 
 func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
@@ -97,6 +106,7 @@ func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageS
 	}
 
 	var vulnerabilityExceptions []string
+	var severityExceptions []string
 	if imgScanInfo.Exceptions != "" {
 		exceptionPolicies, err := GetImageExceptionsFromFile(imgScanInfo.Exceptions)
 		if err != nil {
@@ -104,10 +114,10 @@ func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageS
 			return nil, err
 		}
 
-		vulnerabilityExceptions = getUniqueVulnerabilities(exceptionPolicies)
+		vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies)
 	}
 
-	scanResults, err := svc.Scan(ctx, imgScanInfo.Image, creds, vulnerabilityExceptions)
+	scanResults, err := svc.Scan(ctx, imgScanInfo.Image, creds, vulnerabilityExceptions, severityExceptions)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to scan image: %s", imgScanInfo.Image))
 		return nil, err
