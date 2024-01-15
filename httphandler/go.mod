@@ -31,7 +31,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.19.0
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.26.0 // indirect
-	golang.org/x/crypto v0.16.0 // indirect
+	golang.org/x/crypto v0.17.0 // indirect
 	golang.org/x/exp v0.0.0-20230801115018-d63ba01acd4b
 	golang.org/x/mod v0.12.0 // indirect
 	golang.org/x/net v0.19.0 // indirect
@@ -145,7 +145,7 @@ require (
 	github.com/chainguard-dev/git-urls v1.0.2 // indirect
 	github.com/chrismellard/docker-credential-acr-env v0.0.0-20220119192733-fe33c00cee21 // indirect
 	github.com/clbanning/mxj/v2 v2.5.6 // indirect
-	github.com/cloudflare/circl v1.3.3 // indirect
+	github.com/cloudflare/circl v1.3.7 // indirect
 	github.com/common-nighthawk/go-figure v0.0.0-20210622060536-734e95fb86be // indirect
 	github.com/containerd/console v1.0.4-0.20230313162750-1ae8d489ac81 // indirect
 	github.com/containerd/containerd v1.7.3 // indirect
