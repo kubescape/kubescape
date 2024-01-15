@@ -72,7 +72,7 @@ func TestScan(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			scanResults, err := svc.Scan(ctx, tc.image, creds, tc.exceptions)
+			scanResults, err := svc.Scan(ctx, tc.image, creds, tc.exceptions, nil)
 
 			assert.NoError(t, err)
 			assert.IsType(t, &models.PresenterConfig{}, scanResults)
