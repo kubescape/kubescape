@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/anchore/grype/grype/presenter/models"
@@ -60,23 +61,82 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 	return policies, nil
 }
 
-func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy) ([]string, []string) {
+func getAttributesFromImage(imgName string) (Attributes, error) {
+	canonicalImageName, err := cautils.NormalizeImageName(imgName)
+	if err != nil {
+		return Attributes{}, err
+	}
+
+	tokens := strings.Split(canonicalImageName, "/")
+	registry := tokens[0]
+	organization := tokens[1]
+
+	imageNameAndTag := strings.Split(tokens[2], ":")
+	imageName := imageNameAndTag[0]
+
+	// Intialize the image tag with default value
+	imageTag := "latest"
+	if len(imageNameAndTag) > 1 {
+		imageTag = imageNameAndTag[1]
+	}
+
+	attributes := Attributes{
+		Registry:     registry,
+		Organization: organization,
+		ImageName:    imageName,
+		ImageTag:     imageTag,
+	}
+
+	return attributes, nil
+}
+
+func regexStringMatch(pattern, target string) bool {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		logger.L().StopError(fmt.Sprintf("Failed to generate regular expression: %s", err))
+		return false
+	}
+
+	if re.MatchString(target) {
+		return true
+	}
+
+	return false
+}
+
+func isTargetImage(targets []Target, attributes Attributes) bool {
+	for _, target := range targets {
+		return regexStringMatch(target.Attributes.Registry, attributes.Registry) && regexStringMatch(target.Attributes.Organization, attributes.Organization) && regexStringMatch(target.Attributes.ImageName, attributes.ImageName) && regexStringMatch(target.Attributes.ImageTag, attributes.ImageTag)
+	}
+
+	return false
+}
+
+func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy, image string) ([]string, []string) {
 	// Create maps with slices as values to store unique vulnerabilities and severities (case-insensitive)
 	uniqueVulns := make(map[string][]string)
 	uniqueSevers := make(map[string][]string)
 
+	imageAttributes, err := getAttributesFromImage(image)
+	if err != nil {
+		logger.L().StopError(fmt.Sprintf("Failed to generate image attributes: %s", err))
+	}
+
 	// Iterate over each policy and its vulnerabilities/severities
 	for _, policy := range policies {
-		for _, vulnerability := range policy.Vulnerabilities {
-			// Add to slice directly
-			vulnerabilityUppercase := strings.ToUpper(vulnerability)
-			uniqueVulns[vulnerabilityUppercase] = append(uniqueVulns[vulnerabilityUppercase], vulnerability)
-		}
+		// Include the exceptions only if the image is one of the targets
+		if isTargetImage(policy.Targets, imageAttributes) {
+			for _, vulnerability := range policy.Vulnerabilities {
+				// Add to slice directly
+				vulnerabilityUppercase := strings.ToUpper(vulnerability)
+				uniqueVulns[vulnerabilityUppercase] = append(uniqueVulns[vulnerabilityUppercase], vulnerability)
+			}
 
-		for _, severity := range policy.Severities {
-			// Add to slice directly
-			severityUppercase := strings.ToUpper(severity)
-			uniqueSevers[severityUppercase] = append(uniqueSevers[severityUppercase], severity)
+			for _, severity := range policy.Severities {
+				// Add to slice directly
+				severityUppercase := strings.ToUpper(severity)
+				uniqueSevers[severityUppercase] = append(uniqueSevers[severityUppercase], severity)
+			}
 		}
 	}
 
@@ -114,7 +174,7 @@ func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageS
 			return nil, err
 		}
 
-		vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies)
+		vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, imgScanInfo.Image)
 	}
 
 	scanResults, err := svc.Scan(ctx, imgScanInfo.Image, creds, vulnerabilityExceptions, severityExceptions)
