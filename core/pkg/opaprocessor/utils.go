@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"fmt"
+	"strings"
 
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -75,7 +76,9 @@ var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.T
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
-	result, err := verify(string(aStr), string(bStr))
+	// Replace double backslashes with single backslashes
+	bbStr := strings.Replace(string(bStr), "\\n", "\n", -1)
+	result, err := verify(string(aStr), bbStr)
 	if err != nil {
 		// Do not change this log from debug level. We might find a lot of images without signature
 		logger.L().Debug("failed to verify signature", helpers.String("image", string(aStr)), helpers.String("key", string(bStr)), helpers.Error(err))
