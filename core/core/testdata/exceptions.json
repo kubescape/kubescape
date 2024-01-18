@@ -1,0 +1,78 @@
+[
+    {   
+        "metadata": {
+                "name": "medium-severity-vulnerabilites-exceptions"
+        },
+        "kind": "VulnerabilitiesIgnorePolicy",
+        "targets": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "Registry": "docker.io",
+                    "Organization": "",
+                    "ImageName": ""
+                }
+            }
+        ],
+        "vulnerabilities": [
+        ],
+        "severities": [
+            "medium"
+         ]
+    },
+    {   
+        "metadata": {
+                "name": "exclude-allowed-hostPath-control"
+        },
+        "kind": "VulnerabilitiesIgnorePolicy",
+        "targets": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                }
+            }
+        ],
+        "vulnerabilities": [
+            "CVE-2023-42366",
+            "CVE-2023-42365"
+        ],
+        "severities": [
+            "critical",
+            "low"
+         ]
+    },
+    {   
+        "metadata": {
+                "name": "regex-example"
+        },
+        "kind": "VulnerabilitiesIgnorePolicy",
+        "targets": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "Registry": "quay.*",
+                    "Organization": "kube*",
+                    "ImageName": "kubescape*",
+                    "ImageTag": "v2*"
+                }
+            },
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "Registry": "docker.io",
+                    "Organization": ".*",
+                    "ImageName": "kube*",
+                    "ImageTag": "v3*"
+                }
+            }
+        ],
+        "vulnerabilities": [
+            "CVE-2023-6879",
+            "CVE-2023-44487"
+        ],
+        "severities": [
+            "critical",
+            "low"
+         ]
+    }   
+]

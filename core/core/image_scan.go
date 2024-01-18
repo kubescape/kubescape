@@ -44,6 +44,7 @@ type VulnerabilitiesIgnorePolicy struct {
 	Severities      []string `json:"severities"`
 }
 
+// Loads excpetion policies from exceptions json object.
 func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy, error) {
 	// Read the JSON file
 	jsonFile, err := os.ReadFile(filePath)
@@ -61,6 +62,7 @@ func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy,
 	return policies, nil
 }
 
+// This function will identify the registry, organization and image tag from the image name
 func getAttributesFromImage(imgName string) (Attributes, error) {
 	canonicalImageName, err := cautils.NormalizeImageName(imgName)
 	if err != nil {
@@ -90,6 +92,7 @@ func getAttributesFromImage(imgName string) (Attributes, error) {
 	return attributes, nil
 }
 
+// Checks if the target string matches the regex pattern
 func regexStringMatch(pattern, target string) bool {
 	re, err := regexp.Compile(pattern)
 	if err != nil {
@@ -104,6 +107,9 @@ func regexStringMatch(pattern, target string) bool {
 	return false
 }
 
+// Compares the registry, organization, image name, image tag against the targets specified
+// in the exception policy object to check if the image being scanned qualifies for an
+// exception policy.
 func isTargetImage(targets []Target, attributes Attributes) bool {
 	for _, target := range targets {
 		return regexStringMatch(target.Attributes.Registry, attributes.Registry) && regexStringMatch(target.Attributes.Organization, attributes.Organization) && regexStringMatch(target.Attributes.ImageName, attributes.ImageName) && regexStringMatch(target.Attributes.ImageTag, attributes.ImageTag)
@@ -112,6 +118,8 @@ func isTargetImage(targets []Target, attributes Attributes) bool {
 	return false
 }
 
+// Generates a list of unique CVE-IDs and the severities which are to be excluded for
+// the image being scanned.
 func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolicy, image string) ([]string, []string) {
 	// Create maps with slices as values to store unique vulnerabilities and severities (case-insensitive)
 	uniqueVulns := make(map[string][]string)

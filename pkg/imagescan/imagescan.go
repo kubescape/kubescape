@@ -118,8 +118,41 @@ type Service struct {
 	dbCfg db.Config
 }
 
+func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, packages []pkg.Package, pkgContext pkg.Context) (*match.Matches, []match.IgnoredMatch, error) {
+	if vulnerabilityExceptions == nil {
+		vulnerabilityExceptions = []string{}
+	}
+
+	var ignoreRules []match.IgnoreRule
+	for _, exception := range vulnerabilityExceptions {
+		rule := match.IgnoreRule{
+			Vulnerability: exception,
+		}
+		ignoreRules = append(ignoreRules, rule)
+	}
+
+	matcher := grype.VulnerabilityMatcher{
+		Store:       *store,
+		Matchers:    getMatchers(),
+		IgnoreRules: ignoreRules,
+	}
+
+	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, pkgContext)
+	if err != nil {
+		if !errors.Is(err, grypeerr.ErrAboveSeverityThreshold) {
+			return nil, nil, err
+		}
+	}
+
+	return remainingMatches, ignoredMatches, nil
+}
+
 // Filter the remaing matches based on severity exceptions.
 func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, store *store.Store) match.Matches {
+	if severityExceptions == nil {
+		return remainingMatches
+	}
+
 	filteredMatches := match.NewMatches()
 
 	for m := range remainingMatches.Enumerate() {
@@ -146,16 +179,6 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 }
 
 func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*models.PresenterConfig, error) {
-	if vulnerabilityExceptions == nil {
-		vulnerabilityExceptions = []string{}
-	}
-
-	if severityExceptions == nil {
-		severityExceptions = []string{}
-	}
-
-	var err error
-
 	store, status, dbCloser, err := NewVulnerabilityDB(s.dbCfg, true)
 	if err = validateDBLoad(err, status); err != nil {
 		return nil, err
@@ -170,25 +193,9 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 		defer dbCloser.Close()
 	}
 
-	var ignoreRules []match.IgnoreRule
-	for _, exception := range vulnerabilityExceptions {
-		rule := match.IgnoreRule{
-			Vulnerability: exception,
-		}
-		ignoreRules = append(ignoreRules, rule)
-	}
-
-	matcher := grype.VulnerabilityMatcher{
-		Store:       *store,
-		Matchers:    getMatchers(),
-		IgnoreRules: ignoreRules,
-	}
-
-	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, pkgContext)
+	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, store, packages, pkgContext)
 	if err != nil {
-		if !errors.Is(err, grypeerr.ErrAboveSeverityThreshold) {
-			return nil, err
-		}
+		return nil, err
 	}
 
 	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, store)
