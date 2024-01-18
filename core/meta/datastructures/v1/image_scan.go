@@ -1,9 +1,8 @@
 package v1
 
 type ImageScanInfo struct {
-	Username           string
-	Password           string
-	Image              string
-	Exceptions         string
-	CanonicalImageName string
+	Username   string
+	Password   string
+	Image      string
+	Exceptions string
 }

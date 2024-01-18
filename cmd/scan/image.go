@@ -25,6 +25,9 @@ var (
   # Scan the 'nginx' image and see the full report 
   %[1]s scan image "nginx" -v
 
+  # Scan the 'nginx' image and use exceptions
+  %[1]s scan image "nginx" --exceptions exceptions.json
+
 `, cautils.ExecName())
 )
 
@@ -73,7 +76,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 	}
 
 	// The exceptions flag
-	cmd.PersistentFlags().StringVarP(&exceptions, "exceptions", "E", "", "Path to the exceptions file")
+	cmd.PersistentFlags().StringVarP(&exceptions, "exceptions", "", "", "Path to the exceptions file")
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Username, "username", "u", "", "Username for registry login")
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Password, "password", "p", "", "Password for registry login")
 

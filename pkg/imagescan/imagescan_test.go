@@ -1,7 +1,6 @@
 package imagescan
 
 import (
-	"context"
 	"errors"
 	"testing"
 	"time"
@@ -40,47 +39,62 @@ import (
 // 	assert.IsType(t, Service{}, svc)
 // }
 
-func TestScan(t *testing.T) {
+func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
 	dbCfg, _ := NewDefaultDBConfig()
 	svc := NewScanService(dbCfg)
-	ctx := context.Background()
-	image := "nginx"
 	creds := RegistryCredentials{}
 
 	tests := []struct {
-		name          string
-		image         string
-		exceptions    []string
-		checkNotEmpty bool
-		err           error
+		name                    string
+		image                   string
+		vulnerabilityExceptions []string
+		ignoredLen              int
+		severityExceptions      []string
+		filteredLen             int
 	}{
 		{
-			name:          "Without exceptions",
-			image:         image,
-			exceptions:    []string{},
-			checkNotEmpty: false,
-			err:           nil,
+			name:               "alpine:3.19.1 without medium vulnerabilities",
+			image:              "alpine:3.19.1",
+			ignoredLen:         0,
+			severityExceptions: []string{"MEDIUM"},
+			filteredLen:        0,
 		},
 		{
-			name:          "With exceptions",
-			image:         image,
-			exceptions:    []string{"CVE-2023-6879", "CVE-2023-45853"},
-			checkNotEmpty: true,
-			err:           nil,
+			name:                    "nginx:1.25.3",
+			image:                   "nginx:1.25.3",
+			vulnerabilityExceptions: []string{"CVE-2023-6879", "CVE-2023-45853", "CVE-2023-49463"},
+			ignoredLen:              3,
+			severityExceptions:      []string{"HIGH", "MEDIUM"},
+			filteredLen:             86,
+		},
+		{
+			name:                    "nginx:1.25.3 with invalid vulnerability and severity exceptions",
+			image:                   "nginx:1.25.3",
+			vulnerabilityExceptions: []string{"invalid-cve", "CVE-2023-45853", "CVE-2023-49463"},
+			ignoredLen:              2,
+			severityExceptions:      []string{"CRITICAL", "MEDIUM", "invalid-severity"},
+			filteredLen:             100,
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			scanResults, err := svc.Scan(ctx, tc.image, creds, tc.exceptions, nil)
+			store, status, dbCloser, err := NewVulnerabilityDB(svc.dbCfg, true)
+			assert.NoError(t, validateDBLoad(err, status))
 
+			packages, pkgContext, _, err := pkg.Provide(tc.image, getProviderConfig(creds))
 			assert.NoError(t, err)
-			assert.IsType(t, &models.PresenterConfig{}, scanResults)
-			if tc.checkNotEmpty {
-				assert.NotEmpty(t, scanResults.IgnoredMatches)
-			} else {
-				assert.Empty(t, scanResults.IgnoredMatches)
+
+			if dbCloser != nil {
+				defer dbCloser.Close()
 			}
+
+			remainingMatches, ignoredMatches, err := getIgnoredMatches(tc.vulnerabilityExceptions, store, packages, pkgContext)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.ignoredLen, len(ignoredMatches))
+
+			filteredMatches := filterMatchesBasedOnSeverity(tc.severityExceptions, *remainingMatches, store)
+			assert.Equal(t, tc.filteredLen, filteredMatches.Count())
 		})
 	}
 }
