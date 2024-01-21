@@ -23,6 +23,7 @@ require (
 	github.com/go-git/go-git/v5 v5.13.0
 	github.com/google/go-containerregistry v0.19.1
 	github.com/google/uuid v1.6.0
+	github.com/johnfercher/go-tree v1.1.0
 	github.com/johnfercher/maroto/v2 v2.2.2
 	github.com/json-iterator/go v1.1.12
 	github.com/jwalton/gchalk v1.3.0
@@ -302,7 +303,6 @@ require (
 	github.com/jinzhu/inflection v1.0.0 // indirect
 	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
-	github.com/johnfercher/go-tree v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/jung-kurt/gofpdf v1.16.2 // indirect
 	github.com/jwalton/go-supportscolor v1.1.0 // indirect
