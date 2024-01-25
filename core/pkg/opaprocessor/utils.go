@@ -112,3 +112,21 @@ var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 	normalizedName, err := cautils.NormalizeImageName(string(aStr))
 	return ast.StringTerm(normalizedName), err
 }
+
+var unauthenticatedServiceDeclaration = &rego.Function{
+	Name:    "networkscanner.unauthenticated_service",
+	Decl:    types.NewFunction(types.Args(types.S), types.B),
+	Memoize: true,
+}
+
+var unauthenticatedServiceDefinition = func(bctx rego.BuiltinContext, a, b *ast.Term) (*ast.Term, error) {
+	aStr, err := builtins.StringOperand(a.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+	bStr, err := builtins.StringOperand(b.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+	return ast.BooleanTerm(isUnauthenticatedService(string(aStr), string(bStr))), nil
+}
