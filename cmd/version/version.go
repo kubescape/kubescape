@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/spf13/cobra"
 )
 
@@ -15,8 +15,8 @@ func GetVersionCmd() *cobra.Command {
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.TODO()
-			v := cautils.NewIVersionCheckHandler(ctx)
-			versionCheckRequest := cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", "version")
+			v := versioncheck.NewIVersionCheckHandler(ctx)
+			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "version", nil)
 			v.CheckLatestVersion(ctx, versionCheckRequest)
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"Your current version is: %s\n",

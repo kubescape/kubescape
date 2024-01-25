@@ -9,11 +9,11 @@ import (
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/kubescape/backend/pkg/utils"
+	"github.com/kubescape/backend/pkg/versioncheck"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/httphandler/config"
 	_ "github.com/kubescape/kubescape/v3/httphandler/docs"
@@ -41,7 +41,7 @@ func main() {
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubescape",
-			os.Getenv(cautils.BuildNumber),
+			os.Getenv(versioncheck.BuildNumber),
 			config.GetAccount(),
 			clusterName,
 			url.URL{Host: otelHost})

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/armosec/utils-go/boolutils"
+	"github.com/kubescape/backend/pkg/versioncheck"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -63,8 +64,8 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	ks := core.NewKubescape()
 
 	spanScan.AddEvent("scanning metadata",
-		trace.WithAttributes(attribute.String("version", cautils.BuildNumber)),
-		trace.WithAttributes(attribute.String("build", cautils.Client)),
+		trace.WithAttributes(attribute.String("version", versioncheck.BuildNumber)),
+		trace.WithAttributes(attribute.String("build", versioncheck.Client)),
 		trace.WithAttributes(attribute.String("scanID", scanInfo.ScanID)),
 		trace.WithAttributes(attribute.Bool("scanAll", scanInfo.ScanAll)),
 		trace.WithAttributes(attribute.Bool("HostSensorEnabled", scanInfo.HostSensorEnabled.GetBool())),
