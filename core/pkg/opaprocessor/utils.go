@@ -114,7 +114,7 @@ var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 }
 
 var unauthenticatedServiceDeclaration = &rego.Function{
-	Name:    "networkscanner.unauthenticated_service",
+	Name:    "networkscanner.isUnauthenticatedService",
 	Decl:    types.NewFunction(types.Args(types.S, types.A), types.B),
 	Memoize: true,
 }
