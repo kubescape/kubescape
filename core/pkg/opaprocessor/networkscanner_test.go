@@ -1,6 +1,7 @@
 package opaprocessor
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
@@ -18,11 +19,18 @@ func TestIsUnauthenticatedService(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Get the port as an integer
+	port, err := strconv.Atoi(s.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// rego input
 	type args struct {
 		host string
-		port string
+		port int
 	}
+
 	tests := []struct {
 		name     string
 		args     args
@@ -33,7 +41,7 @@ func TestIsUnauthenticatedService(t *testing.T) {
 			"Unauthenticated service",
 			args{
 				host: s.Host(),
-				port: s.Port(),
+				port: port,
 			},
 			true,
 			assert.True,
@@ -42,7 +50,7 @@ func TestIsUnauthenticatedService(t *testing.T) {
 			"Authenticated service",
 			args{
 				host: s.Host(),
-				port: s.Port(),
+				port: port,
 			},
 			false,
 			assert.False,

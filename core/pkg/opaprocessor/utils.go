@@ -115,18 +115,24 @@ var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 
 var unauthenticatedServiceDeclaration = &rego.Function{
 	Name:    "networkscanner.isUnauthenticatedService",
-	Decl:    types.NewFunction(types.Args(types.S, types.A), types.B),
+	Decl:    types.NewFunction(types.Args(types.S, types.N), types.B),
 	Memoize: true,
 }
 
 var unauthenticatedServiceDefinition = func(bctx rego.BuiltinContext, a, b *ast.Term) (*ast.Term, error) {
-	aStr, err := builtins.StringOperand(a.Value, 1)
+	service, err := builtins.StringOperand(a.Value, 1)
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
-	bStr, err := builtins.StringOperand(b.Value, 1)
+	bNum, err := builtins.NumberOperand(b.Value, 1)
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
-	return ast.BooleanTerm(isUnauthenticatedService(string(aStr), string(bStr))), nil
+
+	portNumber, ok := bNum.Int()
+	if !ok {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+
+	return ast.BooleanTerm(isUnauthenticatedService(string(service), portNumber)), nil
 }
