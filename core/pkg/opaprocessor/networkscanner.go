@@ -24,7 +24,7 @@ func isUnauthenticatedService(host string, port int, namespace string) bool {
 		return false
 	}
 
-	if !discoveryResults.IsAuthenticated {
+	if !discoveryResults.IsAuthenticated && discoveryResults.ApplicationLayer != "" {
 		return true
 	}
 
