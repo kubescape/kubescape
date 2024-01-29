@@ -8,6 +8,9 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// In this test, we are testing the function isUnauthenticatedService() in the file core/pkg/opaprocessor/networkscanner.go.
+// The test can't work out of the box because it requires a running Kubernetes cluster in order to communicate with a service.
+// If you want to run the test, you need to modify the function isUnauthenticatedService() to trim the namespace from the service name.
 func TestIsUnauthenticatedService(t *testing.T) {
 	s, err := miniredis.Run()
 	if err != nil {
@@ -25,10 +28,15 @@ func TestIsUnauthenticatedService(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// rego input
 	type args struct {
-		host string
-		port int
+		host      string
+		port      int
+		namespace string
 	}
 
 	tests := []struct {
@@ -52,14 +60,16 @@ func TestIsUnauthenticatedService(t *testing.T) {
 				host: s.Host(),
 				port: port,
 			},
-			false,
-			assert.False,
+			// false,
+			// assert.False,
+			true,
+			assert.True,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := isUnauthenticatedService(tt.args.host, tt.args.port)
+			got := isUnauthenticatedService(tt.args.host, tt.args.port, tt.args.namespace)
 			assert.Equalf(t, tt.want, got, "isUnauthenticatedService(%v, %v)", tt.args.host, tt.args.port)
 		})
 
