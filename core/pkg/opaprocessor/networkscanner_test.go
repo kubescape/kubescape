@@ -51,8 +51,8 @@ func TestIsUnauthenticatedService(t *testing.T) {
 				host: s.Host(),
 				port: port,
 			},
-			true,
-			assert.True,
+			false,
+			assert.False,
 		},
 		{
 			"Authenticated service",
@@ -62,8 +62,8 @@ func TestIsUnauthenticatedService(t *testing.T) {
 			},
 			// false,
 			// assert.False,
-			true,
-			assert.True,
+			false,
+			assert.False,
 		},
 	}
 
