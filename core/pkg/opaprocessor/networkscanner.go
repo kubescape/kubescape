@@ -12,7 +12,10 @@ const (
 
 // Check if the service is unauthenticated using kubescape-network-scanner.
 func isUnauthenticatedService(host string, port int, namespace string) bool {
-	// Concatenate host and namespace to get the service name.
+	if namespace == "kube-system" {
+		return false
+	}
+
 	if namespace == "" {
 		namespace = "default"
 	}
