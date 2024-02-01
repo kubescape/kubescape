@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	logger "github.com/kubescape/go-logger"
 	servicediscovery "github.com/kubescape/kubescape-network-scanner/cmd"
 )
 
@@ -42,6 +43,7 @@ func isUnauthenticatedService(host string, port int, namespace string) bool {
 	case result := <-results:
 		return result
 	case <-time.After(Timeout):
+		logger.L().Error(fmt.Sprintf("Timeout while scanning service: %s", k8sService))
 		return false
 	}
 }
