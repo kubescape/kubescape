@@ -32,7 +32,7 @@ var scanCmdExamples = fmt.Sprintf(`
   %[1]s scan --kube-context <kubernetes context>
 `, cautils.ExecName())
 
-func GetScanCommand(ks meta.IKubescape) *cobra.Command {
+func GetScanCommand(ks meta.IKubescape, sensitiveKeyNamesAllowed []string) *cobra.Command {
 	var scanInfo cautils.ScanInfo
 
 	// scanCmd represents the scan command
