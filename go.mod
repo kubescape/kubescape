@@ -29,7 +29,6 @@ require (
 	github.com/kubescape/opa-utils v0.0.273
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary v1.0.300
-	github.com/libgit2/git2go/v33 v33.0.9
 	github.com/maruel/natural v1.1.1
 	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
 	github.com/mattn/go-isatty v0.0.19
@@ -447,8 +446,6 @@ require (
 	sigs.k8s.io/structured-merge-diff/v4 v4.3.0 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
 )
-
-replace github.com/libgit2/git2go/v33 => ./git2go
 
 replace (
 	// Using the forked version of tablewriter
