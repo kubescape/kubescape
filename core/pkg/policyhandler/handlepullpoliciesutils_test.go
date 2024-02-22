@@ -89,6 +89,8 @@ func TestPolicyDownloadError(t *testing.T) {
 	tests := []struct {
 		err  error
 		want error
+		name string
+		kind string
 	}{
 		{
 			err:  errors.New("Some error"),
@@ -98,11 +100,31 @@ func TestPolicyDownloadError(t *testing.T) {
 			err:  errors.New("unsupported protocol scheme"),
 			want: fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag"),
 		},
+		{
+			err:  errors.New("framework 'cis' not found"),
+			want: fmt.Errorf("framework 'cis' not found, run `kubescape list frameworks` for available frameworks"),
+			name: "cis",
+			kind: "framework",
+		},
+		{
+			err:  errors.New("control 'c-0005' not found"),
+			want: fmt.Errorf("control 'c-0005' not found, run `kubescape list controls` for available controls"),
+			name: "c-0005",
+			kind: "control",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run("", func(t *testing.T) {
-			assert.Equal(t, tt.want, policyDownloadError(tt.err))
+			switch tt.kind {
+			case "framework":
+				assert.Equal(t, tt.want, frameworkDownloadError(tt.err, tt.name))
+			case "control":
+				assert.Equal(t, tt.want, controlDownloadError(tt.err, tt.name))
+			default:
+				assert.Equal(t, tt.want, frameworkDownloadError(tt.err, tt.name))
+				assert.Equal(t, tt.want, controlDownloadError(tt.err, tt.name))
+			}
 		})
 	}
 }
