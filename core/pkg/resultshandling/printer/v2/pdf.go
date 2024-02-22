@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 
 	"github.com/johnfercher/maroto/pkg/color"
@@ -168,7 +169,7 @@ func (pp *PdfPrinter) printHeader(m pdf.Maroto) {
 // printFramework prints the PDF frameworks after the PDF header
 func (pp *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IFrameworkSummary) {
 	m.Row(10, func() {
-		m.Text(frameworksScoresToString(frameworks), props.Text{
+		m.Text(utils.FrameworksScoresToString(frameworks), props.Text{
 			Align:  consts.Center,
 			Size:   8,
 			Family: consts.Arial,

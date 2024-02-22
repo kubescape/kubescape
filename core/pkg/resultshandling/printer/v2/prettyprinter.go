@@ -321,23 +321,6 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	return relatedStr
 }
 
-func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
-	if len(frameworks) == 1 {
-		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("Framework scanned: %s\n", frameworks[0].GetName())
-		}
-	} else if len(frameworks) > 1 {
-		p := "Frameworks scanned: "
-		i := 0
-		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (compliance score: %.2f%%), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
-		}
-		p += fmt.Sprintf("%s (compliance score: %.2f%%)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
-		return p
-	}
-	return ""
-}
-
 func getSeparator(sep string) string {
 	s := ""
 	for i := 0; i < 80; i++ {
