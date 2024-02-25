@@ -102,6 +102,7 @@ type PolicyIdentifier struct {
 }
 
 type ScanInfo struct {
+	SensitiveKeyNamesAllowed []string
 	Getters                                            // TODO - remove from object
 	PolicyIdentifier      []PolicyIdentifier           // TODO - remove from object
 	UseExceptions         string                       // Load file with exceptions configuration
