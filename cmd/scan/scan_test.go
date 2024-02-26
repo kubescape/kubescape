@@ -216,7 +216,7 @@ func (l *spyLogger) GetSpiedItems() []spyLogMessage {
 }
 
 func Test_terminateOnExceedingSeverity(t *testing.T) {
-	expectedMessage := "result exceeds severity threshold"
+	expectedMessage := "compliance result exceeds severity threshold"
 	expectedKey := "set severity threshold"
 
 	testCases := []struct {
