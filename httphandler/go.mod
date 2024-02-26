@@ -5,7 +5,7 @@ go 1.21
 replace github.com/kubescape/kubescape/v3 => ../
 
 require (
-	github.com/armosec/armoapi-go v0.0.256
+	github.com/armosec/armoapi-go v0.0.278
 	github.com/armosec/utils-go v0.0.40
 	github.com/armosec/utils-k8s-go v0.0.23
 	github.com/go-openapi/runtime v0.26.0
