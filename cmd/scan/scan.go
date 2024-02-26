@@ -49,10 +49,12 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				if err := securityScan(scanInfo, ks); err != nil {
 					logger.L().Fatal(err.Error())
 				}
-			} else {
-				if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
-					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
+			} else if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
+				if err := getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...)); err != nil {
+					logger.L().Fatal(err.Error())
 				}
+			} else {
+				return fmt.Errorf("kubescape did not do anything")
 			}
 
 			return nil
