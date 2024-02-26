@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -45,12 +46,15 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				setSecurityViewScanInfo(args, &scanInfo)
 
-				return securityScan(scanInfo, ks)
+				if err := securityScan(scanInfo, ks); err != nil {
+					logger.L().Fatal(err.Error())
+				}
+			} else {
+				if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
+					return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
+				}
 			}
 
-			if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
-				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
-			}
 			return nil
 		},
 		PostRun: func(cmd *cobra.Command, args []string) {
@@ -118,10 +122,11 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
 	if len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
 		scanInfo.InputPatterns = args
+		scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	} else {
 		scanInfo.SetScanType(cautils.ScanTypeCluster)
+		scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 	}
-	scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {

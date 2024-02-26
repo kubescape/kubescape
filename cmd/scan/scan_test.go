@@ -305,15 +305,11 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 				PolicyIdentifier: []cautils.PolicyIdentifier{
 					{
 						Kind:       v1.KindFramework,
-						Identifier: "clusterscan",
+						Identifier: "workloadscan",
 					},
 					{
 						Kind:       v1.KindFramework,
-						Identifier: "mitre",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "nsa",
+						Identifier: "allcontrols",
 					},
 				},
 			},

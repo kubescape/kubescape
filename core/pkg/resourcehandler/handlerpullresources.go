@@ -36,8 +36,8 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, policyI
 	opaSessionObj.ExternalResources = externalResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
 
-	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.ExternalResources == nil || len(opaSessionObj.ExternalResources) == 0) {
-		return fmt.Errorf("empty list of resources")
+	if (opaSessionObj.K8SResources == nil || len(opaSessionObj.K8SResources) == 0) && (opaSessionObj.ExternalResources == nil || len(opaSessionObj.ExternalResources) == 0) || len(opaSessionObj.AllResources) == 0 {
+		return fmt.Errorf("no resources found to scan")
 	}
 
 	return nil

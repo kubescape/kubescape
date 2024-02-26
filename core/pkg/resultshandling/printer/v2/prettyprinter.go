@@ -32,15 +32,15 @@ const (
 var _ printer.IPrinter = &PrettyPrinter{}
 
 type PrettyPrinter struct {
+	mainPrinter     prettyprinter.MainPrinter
 	writer          *os.File
 	formatVersion   string
 	viewType        cautils.ViewTypes
+	scanType        cautils.ScanTypes
+	clusterName     string
+	inputPatterns   []string
 	verboseMode     bool
 	printAttackTree bool
-	scanType        cautils.ScanTypes
-	inputPatterns   []string
-	mainPrinter     prettyprinter.MainPrinter
-	clusterName     string
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string) *PrettyPrinter {
@@ -165,9 +165,11 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 }
 
 func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
-	if pp.scanType == cautils.ScanTypeCluster || pp.scanType == cautils.ScanTypeRepo {
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nKubescape security posture overview for cluster: %s\n\n", pp.clusterName))
+	if pp.scanType == cautils.ScanTypeCluster {
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName))
 		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
+	} else if pp.scanType == cautils.ScanTypeRepo {
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", ")))
 	} else if pp.scanType == cautils.ScanTypeWorkload {
 		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
 		ns := opaSessionObj.SingleResourceScan.GetNamespace()

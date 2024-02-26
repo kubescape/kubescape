@@ -45,6 +45,9 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
 			workloadIDToSource, workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.ChartPath, scanInfo.FilePath)
+			if err != nil {
+				// We should probably ignore the error so we can continue scanning other charts
+			}
 		} else {
 			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path])
 			if err != nil {
@@ -52,7 +55,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 			}
 		}
 		if len(workloads) == 0 {
-			logger.L().Debug("path ignored because contains only a non-kubernetes file", helpers.String("path", scanInfo.InputPatterns[path]))
+			continue
 		}
 
 		for k, v := range workloadIDToSource {
