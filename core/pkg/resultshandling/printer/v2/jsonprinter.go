@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype/presenter"
 	"github.com/anchore/grype/grype/presenter/models"
 	logger "github.com/kubescape/go-logger"
@@ -70,7 +71,7 @@ func (jp *JsonPrinter) convertToImageScanSummary(imageScanData []cautils.ImageSc
 		}
 
 		presenterConfig := imageScanData[i].PresenterConfig
-		doc, err := models.NewDocument(presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
+		doc, err := models.NewDocument(clio.Identification{}, presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
 		if err != nil {
 			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
 			continue
