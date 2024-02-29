@@ -62,27 +62,3 @@ jobs:
       TAG: ${{ needs.retag.outputs.NEW_TAG }}
       DRAFT: false
     secrets: inherit
-  publish-image:
-    permissions:
-      actions: read
-      checks: read
-      contents: read
-      deployments: read
-      discussions: read
-      id-token: write
-      issues: read
-      packages: write
-      pages: read
-      pull-requests: read
-      repository-projects: read
-      security-events: read
-      statuses: read
-    uses: ./.github/workflows/d-publish-image.yaml
-    needs: [create-release, retag]
-    with:
-      client: "image-release"
-      image_name: "quay.io/${{ github.repository_owner }}/kubescape-cli"
-      image_tag: ${{ needs.retag.outputs.NEW_TAG }}
-      support_platforms: true
-      cosign: true
-    secrets: inherit
