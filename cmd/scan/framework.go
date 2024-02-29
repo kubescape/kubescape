@@ -178,7 +178,7 @@ func countersExceedSeverityThreshold(severityCounters reportsummary.ISeverityCou
 
 // terminateOnExceedingSeverity terminates the application on exceeding severity
 func terminateOnExceedingSeverity(scanInfo *cautils.ScanInfo, l helpers.ILogger) {
-	l.Fatal("result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
+	l.Fatal("compliance result exceeds severity threshold", helpers.String("set severity threshold", scanInfo.FailThresholdSeverity))
 }
 
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold

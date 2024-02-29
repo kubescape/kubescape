@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"github.com/adrg/xdg"
+	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db"
 	"github.com/anchore/grype/grype/grypeerr"
@@ -23,7 +24,7 @@ import (
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/anchore/syft/syft/pkg/cataloger"
+	"github.com/anchore/syft/cmd/syft/cli/options"
 )
 
 const (
@@ -92,16 +93,36 @@ func validateDBLoad(loadErr error, status *db.Status) error {
 	return nil
 }
 
+type packagesOptions struct {
+	options.Output      `yaml:",inline" mapstructure:",squash"`
+	options.Config      `yaml:",inline" mapstructure:",squash"`
+	options.Catalog     `yaml:",inline" mapstructure:",squash"`
+	options.UpdateCheck `yaml:",inline" mapstructure:",squash"`
+}
+
+func defaultPackagesOptions() *packagesOptions {
+	defaultCatalogOpts := options.DefaultCatalog()
+
+	// TODO(matthyx): assess this value
+	defaultCatalogOpts.Parallelism = 4
+
+	return &packagesOptions{
+		Output:      options.DefaultOutput(),
+		UpdateCheck: options.DefaultUpdateCheck(),
+		Catalog:     defaultCatalogOpts,
+	}
+}
+
 func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 	syftCreds := []image.RegistryCredentials{{Username: creds.Username, Password: creds.Password}}
 	regOpts := &image.RegistryOptions{
 		Credentials: syftCreds,
 	}
-	catOpts := cataloger.DefaultConfig()
+	syftOpts := defaultPackagesOptions()
 	pc := pkg.ProviderConfig{
 		SyftProviderConfig: pkg.SyftProviderConfig{
-			RegistryOptions:   regOpts,
-			CatalogingOptions: catOpts,
+			RegistryOptions: regOpts,
+			SBOMOptions:     syftOpts.Catalog.ToSBOMConfig(clio.Identification{}),
 		},
 		SynthesisConfig: pkg.SynthesisConfig{
 			GenerateMissingCPEs: true,

@@ -216,7 +216,7 @@ func (l *spyLogger) GetSpiedItems() []spyLogMessage {
 }
 
 func Test_terminateOnExceedingSeverity(t *testing.T) {
-	expectedMessage := "result exceeds severity threshold"
+	expectedMessage := "compliance result exceeds severity threshold"
 	expectedKey := "set severity threshold"
 
 	testCases := []struct {
@@ -305,15 +305,11 @@ func TestSetSecurityViewScanInfo(t *testing.T) {
 				PolicyIdentifier: []cautils.PolicyIdentifier{
 					{
 						Kind:       v1.KindFramework,
-						Identifier: "clusterscan",
+						Identifier: "workloadscan",
 					},
 					{
 						Kind:       v1.KindFramework,
-						Identifier: "mitre",
-					},
-					{
-						Kind:       v1.KindFramework,
-						Identifier: "nsa",
+						Identifier: "allcontrols",
 					},
 				},
 			},

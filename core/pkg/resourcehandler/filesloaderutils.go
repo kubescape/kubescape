@@ -9,7 +9,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 )
 
@@ -17,20 +16,23 @@ import (
 func cloneGitRepo(path *string) (string, error) {
 	var clonedDir string
 
-	// Clone git repository if needed
 	gitURL, err := giturl.NewGitAPI(*path)
-	if err == nil {
-		logger.L().Info("cloning", helpers.String("repository url", gitURL.GetURL().String()))
-		cautils.StartSpinner()
-		clonedDir, err = cloneRepo(gitURL)
-		cautils.StopSpinner()
-		if err != nil {
-			return "", fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
-		}
-
-		*path = filepath.Join(clonedDir, gitURL.GetPath())
-
+	if err != nil {
+		return "", nil
 	}
+
+	// Clone git repository if needed
+	logger.L().Start("cloning", helpers.String("repository url", gitURL.GetURL().String()))
+
+	clonedDir, err = cloneRepo(gitURL)
+	if err != nil {
+		logger.L().StopError("failed to clone git repo", helpers.String("url", gitURL.GetURL().String()), helpers.Error(err))
+		return "", fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
+	}
+
+	*path = filepath.Join(clonedDir, gitURL.GetPath())
+	logger.L().StopSuccess("Done accessing local objects")
+
 	return clonedDir, nil
 }
 
