@@ -69,18 +69,18 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 			expression := fmt.Sprintf(lineExpression, index)
 			output, err := getYamlLineInfo(expression, fileContent)
 			if err != nil {
-				return nil, fmt.Errorf("getYamlLineInfo wrong, the err is %s\n", err.Error())
+				return nil, fmt.Errorf("getYamlLineInfo wrong, the err is %s", err.Error())
 			}
 
 			path := extractParameter(pathRe, output, "$path")
 			//if path is empty, continue
 			if path != "" && path != "\"\"" {
 				if isApiVersionEmpty || isKindEmpty {
-					return nil, fmt.Errorf("There is no enough objectID info")
+					return nil, fmt.Errorf("there is no enough objectID info")
 				}
 				splits := strings.Split(output, "dest")
 				if len(splits) < 2 {
-					return nil, fmt.Errorf("Something wrong with the length of the splits, which is %d", len(splits))
+					return nil, fmt.Errorf("something wrong with the length of the splits, which is %d", len(splits))
 				} else {
 					// cut the redundant one
 					splits = splits[1:]
@@ -127,7 +127,7 @@ func writeNoteToMapping(split string, lastNumber int, path string, fileName stri
 	if _, ok := mappingNodes.Nodes[path]; !ok {
 		mappingNodes.Nodes[path] = *node
 	} else {
-		return 0, fmt.Errorf("isMapType: %v, %s in mapping.Nodes exists, err: %s", isMapType, path, err.Error())
+		return 0, fmt.Errorf("isMapType: %v, %s in mapping.Nodes exists", isMapType, path)
 	}
 	return newlastNumber, nil
 }
@@ -197,7 +197,7 @@ func exectuateYq(expression string, yamlContent string) (string, error) {
 func extractApiVersion(line string, objectID *ObjectID) (bool, error) {
 	apiVersion := extractParameter(apiVersionRe, line, "$apiVersion")
 	if apiVersion == "" {
-		return true, fmt.Errorf("Something wrong when extracting the apiVersion, the line is %s\n", line)
+		return true, fmt.Errorf("something wrong when extracting the apiVersion, the line is %s", line)
 	}
 	objectID.apiVersion = apiVersion
 	return false, nil
@@ -206,7 +206,7 @@ func extractApiVersion(line string, objectID *ObjectID) (bool, error) {
 func extractKind(line string, objectID *ObjectID) (bool, error) {
 	kind := extractParameter(kindRe, line, "$kind")
 	if kind == "" {
-		return true, fmt.Errorf("Something wrong when extracting the kind, the line is %s\n", line)
+		return true, fmt.Errorf("something wrong when extracting the kind, the line is %s", line)
 	}
 	objectID.kind = kind
 	return false, nil
