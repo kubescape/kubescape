@@ -160,14 +160,18 @@ func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 	return paths
 }
 
-func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+func fixPathsToString(control *resourcesresults.ResourceAssociatedControl, onlyPath bool) []string {
 	var paths []string
 
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {
 			if p := control.ResourceAssociatedRules[j].Paths[k].FixPath.Path; p != "" {
-				v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
-				paths = append(paths, fmt.Sprintf("%s=%s", p, v))
+				if onlyPath {
+					paths = append(paths, p)
+				} else {
+					v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
+					paths = append(paths, fmt.Sprintf("%s=%s", p, v))
+				}
 			}
 		}
 	}
@@ -201,7 +205,7 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 }
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
-	paths := append(fixPathsToString(control), append(deletePathsToString(control), reviewPathsToString(control)...)...)
+	paths := append(fixPathsToString(control, false), append(deletePathsToString(control), reviewPathsToString(control)...)...)
 	// TODO - deprecate failedPaths once all controls support review/delete paths
 	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
 	return paths

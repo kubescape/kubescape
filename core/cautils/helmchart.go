@@ -3,7 +3,6 @@ package cautils
 import (
 	"fmt"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -48,15 +47,15 @@ func (hc *HelmChart) GetDefaultValues() map[string]interface{} {
 }
 
 // GetWorkloads renders chart template using the default values and returns a map of source file to its workloads
-func (hc *HelmChart) GetWorkloadsWithDefaultValues() (map[string][]workloadinterface.IMetadata, []error) {
+func (hc *HelmChart) GetWorkloadsWithDefaultValues() (map[string][]workloadinterface.IMetadata, map[string]MappingNodes, []error) {
 	return hc.GetWorkloads(hc.GetDefaultValues())
 }
 
 // GetWorkloads renders chart template using the provided values and returns a map of source (absolute) file path to its workloads
-func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]workloadinterface.IMetadata, []error) {
+func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]workloadinterface.IMetadata, map[string]MappingNodes, []error) {
 	vals, err := helmchartutil.ToRenderValues(hc.chart, values, helmchartutil.ReleaseOptions{}, nil)
 	if err != nil {
-		return nil, []error{err}
+		return nil, nil, []error{err}
 	}
 
 	// change the chart to template with comment, only is template(.yaml added otherwise no)
@@ -64,14 +63,14 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 
 	sourceToFile, err := helmengine.Render(hc.chart, vals)
 	if err != nil {
-		return nil, []error{err}
+		return nil, nil, []error{err}
 	}
 
 	// get the resouse and analysis and store it to the struct
-	fileMapping := NewFileMapping()
+	fileMapping := make(map[string]MappingNodes)
 	err = GetTemplateMapping(sourceToFile, fileMapping)
 	if err != nil {
-		return nil, []error{err}
+		return nil, nil, []error{err}
 	}
 
 	// delete the comment from chart and from sourceToFile
@@ -95,6 +94,11 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		if firstPathSeparatorIndex := strings.Index(path, string("/")); firstPathSeparatorIndex != -1 {
 			absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
 
+			if nodes, ok := fileMapping[path]; ok {
+				fileMapping[absPath] = nodes
+				delete(fileMapping, path)
+			}
+
 			workloads[absPath] = []workloadinterface.IMetadata{}
 			for i := range wls {
 				lw := localworkload.NewLocalWorkload(wls[i].GetObject())
@@ -103,7 +107,7 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 			}
 		}
 	}
-	return workloads, errs
+	return workloads, fileMapping, errs
 }
 
 func (hc *HelmChart) AddCommentToTemplate() {
@@ -124,7 +128,7 @@ func (hc *HelmChart) AddCommentToTemplate() {
 }
 
 func RemoveComment(sourceToFile map[string]string) {
-	commentRe := regexp.MustCompile(CommentFormat)
+	// commentRe := regexp.MustCompile(CommentFormat)
 	for fileName, file := range sourceToFile {
 		if !IsYaml(strings.ToLower((fileName))) {
 			continue
@@ -133,14 +137,16 @@ func RemoveComment(sourceToFile map[string]string) {
 	}
 }
 
-func GetTemplateMapping(sourceToFile map[string]string, fileMapping *FileMapping) error {
+func GetTemplateMapping(sourceToFile map[string]string, fileMapping map[string]MappingNodes) error {
 	for fileName, fileContent := range sourceToFile {
 		mappingNodes, err := GetMapping(fileName, fileContent)
 		if err != nil {
 			err = fmt.Errorf("GetMapping wrong, err: %s", err.Error())
 			return err
 		}
-		fileMapping.Mapping[fileName] = mappingNodes
+		if len(mappingNodes.Nodes) != 0 {
+			fileMapping[fileName] = *mappingNodes
+		}
 	}
 	return nil
 }

@@ -8,7 +8,9 @@ import (
 	"strconv"
 	"strings"
 
+	logger "github.com/kubescape/go-logger"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
+	"gopkg.in/op/go-logging.v1"
 )
 
 const (
@@ -21,14 +23,15 @@ var pathRe = regexp.MustCompile(`path: (?P<path>\S*)`)
 var typeRe = regexp.MustCompile(`type: '(?P<type>\S*)'`)
 var valueRe = regexp.MustCompile(`value: (?P<value>\[.+\]|\S*)`)
 var commentRe = regexp.MustCompile(CommentFormat)
+var seqRe = regexp.MustCompile(`.(?P<number>\d+)(?P<point>\.?)`)
+var newSeqRe = "[${number}]${point}"
 
 // change to use go func
 func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 
 	node := new(MappingNode)
 	objectID := new(ObjectID)
-	mappingNodes := new(MappingNodes)
-	// mappingNodes := NewMappingNodes()
+	mappingNodes := NewMappingNodes()
 	mappingNodes.TemplateFileName = fileName
 
 	lines := strings.Split(fileContent, "\n")
@@ -38,39 +41,41 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 
 	isApiVersionEmpty := true
 	isKindEmpty := true
+	var err error
+
+	var lineExpression = `..| select(line == %d)| {"destpath": path | join("."),"type": type,"value": .}`
 
 	for i, line := range lines {
 		index := i
 		if apiVersionRe.MatchString(line) {
-			apiVersion := extractParameter(apiVersionRe, line, "$apiVersion")
-			if apiVersion == "" {
-				err := fmt.Errorf("Something wrong when extracting the apiVersion, the line is %s\n", line)
+			isApiVersionEmpty, err = extractApiVersion(line, objectID)
+			if err != nil {
+				err := fmt.Errorf("extractApiVersion error: err, %s", err.Error())
 				return nil, err
 			}
-			objectID.apiVersion = apiVersion
-			isApiVersionEmpty = false
 			if reducedNumber == -1 {
 				reducedNumber = index + reducedNumber
 			}
 			continue
 		} else if kindRe.MatchString(line) {
-			kind := extractParameter(kindRe, line, "$kind")
-			if kind == "" {
-				err := fmt.Errorf("Something wrong when extracting the kind, the line is %s\n", line)
+			isKindEmpty, err = extractKind(line, objectID)
+			if err != nil {
+				err := fmt.Errorf("extractKind error: err, %s", err.Error())
 				return nil, err
 			}
-			objectID.kind = kind
-			isKindEmpty = false
 			continue
-		} else if isApiVersionEmpty == false || isKindEmpty == false {
+		}
+
+		if isApiVersionEmpty == false || isKindEmpty == false {
 			// not sure if it can go to the end
 			index = index - reducedNumber
-			output, err := getYamlLineInfo(index, fileContent)
+			expression := fmt.Sprintf(lineExpression, index)
+			output, err := getYamlLineInfo(expression, fileContent)
 			if err != nil {
 				err := fmt.Errorf("getYamlLineInfo wrong, the err is %s\n", err.Error())
 				return nil, err
 			}
-			// fmt.Println(output)
+
 			path := extractParameter(pathRe, output, "$path")
 			//if path is empty, continue
 			if path != "" && path != "\"\"" {
@@ -85,31 +90,10 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 				} else {
 					// cut the redundant one
 					splits = splits[1:]
-					for _, split := range splits {
-						path := extractParameter(pathRe, split, "$path")
-						pathType := extractParameter(typeRe, split, "$type")
-						mapMatched, err := regexp.MatchString(`!!map`, pathType)
-						if err != nil {
-							err = fmt.Errorf("regexp.MatchString err: %s", err.Error())
-						}
-						if mapMatched {
-							newlastNumber, err := writeNodeInfo(split, lastNumber, path, fileName, node, objectID, true)
-							lastNumber = newlastNumber
-							if err != nil {
-								err = fmt.Errorf("map type: writeNodeInfo wrong err: %s", err.Error())
-								return nil, err
-							}
-							mappingNodes.Nodes = append(mappingNodes.Nodes, *node)
-						} else {
-							newlastNumber, err := writeNodeInfo(split, lastNumber, path, fileName, node, objectID, false)
-							lastNumber = newlastNumber
-							if err != nil {
-								err = fmt.Errorf("not map type: writeNodeInfo wrong err: %s", err.Error())
-								return nil, err
-							}
-							mappingNodes.Nodes = append(mappingNodes.Nodes, *node)
-						}
-
+					lastNumber, err = writeNodes(splits, lastNumber, fileName, node, objectID, mappingNodes)
+					if err != nil {
+						err = fmt.Errorf("writeNodes err: %s", err.Error())
+						return nil, err
 					}
 				}
 			}
@@ -119,8 +103,45 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 	return mappingNodes, nil
 }
 
-func New(MappingNodes MappingNodes) {
-	panic("unimplemented")
+func writeNodes(splits []string, lastNumber int, fileName string, node *MappingNode, objectID *ObjectID, mappingNodes *MappingNodes) (int, error) {
+	for _, split := range splits {
+		path := extractPath(split)
+		mapMatched, err := extractMapType(split)
+		if err != nil {
+			err = fmt.Errorf("extractMapType err: %s", err.Error())
+			return -1, err
+		}
+		if mapMatched {
+			lastNumber, err = writeNoteToMapping(split, lastNumber, path, fileName, node, objectID, true, mappingNodes)
+			if err != nil {
+				err = fmt.Errorf("map type: writeNoteToMapping, err: %s", err.Error())
+				return -1, err
+			}
+
+		} else {
+			lastNumber, err = writeNoteToMapping(split, lastNumber, path, fileName, node, objectID, false, mappingNodes)
+			if err != nil {
+				err = fmt.Errorf("not map type: writeNoteToMapping, err: %s", err.Error())
+				return -1, err
+			}
+		}
+	}
+	return lastNumber, nil
+}
+
+func writeNoteToMapping(split string, lastNumber int, path string, fileName string, node *MappingNode, objectID *ObjectID, isMapType bool, mappingNodes *MappingNodes) (int, error) {
+	newlastNumber, err := writeNodeInfo(split, lastNumber, path, fileName, node, objectID, isMapType)
+	if err != nil {
+		err = fmt.Errorf("isMapType: %v, writeNodeInfo wrong err: %s", isMapType, err.Error())
+		return 0, err
+	}
+	if _, ok := mappingNodes.Nodes[path]; !ok {
+		mappingNodes.Nodes[path] = *node
+	} else {
+		err = fmt.Errorf("isMapType: %v, %s in mapping.Nodes exists, err: %s", isMapType, path, err.Error())
+		return 0, err
+	}
+	return newlastNumber, nil
 }
 
 func writeNodeInfo(split string, lastNumber int, path string, fileName string, node *MappingNode, objectID *ObjectID, isMapType bool) (int, error) {
@@ -129,9 +150,9 @@ func writeNodeInfo(split string, lastNumber int, path string, fileName string, n
 		err = fmt.Errorf("getInfoFromOne wrong err: %s", err.Error())
 		return -1, err
 	}
-	lastNumber = newLastNumber
+	// lastNumber = newLastNumber
 	node.writeInfoToNode(objectID, path, lineNumber, value, fileName)
-	return lastNumber, nil
+	return newLastNumber, nil
 }
 
 func getInfoFromOne(output string, lastNumber int, isMapType bool) (value string, lineNumber int, newLastNumber int, err error) {
@@ -160,8 +181,7 @@ func getInfoFromOne(output string, lastNumber int, isMapType bool) (value string
 	return value, lineNumber, newLastNumber, nil
 }
 
-func getYamlLineInfo(index int, yamlFile string) (string, error) {
-	expression := `..| select(line == ` + strconv.Itoa(index) + `)| {"destpath": path | join("."),"type": type,"value": .}`
+func getYamlLineInfo(expression string, yamlFile string) (string, error) {
 	out, err := exectuateYq(expression, yamlFile)
 	if err != nil {
 		err = fmt.Errorf("exectuateYq err: %s", err.Error())
@@ -171,6 +191,10 @@ func getYamlLineInfo(index int, yamlFile string) (string, error) {
 }
 
 func exectuateYq(expression string, yamlContent string) (string, error) {
+
+	backendLoggerLeveled := logging.AddModuleLevel(logging.NewLogBackend(logger.L().GetWriter(), "", 0))
+	backendLoggerLeveled.SetLevel(logging.ERROR, "")
+	yqlib.GetLogger().SetBackend(backendLoggerLeveled)
 
 	encoder := configureEncoder()
 
@@ -183,6 +207,42 @@ func exectuateYq(expression string, yamlContent string) (string, error) {
 		return "", errors.New("no matches found")
 	}
 	return out, err
+}
+
+func extractApiVersion(line string, objectID *ObjectID) (bool, error) {
+	apiVersion := extractParameter(apiVersionRe, line, "$apiVersion")
+	if apiVersion == "" {
+		err := fmt.Errorf("Something wrong when extracting the apiVersion, the line is %s\n", line)
+		return true, err
+	}
+	objectID.apiVersion = apiVersion
+	return false, nil
+}
+
+func extractKind(line string, objectID *ObjectID) (bool, error) {
+	kind := extractParameter(kindRe, line, "$kind")
+	if kind == "" {
+		err := fmt.Errorf("Something wrong when extracting the kind, the line is %s\n", line)
+		return true, err
+	}
+	objectID.kind = kind
+	return false, nil
+}
+func extractPath(split string) string {
+	path := extractParameter(pathRe, split, "$path")
+	// For each match of the regex in the content.
+	path = seqRe.ReplaceAllString(path, newSeqRe)
+	return path
+}
+
+func extractMapType(split string) (bool, error) {
+	pathType := extractParameter(typeRe, split, "$type")
+	mapMatched, err := regexp.MatchString(`!!map`, pathType)
+	if err != nil {
+		err = fmt.Errorf("regexp.MatchString err: %s", err.Error())
+		return false, err
+	}
+	return mapMatched, nil
 }
 
 func extractParameter(re *regexp.Regexp, line string, keyword string) string {

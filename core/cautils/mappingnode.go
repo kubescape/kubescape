@@ -14,12 +14,8 @@ type MappingNode struct {
 }
 
 type MappingNodes struct {
-	Nodes            []MappingNode //Map line number of chart to template obj
+	Nodes            map[string]MappingNode //Map line number of chart to template obj map[int]MappingNode
 	TemplateFileName string
-}
-
-type FileMapping struct {
-	Mapping map[string]*MappingNodes
 }
 
 func (node *MappingNode) writeInfoToNode(objectID *ObjectID, path string, lineNumber int, value string, fileName string) {
@@ -31,15 +27,10 @@ func (node *MappingNode) writeInfoToNode(objectID *ObjectID, path string, lineNu
 	return
 }
 
-func NewFileMapping() *FileMapping {
-	fileMapping := new(FileMapping)
-	fileMapping.Mapping = make(map[string]*MappingNodes)
-	return fileMapping
-}
+func NewMappingNodes() *MappingNodes {
+	mappingNodes := new(MappingNodes)
+	mappingNodes.Nodes = make(map[string]MappingNode)
+	mappingNodes.TemplateFileName = ""
+	return mappingNodes
 
-// func NewMappingNodes() *MappingNodes {
-// 	mappingNodes := new(MappingNodes)
-// 	mappingNodes.Nodes = make(map[int]MappingNode)
-// 	mappingNodes.TemplateFileName = ""
-// 	return mappingNodes
-// }
+}
