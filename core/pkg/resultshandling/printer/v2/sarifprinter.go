@@ -190,7 +190,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 	for resourceID, result := range opaSessionObj.ResourcesResult { //
 		if result.GetStatus(nil).IsFailed() {
 			helmChartFileType := false
-			var mappingnodes map[string]cautils.MappingNode
+			var mappingnodes []map[string]cautils.MappingNode
 			resourceSource := opaSessionObj.ResourceSource[resourceID]
 			filepath := resourceSource.RelativePath
 
@@ -220,14 +220,20 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
 					if helmChartFileType {
-						location = resolveFixLocation(mappingnodes, &ac) //
+						for _, subfileNodes := range mappingnodes {
+							// first get the failed path, then if cannot find it, use the Fix path, cui it to find the closest error.
+							location, split := resolveFixLocation(subfileNodes, &ac)
+							sp.addRule(run, ctl)
+							result := sp.addResult(run, ctl, filepath, location)
+							collectFixesFromMappingNodes(ctx, result, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath, location, subfileNodes, split)
+						}
 					} else {
-						location = sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID) //
+						location = sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
+						sp.addRule(run, ctl)
+						result := sp.addResult(run, ctl, filepath, location)
+						collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath)
 					}
-					// first get the failed path, then if cannot find it, use the Fix path, cui it to find the closest error.
-					sp.addRule(run, ctl)
-					result := sp.addResult(run, ctl, filepath, location)
-					collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath, helmChartFileType)
+
 				}
 			}
 		}
@@ -283,14 +289,14 @@ func getFixPath(ac *resourcesresults.ResourceAssociatedControl, onlyPath bool) s
 	return fixPath
 }
 
-func resolveFixLocation(mappingnodes map[string]cautils.MappingNode, ac *resourcesresults.ResourceAssociatedControl) locationresolver.Location {
+func resolveFixLocation(mappingnodes map[string]cautils.MappingNode, ac *resourcesresults.ResourceAssociatedControl) (locationresolver.Location, int) {
 	defaultLocation := locationresolver.Location{Line: 1, Column: 1}
 	fixPath := getFixPath(ac, true)
 	if fixPath == "" {
-		return defaultLocation
+		return defaultLocation, -1
 	}
-	location, _ := getLocationFromMappingNodes(mappingnodes, fixPath)
-	return location
+	location, split := getLocationFromMappingNodes(mappingnodes, fixPath)
+	return location, split
 }
 
 func getLocationFromNode(node cautils.MappingNode, path string) locationresolver.Location {
@@ -401,7 +407,7 @@ func collectDiffs(dmp *diffmatchpatch.DiffMatchPatch, diffs []diffmatchpatch.Dif
 	}
 }
 
-func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string, ishelmChartFileType bool) {
+func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string) {
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
 			continue
@@ -420,33 +426,56 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 			}
 
 			var fixedYamlString string
-			if ishelmChartFileType {
-				templateNodes := opaSessionObj.TemplateMapping[resourceID].Nodes
-				location, split := getLocationFromMappingNodes(templateNodes, fixPath)
-				fixValue := rulePaths.FixPath.Value
-				if split == -1 { //replaceNode
-					node := templateNodes[fixPath]
-					fixedYamlString = formReplaceFixedYamlString(node, fileAsString, location, fixValue, fixPath)
-				} else { //insertNode
-					maxLineNumber := getTheLocationOfAddPart(split, fixPath, templateNodes)
-					fixedYamlString = applyFixToContent(split, fixPath, fileAsString, maxLineNumber, fixValue)
-				}
-			} else {
-				// if strings.HasPrefix(rulePaths.FixPath.Value, fixhandler.UserValuePrefix) {
-				// 	continue
-				// }
-				documentIndex, ok := getDocIndex(opaSessionObj, resourceID)
-				if !ok {
-					continue
-				}
 
-				yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, rulePaths.FixPath.Value, documentIndex)
+			// if strings.HasPrefix(rulePaths.FixPath.Value, fixhandler.UserValuePrefix) {
+			// 	continue
+			// }
+			documentIndex, ok := getDocIndex(opaSessionObj, resourceID)
+			if !ok {
+				continue
+			}
 
-				fixedYamlString, err = fixhandler.ApplyFixToContent(ctx, fileAsString, yamlExpression)
-				if err != nil {
-					logger.L().Debug("failed to fix "+filepath+" with "+yamlExpression, helpers.Error(err))
-					continue
-				}
+			yamlExpression := fixhandler.FixPathToValidYamlExpression(fixPath, rulePaths.FixPath.Value, documentIndex)
+
+			fixedYamlString, err = fixhandler.ApplyFixToContent(ctx, fileAsString, yamlExpression)
+			if err != nil {
+				logger.L().Debug("failed to fix "+filepath+" with "+yamlExpression, helpers.Error(err))
+				continue
+			}
+
+			dmp := diffmatchpatch.New()
+			diffs := dmp.DiffMain(fileAsString, fixedYamlString, false)
+			collectDiffs(dmp, diffs, result, filepath, fileAsString)
+		}
+	}
+}
+
+func collectFixesFromMappingNodes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string, location locationresolver.Location, subFileNodes map[string]cautils.MappingNode, split int) {
+	for _, rule := range ac.ResourceAssociatedRules {
+		if !rule.GetStatus(nil).IsFailed() {
+			continue
+		}
+
+		for _, rulePaths := range rule.Paths {
+			fixPath := rulePaths.FixPath.Path
+			if fixPath == "" {
+				continue
+			}
+
+			fileAsString, err := fixhandler.GetFileString(rsrcAbsPath)
+			if err != nil {
+				logger.L().Debug("failed to access "+filepath, helpers.Error(err))
+				continue
+			}
+
+			var fixedYamlString string
+			fixValue := rulePaths.FixPath.Value
+			if split == -1 { //replaceNode
+				node := subFileNodes[fixPath]
+				fixedYamlString = formReplaceFixedYamlString(node, fileAsString, location, fixValue, fixPath)
+			} else { //insertNode
+				maxLineNumber := getTheLocationOfAddPart(split, fixPath, subFileNodes)
+				fixedYamlString = applyFixToContent(split, fixPath, fileAsString, maxLineNumber, fixValue)
 			}
 
 			dmp := diffmatchpatch.New()

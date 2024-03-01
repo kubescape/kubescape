@@ -24,12 +24,14 @@ var valueRe = regexp.MustCompile(`value: (?P<value>\[.+\]|\S*)`)
 var commentRe = regexp.MustCompile(CommentFormat)
 var seqRe = regexp.MustCompile(`.(?P<number>\d+)(?P<point>\.?)`)
 var newSeqRe = "[${number}]${point}"
+var newFileSeperator = "---"
 
 // change to use go func
 func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 
 	node := new(MappingNode)
 	objectID := new(ObjectID)
+	subFileNodes := make(map[string]MappingNode)
 	mappingNodes := NewMappingNodes()
 	mappingNodes.TemplateFileName = fileName
 
@@ -61,6 +63,13 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 				return nil, fmt.Errorf("extractKind error: err, %s", err.Error())
 			}
 			continue
+		} else if strings.Contains(line, newFileSeperator) { //At least two files in one yaml
+			mappingNodes.Nodes = append(mappingNodes.Nodes, subFileNodes)
+			// Restart a subfileNode
+			isApiVersionEmpty = false
+			isKindEmpty = false
+			subFileNodes = make(map[string]MappingNode)
+			continue
 		}
 
 		if !isApiVersionEmpty || !isKindEmpty {
@@ -84,7 +93,7 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 				} else {
 					// cut the redundant one
 					splits = splits[1:]
-					lastNumber, err = writeNodes(splits, lastNumber, fileName, node, objectID, mappingNodes)
+					lastNumber, err = writeNodes(splits, lastNumber, fileName, node, objectID, subFileNodes)
 					if err != nil {
 						return nil, fmt.Errorf("writeNodes err: %s", err.Error())
 					}
@@ -92,11 +101,15 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 			}
 
 		}
+
+		if i == len(lines)-1 {
+			mappingNodes.Nodes = append(mappingNodes.Nodes, subFileNodes)
+		}
 	}
 	return mappingNodes, nil
 }
 
-func writeNodes(splits []string, lastNumber int, fileName string, node *MappingNode, objectID *ObjectID, mappingNodes *MappingNodes) (int, error) {
+func writeNodes(splits []string, lastNumber int, fileName string, node *MappingNode, objectID *ObjectID, subFileNodes map[string]MappingNode) (int, error) {
 	for _, split := range splits {
 		path := extractPath(split)
 		mapMatched, err := extractMapType(split)
@@ -104,13 +117,13 @@ func writeNodes(splits []string, lastNumber int, fileName string, node *MappingN
 			return -1, fmt.Errorf("extractMapType err: %s", err.Error())
 		}
 		if mapMatched {
-			lastNumber, err = writeNoteToMapping(split, lastNumber, path, fileName, node, objectID, true, mappingNodes)
+			lastNumber, err = writeNoteToMapping(split, lastNumber, path, fileName, node, objectID, true, subFileNodes)
 			if err != nil {
 				return -1, fmt.Errorf("map type: writeNoteToMapping, err: %s", err.Error())
 			}
 
 		} else {
-			lastNumber, err = writeNoteToMapping(split, lastNumber, path, fileName, node, objectID, false, mappingNodes)
+			lastNumber, err = writeNoteToMapping(split, lastNumber, path, fileName, node, objectID, false, subFileNodes)
 			if err != nil {
 				return -1, fmt.Errorf("not map type: writeNoteToMapping, err: %s", err.Error())
 			}
@@ -119,16 +132,17 @@ func writeNodes(splits []string, lastNumber int, fileName string, node *MappingN
 	return lastNumber, nil
 }
 
-func writeNoteToMapping(split string, lastNumber int, path string, fileName string, node *MappingNode, objectID *ObjectID, isMapType bool, mappingNodes *MappingNodes) (int, error) {
+func writeNoteToMapping(split string, lastNumber int, path string, fileName string, node *MappingNode, objectID *ObjectID, isMapType bool, subFileNodes map[string]MappingNode) (int, error) {
 	newlastNumber, err := writeNodeInfo(split, lastNumber, path, fileName, node, objectID, isMapType)
 	if err != nil {
 		return 0, fmt.Errorf("isMapType: %v, writeNodeInfo wrong err: %s", isMapType, err.Error())
 	}
-	if _, ok := mappingNodes.Nodes[path]; !ok {
-		mappingNodes.Nodes[path] = *node
-	} else {
-		return 0, fmt.Errorf("isMapType: %v, %s in mapping.Nodes exists", isMapType, path)
+	if _, ok := subFileNodes[path]; !ok { // Assume the path is unique in one subfile
+		subFileNodes[path] = *node
 	}
+	// else {
+	// 	return 0, fmt.Errorf("isMapType: %v, %s in mapping.Nodes exists", isMapType, path)
+	// }
 	return newlastNumber, nil
 }
 

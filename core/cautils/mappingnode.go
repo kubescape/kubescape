@@ -14,7 +14,7 @@ type MappingNode struct {
 }
 
 type MappingNodes struct {
-	Nodes            map[string]MappingNode //Map line number of chart to template obj map[int]MappingNode
+	Nodes            []map[string]MappingNode //Map line number of chart to template obj map[int]MappingNode
 	TemplateFileName string
 }
 
@@ -28,7 +28,6 @@ func (node *MappingNode) writeInfoToNode(objectID *ObjectID, path string, lineNu
 
 func NewMappingNodes() *MappingNodes {
 	mappingNodes := new(MappingNodes)
-	mappingNodes.Nodes = make(map[string]MappingNode)
 	mappingNodes.TemplateFileName = ""
 	return mappingNodes
 
