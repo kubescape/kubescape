@@ -9,27 +9,15 @@ import (
 )
 
 const (
-	ServiceSuffix = ".svc.cluster.local"
-	Timeout       = time.Second * 3
+	Timeout = time.Second * 3
 )
 
 // Check if the service is unauthenticated using kubescape-network-scanner.
-func isUnauthenticatedService(host string, port int, namespace string) bool {
-	// Skip kube-system namespace.
-	if namespace == "kube-system" {
-		return false
-	}
-
-	if namespace == "" {
-		namespace = "default"
-	}
-
-	k8sService := fmt.Sprintf("%s.%s%s", host, namespace, ServiceSuffix)
-
+func isUnauthenticatedService(host string, port int) bool {
 	// Run the network scanner in a goroutine and wait for the result.
 	results := make(chan bool, 1)
 	go func() {
-		discoveryResults, err := servicediscovery.ScanTargets(k8sService, port)
+		discoveryResults, err := servicediscovery.ScanTargets(host, port)
 		if err != nil {
 			results <- false
 		} else if !discoveryResults.IsAuthenticated && discoveryResults.ApplicationLayer != "" {
@@ -43,7 +31,7 @@ func isUnauthenticatedService(host string, port int, namespace string) bool {
 	case result := <-results:
 		return result
 	case <-time.After(Timeout):
-		logger.L().Error(fmt.Sprintf("Timeout while scanning service: %s", k8sService))
+		logger.L().Error(fmt.Sprintf("Timeout while scanning service: %s", host))
 		return false
 	}
 }

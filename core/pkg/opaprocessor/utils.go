@@ -140,5 +140,15 @@ var unauthenticatedServiceDefinition = func(bctx rego.BuiltinContext, a, b, c *a
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
 
-	return ast.BooleanTerm(isUnauthenticatedService(string(service), portNumber, string(namespace))), nil
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	if namespace == "kube-system" {
+		return ast.BooleanTerm(false), nil
+	}
+
+	k8sService := fmt.Sprintf("%s.%s%s", string(service), string(namespace), ".svc.cluster.local")
+
+	return ast.BooleanTerm(isUnauthenticatedService(k8sService, portNumber)), nil
 }
