@@ -15,7 +15,68 @@ on:
         required: false
         type: string
         default: "./..."
+      GO111MODULE:
+        required: true
+        type: string
+      CGO_ENABLED:
+        type: number
+        default: 1
 jobs:
+  unit-tests:
+    if: ${{ github.actor != 'kubescape' }}
+    name: Create cross-platform build
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    runs-on: ubuntu-latest
+    steps:
+
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - uses: actions/setup-go@v4
+        name: Installing go
+        with:
+          go-version: ${{ inputs.GO_VERSION }}
+          cache: true
+
+      - name: Test core pkg
+        run: ${{ env.DOCKER_CMD }} go test -v ./...
+        if: startsWith(github.ref, 'refs/tags')
+
+      - name: Test httphandler pkg
+        run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
+        if: startsWith(github.ref, 'refs/tags')
+
+      - uses: anchore/sbom-action/download-syft@v0.15.2
+        name: Setup Syft
+
+      - uses: goreleaser/goreleaser-action@v5
+        name: Build
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean --snapshot
+        env:
+          RELEASE: ${{ inputs.RELEASE }}
+          CLIENT: ${{ inputs.CLIENT }}
+          CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
+
+      - name: Smoke Testing
+        env:
+          RELEASE: ${{ inputs.RELEASE }}
+          KUBESCAPE_SKIP_UPDATE_CHECK: "true"
+        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ${PWD}/dist/kubescape-ubuntu-latest
+
+      - name: golangci-lint
+        continue-on-error: false
+        uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5 # ratchet:golangci/golangci-lint-action@v3
+        with:
+          version: latest
+          args: --timeout 10m --build-tags=static
+          only-new-issues: true
+
   scanners:
     env:
       GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
