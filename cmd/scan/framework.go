@@ -94,7 +94,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 				}
 				if len(args) > 1 {
-					if len(args[1:]) == 0 || args[1] != "-" {
+					if args[1] != "-" {
 						scanInfo.InputPatterns = args[1:]
 						logger.L().Debug("List of input files", helpers.Interface("patterns", scanInfo.InputPatterns))
 					} else { // store stdin to file - do NOT move to separate function !!
@@ -112,7 +112,6 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				}
 			}
 			scanInfo.SetScanType(cautils.ScanTypeFramework)
-			scanInfo.FrameworkScan = true
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
