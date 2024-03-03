@@ -41,7 +41,7 @@ jobs:
     secrets: inherit
 
   binary-build:
-    if: ${{ github.repository_owner == 'kubescape' }}
+    if: ${{ github.actor == 'kubescape' }}
     permissions:
       actions: read
       checks: read

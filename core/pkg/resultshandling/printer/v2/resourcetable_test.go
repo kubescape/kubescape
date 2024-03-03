@@ -254,16 +254,16 @@ func TestFixPathsToString(t *testing.T) {
 	}
 
 	// Test case 1: Empty ResourceAssociatedRules
-	actualPaths := fixPathsToString(emptyControl)
+	actualPaths := fixPathsToString(emptyControl, false)
 	assert.Nil(t, actualPaths)
 
 	// Test case 2: Single ResourceAssociatedRule and one ReviewPath
-	actualPaths = fixPathsToString(singleRuleControl)
+	actualPaths = fixPathsToString(singleRuleControl, false)
 	expectedPath := []string{"fix-path1=fix-path-value1"}
 	assert.Equal(t, expectedPath, actualPaths)
 
 	// Test case 3: Multiple ResourceAssociatedRules and multiple ReviewPaths
-	actualPaths = fixPathsToString(multipleRulesControl)
+	actualPaths = fixPathsToString(multipleRulesControl, false)
 	expectedPath = []string{"fix-path2=fix-path-value2", "fix-path3=fix-path-value3"}
 	assert.Equal(t, expectedPath, actualPaths)
 }

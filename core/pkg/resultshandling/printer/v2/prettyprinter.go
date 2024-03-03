@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/enescakir/emoji"
 	"github.com/jwalton/gchalk"
@@ -32,15 +33,15 @@ const (
 var _ printer.IPrinter = &PrettyPrinter{}
 
 type PrettyPrinter struct {
+	mainPrinter     prettyprinter.MainPrinter
 	writer          *os.File
 	formatVersion   string
 	viewType        cautils.ViewTypes
+	scanType        cautils.ScanTypes
+	clusterName     string
+	inputPatterns   []string
 	verboseMode     bool
 	printAttackTree bool
-	scanType        cautils.ScanTypes
-	inputPatterns   []string
-	mainPrinter     prettyprinter.MainPrinter
-	clusterName     string
 }
 
 func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string) *PrettyPrinter {
@@ -90,7 +91,7 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 		}
 
 		presenterConfig := imageScanData[i].PresenterConfig
-		doc, err := models.NewDocument(presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
+		doc, err := models.NewDocument(clio.Identification{}, presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
 		if err != nil {
 			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
 			continue
@@ -165,9 +166,11 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 }
 
 func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
-	if pp.scanType == cautils.ScanTypeCluster || pp.scanType == cautils.ScanTypeRepo {
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nKubescape security posture overview for cluster: %s\n\n", pp.clusterName))
+	if pp.scanType == cautils.ScanTypeCluster {
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName))
 		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
+	} else if pp.scanType == cautils.ScanTypeRepo {
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", ")))
 	} else if pp.scanType == cautils.ScanTypeWorkload {
 		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
 		ns := opaSessionObj.SingleResourceScan.GetNamespace()
@@ -319,23 +322,6 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 		relatedStr = fmt.Sprintf(" [%s]", relatedStr[:len(relatedStr)-2])
 	}
 	return relatedStr
-}
-
-func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
-	if len(frameworks) == 1 {
-		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("Framework scanned: %s\n", frameworks[0].GetName())
-		}
-	} else if len(frameworks) > 1 {
-		p := "Frameworks scanned: "
-		i := 0
-		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (compliance score: %.2f%%), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
-		}
-		p += fmt.Sprintf("%s (compliance score: %.2f%%)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
-		return p
-	}
-	return ""
 }
 
 func getSeparator(sep string) string {
