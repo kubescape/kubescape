@@ -59,7 +59,7 @@ _Did you know you can use Kubescape in all these places?_
 
 ## Kubescape-operator Helm-Chart
 
-Besides the CLI, the Kubescape operator can also be installed via a Helm chart. Installing the Helm chart is an excellent way to begin using Kubescape, as it provides extensive features such as continuous scanning, image vulnerability scanning, runtime analysis, network policy generation, and more. You can find the Helm chart in the [Kubescape-operator documentation](https://kubescape.io/docs/install-helm-chart/).
+Besides the CLI, the Kubescape operator can also be installed via a Helm chart. Installing the Helm chart is an excellent way to begin using Kubescape, as it provides extensive features such as continuous scanning, image vulnerability scanning, runtime analysis, network policy generation, and more. You can find the Helm chart in the [Kubescape-operator documentation](https://kubescape.io/docs/install-operator/).
 
 ## Kubescape GitHub Action
 
