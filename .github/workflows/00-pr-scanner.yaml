@@ -38,6 +38,8 @@ jobs:
     with:
       RELEASE: ""
       CLIENT: test
+      CGO_ENABLED: 0
+      GO111MODULE: ""
     secrets: inherit
 
   binary-build:
