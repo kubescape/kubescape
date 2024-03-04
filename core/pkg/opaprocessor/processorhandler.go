@@ -303,6 +303,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		rego.RegisterBuiltin2(cosignVerifySignatureDeclaration, cosignVerifySignatureDefinition)
 		rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
 		rego.RegisterBuiltin1(imageNameNormalizeDeclaration, imageNameNormalizeDefinition)
+		rego.RegisterBuiltin3(unauthenticatedServiceDeclaration, unauthenticatedServiceDefinition)
 	})
 
 	modules[rule.Name] = getRuleData(rule)

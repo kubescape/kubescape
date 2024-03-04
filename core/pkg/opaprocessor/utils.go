@@ -112,3 +112,43 @@ var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 	normalizedName, err := cautils.NormalizeImageName(string(aStr))
 	return ast.StringTerm(normalizedName), err
 }
+
+var unauthenticatedServiceDeclaration = &rego.Function{
+	Name:    "networkscanner.isUnauthenticatedService",
+	Decl:    types.NewFunction(types.Args(types.S, types.N, types.S), types.B),
+	Memoize: true,
+}
+
+var unauthenticatedServiceDefinition = func(bctx rego.BuiltinContext, a, b, c *ast.Term) (*ast.Term, error) {
+	service, err := builtins.StringOperand(a.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+
+	bNum, err := builtins.NumberOperand(b.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+
+	portNumber, ok := bNum.Int()
+	if !ok {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+
+	namespace, err := builtins.StringOperand(c.Value, 1)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parameter type: %v", err)
+	}
+
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	if namespace == "kube-system" {
+		return ast.BooleanTerm(false), nil
+	}
+
+	k8sService := fmt.Sprintf("%s.%s%s", string(service), string(namespace), ".svc.cluster.local")
+
+	return ast.BooleanTerm(isUnauthenticatedService(k8sService, portNumber)), nil
+}
