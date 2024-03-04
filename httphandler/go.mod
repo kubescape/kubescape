@@ -309,7 +309,7 @@ require (
 	github.com/knqyf263/go-rpm-version v0.0.0-20220614171824-631e686d1075 // indirect
 	github.com/knqyf263/go-rpmdb v0.0.0-20230517124904-b97c85e63254 // indirect
 	github.com/kubescape/go-git-url v0.0.27 // indirect
-	github.com/kubescape/kubescape-network-scanner v0.0.11 // indirect
+	github.com/kubescape/kubescape-network-scanner v0.0.12 // indirect
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 // indirect
 	github.com/kubescape/regolibrary v1.0.315 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
