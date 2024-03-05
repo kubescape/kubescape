@@ -17,9 +17,21 @@ func getScanKind(policyIdentifier []cautils.PolicyIdentifier) apisv1.Notificatio
 	}
 	return "unknown"
 }
-func policyDownloadError(err error) error {
+func frameworkDownloadError(err error, fwName string) error {
 	if strings.Contains(err.Error(), "unsupported protocol scheme") {
 		err = fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag")
+	}
+	if strings.Contains(err.Error(), "not found") {
+		err = fmt.Errorf("framework '%s' not found, run `kubescape list frameworks` for available frameworks", fwName)
+	}
+	return err
+}
+func controlDownloadError(err error, controls string) error {
+	if strings.Contains(err.Error(), "unsupported protocol scheme") {
+		err = fmt.Errorf("failed to download from GitHub release, try running with `--use-default` flag")
+	}
+	if strings.Contains(err.Error(), "not found") {
+		err = fmt.Errorf("control '%s' not found, run `kubescape list controls` for available controls", controls)
 	}
 	return err
 }

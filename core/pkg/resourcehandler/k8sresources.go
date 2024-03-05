@@ -132,7 +132,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
 		} else {
-			cautils.SetInfoMapForResources("This control requires the Kubescape operator installed. To install it, go to\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
+			cautils.SetInfoMapForResources("This control is scanned exclusively by the Kubescape operator, not the Kubescape CLI. Install the Kubescape operator:\n     https://kubescape.io/docs/install-operator/.", hostResources, sessionObj.InfoMap)
 		}
 	}
 

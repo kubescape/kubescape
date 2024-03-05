@@ -1,5 +1,3 @@
-//go:build !gitenabled
-
 package cautils
 
 import (

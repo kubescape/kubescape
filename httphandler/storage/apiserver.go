@@ -7,12 +7,12 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	v1 "github.com/kubescape/k8s-interface/instanceidhandler/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/names"
 	"golang.org/x/exp/maps"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 
 	"github.com/kubescape/opa-utils/objectsenvelopes"
@@ -327,23 +327,23 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 }
 
 func updateLabelsAndAnnotationsMapFromRelatedObjects(clusterName string, labels map[string]string, annotations map[string]string, relatedObjects []workloadinterface.IMetadata) error {
-	labels[v1.RbacResourceMetadataKey] = "true"
+	labels[helpersv1.RbacResourceMetadataKey] = "true"
 
 	for i := range relatedObjects {
 		relatedObject := relatedObjects[i]
 		switch relatedObject.GetKind() {
 		case "Role":
-			labels[v1.RoleNameMetadataKey] = relatedObject.GetName()
-			labels[v1.RoleNamespaceMetadataKey] = relatedObject.GetNamespace()
+			labels[helpersv1.RoleNameMetadataKey] = relatedObject.GetName()
+			labels[helpersv1.RoleNamespaceMetadataKey] = relatedObject.GetNamespace()
 		case "RoleBinding":
-			labels[v1.RoleBindingNameMetadataKey] = relatedObject.GetName()
-			labels[v1.RoleBindingNamespaceMetadataKey] = relatedObject.GetNamespace()
-			annotations[v1.WlidMetadataKey] = wlid.GetK8sWLID(clusterName, relatedObject.GetNamespace(), relatedObject.GetKind(), relatedObject.GetName())
+			labels[helpersv1.RoleBindingNameMetadataKey] = relatedObject.GetName()
+			labels[helpersv1.RoleBindingNamespaceMetadataKey] = relatedObject.GetNamespace()
+			annotations[helpersv1.WlidMetadataKey] = wlid.GetK8sWLID(clusterName, relatedObject.GetNamespace(), relatedObject.GetKind(), relatedObject.GetName())
 		case "ClusterRole":
-			labels[v1.ClusterRoleNameMetadataKey] = relatedObject.GetName()
+			labels[helpersv1.ClusterRoleNameMetadataKey] = relatedObject.GetName()
 		case "ClusterRoleBinding":
-			labels[v1.ClusterRoleBindingNameMetadataKey] = relatedObject.GetName()
-			annotations[v1.WlidMetadataKey] = wlid.GetK8sWLID(clusterName, "", relatedObject.GetKind(), relatedObject.GetName())
+			labels[helpersv1.ClusterRoleBindingNameMetadataKey] = relatedObject.GetName()
+			annotations[helpersv1.WlidMetadataKey] = wlid.GetK8sWLID(clusterName, "", relatedObject.GetKind(), relatedObject.GetName())
 		default:
 			return fmt.Errorf("unknown related object kind %s", relatedObject.GetKind())
 		}
@@ -353,14 +353,14 @@ func updateLabelsAndAnnotationsMapFromRelatedObjects(clusterName string, labels 
 
 func getManifestObjectLabelsAndAnnotations(clusterName string, resource workloadinterface.IMetadata, relatedObjects []workloadinterface.IMetadata) (map[string]string, map[string]string, error) {
 	annotations := map[string]string{
-		v1.WlidMetadataKey: wlid.GetK8sWLID(clusterName, resource.GetNamespace(), resource.GetKind(), resource.GetName()),
+		helpersv1.WlidMetadataKey: wlid.GetK8sWLID(clusterName, resource.GetNamespace(), resource.GetKind(), resource.GetName()),
 	}
 	labels := make(map[string]string)
-	labels[v1.ApiGroupMetadataKey], labels[v1.ApiVersionMetadataKey] = k8sinterface.SplitApiVersion(resource.GetApiVersion())
-	labels[v1.KindMetadataKey] = resource.GetKind()
-	labels[v1.NameMetadataKey] = resource.GetName()
+	labels[helpersv1.ApiGroupMetadataKey], labels[helpersv1.ApiVersionMetadataKey] = k8sinterface.SplitApiVersion(resource.GetApiVersion())
+	labels[helpersv1.KindMetadataKey] = resource.GetKind()
+	labels[helpersv1.NameMetadataKey] = resource.GetName()
 	if k8sinterface.IsResourceInNamespaceScope(resource.GetKind()) {
-		labels[v1.NamespaceMetadataKey] = resource.GetNamespace()
+		labels[helpersv1.NamespaceMetadataKey] = resource.GetNamespace()
 	}
 
 	if len(relatedObjects) > 0 {

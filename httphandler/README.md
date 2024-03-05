@@ -7,7 +7,6 @@ Running `kubescape` will start up a web-server on port `8080` which will serve t
 * POST `/v1/scan` - triggers a Kubescape scan. The server will return an ID and will execute the scanning asynchronously. The request body should look [as follows](#trigger-scan-object).
 * * `wait=true`: scan synchronously (return results and not ID). Use only in small clusters or with an increased timeout. Default is `wait=false`
 * * `keep=true`: do not delete results from local storage after returning. Default is `keep=false`
-* POST `/v1/metrics` - trigger kubescape for Prometheus support. [read more](examples/prometheus/README.md)
 
 [Response](#response-object):
 
@@ -84,12 +83,6 @@ When scanning is not in progress
 * DELETE `/v1/results` - Delete kubescape scan results from storage. If empty will delete the latest results
 * * query `id=<string>`: Delete ID of specific results 
 * * query `all`: Delete all cached results
-
-### Prometheus support API
-
-* GET/POST `/v1/metrics` - will trigger cluster scan. will respond with prometheus metrics once they have been scanned. This will respond 503 if the scan failed.
-* `/livez` - will respond 200 if the server is alive
-* `/readyz` - will respond 200 if the server can receive requests 
 
 ## Objects
 

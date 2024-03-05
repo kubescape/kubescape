@@ -1,0 +1,74 @@
+# Default values for kubescape.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# -- Frequency of running the scan
+#       ┌────────────── timezone (optional)
+#       |  ┌───────────── minute (0 - 59)
+#       |  │ ┌───────────── hour (0 - 23)
+#       |  │ │ ┌───────────── day of the month (1 - 31)
+#       |  │ │ │ ┌───────────── month (1 - 12)
+#       |  │ │ │ │ ┌───────────── day of the week (0 - 6) (Sunday to Saturday;
+#       |  │ │ │ │ │                         7 is also Sunday on some systems)
+#       |  │ │ │ │ │
+#       |  │ │ │ │ │
+#      UTC * * * * *
+schedule: "* * 1 * *"
+
+# -- Image and version to deploy
+image:
+  repository: quay.io/armosec
+  imageName: kubescape
+  pullPolicy: Always
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: latest
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# -- Service account that runs the scan and has permissions to view the cluster
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: "kubescape-discovery"
+
+# -- ARMO customer information
+configMap:
+  create: false
+  params:
+    customerGUID: <MyGUID>
+    clusterName: <MyK8sClusterName>
+
+podAnnotations: {}
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+# -- Default resources for running the service in cluster
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

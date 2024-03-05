@@ -83,7 +83,7 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
 	// Override default value
 	values["image"].(map[string]interface{})["pullPolicy"] = "Never"
 
-	fileToWorkloads, errs := chart.GetWorkloads(values)
+	fileToWorkloads, _, errs := chart.GetWorkloads(values)
 	s.Len(errs, 0)
 
 	s.Lenf(fileToWorkloads, len(s.expectedFiles), "Expected %d files", len(s.expectedFiles))
@@ -111,7 +111,7 @@ func (s *HelmChartTestSuite) TestGetWorkloadsMissingValue() {
 	values := chart.GetDefaultValues()
 	delete(values, "image")
 
-	fileToWorkloads, errs := chart.GetWorkloads(values)
+	fileToWorkloads, _, errs := chart.GetWorkloads(values)
 	s.Nil(fileToWorkloads)
 	s.Len(errs, 1, "Expected an error due to missing value")
 

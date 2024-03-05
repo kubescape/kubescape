@@ -150,7 +150,7 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			logger.L().Debug("Downloading framework", helpers.String("framework", rule.Identifier))
 			receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(rule.Identifier)
 			if err != nil {
-				return frameworks, policyDownloadError(err)
+				return frameworks, frameworkDownloadError(err, rule.Identifier)
 			}
 			if err := validateFramework(receivedFramework); err != nil {
 				return frameworks, err
@@ -171,7 +171,7 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			logger.L().Debug("Downloading control", helpers.String("control", policy.Identifier))
 			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(policy.Identifier)
 			if err != nil {
-				return frameworks, policyDownloadError(err)
+				return frameworks, controlDownloadError(err, policy.Identifier)
 			}
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)

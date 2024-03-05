@@ -97,9 +97,9 @@ func FrameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) stri
 		p := "Frameworks scanned: "
 		i := 0
 		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (compliance score: %.2f%%), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+			p += fmt.Sprintf("%s (compliance score: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		}
-		p += fmt.Sprintf("%s (compliance score: %.2f%%)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
+		p += fmt.Sprintf("%s (compliance score: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
 		return p
 	}
 	return ""

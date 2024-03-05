@@ -63,9 +63,9 @@ jobs:
         with:
           path: .
       - name: mv kubescape amd64 binary
-        run: mv kubescape-ubuntu-latest/kubescape-ubuntu-latest kubescape-amd64-ubuntu-latest
+        run: mv ${{steps.download-artifact.outputs.download-path}}/kubescape/kubescape-ubuntu-latest kubescape-amd64-ubuntu-latest
       - name: mv kubescape arm64 binary
-        run: mv kubescape-ubuntu-latest/kubescape-arm64-ubuntu-latest kubescape-arm64-ubuntu-latest
+        run: mv ${{steps.download-artifact.outputs.download-path}}/kubescape/kubescape-arm64-ubuntu-latest kubescape-arm64-ubuntu-latest
       - name: chmod +x
         run: chmod +x -v kubescape-a*
       - name: Build and push images

@@ -205,7 +205,7 @@ jobs:
       - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # ratchet:actions/download-artifact@v3.0.2
         id: download-artifact
         with:
-          name: kubescape-ubuntu-latest
+          name: kubescape
           path: "~"
 
       - run: ls -laR

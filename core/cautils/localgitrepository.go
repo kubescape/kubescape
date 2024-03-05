@@ -1,7 +1,6 @@
 package cautils
 
 import (
-	"errors"
 	"fmt"
 	"path"
 	"strings"
@@ -18,8 +17,6 @@ type LocalGitRepository struct {
 	head      *plumbingv5.Reference
 	config    *configv5.Config
 }
-
-var ErrWarnNotSupportedByBuild = errors.New(`git commits retrieval not supported by this build. Build with tag "gitenabled" to enable the full git scan feature`)
 
 func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 	goGitRepo, err := gitv5.PlainOpenWithOptions(path, &gitv5.PlainOpenOptions{DetectDotGit: true})
@@ -53,7 +50,7 @@ func NewLocalGitRepository(path string) (*LocalGitRepository, error) {
 
 	if repoRoot, err := l.GetRootDir(); err == nil {
 		gitRepository, err := newGitRepository(repoRoot)
-		if err != nil && !errors.Is(err, ErrWarnNotSupportedByBuild) {
+		if err != nil {
 			return l, err
 		}
 

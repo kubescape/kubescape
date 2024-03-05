@@ -58,6 +58,7 @@ type OPASessionObj struct {
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
+	TemplateMapping       map[string]MappingNodes // Map chart obj to template (only for rendering from path)
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
@@ -74,6 +75,7 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		SessionID:             scanInfo.ScanID,
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
 		OmitRawResources:      scanInfo.OmitRawResources,
+		TemplateMapping:       make(map[string]MappingNodes),
 	}
 }
 

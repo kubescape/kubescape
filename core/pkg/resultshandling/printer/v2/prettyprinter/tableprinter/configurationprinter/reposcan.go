@@ -32,6 +32,7 @@ func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *r
 
 	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapRepoControlsToCategories)
 
+	tableRended := false
 	for _, id := range repoCategoriesDisplayOrder {
 		categoryControl, ok := categoriesToCategoryControls[id]
 		if !ok {
@@ -42,12 +43,16 @@ func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *r
 			continue
 		}
 
-		rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
+		tableRended = tableRended || rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
+	}
+
+	if !tableRended {
+		fmt.Fprintln(writer, gchalk.WithGreen().Bold("All controls passed. No issues found"))
 	}
 
 }
 
-func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
+func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) bool {
 	sortControlSummaries(controlSummaries)
 
 	headers, columnAligments := initCategoryTableData(categoryType)
@@ -72,10 +77,11 @@ func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryTy
 	}
 
 	if len(rows) == 0 {
-		return
+		return false
 	}
 
 	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
+	return true
 }
 
 func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary, inputPatterns []string) []string {
