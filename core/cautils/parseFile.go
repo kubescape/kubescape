@@ -1,7 +1,6 @@
 package cautils
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -78,7 +77,7 @@ func GetMapping(fileName string, fileContent string) (*MappingNodes, error) {
 			expression := fmt.Sprintf(lineExpression, index)
 			output, err := getYamlLineInfo(expression, fileContent)
 			if err != nil {
-				return nil, fmt.Errorf("getYamlLineInfo wrong, the err is %s", err.Error())
+				return nil, err
 			}
 
 			path := extractParameter(pathRe, output, "$path")
@@ -184,7 +183,7 @@ func getInfoFromOne(output string, lastNumber int, isMapType bool) (value string
 func getYamlLineInfo(expression string, yamlFile string) (string, error) {
 	out, err := exectuateYq(expression, yamlFile)
 	if err != nil {
-		return "", fmt.Errorf("exectuateYq err: %s", err.Error())
+		return "", fmt.Errorf("exectuate yqlib err: %s", err.Error())
 	}
 	return out, nil
 }
@@ -203,7 +202,7 @@ func exectuateYq(expression string, yamlContent string) (string, error) {
 
 	out, err := stringEvaluator.Evaluate(expression, yamlContent, encoder, decoder)
 	if err != nil {
-		return "", errors.New("no matches found")
+		return "", fmt.Errorf("no matches found")
 	}
 	return out, err
 }

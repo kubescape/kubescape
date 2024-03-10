@@ -58,7 +58,9 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
-			sourceToNodes = templateToNodes
+			for k, v := range templateToNodes {
+				sourceToNodes[k] = v
+			}
 
 			chartName := chart.GetName()
 			for k, v := range wls {
@@ -68,9 +70,6 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 					Path: helmDir,
 				}
 			}
-			// for k, v := range templateMappings {
-			// 	sourceToNodes[k] = v
-			// }
 		}
 	}
 	return sourceToWorkloads, sourceToChart, sourceToNodes

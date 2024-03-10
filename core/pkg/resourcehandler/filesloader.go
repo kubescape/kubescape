@@ -283,7 +283,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]
-		templatesNodes := helmSourceToNodes[source]
+		var templatesNodes cautils.MappingNodes
+		if nodes, ok := helmSourceToNodes[source]; ok {
+			templatesNodes = nodes
+		}
 
 		if clonedRepo != "" {
 			url, err := gitRepo.GetRemoteUrl()
@@ -302,16 +305,11 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = workloadSource
 			workloadIDToNodes[ws[i].GetID()] = templatesNodes
-			// workloadIDToNodes[ws[i].GetID()].Nodes = templatesNodes.Nodes
-			// workloadIDToNodes[ws[i].GetID()].TemplateFileName = templatesNodes.TemplateFileName
-			// helmSourceToNodes[source]
 		}
 	}
 
 	if len(helmSourceToWorkloads) > 0 { // && len(helmSourceToNodes) > 0
 		logger.L().Debug("helm templates found in local storage", helpers.Int("helmTemplates", len(helmSourceToWorkloads)), helpers.Int("workloads", len(workloads)))
-	} else {
-		workloadIDToNodes = nil
 	}
 
 	//patch, get value from env
