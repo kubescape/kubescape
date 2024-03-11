@@ -5,7 +5,7 @@ import (
 	"io"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -28,7 +28,7 @@ func TestGetVersionCmd(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cautils.BuildNumber = tt.buildNumber
+			versioncheck.BuildNumber = tt.buildNumber
 
 			if cmd := GetVersionCmd(); cmd != nil {
 				buf := bytes.NewBufferString("")

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kubescape/backend/pkg/versioncheck"
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -259,7 +260,7 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Identifier)
 	}
 
-	metadata.ScanMetadata.KubescapeVersion = BuildNumber
+	metadata.ScanMetadata.KubescapeVersion = versioncheck.BuildNumber
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
 	metadata.ScanMetadata.ComplianceThreshold = scanInfo.ComplianceThreshold

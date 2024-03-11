@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/kubescape/backend/pkg/versioncheck"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/metrics"
 	"github.com/kubescape/kubescape/v3/httphandler/docs"
 	handlerequestsv1 "github.com/kubescape/kubescape/v3/httphandler/handlerequests/v1"
@@ -69,7 +69,7 @@ func SetupHTTPListener() error {
 
 	server.Handler = rtr
 
-	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", cautils.BuildNumber))
+	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", versioncheck.BuildNumber))
 
 	servePprof()
 

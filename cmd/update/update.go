@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/backend/pkg/versioncheck"
 	logger "github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -32,22 +33,22 @@ func GetUpdateCmd() *cobra.Command {
 		Example: updateCmdExamples,
 		RunE: func(_ *cobra.Command, args []string) error {
 			ctx := context.TODO()
-			v := cautils.NewVersionCheckHandler()
-			versionCheckRequest := cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", "update")
+			v := versioncheck.NewVersionCheckHandler()
+			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "update", nil)
 			v.CheckLatestVersion(ctx, versionCheckRequest)
 
 			//Checking the user's version of kubescape to the latest release
-			if cautils.BuildNumber == "" || strings.Contains(cautils.BuildNumber, "rc") {
+			if versioncheck.BuildNumber == "" || strings.Contains(versioncheck.BuildNumber, "rc") {
 				//your version is unknown
 				fmt.Printf("Nothing to update: you are running the development version\n")
-			} else if cautils.LatestReleaseVersion == "" {
+			} else if versioncheck.LatestReleaseVersion == "" {
 				//Failed to check for updates
-				logger.L().Info(("Failed to check for updates"))
-			} else if cautils.BuildNumber == cautils.LatestReleaseVersion {
+				logger.L().Info("Failed to check for updates")
+			} else if versioncheck.BuildNumber == versioncheck.LatestReleaseVersion {
 				//your version == latest version
-				logger.L().Info(("Nothing to update: you are running the latest version"), helpers.String("Version", cautils.BuildNumber))
+				logger.L().Info("Nothing to update: you are running the latest version", helpers.String("Version", versioncheck.BuildNumber))
 			} else {
-				fmt.Printf("Version %s is available. Please refer to our installation documentation: %s\n", cautils.LatestReleaseVersion, installationLink)
+				fmt.Printf("Version %s is available. Please refer to our installation documentation: %s\n", versioncheck.LatestReleaseVersion, installationLink)
 			}
 			return nil
 		},

@@ -3,6 +3,7 @@ package cautils
 import (
 	"golang.org/x/mod/semver"
 
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -63,7 +64,7 @@ func (policies *Policies) Set(frameworks []reporthandling.Framework, excludedRul
 //  1. Rule is compatible with the current kubescape version
 //  2. Rule fits the current scanning scope
 func ShouldSkipRule(control reporthandling.Control, rule reporthandling.PolicyRule, scanningScope reporthandling.ScanningScopeType) bool {
-	if !isRuleKubescapeVersionCompatible(rule.Attributes, BuildNumber) {
+	if !isRuleKubescapeVersionCompatible(rule.Attributes, versioncheck.BuildNumber) {
 		return true
 	}
 	if !isControlFitToScanScope(control, scanningScope) {
