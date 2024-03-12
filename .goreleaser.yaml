@@ -22,7 +22,9 @@ builds:
       - arm64
       - riscv64
     ldflags:
-      - -s -w -X "github.com/kubescape/kubescape/v3/core/cautils.BuildNumber={{.Env.RELEASE}}"
+      - -s -w
+      - -X "github.com/kubescape/kubescape/v3/core/cautils.BuildNumber={{.Env.RELEASE}}"
+      - -X "github.com/kubescape/kubescape/v3/core/cautils.Client={{.Env.CLIENT}}"
     binary: >-
       {{ .ProjectName }}-
       {{- if eq .Arch "amd64" }}
