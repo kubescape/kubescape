@@ -71,11 +71,13 @@ jobs:
 
       - name: golangci-lint
         continue-on-error: false
-        uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5 # ratchet:golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v3
         with:
           version: latest
-          args: --timeout 10m --build-tags=static
+          args: --timeout 10m
           only-new-issues: true
+          skip-pkg-cache: true
+          skip-build-cache: true
 
   scanners:
     env:
