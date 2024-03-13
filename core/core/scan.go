@@ -23,6 +23,7 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slices"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/kubescape/opa-utils/resources"
 )
@@ -42,11 +43,13 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== setup k8s interface object ======================================
 	var k8s *k8sinterface.KubernetesApi
+	var k8sClient kubernetes.Interface
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8s = getKubernetesApi()
 		if k8s == nil {
 			logger.L().Ctx(ctx).Fatal("failed connecting to Kubernetes cluster")
 		}
+		k8sClient = k8s.KubernetesClient
 	}
 
 	// ================== setup tenant object ======================================
@@ -65,7 +68,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	// ================== version testing ======================================
 
 	v := versioncheck.NewIVersionCheckHandler(ctx)
-	v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8s.KubernetesClient))
+	v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
 
 	// ================== setup host scanner object ======================================
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
