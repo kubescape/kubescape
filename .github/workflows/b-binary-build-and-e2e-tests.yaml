@@ -30,7 +30,7 @@ on:
       BINARY_TESTS:
         type: string
         required: false
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "control_cluster_from_CLI_config_scan_exclude_namespaces", "control_cluster_from_CLI_config_scan_include_namespaces", "control_cluster_from_CLI_config_scan_host_scanner_enabled", "control_cluster_from_CLI_config_scan_MITRE_framework", "control_cluster_from_CLI_vulnerabilities_scan_default", "control_cluster_from_CLI_vulnerabilities_scan_include_namespaces" ]'
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "control_cluster_from_CLI_config_scan_exclude_namespaces", "control_cluster_from_CLI_config_scan_include_namespaces", "control_cluster_from_CLI_config_scan_host_scanner_enabled", "control_cluster_from_CLI_config_scan_MITRE_framework", "control_cluster_from_CLI_vulnerabilities_scan_default", "control_cluster_from_CLI_vulnerabilities_scan_include_namespaces" ]'
 
   workflow_call:
     inputs:
@@ -54,7 +54,7 @@ on:
         default: 1
       BINARY_TESTS:
         type: string
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "scan_custom_framework_scanning_file_scope_testing", "scan_custom_framework_scanning_cluster_scope_testing", "scan_custom_framework_scanning_cluster_and_file_scope_testing" ]'
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "scan_custom_framework_scanning_file_scope_testing", "scan_custom_framework_scanning_cluster_scope_testing", "scan_custom_framework_scanning_cluster_and_file_scope_testing" ]'
 
 jobs:
   wf-preparation:
