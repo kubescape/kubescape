@@ -249,7 +249,7 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 			report.tenantConfig.DeleteCredentials()
 		}
 
-		return fmt.Errorf("%s, %v:%s", report.getReportUrl(), err, strResponse)
+		return fmt.Errorf("%w:%s", err, strResponse)
 	}
 
 	// message is taken only from last report
