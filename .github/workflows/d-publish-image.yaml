@@ -1,5 +1,8 @@
 name: d-publish-image
-permissions: read-all
+permissions:
+  contents: read
+  metadata: read
+  id-token: write
 on:
   workflow_call:
     inputs:

@@ -65,23 +65,22 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 	// Get the URL to clone
 	cloneURL := gitURL.GetHttpCloneURL()
 
-	isGitRepoPublic := isGitRepoPublic(cloneURL)
+	isGitTokenPresent := isGitTokenPresent(gitURL)
 
 	// Declare the authentication variable required for cloneOptions
 	var auth transport.AuthMethod
 
-	if isGitRepoPublic {
-		// No authentication needed if repository is public
-		auth = nil
-	} else {
-
-		// Return Error if the AUTH_TOKEN is not present
-		if isGitTokenPresent := isGitTokenPresent(gitURL); !isGitTokenPresent {
-			return "", getProviderError(gitURL)
-		}
+	if isGitTokenPresent {
 		auth = &http.BasicAuth{
 			Username: "x-token-auth",
 			Password: gitURL.GetToken(),
+		}
+	} else {
+		// If the repository is public, no authentication is needed
+		if isGitRepoPublic(cloneURL) {
+			auth = nil
+		} else {
+			return "", getProviderError(gitURL)
 		}
 	}
 
