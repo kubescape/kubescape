@@ -1,22 +1,35 @@
-[
-    {
+{
+    "account": "...",
+    "excludedNamespaces": ["..."],
+    "failThreshold": "...",
+    "complianceThreshold": "...",
+    "format": "...",
+    "hostScanner": "...",
+    "includeNamespaces": ["..."],
+    "keepLocal": "...",
+    "submit": "...",
+    "targetNames": ["..."],
+    "targetType": "...",
+    "useCachedArtifacts": "...",
+    "exceptions": [
+      {
         "name": "exclude-allowed-hostPath-control",
         "policyType": "postureExceptionPolicy",
-        "actions": [
-            "alertOnly"
-        ],
+        "actions": ["alertOnly"],
         "resources": [
-            {
-                "designatorType": "Attributes",
-                "attributes": {
-                    "kind": ".*"
-                }
+          {
+            "designatorType": "Attributes",
+            "attributes": {
+              "kind": ".*"
             }
+          }
         ],
         "posturePolicies": [
-            {
-                "controlName": "HostPath mount" 
-            }
+          {
+            "controlName": "HostPath mount"
+          }
         ]
-    }
-]
+      }
+    ]
+  }
+  
