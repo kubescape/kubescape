@@ -1,8 +1,14 @@
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"k8s.io/utils/strings/slices"
@@ -68,6 +74,10 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		scanInfo.IsDeletedScanObject = *scanRequest.IsDeletedScanObject
 	}
 
+	if scanRequest.Exceptions != nil {
+		scanInfo.UseExceptions = loadexception(scanRequest)
+
+	}
 	return scanInfo
 }
 
@@ -92,4 +102,27 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 		scanInfo.FrameworkScan = true
 		scanInfo.ScanAll = true
 	}
+}
+
+func loadexception(exceptions *utilsmetav1.PostScanRequest) (path string) {
+	exceptionJSON, err := json.Marshal(exceptions.Exceptions)
+	if err != nil {
+		logger.L().Error("Failed to marshal exceptions", helpers.Error(err))
+	} else {
+		exePath, err := os.Executable()
+		if err != nil {
+			fmt.Printf("Failed to get executable path, reason: %s", err)
+		}
+		exeDir := filepath.Dir(exePath)
+		exdir := filepath.Dir(exeDir)
+		edir := filepath.Dir(exdir)
+		exceptionpath := filepath.Join(edir, ".kubescape", "exceptions.json")
+		if err := os.WriteFile(exceptionpath, exceptionJSON, 0644); err != nil {
+			logger.L().Error("Failed to write exceptions file to disk", helpers.String("path", exceptionpath), helpers.Error(err))
+			return
+		}
+		print(exceptionpath)
+		return exceptionpath // to test
+	}
+	return
 }
