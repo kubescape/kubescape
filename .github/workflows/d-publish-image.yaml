@@ -59,7 +59,7 @@ jobs:
     name: Build image and upload to registry
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Set up QEMU

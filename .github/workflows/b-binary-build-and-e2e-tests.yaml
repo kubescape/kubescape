@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
@@ -216,7 +216,7 @@ jobs:
         run: chmod +x -R ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
 
       - name: Checkout systests repo
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: armosec/system-tests
           path: .
