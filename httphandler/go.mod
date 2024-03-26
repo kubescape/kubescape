@@ -14,11 +14,11 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/schema v1.2.0
-	github.com/kubescape/backend v0.0.19
+	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.161
 	github.com/kubescape/kubescape/v3 v3.0.4
-	github.com/kubescape/opa-utils v0.0.278
+	github.com/kubescape/opa-utils v0.0.279
 	github.com/kubescape/storage v0.0.20
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.8.4
@@ -291,7 +291,7 @@ require (
 	github.com/knqyf263/go-rpmdb v0.0.0-20230517124904-b97c85e63254 // indirect
 	github.com/kubescape/go-git-url v0.0.30 // indirect
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 // indirect
-	github.com/kubescape/regolibrary v1.0.315 // indirect
+	github.com/kubescape/regolibrary/v2 v2.0.1 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20231026200631-000cd05d5491 // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
