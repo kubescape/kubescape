@@ -14,7 +14,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/schema v1.2.0
-	github.com/kubescape/backend v0.0.20-0.20240325120349-9f7b2a07ff39
+	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.22
 	github.com/kubescape/k8s-interface v0.0.161
 	github.com/kubescape/kubescape/v3 v3.0.4
