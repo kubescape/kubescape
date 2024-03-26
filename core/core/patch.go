@@ -200,6 +200,9 @@ func tryParseScanReport(file string) (*unversioned.UpdateManifest, error) {
 
 	parser := copaGrype.GrypeParser{}
 	manifest, err := parser.Parse(file)
+	if err != nil {
+		return nil, err
+	}
 
 	// Convert from v1alpha1 to unversioned.UpdateManifest
 	var um unversioned.UpdateManifest

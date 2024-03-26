@@ -10,7 +10,7 @@ require (
 	github.com/anchore/grype v0.74.2
 	github.com/anchore/stereoscope v0.0.1
 	github.com/anchore/syft v0.101.1
-	github.com/anubhav06/copa-grype v1.0.2-alpha.1.0.20231017133953-fa145c9efe24
+	github.com/anubhav06/copa-grype v1.0.3-alpha.1
 	github.com/armosec/armoapi-go v0.0.330
 	github.com/armosec/utils-go v0.0.57
 	github.com/armosec/utils-k8s-go v0.0.26
@@ -195,7 +195,7 @@ require (
 	github.com/digitorus/timestamp v0.0.0-20231217203849-220c5c2851b7 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
 	github.com/docker/buildx v0.11.2 // indirect
-	github.com/docker/cli v24.0.7+incompatible // indirect
+	github.com/docker/cli v25.0.3+incompatible // indirect
 	github.com/docker/docker v25.0.1+incompatible // indirect
 	github.com/docker/docker-credential-helpers v0.8.0 // indirect
 	github.com/docker/go v1.5.1-1.0.20160303222718-d30aec9fd63c // indirect
