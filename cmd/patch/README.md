@@ -47,6 +47,7 @@ The patch command can be run in 2 ways:
 | -a, --addr     | Address of the buildkitd service                       | No       | unix:///run/buildkit/buildkitd.sock |
 | -t, --tag      | Tag of the resultant patched image                     | No       | image_name-patched                  |
 | --timeout      | Timeout for the patching process                       | No       | 5m                                  |
+| --ignore-errors| Ignore errors during patching                          | No       | false                               |
 | -u, --username | Username for the image registry login                  | No       |                                     |
 | -p, --password | Password for the image registry login                  | No       |                                     |
 | -f, --format   | Output file format.                                    | No       |                                     |
