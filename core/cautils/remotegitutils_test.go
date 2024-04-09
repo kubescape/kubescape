@@ -1,4 +1,4 @@
-package resourcehandler
+package cautils
 
 import (
 	"errors"

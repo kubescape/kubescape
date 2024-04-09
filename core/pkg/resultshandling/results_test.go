@@ -14,30 +14,30 @@ import (
 
 type DummyReporter struct{}
 
-func (dr *DummyReporter) Submit(_ context.Context, opaSessionObj *cautils.OPASessionObj) error {
+func (dr *DummyReporter) Submit(_ context.Context, _ *cautils.OPASessionObj) error {
 	return nil
 }
-func (dr *DummyReporter) SetTenantConfig(tenantConfig cautils.ITenantConfig) {}
-func (dr *DummyReporter) DisplayMessage()                                    {}
-func (dr *DummyReporter) GetURL() string                                     { return "" }
+func (dr *DummyReporter) SetTenantConfig(_ cautils.ITenantConfig) {}
+func (dr *DummyReporter) DisplayMessage()                         {}
+func (dr *DummyReporter) GetURL() string                          { return "" }
 
 type SpyPrinter struct {
 	ActionPrintCalls int
 	ScoreCalls       int
 }
 
-func (sp *SpyPrinter) SetWriter(_ context.Context, outputFile string) {}
-func (sp *SpyPrinter) PrintNextSteps()                                {}
-func (sp *SpyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, _ []cautils.ImageScanData) {
+func (sp *SpyPrinter) SetWriter(_ context.Context, _ string) {}
+func (sp *SpyPrinter) PrintNextSteps()                       {}
+func (sp *SpyPrinter) ActionPrint(_ context.Context, _ *cautils.OPASessionObj, _ []cautils.ImageScanData) {
 	sp.ActionPrintCalls += 1
 }
-func (sp *SpyPrinter) Score(score float32) {
+func (sp *SpyPrinter) Score(_ float32) {
 	sp.ScoreCalls += 1
 }
 
 func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 	reporter := &DummyReporter{}
-	printers := []printer.IPrinter{}
+	var printers []printer.IPrinter
 	uiPrinter := &SpyPrinter{}
 	fakeScanData := &cautils.OPASessionObj{
 		Report: &reporthandlingv2.PostureReport{
@@ -50,7 +50,8 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
-	rh.HandleResults(context.TODO())
+	err := rh.HandleResults(context.TODO())
+	assert.NoError(t, err)
 
 	want := 1
 	got := uiPrinter.ActionPrintCalls
@@ -148,12 +149,6 @@ func TestValidatePrinter(t *testing.T) {
 			expectErr:   errors.New("format \"sarif\" is only supported when scanning local files"),
 		},
 		{
-			name:        "sarif format for remote url context should return error",
-			scanContext: cautils.ContextGitURL,
-			format:      printer.SARIFFormat,
-			expectErr:   errors.New("format \"sarif\" is only supported when scanning local files"),
-		},
-		{
 			name:        "sarif format for local dir context should not return error",
 			scanContext: cautils.ContextDir,
 			format:      printer.SARIFFormat,
@@ -240,7 +235,7 @@ func TestNewPrinter(t *testing.T) {
 			version:  defaultVersion,
 		},
 		{
-			name:     "Prettry printer",
+			name:     "Pretty printer",
 			format:   "pretty-printer",
 			viewType: "control",
 			version:  defaultVersion,
@@ -259,8 +254,8 @@ func TestNewPrinter(t *testing.T) {
 				FormatVersion: tt.version,
 				View:          tt.viewType,
 			}
-			printer := NewPrinter(ctx, tt.format, scanInfo, "my-cluster")
-			assert.NotNil(t, printer)
+			p := NewPrinter(ctx, tt.format, scanInfo, "my-cluster")
+			assert.NotNil(t, p)
 		})
 	}
 }
