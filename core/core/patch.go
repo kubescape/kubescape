@@ -56,7 +56,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 
 	writer := printer.GetWriter(ctx, fileName)
 
-	if err := pres.Present(writer); err != nil {
+	if err = pres.Present(writer); err != nil {
 		return nil, err
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
@@ -70,7 +70,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 		disableCopaLogger()
 	}
 
-	if err := copaPatch(ctx, patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.BuildKitOpts); err != nil {
+	if err = copaPatch(ctx, patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.BuildKitOpts); err != nil {
 		return nil, err
 	}
 
@@ -150,7 +150,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			return err
 		}
 		defer os.RemoveAll(workingFolder)
-		if err = os.Chmod(workingFolder, 0o744); err != nil {
+		if err := os.Chmod(workingFolder, 0o744); err != nil {
 			return err
 		}
 	} else {
@@ -221,9 +221,5 @@ func tryParseScanReport(file string) (*unversioned.UpdateManifest, error) {
 		um.Updates[i].VulnerabilityID = update.VulnerabilityID
 	}
 
-	if err == nil {
-		return &um, nil
-	}
-
-	return nil, err
+	return &um, nil
 }
