@@ -114,7 +114,7 @@ func filterRuleMatchesForResource(resourceKind string, matchObjects []reporthand
 	return resourceMap
 }
 
-// updateQueryableResourcesMapFromMatch updates the queryableResources map with the relevant resources from the match object.
+// updateQueryableResourcesMapFromRuleMatchObject updates the queryableResources map with the relevant resources from the match object.
 // if namespace is not empty, the namespace filter is added to the queryable resources (which are namespaced)
 // if resourcesFilterMap is not nil, only the resources with value 'true' will be added to the queryable resources
 func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMatchObjects, resourcesFilterMap map[string]bool, queryableResources QueryableResources, namespace string) {
