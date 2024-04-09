@@ -1,10 +1,11 @@
-package resourcehandler
+package cautils
 
 import (
 	"errors"
 	"fmt"
 	nethttp "net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -12,6 +13,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	giturl "github.com/kubescape/go-git-url"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 )
 
 // To Check if the given repository is Public(No Authentication needed), send a HTTP GET request to the URL
@@ -65,23 +68,22 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 	// Get the URL to clone
 	cloneURL := gitURL.GetHttpCloneURL()
 
-	isGitRepoPublic := isGitRepoPublic(cloneURL)
+	isGitTokenPresent := isGitTokenPresent(gitURL)
 
 	// Declare the authentication variable required for cloneOptions
 	var auth transport.AuthMethod
 
-	if isGitRepoPublic {
-		// No authentication needed if repository is public
-		auth = nil
-	} else {
-
-		// Return Error if the AUTH_TOKEN is not present
-		if isGitTokenPresent := isGitTokenPresent(gitURL); !isGitTokenPresent {
-			return "", getProviderError(gitURL)
-		}
+	if isGitTokenPresent {
 		auth = &http.BasicAuth{
 			Username: "x-token-auth",
 			Password: gitURL.GetToken(),
+		}
+	} else {
+		// If the repository is public, no authentication is needed
+		if isGitRepoPublic(cloneURL) {
+			auth = nil
+		} else {
+			return "", getProviderError(gitURL)
 		}
 	}
 
@@ -104,4 +106,28 @@ func cloneRepo(gitURL giturl.IGitAPI) (string, error) {
 	}
 
 	return tmpDir, nil
+}
+
+// CloneGitRepo clone git repository
+func CloneGitRepo(path *string) (string, error) {
+	var clonedDir string
+
+	gitURL, err := giturl.NewGitAPI(*path)
+	if err != nil {
+		return "", nil
+	}
+
+	// Clone git repository if needed
+	logger.L().Start("cloning", helpers.String("repository url", gitURL.GetURL().String()))
+
+	clonedDir, err = cloneRepo(gitURL)
+	if err != nil {
+		logger.L().StopError("failed to clone git repo", helpers.String("url", gitURL.GetURL().String()), helpers.Error(err))
+		return "", fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
+	}
+
+	*path = filepath.Join(clonedDir, gitURL.GetPath())
+	logger.L().StopSuccess("Done accessing local objects")
+
+	return clonedDir, nil
 }

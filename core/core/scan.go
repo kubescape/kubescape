@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -22,6 +23,7 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slices"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/kubescape/opa-utils/resources"
 )
@@ -41,10 +43,13 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== setup k8s interface object ======================================
 	var k8s *k8sinterface.KubernetesApi
+	var k8sClient kubernetes.Interface
 	if scanInfo.GetScanningContext() == cautils.ContextCluster {
 		k8s = getKubernetesApi()
 		if k8s == nil {
 			logger.L().Ctx(ctx).Fatal("failed connecting to Kubernetes cluster")
+		} else {
+			k8sClient = k8s.KubernetesClient
 		}
 	}
 
@@ -63,8 +68,8 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 	// ================== version testing ======================================
 
-	v := cautils.NewIVersionCheckHandler(ctx)
-	v.CheckLatestVersion(ctx, cautils.NewVersionCheckRequest(cautils.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", cautils.ScanningContextToScanningScope(scanInfo.GetScanningContext())))
+	v := versioncheck.NewIVersionCheckHandler(ctx)
+	_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
 
 	// ================== setup host scanner object ======================================
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
@@ -123,6 +128,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info
+	defer scanInfo.Cleanup()
 
 	interfaces := getInterfaces(ctxInit, scanInfo)
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
@@ -190,7 +196,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)
 		}
-		if err == nil && isPrioritizationScanType(scanInfo.ScanType) {
+		if isPrioritizationScanType(scanInfo.ScanType) {
 			scanData.SetTopWorkloads()
 		}
 		spanPrioritization.End()
@@ -210,7 +216,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 }
 
 func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler) {
-	imagesToScan := []string{}
+	var imagesToScan []string
 
 	if scanType == cautils.ScanTypeWorkload {
 		containers, err := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()

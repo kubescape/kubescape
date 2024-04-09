@@ -1,7 +1,6 @@
 package cautils
 
 import (
-	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -68,10 +67,7 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 
 	// get the resouse and analysis and store it to the struct
 	fileMapping := make(map[string]MappingNodes)
-	err = GetTemplateMapping(sourceToFile, fileMapping)
-	if err != nil {
-		return nil, nil, []error{err}
-	}
+	GetTemplateMapping(sourceToFile, fileMapping)
 
 	// delete the comment from chart and from sourceToFile
 	RemoveComment(sourceToFile)
@@ -98,7 +94,6 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 				fileMapping[absPath] = nodes
 				delete(fileMapping, path)
 			}
-
 			workloads[absPath] = []workloadinterface.IMetadata{}
 			for i := range wls {
 				lw := localworkload.NewLocalWorkload(wls[i].GetObject())
@@ -137,16 +132,16 @@ func RemoveComment(sourceToFile map[string]string) {
 	}
 }
 
-func GetTemplateMapping(sourceToFile map[string]string, fileMapping map[string]MappingNodes) error {
+func GetTemplateMapping(sourceToFile map[string]string, fileMapping map[string]MappingNodes) {
 	for fileName, fileContent := range sourceToFile {
 		mappingNodes, err := GetMapping(fileName, fileContent)
 		if err != nil {
-			err = fmt.Errorf("GetMapping wrong, err: %s", err.Error())
-			return err
+			// if one file cannot get mapping nodes, generate error, then ignore it
+			logger.L().Warning("Failed to get File Mapping nodes", helpers.String("file name", fileName), helpers.Error(err))
+			continue
 		}
 		if len(mappingNodes.Nodes) != 0 {
 			fileMapping[fileName] = *mappingNodes
 		}
 	}
-	return nil
 }

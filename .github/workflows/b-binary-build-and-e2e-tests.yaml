@@ -30,7 +30,7 @@ on:
       BINARY_TESTS:
         type: string
         required: false
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "control_cluster_from_CLI_config_scan_exclude_namespaces", "control_cluster_from_CLI_config_scan_include_namespaces", "control_cluster_from_CLI_config_scan_host_scanner_enabled", "control_cluster_from_CLI_config_scan_MITRE_framework", "control_cluster_from_CLI_vulnerabilities_scan_default", "control_cluster_from_CLI_vulnerabilities_scan_include_namespaces" ]'
+        default: '["ks_microservice_create_2_cronjob_mitre_and_nsa_proxy", "ks_microservice_triggering_with_cron_job", "ks_microservice_update_cronjob_schedule", "ks_microservice_delete_cronjob", "ks_microservice_create_2_cronjob_mitre_and_nsa", "ks_microservice_ns_creation", "ks_microservice_on_demand", "ks_microservice_mitre_framework_on_demand", "ks_microservice_nsa_and_mitre_framework_demand", "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_with_exception_to_backend", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "control_cluster_from_CLI_config_scan_exclude_namespaces", "control_cluster_from_CLI_config_scan_include_namespaces", "control_cluster_from_CLI_config_scan_host_scanner_enabled", "control_cluster_from_CLI_config_scan_MITRE_framework", "control_cluster_from_CLI_vulnerabilities_scan_default", "control_cluster_from_CLI_vulnerabilities_scan_include_namespaces"]'
 
   workflow_call:
     inputs:
@@ -54,7 +54,7 @@ on:
         default: 1
       BINARY_TESTS:
         type: string
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_exception_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "scan_custom_framework_scanning_file_scope_testing", "scan_custom_framework_scanning_cluster_scope_testing", "scan_custom_framework_scanning_cluster_and_file_scope_testing" ]'
+        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "scan_custom_framework_scanning_file_scope_testing", "scan_custom_framework_scanning_cluster_scope_testing", "scan_custom_framework_scanning_cluster_and_file_scope_testing" ]'
 
 jobs:
   wf-preparation:
@@ -106,7 +106,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
@@ -147,11 +147,13 @@ jobs:
 
       - name: golangci-lint
         continue-on-error: true
-        uses: golangci/golangci-lint-action@08e2f20817b15149a52b5b3ebe7de50aff2ba8c5 # ratchet:golangci/golangci-lint-action@v3
+        uses: golangci/golangci-lint-action@v3
         with:
           version: latest
-          args: --timeout 10m --build-tags=static
+          args: --timeout 10m
           only-new-issues: true
+          skip-pkg-cache: true
+          skip-build-cache: true
 
       - uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # ratchet:actions/upload-artifact@v3.1.1
         name: Upload artifacts
@@ -186,7 +188,28 @@ jobs:
                 "ks_microservice_on_demand",
                 "ks_microservice_mitre_framework_on_demand",
                 "ks_microservice_nsa_and_mitre_framework_demand",
-                "scan_compliance_score"
+                "scan_nsa", 
+                "scan_mitre", 
+                "scan_with_exceptions", 
+                "scan_repository", 
+                "scan_local_file", 
+                "scan_local_glob_files", 
+                "scan_local_list_of_files", 
+                "scan_with_exception_to_backend", 
+                "scan_nsa_and_submit_to_backend", 
+                "scan_mitre_and_submit_to_backend", 
+                "scan_local_repository_and_submit_to_backend", 
+                "scan_repository_from_url_and_submit_to_backend", 
+                "scan_with_custom_framework", 
+                "scan_customer_configuration", 
+                "host_scanner", 
+                "scan_compliance_score", 
+                "control_cluster_from_CLI_config_scan_exclude_namespaces", 
+                "control_cluster_from_CLI_config_scan_include_namespaces", 
+                "control_cluster_from_CLI_config_scan_host_scanner_enabled", 
+                "control_cluster_from_CLI_config_scan_MITRE_framework", 
+                "control_cluster_from_CLI_vulnerabilities_scan_default", 
+                "control_cluster_from_CLI_vulnerabilities_scan_include_namespaces"
               ]'
       COSIGN: true
       HELM_E2E_TEST: true
@@ -214,7 +237,7 @@ jobs:
         run: chmod +x -R ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
 
       - name: Checkout systests repo
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: armosec/system-tests
           path: .

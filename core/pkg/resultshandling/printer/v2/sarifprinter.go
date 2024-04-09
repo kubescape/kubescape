@@ -2,6 +2,7 @@ package printer
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -224,14 +225,14 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 							// first get the failed path, then if cannot find it, use the Fix path, cui it to find the closest error.
 							location, split := resolveFixLocation(subfileNodes, &ac)
 							sp.addRule(run, ctl)
-							result := sp.addResult(run, ctl, filepath, location)
-							collectFixesFromMappingNodes(ctx, result, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath, location, subfileNodes, split)
+							r := sp.addResult(run, ctl, filepath, location)
+							collectFixesFromMappingNodes(r, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath, location, subfileNodes, split)
 						}
 					} else {
 						location = sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 						sp.addRule(run, ctl)
-						result := sp.addResult(run, ctl, filepath, location)
-						collectFixes(ctx, result, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath)
+						r := sp.addResult(run, ctl, filepath, location)
+						collectFixes(ctx, r, ac, opaSessionObj, resourceID, filepath, rsrcAbsPath)
 					}
 
 				}
@@ -342,6 +343,15 @@ func addFix(result *sarif.Result, filepath string, startLine, startColumn, endLi
 		sarif.NewSimpleArtifactLocation(filepath),
 	).WithReplacement(replacement)
 
+	// check if the fix is already added
+	for _, fix := range result.Fixes {
+		for _, ac := range fix.ArtifactChanges {
+			if hashArtifactChange(ac) == hashArtifactChange(artifactChange) {
+				return
+			}
+		}
+	}
+
 	// Add the artifact change to the result's fixes.
 	result.AddFix(sarif.NewFix().WithArtifactChanges([]*sarif.ArtifactChange{artifactChange}))
 }
@@ -427,9 +437,6 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 
 			var fixedYamlString string
 
-			// if strings.HasPrefix(rulePaths.FixPath.Value, fixhandler.UserValuePrefix) {
-			// 	continue
-			// }
 			documentIndex, ok := getDocIndex(opaSessionObj, resourceID)
 			if !ok {
 				continue
@@ -450,7 +457,7 @@ func collectFixes(ctx context.Context, result *sarif.Result, ac resourcesresults
 	}
 }
 
-func collectFixesFromMappingNodes(ctx context.Context, result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string, location locationresolver.Location, subFileNodes map[string]cautils.MappingNode, split int) {
+func collectFixesFromMappingNodes(result *sarif.Result, ac resourcesresults.ResourceAssociatedControl, opaSessionObj *cautils.OPASessionObj, resourceID string, filepath string, rsrcAbsPath string, location locationresolver.Location, subFileNodes map[string]cautils.MappingNode, split int) {
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
 			continue
@@ -575,4 +582,8 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 // generateRemediationMessage generates a remediation message for the given control summary
 func (sp *SARIFPrinter) generateRemediationMessage(control reportsummary.IControlSummary) string {
 	return fmt.Sprintf("Remediation: %s", control.GetRemediation())
+}
+func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
+	acJson, _ := json.Marshal(artifactChange)
+	return sha256.Sum256(acJson)
 }

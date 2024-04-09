@@ -307,7 +307,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventTy
 	}
 }
 
-// tearDownNamespace manage the host-scanner deletion.
+// tearDownHostScanner manage the host-scanner deletion.
 func (hsh *HostSensorHandler) tearDownHostScanner(namespace string) error {
 	client := hsh.k8sObj.KubernetesClient
 

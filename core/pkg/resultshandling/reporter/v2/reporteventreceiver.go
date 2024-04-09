@@ -76,7 +76,7 @@ func (report *ReportEventReceiver) Submit(ctx context.Context, opaSessionObj *ca
 	}
 
 	if err := report.prepareReport(opaSessionObj); err != nil {
-		return fmt.Errorf("failed to submit scan results. url: '%s', reason: %s", report.getReportUrl(), err.Error())
+		return fmt.Errorf("failed to submit scan results. reason: %s", err.Error())
 	}
 
 	logger.L().Debug("", helpers.String("account ID", report.GetAccountID()))
@@ -249,7 +249,7 @@ func (report *ReportEventReceiver) sendReport(postureReport *reporthandlingv2.Po
 			report.tenantConfig.DeleteCredentials()
 		}
 
-		return fmt.Errorf("%s, %v:%s", report.getReportUrl(), err, strResponse)
+		return fmt.Errorf("%w:%s", err, strResponse)
 	}
 
 	// message is taken only from last report

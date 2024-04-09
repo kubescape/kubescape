@@ -155,7 +155,7 @@ func (hsh *HostSensorHandler) getKubeProxyInfo(ctx context.Context) ([]hostsenso
 	return hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeProxyInfo", KubeProxyInfo)
 }
 
-// getControlPlanInfo returns the list of controlPlaneInfo metadata
+// getControlPlaneInfo returns the list of controlPlaneInfo metadata
 func (hsh *HostSensorHandler) getControlPlaneInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
 	// loop over pods and port-forward it to each of them
 	return hsh.sendAllPodsHTTPGETRequest(ctx, "/controlPlaneInfo", ControlPlaneInfo)

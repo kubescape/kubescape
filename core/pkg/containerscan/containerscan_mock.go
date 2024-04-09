@@ -25,7 +25,7 @@ func GenerateContainerScanReportMock() ScanResultReport {
 	return ds
 }
 
-// GenerateContainerScanReportMock - generate a scan result
+// GenerateContainerScanReportNoVulMock - generate a scan result
 func GenerateContainerScanReportNoVulMock() ScanResultReport {
 	ds := ScanResultReport{
 		WLID:          "wlid://cluster-k8s-geriatrix-k8s-demo3/namespace-whisky-app/deployment-whisky4all-shipping",
