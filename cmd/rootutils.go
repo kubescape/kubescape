@@ -77,7 +77,7 @@ func initEnvironment() {
 	)
 
 	if err != nil {
-		logger.L().Fatal("failed to to get services from server", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
+		logger.L().Fatal("failed to get services from server", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
 		return
 	}
 
