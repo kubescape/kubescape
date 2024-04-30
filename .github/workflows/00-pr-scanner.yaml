@@ -34,6 +34,7 @@ jobs:
       repository-projects: read
       security-events: read
       statuses: read
+      attestations: read
     uses: ./.github/workflows/a-pr-scanner.yaml
     with:
       RELEASE: ""
@@ -58,6 +59,7 @@ jobs:
       repository-projects: read
       security-events: read
       statuses: read
+      attestations: read
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
       COMPONENT_NAME: kubescape
