@@ -29,6 +29,7 @@ jobs:
       repository-projects: read
       security-events: read
       statuses: read
+      contents: write
       attestations: write
     needs: [retag]
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
