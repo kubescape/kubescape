@@ -12,8 +12,7 @@ before:
     - go mod tidy
 
 builds:
-  - id: "kubescape-cli"
-    goos:
+  - goos:
       - linux
       - windows
       - darwin
@@ -35,8 +34,11 @@ builds:
     no_unique_dist_dir: true
 
 archives:
+  - format: binary
+    id: binaries
+    name_template: >-
+      {{ .Binary }}
   - format: tar.gz
-    # this name template makes the OS and Arch compatible with the results of `uname`.
     name_template: >-
       {{ .Binary }}
 
@@ -47,5 +49,12 @@ changelog:
       - "^docs:"
       - "^test:"
 
+checksum:
+  ids:
+    - binaries
+  split: true
+
 sboms:
-  - artifacts: archive
+  - artifacts: binary
+    documents:
+      - "{{ .Binary }}.sbom"

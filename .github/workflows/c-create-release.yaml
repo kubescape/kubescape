@@ -61,24 +61,31 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             ./kubescape/kubescape-${{ env.MAC_OS }}
+            ./kubescape/kubescape-${{ env.MAC_OS }}.sbom
+            ./kubescape/kubescape-${{ env.MAC_OS }}.sha256
             ./kubescape/kubescape-${{ env.MAC_OS }}.tar.gz
-            ./kubescape/kubescape-${{ env.MAC_OS }}.tar.gz.sbom
             ./kubescape/kubescape-${{ env.UBUNTU_OS }}
+            ./kubescape/kubescape-${{ env.UBUNTU_OS }}.sbom
+            ./kubescape/kubescape-${{ env.UBUNTU_OS }}.sha256
             ./kubescape/kubescape-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape/kubescape-${{ env.UBUNTU_OS }}.tar.gz.sbom
             ./kubescape/kubescape-${{ env.WINDOWS_OS }}.exe
+            ./kubescape/kubescape-${{ env.WINDOWS_OS }}.exe.sbom
+            ./kubescape/kubescape-${{ env.WINDOWS_OS }}.exe.sha256
             ./kubescape/kubescape-${{ env.WINDOWS_OS }}.tar.gz
-            ./kubescape/kubescape-${{ env.WINDOWS_OS }}.tar.gz.sbom
             ./kubescape/kubescape-arm64-${{ env.MAC_OS }}
+            ./kubescape/kubescape-arm64-${{ env.MAC_OS }}.sbom
+            ./kubescape/kubescape-arm64-${{ env.MAC_OS }}.sha256
             ./kubescape/kubescape-arm64-${{ env.MAC_OS }}.tar.gz
-            ./kubescape/kubescape-arm64-${{ env.MAC_OS }}.tar.gz.sbom
             ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}
+            ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}.sbom
+            ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}.sha256
             ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}.tar.gz.sbom
             ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.exe
+            ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.exe.sbom
+            ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.exe.sha256
             ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.tar.gz
-            ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.tar.gz.sbom
             ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}
+            ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}.sbom
+            ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}.sha256
             ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}.tar.gz.sbom
             ./kubescape/kubescape.exe
