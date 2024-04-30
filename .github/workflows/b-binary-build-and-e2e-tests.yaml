@@ -164,7 +164,7 @@ jobs:
 
   build-http-image:
     permissions:
-      contents: read
+      contents: write
       id-token: write
       packages: write
       pull-requests: read
