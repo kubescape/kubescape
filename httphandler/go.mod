@@ -179,7 +179,7 @@ require (
 	github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352 // indirect
 	github.com/digitorus/timestamp v0.0.0-20231217203849-220c5c2851b7 // indirect
 	github.com/dimchansky/utfbom v1.1.1 // indirect
-	github.com/distribution/distribution v2.8.3+incompatible // indirect
+	github.com/distribution/distribution v2.8.2+incompatible // indirect
 	github.com/distribution/reference v0.6.0 // indirect
 	github.com/docker/cli v26.1.0+incompatible // indirect
 	github.com/docker/distribution v2.8.3+incompatible // indirect
@@ -498,3 +498,5 @@ replace github.com/olekukonko/tablewriter => github.com/kubescape/tablewriter v0
 
 // TODO(anubhav06): Remove this once we have a release of copacetic with the support for patching kubescape image scan results.
 replace github.com/project-copacetic/copacetic => github.com/anubhav06/copacetic v0.0.0-20230821175613-0a7915a62e10
+
+replace github.com/docker/distribution v2.8.3+incompatible => github.com/docker/distribution v2.8.2+incompatible
