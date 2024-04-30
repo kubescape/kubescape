@@ -19,7 +19,6 @@ jobs:
     permissions:
       actions: read
       checks: read
-      contents: read
       deployments: read
       discussions: read
       id-token: write
@@ -31,7 +30,6 @@ jobs:
       security-events: read
       statuses: read
       attestations: write
-      contents: write
     needs: [retag]
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
@@ -58,7 +56,6 @@ jobs:
       statuses: read
       security-events: read
       attestations: read
-      contents: write
     needs: [retag, binary-build]
     uses: ./.github/workflows/c-create-release.yaml
     with:
@@ -70,7 +67,6 @@ jobs:
     permissions:
       actions: read
       checks: read
-      contents: read
       deployments: read
       discussions: read
       id-token: write
