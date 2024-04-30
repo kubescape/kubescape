@@ -30,6 +30,7 @@ jobs:
       repository-projects: read
       security-events: read
       statuses: read
+      attestations: write
     needs: [retag]
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
@@ -86,3 +87,4 @@ jobs:
       support_platforms: true
       cosign: true
     secrets: inherit
+   

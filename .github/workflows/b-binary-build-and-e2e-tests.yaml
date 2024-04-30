@@ -75,7 +75,7 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-        run: "echo \"is-secret-set=${{ env.CUSTOMER != '' && \n                        env.USERNAME != '' &&\n                        env.PASSWORD != '' &&\n                        env.CLIENT_ID != '' &&\n                        env.SECRET_KEY != '' &&\n                        env.REGISTRY_USERNAME != '' &&\n                        env.REGISTRY_PASSWORD != ''\n                      }}\" >> $GITHUB_OUTPUT\n"
+        run: "echo \"is-secret-set=${{ env.CUSTOMER != '' && env.USERNAME != '' && env.PASSWORD != '' && env.CLIENT_ID != '' && env.SECRET_KEY != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != '' }}\" >> $GITHUB_OUTPUT\n"
 
       - id: export_tests_to_env
         name: set test name
@@ -290,5 +290,6 @@ jobs:
         uses: mikepenz/action-junit-report@6e9933f4a97f4d2b99acef4d7b97924466037882 # ratchet:mikepenz/action-junit-report@v3.6.1
         if: always() # always run even if the previous step fails
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           report_paths: '**/results_xml_format/**.xml'
           commit: ${{github.event.workflow_run.head_sha}}
