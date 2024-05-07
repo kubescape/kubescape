@@ -71,7 +71,7 @@ func TestGetScanningContext(t *testing.T) {
 		{
 			name:  "git URL input",
 			input: "https://github.com/kubescape/http-request",
-			want:  ContextGitLocal,
+			want:  ContextGitRemote,
 		},
 		{
 			name:  "local git input",

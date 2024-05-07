@@ -25,10 +25,11 @@ import (
 type ScanningContext string
 
 const (
-	ContextCluster  ScanningContext = "cluster"
-	ContextFile     ScanningContext = "single-file"
-	ContextDir      ScanningContext = "local-dir"
-	ContextGitLocal ScanningContext = "git-local"
+	ContextCluster   ScanningContext = "cluster"
+	ContextFile      ScanningContext = "single-file"
+	ContextDir       ScanningContext = "local-dir"
+	ContextGitLocal  ScanningContext = "git-local"
+	ContextGitRemote ScanningContext = "git-remote"
 )
 
 const ( // deprecated
@@ -281,6 +282,9 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 	case ContextGitLocal:
 		// local-git
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.GitLocal
+	case ContextGitRemote:
+		// remote
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Repo
 	case ContextDir:
 		// directory
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
@@ -308,6 +312,7 @@ func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
 }
 
 // getScanningContext get scanning context from the input param
+// this function should be called only once. Call GetScanningContext() to get the scanning context
 func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	//  cluster
 	if input == "" {
@@ -321,7 +326,7 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 				scanInfo.cleanups = append(scanInfo.cleanups, func() {
 					_ = os.RemoveAll(repo)
 				})
-				return ContextGitLocal
+				return ContextGitRemote
 			}
 		}
 	}
@@ -387,6 +392,13 @@ func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadat
 		repoContext, err := metadataGitLocal(input)
 		if err != nil {
 			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitLocal), helpers.Error(err))
+		}
+		contextMetadata.RepoContextMetadata = repoContext
+	case ContextGitRemote:
+		// remote
+		repoContext, err := metadataGitLocal(GetClonedPath(input))
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitRemote), helpers.Error(err))
 		}
 		contextMetadata.RepoContextMetadata = repoContext
 	}
