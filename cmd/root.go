@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/kubescape/v3/cmd/patch"
 	"github.com/kubescape/kubescape/v3/cmd/scan"
 	"github.com/kubescape/kubescape/v3/cmd/update"
+	"github.com/kubescape/kubescape/v3/cmd/vap_helper"
 	"github.com/kubescape/kubescape/v3/cmd/version"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
@@ -97,6 +98,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(update.GetUpdateCmd())
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
 	rootCmd.AddCommand(patch.GetPatchCmd(ks))
+	rootCmd.AddCommand(vap_helper.GetVapHelperCmd(ks))
 	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 
 	// deprecated commands
