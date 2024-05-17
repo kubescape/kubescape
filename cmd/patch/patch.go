@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	ref "github.com/distribution/reference"
 	"github.com/docker/distribution/reference"
 
 	"github.com/kubescape/go-logger"
@@ -98,22 +97,22 @@ func validateImagePatchInfo(patchInfo *metav1.PatchInfo) error {
 	}
 
 	// Parse the image full name to get image name and tag
-	named, err := ref.ParseNamed(patchInfoImage)
+	named, err := reference.ParseNamed(patchInfoImage)
 	if err != nil {
 		return err
 	}
 
 	// If no tag or digest is provided, default to 'latest'
-	if ref.IsNameOnly(named) {
+	if reference.IsNameOnly(named) {
 		logger.L().Warning("Image name has no tag or digest, using latest as tag")
-		named = ref.TagNameOnly(named)
+		named = reference.TagNameOnly(named)
 	}
 	patchInfo.Image = named.String()
 
 	// If no patched image tag is provided, default to '<image-tag>-patched'
 	if patchInfo.PatchedImageTag == "" {
 
-		taggedName, ok := named.(ref.Tagged)
+		taggedName, ok := named.(reference.Tagged)
 		if !ok {
 			return errors.New("unexpected error while parsing image tag")
 		}

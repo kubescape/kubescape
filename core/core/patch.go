@@ -45,9 +45,10 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 		return nil, err
 	}
 
-	// WORKAROUND: Since the current version of grype is buggy and doesn't include this value. Hence this requirement
-	scanResults.ID.Name = "grype"
-
+	// If the scan results ID is empty, set it to "grype"
+	if scanResults.ID.Name == "" {
+		scanResults.ID.Name = "grype"
+	}
 	// Save the scan results to a file in json format
 	pres := presenter.GetPresenter("json", "", false, *scanResults)
 

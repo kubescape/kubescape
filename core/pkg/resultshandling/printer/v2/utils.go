@@ -16,7 +16,7 @@ import (
 
 const indicator = "†"
 
-// finalizeV2Report finalize the results objects by copying data from map to lists
+// FinalizeResults finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,

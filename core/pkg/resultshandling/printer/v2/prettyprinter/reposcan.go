@@ -3,6 +3,7 @@ package prettyprinter
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
@@ -77,9 +78,8 @@ func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source repo
 	}
 
 	if source.FileType == reporthandling.SourceTypeHelmChart {
-		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.HelmPath, fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
-
+		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.HelmPath, filepath.Join(source.Path, source.RelativePath))
 	} else {
-		return fmt.Sprintf("%s --file-path=%s", cmd, fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
+		return fmt.Sprintf("%s --file-path=%s", cmd, filepath.Join(source.Path, source.RelativePath))
 	}
 }

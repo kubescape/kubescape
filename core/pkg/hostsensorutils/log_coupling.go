@@ -39,7 +39,7 @@ func (lm *LogsMap) isDuplicated(logContent string) bool {
 	return ok
 }
 
-// GgtOccurrence retrieve the number of occurrences logContent has been used.
+// getOccurrence retrieve the number of occurrences logContent has been used.
 func (lm *LogsMap) getOccurrence(logContent string) int {
 	lm.Lock()
 	occurrence, ok := lm.usedLogs[logContent]

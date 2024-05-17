@@ -192,18 +192,21 @@ func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.Sum
 		}
 	}
 
+	size := 6.0
+	gridSize := []uint{1, 1, 6, 1, 1, 2}
+
 	m.TableList(headers, controls, props.TableList{
 		HeaderProp: props.TableListContent{
 			Family:    consts.Arial,
 			Style:     consts.Bold,
-			Size:      6.0,
-			GridSizes: []uint{1, 5, 2, 2, 2},
+			Size:      size,
+			GridSizes: gridSize,
 		},
 		ContentProp: props.TableListContent{
 			Family:                          consts.Courier,
 			Style:                           consts.Normal,
-			Size:                            6.0,
-			GridSizes:                       []uint{1, 5, 2, 2, 2},
+			Size:                            size,
+			GridSizes:                       gridSize,
 			CellTextColorChangerColumnIndex: 0,
 			CellTextColorChangerFunc: func(cellValue string) color.Color {
 				if cellValue == "Critical" {

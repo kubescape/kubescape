@@ -23,7 +23,7 @@ jobs:
     permissions:
       id-token: write
       packages: write
-      contents: read
+      contents: write
       pull-requests: read
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:

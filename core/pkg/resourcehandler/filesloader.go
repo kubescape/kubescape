@@ -3,7 +3,6 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -45,7 +44,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		var err error
 
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
-			workloadIDToSource, workloads, workloadIDToMappingNodes, err = getWorkloadFromHelmChart(ctx, scanInfo.ChartPath, scanInfo.FilePath)
+			workloadIDToSource, workloads, workloadIDToMappingNodes, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath)
 			if err != nil {
 				// We should probably ignore the error so we can continue scanning other charts
 			}
@@ -107,25 +106,21 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
-func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, map[string]cautils.MappingNodes, error) {
-	clonedRepo, err := cautils.CloneGitRepo(&helmPath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, map[string]cautils.MappingNodes, error) {
+	clonedRepo := cautils.GetClonedPath(path)
+
 	if clonedRepo != "" {
-		defer func(path string) {
-			_ = os.RemoveAll(path)
-		}(clonedRepo)
+		// if the repo was cloned, add the workload path to the cloned repo
+		workloadPath = filepath.Join(clonedRepo, workloadPath)
+	} else {
+		// if the repo was not cloned
+		clonedRepo = path
 	}
 
 	// Get repo root
-	repoRoot, gitRepo := extractGitRepo(helmPath)
+	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
 	helmSourceToWorkloads, helmSourceToChart, helmSourceToNodes := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
-
-	if clonedRepo != "" {
-		workloadPath = clonedRepo + workloadPath
-	}
 
 	wlSource, ok := helmSourceToWorkloads[workloadPath]
 	if !ok {
@@ -195,14 +190,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 	workloadIDToNodes := make(map[string]cautils.MappingNodes)
 	var workloads []workloadinterface.IMetadata
 
-	clonedRepo, err := cautils.CloneGitRepo(&path)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	clonedRepo := cautils.GetClonedPath(path)
 	if clonedRepo != "" {
-		defer func(path string) {
-			_ = os.RemoveAll(path)
-		}(clonedRepo)
+		// if the repo was cloned, add the workload path to the cloned repo
+		path = clonedRepo
 	}
 
 	// Get repo root

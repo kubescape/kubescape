@@ -1,7 +1,7 @@
 package cautils
 
 import (
-	"github.com/docker/distribution/reference"
+	"github.com/distribution/reference"
 )
 
 func NormalizeImageName(img string) (string, error) {
