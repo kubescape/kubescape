@@ -8,7 +8,7 @@ metadata:
 spec:
   containers:
   - name: nginx1
-    image: nginx
     securityContext:
       capabilities:
         drop: ["NET_RAW", "SYS_ADM"]
+    image: nginx
