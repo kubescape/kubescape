@@ -17,21 +17,21 @@ import (
 )
 
 var vapHelperCmdExamples = fmt.Sprintf(`
-  vap-helper command can be used for managing Validating Admission Policies in a Kubernetes cluster.
+  vap command can be used for managing Validating Admission Policies in a Kubernetes cluster.
   This is an experimental feature and it might change.
 
   Examples:
 
   # Install Kubescape CEL admission policy library
-  %[1]s vap-helper deploy-library | kubectl apply -f -
+  %[1]s vap deploy-library | kubectl apply -f -
   # Create a policy binding
-  %[1]s vap-helper create-policy-binding --name my-policy-binding --policy C-0012 --scope namespace=my-namespace | kubectl apply -f -
+  %[1]s vap create-policy-binding --name my-policy-binding --policy C-0012 --scope namespace=my-namespace | kubectl apply -f -
 `, cautils.ExecName())
 
 func GetVapHelperCmd(ks meta.IKubescape) *cobra.Command {
 
 	vapHelperCmd := &cobra.Command{
-		Use:     "vap-helper",
+		Use:     "vap",
 		Short:   "Helper commands for managing Validating Admission Policies in a Kubernetes cluster",
 		Long:    ``,
 		Example: vapHelperCmdExamples,
