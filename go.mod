@@ -1,8 +1,6 @@
 module github.com/kubescape/kubescape/v3
 
-go 1.22.0
-
-toolchain go1.22.3
+go 1.22.3
 
 require (
 	github.com/adrg/xdg v0.4.0
@@ -59,6 +57,7 @@ require (
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b
 	sigs.k8s.io/kustomize/api v0.13.5-0.20230601165947-6ce0bf390ce3
 	sigs.k8s.io/kustomize/kyaml v0.14.3-0.20230601165947-6ce0bf390ce3
+	sigs.k8s.io/yaml v1.4.0
 )
 
 require github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
@@ -483,7 +482,6 @@ require (
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/release-utils v0.7.7 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.4.1 // indirect
-	sigs.k8s.io/yaml v1.4.0 // indirect
 )
 
 // Using the forked version of tablewriter

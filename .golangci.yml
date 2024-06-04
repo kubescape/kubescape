@@ -1,6 +1,6 @@
 linters-settings:
   govet:
-    check-shadowing: true
+    shadow: true
   dupl:
     threshold: 200
   goconst:
@@ -24,7 +24,6 @@ linters:
     - gosimple
   disable:
     # temporarily disabled
-    - varcheck
     - errcheck
     - dupl
     - gocritic
@@ -36,8 +35,6 @@ linters:
     - unparam
     #- forbidigo # <- see later
     # should remain disabled
-    - deadcode   # deprecated linter
-    - maligned
     - lll
     - gochecknoinits
     - gochecknoglobals

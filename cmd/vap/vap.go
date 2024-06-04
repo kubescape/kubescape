@@ -1,6 +1,7 @@
-package vap_helper
+package vap
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -8,7 +9,6 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/meta"
 	"sigs.k8s.io/yaml"
 
 	"github.com/spf13/cobra"
@@ -25,10 +25,10 @@ var vapHelperCmdExamples = fmt.Sprintf(`
   # Install Kubescape CEL admission policy library
   %[1]s vap deploy-library | kubectl apply -f -
   # Create a policy binding
-  %[1]s vap create-policy-binding --name my-policy-binding --policy C-0012 --scope namespace=my-namespace | kubectl apply -f -
+  %[1]s vap create-policy-binding --name my-policy-binding --policy c-0016 --namespace=my-namespace | kubectl apply -f -
 `, cautils.ExecName())
 
-func GetVapHelperCmd(ks meta.IKubescape) *cobra.Command {
+func GetVapHelperCmd() *cobra.Command {
 
 	vapHelperCmd := &cobra.Command{
 		Use:     "vap",
@@ -38,24 +38,24 @@ func GetVapHelperCmd(ks meta.IKubescape) *cobra.Command {
 	}
 
 	// Create subcommands
-	vapHelperCmd.AddCommand(getDeployLibraryCmd(ks))
-	vapHelperCmd.AddCommand(getCreatePolicyBindingCmd(ks))
+	vapHelperCmd.AddCommand(getDeployLibraryCmd())
+	vapHelperCmd.AddCommand(getCreatePolicyBindingCmd())
 
 	return vapHelperCmd
 }
 
-func getDeployLibraryCmd(ks meta.IKubescape) *cobra.Command {
+func getDeployLibraryCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "deploy-library",
 		Short: "Install Kubescape CEL admission policy library",
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return deployLibrary(ks)
+			return deployLibrary()
 		},
 	}
 }
 
-func getCreatePolicyBindingCmd(ks meta.IKubescape) *cobra.Command {
+func getCreatePolicyBindingCmd() *cobra.Command {
 	var policyBindingName string
 	var policyName string
 	var namespaceArr []string
@@ -69,15 +69,15 @@ func getCreatePolicyBindingCmd(ks meta.IKubescape) *cobra.Command {
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Validate the inputs
-			if !isValidK8sObjectName(policyBindingName) {
-				return fmt.Errorf("invalid policy binding name: %s", policyBindingName)
+			if err := isValidK8sObjectName(policyBindingName); err != nil {
+				return fmt.Errorf("invalid policy binding name %s: %w", policyBindingName, err)
 			}
-			if !isValidK8sObjectName(policyName) {
-				return fmt.Errorf("invalid policy name: %s", policyName)
+			if err := isValidK8sObjectName(policyName); err != nil {
+				return fmt.Errorf("invalid policy name %s: %w", policyName, err)
 			}
 			for _, namespace := range namespaceArr {
-				if !isValidK8sObjectName(namespace) {
-					return fmt.Errorf("invalid namespace: %s", namespace)
+				if err := isValidK8sObjectName(namespace); err != nil {
+					return fmt.Errorf("invalid namespace %s: %w", namespace, err)
 				}
 			}
 			for _, label := range labelArr {
@@ -89,8 +89,10 @@ func getCreatePolicyBindingCmd(ks meta.IKubescape) *cobra.Command {
 			if action != "Deny" && action != "Audit" && action != "Warn" {
 				return fmt.Errorf("invalid action: %s", action)
 			}
-			if parameterReference != "" && !isValidK8sObjectName(parameterReference) {
-				return fmt.Errorf("invalid parameter reference: %s", parameterReference)
+			if parameterReference != "" {
+				if err := isValidK8sObjectName(parameterReference); err != nil {
+					return fmt.Errorf("invalid parameter reference %s: %w", parameterReference, err)
+				}
 			}
 
 			return createPolicyBinding(policyBindingName, policyName, action, parameterReference, namespaceArr, labelArr)
@@ -109,9 +111,9 @@ func getCreatePolicyBindingCmd(ks meta.IKubescape) *cobra.Command {
 	return createPolicyBindingCmd
 }
 
-// Imlpementation of the VAP helper commands
+// Implementation of the VAP helper commands
 // deploy-library
-func deployLibrary(ks meta.IKubescape) error {
+func deployLibrary() error {
 	logger.L().Info("Downloading the Kubescape CEL admission policy library")
 	// Download the policy-configuration-definition.yaml from the latest release URL
 	policyConfigurationDefinitionURL := "https://github.com/kubescape/cel-admission-library/releases/latest/download/policy-configuration-definition.yaml"
@@ -134,7 +136,7 @@ func deployLibrary(ks meta.IKubescape) error {
 		return err
 	}
 
-	logger.L().Info("Successfuly downloaded admission policy library")
+	logger.L().Info("Successfully downloaded admission policy library")
 
 	// Print the downloaded files to the STDOUT for the user to apply connecting them to a single YAML with ---
 	fmt.Println(policyConfigurationDefinition)
@@ -148,7 +150,7 @@ func deployLibrary(ks meta.IKubescape) error {
 
 func downloadFileToString(url string) (string, error) {
 	// Send an HTTP GET request to the URL
-	response, err := http.Get(url)
+	response, err := http.Get(url) //nolint:gosec
 	if err != nil {
 		return "", err // Return an empty string and the error if the request fails
 	}
@@ -170,20 +172,24 @@ func downloadFileToString(url string) (string, error) {
 	return bodyString, nil
 }
 
-func isValidK8sObjectName(name string) bool {
+func isValidK8sObjectName(name string) error {
 	// Kubernetes object names must consist of lower case alphanumeric characters, '-' or '.',
 	// and must start and end with an alphanumeric character (e.g., 'example.com', regex used for validation is '[a-z0-9]([-a-z0-9]*[a-z0-9])?')
 	// Max length of 63 characters.
 	if len(name) > 63 {
-		return false
+		return errors.New("name should be less than 63 characters")
 	}
 
 	regex := regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
-	return regex.MatchString(name)
+	if !regex.MatchString(name) {
+		return errors.New("name should consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character")
+	}
+
+	return nil
 }
 
 // Create a policy binding
-func createPolicyBinding(bindingName string, policyName string, action string, paramRefName string, namespaceScope []string, labelMatch []string) error {
+func createPolicyBinding(bindingName string, policyName string, action string, paramRefName string, namespaceArr []string, labelMatch []string) error {
 	// Create a policy binding struct
 	policyBinding := &admissionv1.ValidatingAdmissionPolicyBinding{}
 	// Print the policy binding after marshalling it to YAML to the STDOUT
@@ -193,13 +199,13 @@ func createPolicyBinding(bindingName string, policyName string, action string, p
 	policyBinding.Kind = "ValidatingAdmissionPolicyBinding"
 	policyBinding.Spec.PolicyName = policyName
 	policyBinding.Spec.MatchResources = &admissionv1.MatchResources{}
-	if len(namespaceScope) > 0 {
+	if len(namespaceArr) > 0 {
 		policyBinding.Spec.MatchResources.NamespaceSelector = &metav1.LabelSelector{
 			MatchExpressions: []metav1.LabelSelectorRequirement{
 				{
 					Key:      "name",
 					Operator: metav1.LabelSelectorOpIn,
-					Values:   namespaceScope,
+					Values:   namespaceArr,
 				},
 			},
 		}
