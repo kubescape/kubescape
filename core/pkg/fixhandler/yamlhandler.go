@@ -182,7 +182,7 @@ func addLinesToRemove(ctx context.Context, fixInfoMetadata *fixInfoMetadata) (in
 	newOriginalListTracker := updateTracker(fixInfoMetadata.originalList, fixInfoMetadata.originalListTracker)
 	*fixInfoMetadata.linesToRemove = append(*fixInfoMetadata.linesToRemove, linesToRemove{
 		startLine: currentDFSNode.node.Line,
-		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker),
+		endLine:   getNodeLine(fixInfoMetadata.originalList, newOriginalListTracker-1), // newOriginalListTracker is the next node
 	})
 
 	return newOriginalListTracker, fixInfoMetadata.fixedListTracker
