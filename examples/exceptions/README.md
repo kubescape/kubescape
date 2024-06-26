@@ -22,7 +22,6 @@ e.g. When a `kube-system` resource fails and it is ok, simply add the resource t
     * `frameworkName` - Framework names can be found [here](https://github.com/armosec/regolibrary/tree/master/frameworks) (regex supported)
     * `controlName` - Control names can be found [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
     * `controlID` - Control ID can be found [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
-    * `ruleName` - Rule names can be found [here](https://github.com/armosec/regolibrary/tree/master/rules) (regex supported)
  
 You can find [here](https://github.com/kubescape/kubescape/tree/master/examples/exceptions) some examples of exceptions files
 

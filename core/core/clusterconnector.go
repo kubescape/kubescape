@@ -83,7 +83,10 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 		return "", err
 	}
 	defer resp.Body.Close()
-	return httputils.HttpRespToString(resp)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("http-error: %d", resp.StatusCode)
+	}
+	return "success", nil
 }
 
 func (a *OperatorAdapter) OperatorScan() (string, error) {

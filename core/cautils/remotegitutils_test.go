@@ -1,4 +1,4 @@
-package resourcehandler
+package cautils
 
 import (
 	"errors"
@@ -90,6 +90,66 @@ func TestCloneRepo(t *testing.T) {
 			tempDir, err := cloneRepo(gitURL)
 			assert.NotEqual(t, tmpDir, tempDir)
 			assert.Equal(t, tt.err, err)
+		})
+	}
+}
+func TestGetClonedPath(t *testing.T) {
+	testCases := []struct {
+		name     string
+		path     string
+		expected string
+	}{
+		{
+			name:     "Valid Git URL",
+			path:     "https://github.com/kubescape/kubescape.git",
+			expected: "/path/to/cloned/repo", // replace with the expected path
+		},
+		{
+			name:     "Invalid Git URL",
+			path:     "invalid",
+			expected: "",
+		},
+	}
+	tmpDirPaths = make(map[string]string)
+	tmpDirPaths[hashRepoURL("https://github.com/kubescape/kubescape.git")] = "/path/to/cloned/repo" // replace with the actual path
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := GetClonedPath(tc.path)
+			if result != tc.expected {
+				t.Errorf("Expected %q, got %q", tc.expected, result)
+			}
+		})
+	}
+}
+func TestGetDirPath(t *testing.T) {
+	testCases := []struct {
+		name     string
+		repoURL  string
+		expected string
+	}{
+		{
+			name:     "Existing Repo URL",
+			repoURL:  "https://github.com/user/repo.git",
+			expected: "/path/to/cloned/repo", // replace with the expected path
+		},
+		{
+			name:     "Non-Existing Repo URL",
+			repoURL:  "https://github.com/user/nonexistentrepo.git",
+			expected: "",
+		},
+	}
+
+	// Initialize tmpDirPaths
+	tmpDirPaths = make(map[string]string)
+	tmpDirPaths[hashRepoURL("https://github.com/user/repo.git")] = "/path/to/cloned/repo" // replace with the actual path
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := getDirPath(tc.repoURL)
+			if result != tc.expected {
+				t.Errorf("Expected %q, got %q", tc.expected, result)
+			}
 		})
 	}
 }

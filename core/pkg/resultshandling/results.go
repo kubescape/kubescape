@@ -146,7 +146,7 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 	if printFormat == printer.SARIFFormat {
 		// supported types for SARIF
 		switch scanContext {
-		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal:
+		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
 			return nil
 		default:
 			return fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)

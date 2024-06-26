@@ -48,8 +48,9 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 		k8s = getKubernetesApi()
 		if k8s == nil {
 			logger.L().Ctx(ctx).Fatal("failed connecting to Kubernetes cluster")
+		} else {
+			k8sClient = k8s.KubernetesClient
 		}
-		k8sClient = k8s.KubernetesClient
 	}
 
 	// ================== setup tenant object ======================================
@@ -68,7 +69,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	// ================== version testing ======================================
 
 	v := versioncheck.NewIVersionCheckHandler(ctx)
-	v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+	_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
 
 	// ================== setup host scanner object ======================================
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
@@ -127,6 +128,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	// ===================== Initialization =====================
 	scanInfo.Init(ctxInit) // initialize scan info
+	defer scanInfo.Cleanup()
 
 	interfaces := getInterfaces(ctxInit, scanInfo)
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
@@ -194,7 +196,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)
 		}
-		if err == nil && isPrioritizationScanType(scanInfo.ScanType) {
+		if isPrioritizationScanType(scanInfo.ScanType) {
 			scanData.SetTopWorkloads()
 		}
 		spanPrioritization.End()
@@ -214,7 +216,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 }
 
 func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler) {
-	imagesToScan := []string{}
+	var imagesToScan []string
 
 	if scanType == cautils.ScanTypeWorkload {
 		containers, err := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()

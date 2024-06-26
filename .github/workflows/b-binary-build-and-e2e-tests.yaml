@@ -18,7 +18,7 @@ on:
       GO_VERSION:
         required: false
         type: string
-        default: "1.21"
+        default: "1.22"
       GO111MODULE:
         required: false
         type: string
@@ -30,7 +30,32 @@ on:
       BINARY_TESTS:
         type: string
         required: false
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "control_cluster_from_CLI_config_scan_exclude_namespaces", "control_cluster_from_CLI_config_scan_include_namespaces", "control_cluster_from_CLI_config_scan_host_scanner_enabled", "control_cluster_from_CLI_config_scan_MITRE_framework", "control_cluster_from_CLI_vulnerabilities_scan_default", "control_cluster_from_CLI_vulnerabilities_scan_include_namespaces" ]'
+        default: '[
+          "ks_microservice_create_2_cronjob_mitre_and_nsa_proxy",
+          "ks_microservice_triggering_with_cron_job",
+          "ks_microservice_update_cronjob_schedule",
+          "ks_microservice_delete_cronjob",
+          "ks_microservice_create_2_cronjob_mitre_and_nsa",
+          "ks_microservice_ns_creation",
+          "ks_microservice_on_demand",
+          "ks_microservice_mitre_framework_on_demand",
+          "ks_microservice_nsa_and_mitre_framework_demand",
+          "scan_nsa",
+          "scan_mitre",
+          "scan_with_exceptions",
+          "scan_repository",
+          "scan_local_file",
+          "scan_local_glob_files",
+          "scan_local_list_of_files",
+          "scan_with_exception_to_backend",
+          "scan_nsa_and_submit_to_backend",
+          "scan_mitre_and_submit_to_backend",
+          "scan_local_repository_and_submit_to_backend",
+          "scan_repository_from_url_and_submit_to_backend",
+          "scan_with_custom_framework",
+          "scan_customer_configuration",
+          "scan_compliance_score"
+          ]'
 
   workflow_call:
     inputs:
@@ -45,7 +70,7 @@ on:
         type: string
       GO_VERSION:
         type: string
-        default: "1.21"
+        default: "1.22"
       GO111MODULE:
         required: true
         type: string
@@ -54,7 +79,25 @@ on:
         default: 1
       BINARY_TESTS:
         type: string
-        default: '[ "scan_nsa", "scan_mitre", "scan_with_exceptions", "scan_repository", "scan_local_file", "scan_local_glob_files", "scan_local_list_of_files", "scan_nsa_and_submit_to_backend", "scan_mitre_and_submit_to_backend", "scan_local_repository_and_submit_to_backend", "scan_repository_from_url_and_submit_to_backend", "scan_with_custom_framework", "scan_customer_configuration", "host_scanner", "scan_compliance_score", "scan_custom_framework_scanning_file_scope_testing", "scan_custom_framework_scanning_cluster_scope_testing", "scan_custom_framework_scanning_cluster_and_file_scope_testing" ]'
+        default: '[ 
+          "scan_nsa", 
+          "scan_mitre", 
+          "scan_with_exceptions", 
+          "scan_repository", 
+          "scan_local_file", 
+          "scan_local_glob_files", 
+          "scan_local_list_of_files", 
+          "scan_nsa_and_submit_to_backend", 
+          "scan_mitre_and_submit_to_backend", 
+          "scan_local_repository_and_submit_to_backend", 
+          "scan_repository_from_url_and_submit_to_backend", 
+          "scan_with_custom_framework", 
+          "scan_customer_configuration", 
+          "scan_compliance_score", 
+          "scan_custom_framework_scanning_file_scope_testing", 
+          "scan_custom_framework_scanning_cluster_scope_testing", 
+          "scan_custom_framework_scanning_cluster_and_file_scope_testing"
+          ]'
 
 jobs:
   wf-preparation:
@@ -75,7 +118,7 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-        run: "echo \"is-secret-set=${{ env.CUSTOMER != '' && \n                        env.USERNAME != '' &&\n                        env.PASSWORD != '' &&\n                        env.CLIENT_ID != '' &&\n                        env.SECRET_KEY != '' &&\n                        env.REGISTRY_USERNAME != '' &&\n                        env.REGISTRY_PASSWORD != ''\n                      }}\" >> $GITHUB_OUTPUT\n"
+        run: "echo \"is-secret-set=${{ env.CUSTOMER != '' && env.USERNAME != '' && env.PASSWORD != '' && env.CLIENT_ID != '' && env.SECRET_KEY != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != '' }}\" >> $GITHUB_OUTPUT\n"
 
       - id: export_tests_to_env
         name: set test name
@@ -106,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
@@ -164,7 +207,7 @@ jobs:
 
   build-http-image:
     permissions:
-      contents: read
+      contents: write
       id-token: write
       packages: write
       pull-requests: read
@@ -177,7 +220,7 @@ jobs:
       CGO_ENABLED: 0
       GO111MODULE: "on"
       BUILD_PLATFORM: linux/amd64,linux/arm64
-      GO_VERSION: "1.21"
+      GO_VERSION: "1.22"
       REQUIRED_TESTS: '[
                 "ks_microservice_create_2_cronjob_mitre_and_nsa_proxy", 
                 "ks_microservice_triggering_with_cron_job",
@@ -188,8 +231,22 @@ jobs:
                 "ks_microservice_on_demand",
                 "ks_microservice_mitre_framework_on_demand",
                 "ks_microservice_nsa_and_mitre_framework_demand",
+                "scan_nsa", 
+                "scan_mitre", 
+                "scan_with_exceptions", 
+                "scan_repository", 
+                "scan_local_file", 
+                "scan_local_glob_files", 
+                "scan_local_list_of_files", 
+                "scan_with_exception_to_backend", 
+                "scan_nsa_and_submit_to_backend", 
+                "scan_mitre_and_submit_to_backend", 
+                "scan_local_repository_and_submit_to_backend", 
+                "scan_repository_from_url_and_submit_to_backend", 
+                "scan_with_custom_framework", 
+                "scan_customer_configuration", 
                 "scan_compliance_score"
-              ]'
+                ]'
       COSIGN: true
       HELM_E2E_TEST: true
       FORCE: true
@@ -216,7 +273,7 @@ jobs:
         run: chmod +x -R ${{steps.download-artifact.outputs.download-path}}/kubescape-ubuntu-latest
 
       - name: Checkout systests repo
-        uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           repository: armosec/system-tests
           path: .
@@ -269,5 +326,6 @@ jobs:
         uses: mikepenz/action-junit-report@6e9933f4a97f4d2b99acef4d7b97924466037882 # ratchet:mikepenz/action-junit-report@v3.6.1
         if: always() # always run even if the previous step fails
         with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           report_paths: '**/results_xml_format/**.xml'
           commit: ${{github.event.workflow_run.head_sha}}

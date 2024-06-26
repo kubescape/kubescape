@@ -3,7 +3,6 @@ package resourcehandler
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -11,7 +10,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/apimachinery/pkg/version"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -26,7 +25,7 @@ func NewFileResourceHandler() *FileResourceHandler {
 	return &FileResourceHandler{}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, progressListener opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 	externalResources := cautils.ExternalResources{}
 
@@ -45,7 +44,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		var err error
 
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
-			workloadIDToSource, workloads, workloadIDToMappingNodes, err = getWorkloadFromHelmChart(ctx, scanInfo.ChartPath, scanInfo.FilePath)
+			workloadIDToSource, workloads, workloadIDToMappingNodes, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath)
 			if err != nil {
 				// We should probably ignore the error so we can continue scanning other charts
 			}
@@ -88,7 +87,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	// save only relevant resources
 	for i := range mappedResources {
 		if _, ok := k8sResources[i]; ok {
-			ids := []string{}
+			var ids []string
 			for j := range mappedResources[i] {
 				ids = append(ids, mappedResources[i][j].GetID())
 				allResources[mappedResources[i][j].GetID()] = mappedResources[i][j]
@@ -107,23 +106,21 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
-func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, map[string]cautils.MappingNodes, error) {
-	clonedRepo, err := cloneGitRepo(&helmPath)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, map[string]cautils.MappingNodes, error) {
+	clonedRepo := cautils.GetClonedPath(path)
+
 	if clonedRepo != "" {
-		defer os.RemoveAll(clonedRepo)
+		// if the repo was cloned, add the workload path to the cloned repo
+		workloadPath = filepath.Join(clonedRepo, workloadPath)
+	} else {
+		// if the repo was not cloned
+		clonedRepo = path
 	}
 
 	// Get repo root
-	repoRoot, gitRepo := extractGitRepo(helmPath)
+	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
 	helmSourceToWorkloads, helmSourceToChart, helmSourceToNodes := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
-
-	if clonedRepo != "" {
-		workloadPath = clonedRepo + workloadPath
-	}
 
 	wlSource, ok := helmSourceToWorkloads[workloadPath]
 	if !ok {
@@ -151,7 +148,7 @@ func getWorkloadFromHelmChart(ctx context.Context, helmPath, workloadPath string
 	workloadIDToSource[wlSource[0].GetID()] = workloadSource
 	workloadIDToNodes[wlSource[0].GetID()] = templatesNodes
 
-	workloads := []workloadinterface.IMetadata{}
+	var workloads []workloadinterface.IMetadata
 	workloads = append(workloads, wlSource...)
 
 	return workloadIDToSource, workloads, workloadIDToNodes, nil
@@ -189,16 +186,14 @@ func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils
 }
 
 func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, map[string]cautils.MappingNodes, error) {
-	workloadIDToSource := make(map[string]reporthandling.Source, 0)
+	workloadIDToSource := make(map[string]reporthandling.Source)
 	workloadIDToNodes := make(map[string]cautils.MappingNodes)
-	workloads := []workloadinterface.IMetadata{}
+	var workloads []workloadinterface.IMetadata
 
-	clonedRepo, err := cloneGitRepo(&path)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	clonedRepo := cautils.GetClonedPath(path)
 	if clonedRepo != "" {
-		defer os.RemoveAll(clonedRepo)
+		// if the repo was cloned, add the workload path to the cloned repo
+		path = clonedRepo
 	}
 
 	// Get repo root
@@ -288,7 +283,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 			templatesNodes = nodes
 		}
 
-		if clonedRepo != "" {
+		if clonedRepo != "" && gitRepo != nil {
 			url, err := gitRepo.GetRemoteUrl()
 			if err != nil {
 				logger.L().Warning("failed to get remote url", helpers.Error(err))

@@ -3,17 +3,19 @@ package cautils
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestSetContextMetadata(t *testing.T) {
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
-		setContextMetadata(context.TODO(), &ctx, "")
+		scanInfo := &ScanInfo{}
+		scanInfo.setContextMetadata(context.TODO(), &ctx)
 
 		assert.NotNil(t, ctx.ClusterContextMetadata)
 		assert.Nil(t, ctx.DirectoryContextMetadata)
@@ -42,13 +44,57 @@ func TestGetHostname(t *testing.T) {
 }
 
 func TestGetScanningContext(t *testing.T) {
-	// Test with empty input
-	assert.Equal(t, ContextCluster, GetScanningContext(""))
-
-	// Test with Git URL input
-	assert.Equal(t, ContextGitURL, GetScanningContext("https://github.com/kubescape/kubescape"))
-
-	// TODO: Add more tests with other input types
+	repoRoot, err := os.MkdirTemp("", "repo")
+	require.NoError(t, err)
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(repoRoot)
+	_, err = git.PlainClone(repoRoot, false, &git.CloneOptions{
+		URL: "https://github.com/kubescape/http-request",
+	})
+	require.NoError(t, err)
+	tmpFile, err := os.CreateTemp("", "single.*.txt")
+	require.NoError(t, err)
+	defer func(name string) {
+		_ = os.Remove(name)
+	}(tmpFile.Name())
+	tests := []struct {
+		name  string
+		input string
+		want  ScanningContext
+	}{
+		{
+			name:  "empty input",
+			input: "",
+			want:  ContextCluster,
+		},
+		{
+			name:  "git URL input",
+			input: "https://github.com/kubescape/http-request",
+			want:  ContextGitRemote,
+		},
+		{
+			name:  "local git input",
+			input: repoRoot,
+			want:  ContextGitLocal,
+		},
+		{
+			name:  "single file input",
+			input: tmpFile.Name(),
+			want:  ContextFile,
+		},
+		{
+			name:  "directory input",
+			input: os.TempDir(),
+			want:  ContextDir,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{}
+			assert.Equalf(t, tt.want, scanInfo.getScanningContext(tt.input), "GetScanningContext(%v)", tt.input)
+		})
+	}
 }
 
 func TestScanInfoFormats(t *testing.T) {
@@ -76,31 +122,4 @@ func TestScanInfoFormats(t *testing.T) {
 			assert.Equal(t, want, got)
 		})
 	}
-}
-
-func TestGetScanningContextWithFile(t *testing.T) {
-	// Test with a file
-	dir, err := os.MkdirTemp("", "example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	filePath := filepath.Join(dir, "file.txt")
-	if _, err := os.Create(filePath); err != nil {
-		t.Fatal(err)
-	}
-
-	assert.Equal(t, ContextFile, GetScanningContext(filePath))
-}
-
-func TestGetScanningContextWithDir(t *testing.T) {
-	// Test with a directory
-	dir, err := os.MkdirTemp("", "example")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	assert.Equal(t, ContextDir, GetScanningContext(dir))
 }

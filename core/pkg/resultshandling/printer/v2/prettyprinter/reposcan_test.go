@@ -1,6 +1,7 @@
 package prettyprinter
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -50,7 +51,18 @@ func TestRepoScan_getWorkloadScanCommand(t *testing.T) {
 				Path:         "path",
 				RelativePath: "relativePath",
 			},
-			want: "$ kubescape scan workload kind/name --namespace ns --file-path=path/relativePath",
+			want: "$ kubescape scan workload kind/name --namespace ns --file-path=" + filepath.Join("path", "relativePath"),
+		},
+		{
+			testName: "relative file path",
+			ns:       "ns",
+			kind:     "kind",
+			name:     "name",
+			source: reporthandling.Source{
+				Path:         "",
+				RelativePath: "relativePath",
+			},
+			want: "$ kubescape scan workload kind/name --namespace ns --file-path=relativePath",
 		},
 		{
 			testName: "helm path",
@@ -63,7 +75,7 @@ func TestRepoScan_getWorkloadScanCommand(t *testing.T) {
 				HelmPath:     "helmPath",
 				FileType:     "Helm Chart",
 			},
-			want: "$ kubescape scan workload kind/name --namespace ns --chart-path=helmPath --file-path=path/relativePath",
+			want: "$ kubescape scan workload kind/name --namespace ns --chart-path=helmPath --file-path=" + filepath.Join("path", "relativePath"),
 		},
 		{
 			testName: "file path - no namespace",
@@ -73,7 +85,7 @@ func TestRepoScan_getWorkloadScanCommand(t *testing.T) {
 				Path:         "path",
 				RelativePath: "relativePath",
 			},
-			want: "$ kubescape scan workload kind/name --file-path=path/relativePath",
+			want: "$ kubescape scan workload kind/name --file-path=" + filepath.Join("path", "relativePath"),
 		},
 		{
 			testName: "helm path - no namespace",
@@ -85,7 +97,7 @@ func TestRepoScan_getWorkloadScanCommand(t *testing.T) {
 				HelmPath:     "helmPath",
 				FileType:     "Helm Chart",
 			},
-			want: "$ kubescape scan workload kind/name --chart-path=helmPath --file-path=path/relativePath",
+			want: "$ kubescape scan workload kind/name --chart-path=helmPath --file-path=" + filepath.Join("path", "relativePath"),
 		},
 	}
 
