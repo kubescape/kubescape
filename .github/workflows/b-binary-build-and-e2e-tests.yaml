@@ -148,11 +148,16 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: ubuntu-latest
     steps:
+      - name: (debug) Step 1 - Check disk space before checkout
+        run: df -h
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: (debug) Step 2 - Check disk space before installing Go
+        run: df -h
 
       - uses: actions/setup-go@v4
         name: Installing go
@@ -160,16 +165,28 @@ jobs:
           go-version: ${{ inputs.GO_VERSION }}
           cache: true
 
+      - name: (debug) Step 3 - Check disk space before build
+        run: df -h
+
       - name: Test core pkg
         run: ${{ env.DOCKER_CMD }} go test -v ./...
         if: startsWith(github.ref, 'refs/tags')
+
+      - name: (debug) Step 4 - Check disk space before testing httphandler pkg
+        run: df -h
 
       - name: Test httphandler pkg
         run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
         if: startsWith(github.ref, 'refs/tags')
 
+      - name: (debug) Step 5 - Check disk space before setting up Syft
+        run: df -h
+
       - uses: anchore/sbom-action/download-syft@v0.15.2
         name: Setup Syft
+
+      - name: (debug) Step 6 - Check disk space before goreleaser
+        run: df -h
 
       - uses: goreleaser/goreleaser-action@v5
         name: Build
@@ -182,11 +199,17 @@ jobs:
           CLIENT: ${{ inputs.CLIENT }}
           CGO_ENABLED: ${{ inputs.CGO_ENABLED }}
 
+      - name: (debug) Step 7 - Check disk space before smoke testing
+        run: df -h
+
       - name: Smoke Testing
         env:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
         run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ${PWD}/dist/kubescape-ubuntu-latest
+
+      - name: (debug) Step 8 - Check disk space before golangci-lint
+        run: df -h
 
       - name: golangci-lint
         continue-on-error: true
@@ -198,12 +221,18 @@ jobs:
           skip-pkg-cache: true
           skip-build-cache: true
 
+      - name: (debug) Step 9 - Check disk space before uploading artifacts
+        run: df -h
+
       - uses: actions/upload-artifact@83fd05a356d7e2593de66fc9913b3002723633cb # ratchet:actions/upload-artifact@v3.1.1
         name: Upload artifacts
         with:
           name: kubescape
           path: dist/kubescape*
           if-no-files-found: error
+
+      - name: (debug) Step 10 - Check disk space after uploading artifacts
+        run: df -h
 
   build-http-image:
     permissions:
