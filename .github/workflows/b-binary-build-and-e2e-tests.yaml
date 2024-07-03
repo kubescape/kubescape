@@ -146,7 +146,7 @@ jobs:
     needs: wf-preparation
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04-large
     steps:
       - name: (debug) Step 1 - Check disk space before checkout
         run: df -h
