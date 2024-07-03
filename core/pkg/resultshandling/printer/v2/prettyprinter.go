@@ -11,7 +11,7 @@ import (
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/enescakir/emoji"
 	"github.com/jwalton/gchalk"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"

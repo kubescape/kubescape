@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/schema"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 
 	"github.com/google/uuid"
 )

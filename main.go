@@ -5,7 +5,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd"
 )
 

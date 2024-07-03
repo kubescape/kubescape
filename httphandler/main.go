@@ -10,7 +10,7 @@ import (
 	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/backend/pkg/versioncheck"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"

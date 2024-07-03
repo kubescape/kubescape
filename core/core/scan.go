@@ -169,7 +169,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 
 	// ===================== resources =====================
 	ctxResources, spanResources := otel.Tracer("").Start(ctxInit, "resources")
-	err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanInfo.PolicyIdentifier, scanData, cautils.NewProgressHandler(""), scanInfo)
+	err = resourcehandler.CollectResources(ctxResources, interfaces.resourceHandler, scanData, scanInfo)
 	if err != nil {
 		spanInit.End()
 		return resultsHandling, err

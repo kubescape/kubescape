@@ -7,7 +7,7 @@ import (
 	_ "embed"
 
 	"github.com/go-openapi/runtime/middleware"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 )
 
 const (

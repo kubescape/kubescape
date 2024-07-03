@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/internal/testutils"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"

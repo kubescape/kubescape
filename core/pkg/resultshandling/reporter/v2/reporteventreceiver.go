@@ -10,7 +10,7 @@ import (
 	"github.com/armosec/armoapi-go/apis"
 	client "github.com/kubescape/backend/pkg/client/v1"
 	v1 "github.com/kubescape/backend/pkg/server/v1"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"

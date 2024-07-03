@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 )

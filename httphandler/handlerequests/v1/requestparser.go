@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"sync"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"

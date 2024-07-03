@@ -10,7 +10,7 @@ import (
 
 	"github.com/armosec/utils-go/boolutils"
 	"github.com/kubescape/backend/pkg/versioncheck"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"

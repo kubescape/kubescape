@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/kubescape/kubescape/v3/core/meta"

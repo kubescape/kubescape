@@ -12,7 +12,7 @@ import (
 	"os"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/yaml.v3"
 )

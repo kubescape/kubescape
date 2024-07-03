@@ -8,7 +8,7 @@ import (
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	sdClientV2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/go-logger/zaplogger"
