@@ -9,7 +9,7 @@ import (
 
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"

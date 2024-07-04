@@ -9,7 +9,7 @@ import (
 
 	spinnerpkg "github.com/briandowns/spinner"
 	"github.com/jwalton/gchalk"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/mattn/go-isatty"
 	"github.com/schollz/progressbar/v3"

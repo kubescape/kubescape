@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 )
 
 // FileResourceHandler handle resources from files and URLs
@@ -25,7 +24,7 @@ func NewFileResourceHandler() *FileResourceHandler {
 	return &FileResourceHandler{}
 }
 
-func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, _ opaprocessor.IJobProgressNotificationClient, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
+func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessionObj *cautils.OPASessionObj, scanInfo *cautils.ScanInfo) (cautils.K8SResources, map[string]workloadinterface.IMetadata, cautils.ExternalResources, map[string]bool, error) {
 	allResources := map[string]workloadinterface.IMetadata{}
 	externalResources := cautils.ExternalResources{}
 
@@ -44,10 +43,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		var err error
 
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
-			workloadIDToSource, workloads, workloadIDToMappingNodes, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath)
-			if err != nil {
-				// We should probably ignore the error so we can continue scanning other charts
-			}
+			workloadIDToSource, workloads, workloadIDToMappingNodes, _ = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath)
 		} else {
 			workloadIDToSource, workloads, workloadIDToMappingNodes, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path])
 			if err != nil {

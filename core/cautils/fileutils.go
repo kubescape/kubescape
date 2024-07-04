@@ -13,7 +13,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"golang.org/x/exp/slices"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 

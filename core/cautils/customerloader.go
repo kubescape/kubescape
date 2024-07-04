@@ -14,7 +14,7 @@ import (
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
 	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
