@@ -47,8 +47,11 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 
 	handler.state.setNotBusy(scanReq.scanID)
 
-	// return results
-	handler.scanResponseChan.push(scanReq.scanID, response)
+	// return results, if someone's waiting for them; never block.
+	select {
+	case scanReq.resp <- response:
+	default:
+	}
 }
 
 // executeScan execute the scan request passed in the channel
