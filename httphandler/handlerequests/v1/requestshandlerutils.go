@@ -25,11 +25,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+var scanImpl = scan // Override for testing
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{}
 
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-	_, err := scan(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
+	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
 	if err != nil {
 		logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
 		if scanReq.scanQueryParams.ReturnResults {
@@ -39,6 +40,7 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	} else {
 		logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
 		if scanReq.scanQueryParams.ReturnResults {
+			//TODO(ttimonen) should we actually pass the PostureReport here somehow?
 			response.Type = utilsapisv1.ResultsV1ScanResponseType
 		}
 	}

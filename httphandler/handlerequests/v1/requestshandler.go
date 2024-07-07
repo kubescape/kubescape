@@ -90,7 +90,6 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 // ============================================== SCAN ========================================================
 // Scan API
 func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
-
 	// generate id
 	scanID := uuid.NewString()
 
@@ -101,7 +100,6 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-
 	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
 	if err != nil {
 		handler.writeError(w, err, "")
@@ -110,12 +108,6 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 	scanRequestParams.ctx = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context()))
 
 	handler.state.setBusy(scanID)
-
-	response := &utilsmetav1.Response{}
-	response.ID = scanID
-	response.Type = utilsapisv1.BusyScanResponseType
-	response.Response = fmt.Sprintf("scanning '%s' is in progress", scanID)
-
 	handler.scanResponseChan.set(scanID) // add channel
 	defer handler.scanResponseChan.delete(scanID)
 
@@ -126,6 +118,11 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.scanRequestChan <- scanRequestParams
 	}()
 
+	response := &utilsmetav1.Response{
+		ID:       scanID,
+		Type:     utilsapisv1.BusyScanResponseType,
+		Response: fmt.Sprintf("scanning '%s' is in progress", scanID),
+	}
 	if scanRequestParams.scanQueryParams.ReturnResults {
 		// wait for scan to complete
 		response = <-handler.scanResponseChan.get(scanID)
