@@ -378,8 +378,8 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 
 		// list resources
 		if err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
-			return clientResource.List(context.Background(), opts)
-		}).EachListItem(context.TODO(), listOptions, func(obj runtime.Object) error {
+			return clientResource.List(ctx, opts)
+		}).EachListItem(context.Background(), listOptions, func(obj runtime.Object) error {
 			uObject := obj.(*unstructured.Unstructured)
 			if k8sinterface.IsTypeWorkload(uObject.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObject.Object)) {
 				logger.L().Debug("Skipping resource with parent", helpers.String("kind", uObject.GetKind()), helpers.String("name", uObject.GetName()))
