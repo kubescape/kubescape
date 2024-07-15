@@ -41,7 +41,7 @@ func (ip *ImagePrinter) PrintImageScanningTable(summary imageprinter.ImageScanSu
 	}
 
 	ip.imageTablePrinter.PrintImageScanningTable(ip.writer, summary)
-	cautils.InfoTextDisplay(ip.writer, "\n")
+	cautils.SimpleDisplay(ip.writer, "\n")
 }
 
 func (ip *ImagePrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {

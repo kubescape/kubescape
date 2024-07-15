@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/olekukonko/tablewriter"
-	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -112,17 +111,14 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 }
 
 func generateResourceHeader(short bool) []string {
-	var headers []string
+	headers := make([]string, 0)
+
 	if short {
-		headers = make([]string, 1)
-		headers[0] = "Resources"
+		headers = append(headers, "Resources")
 	} else {
-		headers = make([]string, _resourceRowLen)
-		headers[resourceColumnSeverity] = "Severity"
-		headers[resourceColumnName] = "Control Name"
-		headers[resourceColumnURL] = "Docs"
-		headers[resourceColumnPath] = "Assisted Remediation"
+		headers = append(headers, []string{"Severity", "Control name", "Docs", "Assisted remediation"}...)
 	}
+
 	return headers
 }
 
@@ -164,14 +160,18 @@ func failedPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 	return paths
 }
 
-func fixPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
+func fixPathsToString(control *resourcesresults.ResourceAssociatedControl, onlyPath bool) []string {
 	var paths []string
 
 	for j := range control.ResourceAssociatedRules {
 		for k := range control.ResourceAssociatedRules[j].Paths {
 			if p := control.ResourceAssociatedRules[j].Paths[k].FixPath.Path; p != "" {
-				v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
-				paths = append(paths, fmt.Sprintf("%s=%s", p, v))
+				if onlyPath {
+					paths = append(paths, p)
+				} else {
+					v := control.ResourceAssociatedRules[j].Paths[k].FixPath.Value
+					paths = append(paths, fmt.Sprintf("%s=%s", p, v))
+				}
 			}
 		}
 	}
@@ -205,17 +205,25 @@ func reviewPathsToString(control *resourcesresults.ResourceAssociatedControl) []
 }
 
 func AssistedRemediationPathsToString(control *resourcesresults.ResourceAssociatedControl) []string {
-	paths := append(fixPathsToString(control), append(deletePathsToString(control), reviewPathsToString(control)...)...)
+	paths := append(fixPathsToString(control, false), append(deletePathsToString(control), reviewPathsToString(control)...)...)
 	// TODO - deprecate failedPaths once all controls support review/delete paths
 	paths = appendFailedPathsIfNotInPaths(paths, failedPathsToString(control))
 	return paths
 }
 
 func appendFailedPathsIfNotInPaths(paths []string, failedPaths []string) []string {
+	// Create a set to efficiently check if a failed path already exists in the paths slice
+	pathSet := make(map[string]struct{})
+	for _, path := range paths {
+		pathSet[path] = struct{}{}
+	}
+
+	// Append failed paths if they are not already present
 	for _, failedPath := range failedPaths {
-		if !slices.Contains(paths, failedPath) {
+		if _, ok := pathSet[failedPath]; !ok {
 			paths = append(paths, failedPath)
 		}
 	}
+
 	return paths
 }

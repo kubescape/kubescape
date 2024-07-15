@@ -6,16 +6,7 @@ import (
 	"github.com/armosec/armoapi-go/identifiers"
 )
 
-func (layer *ScanResultLayer) GetFilesByPackage(pkgname string) (files *PkgFiles) {
-	for _, pkg := range layer.Packages {
-		if pkg.PackageName == pkgname {
-			return &pkg.Files
-		}
-	}
-
-	return &PkgFiles{}
-}
-
+// GetPackagesNames retrieves the names of all the packages stored in the Packages field of the ScanResultLayer object and returns them as a slice of strings.
 func (layer *ScanResultLayer) GetPackagesNames() []string {
 	pkgsNames := []string{}
 	for _, pkg := range layer.Packages {
@@ -24,6 +15,7 @@ func (layer *ScanResultLayer) GetPackagesNames() []string {
 	return pkgsNames
 }
 
+// GetDesignatorsNContext retrieves the designators and context information from the ScanResultReport object and returns them as a pair of objects.
 func (scanresult *ScanResultReport) GetDesignatorsNContext() (*identifiers.PortalDesignator, []identifiers.ArmoContext) {
 	designatorsObj := identifiers.AttributesDesignatorsFromWLID(scanresult.WLID)
 	designatorsObj.Attributes["containerName"] = scanresult.ContainerName
@@ -32,6 +24,7 @@ func (scanresult *ScanResultReport) GetDesignatorsNContext() (*identifiers.Porta
 	return designatorsObj, contextObj
 }
 
+// Validate checks if the scan result report is valid.
 func (scanresult *ScanResultReport) Validate() bool {
 	if scanresult.CustomerGUID == "" || (scanresult.ImgHash == "" && scanresult.ImgTag == "") || scanresult.Timestamp <= 0 {
 		return false
@@ -42,6 +35,7 @@ func (scanresult *ScanResultReport) Validate() bool {
 	return true
 }
 
+// IsRCE checks if a vulnerability description contains any keywords related to remote code execution (RCE) or arbitrary code injection.
 func (v *Vulnerability) IsRCE() bool {
 	desc := strings.ToLower(v.Description)
 

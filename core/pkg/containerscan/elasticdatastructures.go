@@ -86,6 +86,7 @@ type ElasticContainerScanSummaryResult struct {
 	Version string `json:"version"`
 }
 
+// Validate checks if the ElasticContainerScanSummaryResult object is valid.
 func (summary *ElasticContainerScanSummaryResult) Validate() bool {
 	return summary.CustomerGUID != "" && summary.ContainerScanID != "" && (summary.ImgTag != "" || summary.ImgHash != "") && summary.Timestamp > 0
 }

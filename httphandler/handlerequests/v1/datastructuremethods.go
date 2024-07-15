@@ -19,6 +19,9 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	if scanRequest.Account != "" {
 		scanInfo.AccountID = scanRequest.Account
 	}
+	if scanRequest.AccessKey != "" {
+		scanInfo.AccessKey = scanRequest.AccessKey
+	}
 	if len(scanRequest.ExcludedNamespaces) > 0 {
 		scanInfo.ExcludedNamespaces = strings.Join(scanRequest.ExcludedNamespaces, ",")
 	}

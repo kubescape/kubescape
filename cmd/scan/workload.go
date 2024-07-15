@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -50,6 +50,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 				return fmt.Errorf("usage: <kind>/<name> [`<glob pattern>`/`-`] [flags]")
 			}
 
+			// Looks strange, a bug maybe????
 			if scanInfo.ChartPath != "" && scanInfo.FilePath == "" {
 				return fmt.Errorf("usage: --chart-path <chart path> --file-path <file path>")
 			}
@@ -75,6 +76,8 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			if err = results.HandleResults(ctx); err != nil {
 				logger.L().Fatal(err.Error())
 			}
+
+			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 
 			return nil
 		},

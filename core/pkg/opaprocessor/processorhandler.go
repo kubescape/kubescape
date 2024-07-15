@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -21,6 +21,7 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/exp/slices"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -53,8 +54,8 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 }
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
-	scanningScope := getScanningScope(opap.Metadata.ContextMetadata)
-	opap.OPASessionObj.AllPolicies = convertFrameworksToPolicies(opap.Policies, cautils.BuildNumber, opap.ExcludedRules, scanningScope)
+	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
+	opap.OPASessionObj.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, scanningScope)
 
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
 
@@ -244,7 +245,10 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 					for _, relatedObject := range ruleResponse.RelatedObjects {
 						wl := objectsenvelopes.NewObject(relatedObject.Object)
 						if wl != nil {
-							ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+							// avoid adding duplicate related resource IDs
+							if !slices.Contains(ruleResult.RelatedResourcesIDs, wl.GetID()) {
+								ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
+							}
 							ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
 						}
 					}

@@ -9,3 +9,5 @@
 ca.srl
 *.out
 ks
+
+dist/

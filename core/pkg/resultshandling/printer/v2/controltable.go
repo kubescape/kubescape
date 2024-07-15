@@ -14,11 +14,13 @@ import (
 
 const (
 	columnSeverity        = iota
+	columnRef             = iota
 	columnName            = iota
 	columnCounterFailed   = iota
 	columnCounterAll      = iota
 	columnComplianceScore = iota
 	_rowLen               = iota
+	controlNameMaxLength  = 70
 )
 
 func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
@@ -30,8 +32,8 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	}
 
 	row[columnSeverity] = getSeverityColumn(controlSummary)
-	if len(controlSummary.GetName()) > 50 {
-		row[columnName] = controlSummary.GetName()[:50] + "..."
+	if len(controlSummary.GetName()) > controlNameMaxLength {
+		row[columnName] = controlSummary.GetName()[:controlNameMaxLength] + "..."
 	} else {
 		row[columnName] = controlSummary.GetName()
 	}
@@ -62,8 +64,9 @@ func generateRowPdf(controlSummary reportsummary.IControlSummary, infoToPrintInf
 	}
 
 	row[columnSeverity] = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
-	if len(controlSummary.GetName()) > 50 {
-		row[columnName] = controlSummary.GetName()[:50] + "..."
+	row[columnRef] = controlSummary.GetID()
+	if len(controlSummary.GetName()) > controlNameMaxLength {
+		row[columnName] = controlSummary.GetName()[:controlNameMaxLength] + "..."
 	} else {
 		row[columnName] = controlSummary.GetName()
 	}
@@ -144,11 +147,12 @@ func getControlTableHeaders(short bool) []string {
 		headers[0] = "Controls"
 	} else {
 		headers = make([]string, _rowLen)
-		headers[columnName] = "Control Name"
-		headers[columnCounterFailed] = "Failed Resources"
-		headers[columnCounterAll] = "All Resources"
+		headers[columnRef] = "Control reference"
+		headers[columnName] = "Control name"
+		headers[columnCounterFailed] = "Failed resources"
+		headers[columnCounterAll] = "All resources"
 		headers[columnSeverity] = "Severity"
-		headers[columnComplianceScore] = "% Compliane-Score"
+		headers[columnComplianceScore] = "Compliance score"
 	}
 	return headers
 }

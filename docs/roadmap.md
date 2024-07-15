@@ -14,23 +14,19 @@ The features serve different stages of the workflow of the users:
 The items in the Kubescape roadmap are split into 3 major groups based on the feature planning maturity:
 
 * [Planning](#planning-) - we have tickets open for these issues with a more or less clear vision of design.
-* [Backlog](#backlog-)  -  features that were discussed at a high level but are not ready for development. 
+* [Backlog](#backlog-)  -  features that were discussed at a high level but are not ready for development.
 * [Wishlist](#wishlist-) -  features that we are dreaming of in 😀 and want to push them gradually forward.
 
 
 ## Planning 👷
 
-* ### Storing scan results in cluster
+* ### eBPF based anomaly detection in workloads
 
-  We want the Kubescape scan results (both cluster and image scan) to be stored in the cluster locally as `CRD`s. This will lead to an easier integration with results by other projects as well as with scripting via `kubectl`. Along with this, the image scan based controls will be able to avoid accessing external resources for image vulnerability scan results.
+The introduction of runtime anomaly detection using eBPF (extended Berkeley Packet Filter) events marks an addition to the Kubescape project's development roadmap. This feature aims to leverage the high-performance monitoring capabilities of eBPF to detect abnormal behavior within Kubernetes workloads in real-time. By capturing and analyzing eBPF events, Kubescape will be able to identify deviations from application profiles, such as unexpected network connections, unauthorized process executions, or unusual system calls, which could indicate a security breach. This anomaly detection mechanism is designed to operate with minimal overhead, ensuring that security monitoring does not compromise system performance.
 
-* ### Vulnerability prioritization based on workload file activity
+* ### Enriching Vulnerability scan results with advanced prioritization data sources
 
-  Implementing an eBPF agent (based on Falco or Tracee) which tracks file activity in workloads to prioritize container image vulnerabilities.
-
-* ### Prioritization engine using MITRE Attack matrix based attack chains
-
-  Create a security issue prioritization engine that scores resources based on control based attack chains. All Kubescape controls can be arranged into attack categories of the MITRE Attack matrix. The Attack matrix categories can be connected to each other based on a theoretical attack (ie. you can't have privilege escalation without initial access). Each of the Kubescape controls is to be categorized in these system and Kubescape will calculate a priority score based on the interconnections between failed controls.
+Integrating EPSS (Exploit Prediction Scoring System) and CISA-KEV (Known Exploited Vulnerabilities) metrics into Kubescape's CLI and Operator vulnerability scan results represents a significant enhancement in the project's roadmap. This integration aims to enrich the vulnerability management process by providing more contextual and predictive insights into the security risks associated with Kubernetes clusters. By leveraging EPSS scores, Kubescape will offer predictions on the likelihood of a vulnerability being exploited, enabling users to prioritize remediations based on risk rather than just vulnerability presence. The addition of CISA-KEV metrics further enhances this capability by flagging vulnerabilities that are actively being exploited in the wild, as identified by the Cybersecurity and Infrastructure Security Agency (CISA). This dual approach ensures that Kubescape users are not only informed about the vulnerabilities in their environments but are also equipped with critical information on which vulnerabilities to remediate first, based on their exploitability and active exploitation trends. This strategic enhancement to Kubescape's vulnerability scan results will provide users with a powerful tool for making informed, risk-based security decisions in their Kubernetes environments.
 
 * ### Integration with image registries
 
@@ -39,7 +35,7 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 * ### Kubescape CLI control over cluster operations
 
   Add functionality to Kubescape CLI to trigger operations in Kubescape cluster components (example: trigger image scans, etc.)
-  
+
 * ### Git integration for pull requests
 
   Create insightful GitHub actions for Kubescape.
@@ -91,14 +87,14 @@ The items in the Kubescape roadmap are split into 3 major groups based on the fe
 
 ## Completed features 🎓
 
-* Kubelet configuration validation 
+* Kubelet configuration validation
 * API server configuration validation
-* Image vulnerability scanning based controls 
+* Image vulnerability scanning based controls
 * Assisted remediation (telling where/what to fix)
 * Integration with Prometheus
 * Configuration of controls (customizing rules for a given environment)
 * Installation in the cluster for continuous monitoring
-* Host scanner 
+* Host scanner
 * Cloud vendor API integration
 * Custom exceptions
 * Custom frameworks

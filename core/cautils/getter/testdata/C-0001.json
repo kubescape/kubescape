@@ -2,7 +2,6 @@
   "guid": "",
   "name": "Forbidden Container Registries",
   "attributes": {
-    "armoBuiltin": true,
     "attackTracks": [
       {
         "attackTrack": "container",
@@ -29,7 +28,6 @@
       "guid": "",
       "name": "rule-identify-blocklisted-image-registries",
       "attributes": {
-        "armoBuiltin": true,
         "m$K8sThreatMatrix": "Initial Access::Compromised images in registry"
       },
       "creationTime": "",

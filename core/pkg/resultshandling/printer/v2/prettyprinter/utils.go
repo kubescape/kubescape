@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jwalton/gchalk"
@@ -20,7 +21,7 @@ const (
 	configScanVerboseRunText = "Run with '--verbose'/'-v' flag for detailed resources view"
 	imageScanVerboseRunText  = "Run with '--verbose'/'-v' flag for detailed vulnerabilities view"
 	runCommandsText          = "Run one of the suggested commands to learn more about a failed control failure"
-	ksHelmChartLink          = "https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-operator"
+	ksHelmChartLink          = "https://kubescape.io/docs/install-operator/"
 	highStakesWlsText        = "High-stakes workloads are defined as those which Kubescape estimates would have the highest impact if they were to be exploited.\n\n"
 )
 
@@ -55,7 +56,7 @@ func getWorkloadPrefixForCmd(namespace, kind, name string) string {
 
 func getTopWorkloadsTitle(topWLsLen int) string {
 	if topWLsLen > 0 {
-		return "Highest-stake workloads\n"
+		return "Highest-stake workloads"
 	}
 	return ""
 }
@@ -115,13 +116,17 @@ func getFilteredCVEs(cves []imageprinter.CVE) []imageprinter.CVE {
 
 // filterCVEsBySeverities returns a list of CVEs only with the severities that are in the severities list
 func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imageprinter.CVE {
-	var filteredCVEs []imageprinter.CVE
+	// Create a map to efficiently check if a severity is present in the severities slice
+	severityMap := make(map[string]bool)
+	for _, severity := range severities {
+		severityMap[severity] = true
+	}
 
+	// Filter CVEs based on the severityMap
+	filteredCVEs := []imageprinter.CVE{}
 	for _, cve := range cves {
-		for _, severity := range severities {
-			if cve.Severity == severity {
-				filteredCVEs = append(filteredCVEs, cve)
-			}
+		if severityMap[cve.Severity] {
+			filteredCVEs = append(filteredCVEs, cve)
 		}
 	}
 
@@ -130,35 +135,46 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 
 // getSortPackageScores returns a slice of package names sorted by score
 func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []string {
-	var ss []string
-	for k := range pkgScores {
-		ss = append(ss, k)
+	sortedSlice := make([]string, 0, len(pkgScores))
+	for pkgName, _ := range pkgScores {
+		sortedSlice = append(sortedSlice, pkgName)
 	}
 
-	// sort by score. If score is equal, sort by name
-	sort.Slice(ss, func(i, j int) bool {
-		if pkgScores[ss[i]].Score == pkgScores[ss[j]].Score {
-			return pkgScores[ss[i]].Name < pkgScores[ss[j]].Name
+	sort.Slice(sortedSlice, func(i, j int) bool {
+		if pkgScores[sortedSlice[i]].Score == pkgScores[sortedSlice[j]].Score {
+			return pkgScores[sortedSlice[i]].Name < pkgScores[sortedSlice[j]].Name
 		}
-		return pkgScores[ss[i]].Score > pkgScores[ss[j]].Score
+		return pkgScores[sortedSlice[i]].Score > pkgScores[sortedSlice[j]].Score
 	})
 
-	return ss
+	return sortedSlice
 }
 
 // getSortedCVEsBySeverity returns a slice of CVEs sorted by severity
 func getSortedCVEsBySeverity(mapSeverityToCVEsNumber map[string]int) []string {
-	ss := make([]string, 0, len(mapSeverityToCVEsNumber))
-	for k := range mapSeverityToCVEsNumber {
-		ss = append(ss, k)
+	if len(mapSeverityToCVEsNumber) == 0 {
+		// Handle empty mapSeverityToCVEsNumber map
+		return []string{} // Return an empty slice
 	}
 
-	sort.Slice(ss, func(i, j int) bool {
-		return utils.ImageSeverityToInt(ss[i]) > utils.ImageSeverityToInt(ss[j])
+	// Create a slice of severity-CVEs count pairs
+	severityToCVEsCountPairs := make([][2]string, 0, len(mapSeverityToCVEsNumber))
+	for severity, cvesCount := range mapSeverityToCVEsNumber {
+		severityToCVEsCountPairs = append(severityToCVEsCountPairs, [2]string{severity, strconv.Itoa(cvesCount)})
+	}
+
+	// Sort the severity-CVEs count pairs by severity
+	sort.Slice(severityToCVEsCountPairs, func(i, j int) bool {
+		return utils.ImageSeverityToInt(severityToCVEsCountPairs[i][0]) > utils.ImageSeverityToInt(severityToCVEsCountPairs[j][0])
 	})
 
-	return ss
+	// Extract severities from the sorted slice of pairs
+	var sortedSlice []string
+	for _, severityToCVEsCountPair := range severityToCVEsCountPairs {
+		sortedSlice = append(sortedSlice, severityToCVEsCountPair[0])
+	}
 
+	return sortedSlice
 }
 
 func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) {
@@ -167,24 +183,23 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 	}
 
 	txt := "Components with most vulnerabilities"
-	cautils.InfoTextDisplay(writer, "\n"+txt+"\n")
-	cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
+	cautils.SectionHeadingDisplay(writer, txt)
 
 	sortedPkgScores := getSortPackageScores(summary.PackageScores)
 
 	for i := 0; i < len(sortedPkgScores) && i < TopPackagesNumber; i++ {
 		topPkg := summary.PackageScores[sortedPkgScores[i]]
-		output := fmt.Sprintf("  * %s (%s) -", topPkg.Name, topPkg.Version)
+		output := fmt.Sprintf("%s (%s) -", topPkg.Name, topPkg.Version)
 
 		sortedCVEs := getSortedCVEsBySeverity(topPkg.MapSeverityToCVEsNumber)
 
 		for j := range sortedCVEs {
-			output += fmt.Sprintf(" %d %s,", topPkg.MapSeverityToCVEsNumber[sortedCVEs[j]], sortedCVEs[j])
+			output += fmt.Sprintf(" %d %s,", topPkg.MapSeverityToCVEsNumber[sortedCVEs[j]], utils.GetColorForVulnerabilitySeverity(sortedCVEs[j])(sortedCVEs[j]))
 		}
 
 		output = output[:len(output)-1]
 
-		cautils.SimpleDisplay(writer, output+"\n")
+		cautils.StarDisplay(writer, output+"\n")
 	}
 
 	cautils.SimpleDisplay(writer, "\n")
@@ -206,24 +221,25 @@ func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSu
 
 	if len(summary.CVEs) == 0 {
 		txt := "No vulnerabilities were found!"
-		cautils.InfoTextDisplay(writer, txt+"\n")
-		cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
+
+		cautils.InfoDisplay(writer, txt+"\n")
 		return
 	}
 
-	txt := fmt.Sprintf("%d vulnerabilities found:", len(summary.CVEs))
-	cautils.InfoTextDisplay(writer, txt+"\n")
-	cautils.SimpleDisplay(writer, strings.Repeat("─", len(txt))+"\n")
+	txt := fmt.Sprintf("%d vulnerabilities found", len(summary.CVEs))
+	cautils.SectionHeadingDisplay(writer, txt)
 
 	if len(summary.Images) == 1 {
-		cautils.SimpleDisplay(writer, "Image: %s\n", summary.Images[0])
+		cautils.SimpleDisplay(writer, "Image: %s\n\n", summary.Images[0])
 	} else if len(summary.Images) < 4 {
-		cautils.SimpleDisplay(writer, "Images: %s\n", strings.Join(summary.Images, ", "))
+		cautils.SimpleDisplay(writer, "Images: %s\n\n", strings.Join(summary.Images, ", "))
 	}
 
 	for _, k := range keys {
-		cautils.SimpleDisplay(writer, "  * %d %s \n", mapSeverityTSummary[k].NumberOfCVEs, utils.GetColorForVulnerabilitySeverity(k)(k))
+		cautils.StarDisplay(writer, "%d %s \n", mapSeverityTSummary[k].NumberOfCVEs, utils.GetColorForVulnerabilitySeverity(k)(k))
 	}
+
+	cautils.SimpleDisplay(writer, "\n")
 
 }
 
@@ -233,21 +249,19 @@ func printImagesCommands(writer *os.File, summary imageprinter.ImageScanSummary)
 	} else {
 		for _, img := range summary.Images {
 			imgWithoutTag := strings.Split(img, ":")[0]
-			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive full report for %s image by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
+			cautils.SimpleDisplay(writer, fmt.Sprintf("Receive a full report for %s by running: %s\n", imgWithoutTag, getCallToActionString(fmt.Sprintf("'$ kubescape scan image %s'", img))))
 		}
 	}
 
-	cautils.InfoTextDisplay(writer, "\n")
+	cautils.SimpleDisplay(writer, "\n")
 }
 
 func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 	txt := "What now?"
-	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
-
-	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
+	cautils.SectionHeadingDisplay(writer, txt)
 
 	for _, ns := range nextSteps {
-		cautils.SimpleDisplay(writer, "* "+ns+"\n")
+		cautils.StarDisplay(writer, ns+"\n")
 	}
 	if addLine {
 		cautils.SimpleDisplay(writer, "\n")
@@ -256,21 +270,18 @@ func printNextSteps(writer *os.File, nextSteps []string, addLine bool) {
 
 func printComplianceScore(writer *os.File, frameworks []reportsummary.IFrameworkSummary) {
 	txt := "Compliance Score"
-	cautils.InfoTextDisplay(writer, fmt.Sprintf("%s\n", txt))
-
-	cautils.SimpleDisplay(writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
-
+	cautils.SectionHeadingDisplay(writer, txt)
 	cautils.SimpleDisplay(writer, "The compliance score is calculated by multiplying control failures by the number of failures against supported compliance frameworks. Remediate controls, or configure your cluster baseline with exceptions, to improve this score.\n\n")
 
 	for _, fw := range frameworks {
-		cautils.SimpleDisplay(writer, "* %s: %s", fw.GetName(), gchalk.WithYellow().Bold(fmt.Sprintf("%.2f%%\n", fw.GetComplianceScore())))
+		cautils.StarDisplay(writer, "%s: %s", fw.GetName(), gchalk.WithBrightYellow().Bold(fmt.Sprintf("%.2f%%\n", fw.GetComplianceScore())))
 	}
 
 	cautils.SimpleDisplay(writer, fmt.Sprintf("\nView a full compliance report by running %s or %s\n", getCallToActionString("'$ kubescape scan framework nsa'"), getCallToActionString("'$ kubescape scan framework mitre'")))
 
-	cautils.InfoTextDisplay(writer, "\n")
+	cautils.SimpleDisplay(writer, "\n")
 }
 
 func getCallToActionString(action string) string {
-	return gchalk.WithBrightBlue().Bold(action)
+	return gchalk.WithBrightWhite().Bold(action)
 }

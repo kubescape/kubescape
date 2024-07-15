@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/prettylogger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
@@ -88,7 +88,7 @@ func TestDisplayMessage(t *testing.T) {
 			getter.GetKSCloudAPIConnector(),
 		)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
 		reporter.DisplayMessage()
@@ -114,7 +114,7 @@ func TestDisplayMessage(t *testing.T) {
 		)
 		reporter.setMessage("message returned from server")
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
 		reporter.DisplayMessage()
@@ -232,7 +232,7 @@ func TestSubmit(t *testing.T) {
 
 		opaSession := mockOPASessionObj(t)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -274,7 +274,7 @@ func TestSubmit(t *testing.T) {
 		opaSession := mockOPASessionObj(t)
 		opaSession.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -354,6 +354,28 @@ func captureStderr(t testing.TB) (*os.File, func()) {
 		_ = os.Remove(capture.Name())
 
 		os.Stderr = saved
+		mxStdio.Unlock()
+	}
+}
+
+func captureStdout(t testing.TB) (*os.File, func()) {
+	mxStdio.Lock()
+	saved := os.Stdout
+	capture, err := os.CreateTemp("", "stdout")
+	if !assert.NoError(t, err) {
+		mxStdio.Unlock()
+
+		t.FailNow()
+
+		return nil, nil
+	}
+	os.Stdout = capture
+
+	return capture, func() {
+		_ = capture.Close()
+		_ = os.Remove(capture.Name())
+
+		os.Stdout = saved
 		mxStdio.Unlock()
 	}
 }

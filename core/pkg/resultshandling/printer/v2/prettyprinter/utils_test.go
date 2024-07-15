@@ -88,13 +88,13 @@ func TestGetTopWorkloadsTitle(t *testing.T) {
 	assert.Equal(t, "", title)
 
 	title = getTopWorkloadsTitle(1)
-	assert.Equal(t, "Highest-stake workloads\n", title)
+	assert.Equal(t, "Highest-stake workloads", title)
 
 	title = getTopWorkloadsTitle(2)
-	assert.Equal(t, "Highest-stake workloads\n", title)
+	assert.Equal(t, "Highest-stake workloads", title)
 
 	title = getTopWorkloadsTitle(10)
-	assert.Equal(t, "Highest-stake workloads\n", title)
+	assert.Equal(t, "Highest-stake workloads", title)
 }
 
 func TestGetSeverityToSummaryMap(t *testing.T) {
@@ -520,6 +520,11 @@ func TestGetSortedCVEsBySeverity(t *testing.T) {
 				"Low":      4,
 			},
 			expectedResult: []string{"Critical", "High", "Medium", "Low"},
+		},
+		{
+			name:           "Empty input",
+			severityToCVEs: map[string]int{},
+			expectedResult: []string{},
 		},
 	}
 

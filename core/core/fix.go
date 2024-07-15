@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"

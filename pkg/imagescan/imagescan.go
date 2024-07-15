@@ -23,7 +23,7 @@ import (
 	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
-	"github.com/anchore/syft/syft/pkg/cataloger"
+	"github.com/anchore/syft/syft"
 )
 
 const (
@@ -44,6 +44,10 @@ func (c RegistryCredentials) IsEmpty() bool {
 //
 // Values equal to the threshold are considered failing, too.
 func ExceedsSeverityThreshold(scanResults *models.PresenterConfig, severity vulnerability.Severity) bool {
+	if scanResults.MetadataProvider == nil {
+		return false
+	}
+
 	return grype.HasSeverityAtOrAbove(scanResults.MetadataProvider, severity, scanResults.Matches)
 }
 
@@ -93,11 +97,10 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 	regOpts := &image.RegistryOptions{
 		Credentials: syftCreds,
 	}
-	catOpts := cataloger.DefaultConfig()
 	pc := pkg.ProviderConfig{
 		SyftProviderConfig: pkg.SyftProviderConfig{
-			RegistryOptions:   regOpts,
-			CatalogingOptions: catOpts,
+			RegistryOptions: regOpts,
+			SBOMOptions:     syft.DefaultCreateSBOMConfig(),
 		},
 		SynthesisConfig: pkg.SynthesisConfig{
 			GenerateMissingCPEs: true,

@@ -27,28 +27,28 @@ type OperatorAdapter struct {
 	cautils.OperatorConnector
 }
 
-func getOperatorPod(k8sClient *k8sinterface.KubernetesApi) (*v1.Pod, error) {
+func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, error) {
 	listOptions := metav1.ListOptions{
 		LabelSelector: "app=operator",
 	}
-	pods, err := k8sClient.KubernetesClient.CoreV1().Pods(kubescapeNamespace).List(k8sClient.Context, listOptions)
+	pods, err := k8sClient.KubernetesClient.CoreV1().Pods(ns).List(k8sClient.Context, listOptions)
 	if err != nil {
 		return nil, err
 	}
 	if len(pods.Items) != 1 {
-		return nil, errors.New("Could not find the Kubescape-Operator chart, please validate that the Kubescape-Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
+		return nil, errors.New("Could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts")
 	}
 
 	return &pods.Items[0], nil
 }
 
-func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo) (*OperatorAdapter, error) {
+func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string) (*OperatorAdapter, error) {
 	k8sClient := getKubernetesApi()
-	pod, err := getOperatorPod(k8sClient)
+	pod, err := getOperatorPod(k8sClient, ns)
 	if err != nil {
 		return nil, err
 	}
-	operatorConnector, err := cautils.CreatePortForwarder(k8sClient, pod, operatorServicePort, kubescapeNamespace)
+	operatorConnector, err := cautils.CreatePortForwarder(k8sClient, pod, operatorServicePort, ns)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,10 @@ func (a *OperatorAdapter) httpPostOperatorScanRequest(body apis.Commands) (strin
 		return "", err
 	}
 	defer resp.Body.Close()
-	return httputils.HttpRespToString(resp)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("http-error: %d", resp.StatusCode)
+	}
+	return "success", nil
 }
 
 func (a *OperatorAdapter) OperatorScan() (string, error) {

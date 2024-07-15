@@ -7,13 +7,13 @@ import (
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
-	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
+	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
 	"github.com/kubescape/backend/pkg/utils"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/httphandler/config"
 	_ "github.com/kubescape/kubescape/v3/httphandler/docs"
@@ -41,7 +41,7 @@ func main() {
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubescape",
-			os.Getenv(cautils.BuildNumber),
+			os.Getenv(versioncheck.BuildNumber),
 			config.GetAccount(),
 			clusterName,
 			url.URL{Host: otelHost})
@@ -54,13 +54,13 @@ func main() {
 	initializeLoggerName()
 	initializeLoggerLevel()
 	initializeSaaSEnv()
-	initializeStorage(cfg)
+	initializeStorage(clusterName, cfg)
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
 	logger.L().Ctx(ctx).Fatal(listener.SetupHTTPListener().Error())
 }
 
-func initializeStorage(cfg config.Config) {
+func initializeStorage(clusterName string, cfg config.Config) {
 	if !cfg.ContinuousPostureScan {
 		logger.L().Debug("continuous posture scan - skipping storage initialization")
 		return
@@ -80,7 +80,7 @@ func initializeStorage(cfg config.Config) {
 		}
 	}
 
-	s, err := storage.NewAPIServerStorage(namespace, config)
+	s, err := storage.NewAPIServerStorage(clusterName, namespace, config)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}
@@ -121,14 +121,14 @@ func initializeSaaSEnv() {
 	}
 
 	backendServices, err := servicediscovery.GetServices(
-		servicediscoveryv1.NewServiceDiscoveryFileV1(serviceDiscoveryFilePath),
+		servicediscoveryv2.NewServiceDiscoveryFileV2(serviceDiscoveryFilePath),
 	)
 	if err != nil {
 		logger.L().Fatal("failed to get backend services", helpers.Error(err))
 		return
 	}
 
-	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetReportReceiverHttpUrl(), backendServices.GetApiServerUrl(), config.GetAccount(), config.GetAccessKey()); err != nil {
+	if ksCloud, err := v1.NewKSCloudAPI(backendServices.GetApiServerUrl(), backendServices.GetReportReceiverHttpUrl(), config.GetAccount(), config.GetAccessKey()); err != nil {
 		logger.L().Fatal("failed to initialize cloud api", helpers.Error(err))
 	} else {
 		getter.SetKSCloudAPIConnector(ksCloud)

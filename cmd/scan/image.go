@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -42,6 +42,10 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) != 1 {
+				return fmt.Errorf("the command takes exactly one image name as an argument")
+			}
+
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
 				return err
 			}

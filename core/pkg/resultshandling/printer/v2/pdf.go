@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 
 	"github.com/johnfercher/maroto/pkg/color"
@@ -57,6 +58,13 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
 }
 
 func (pp *PdfPrinter) Score(score float32) {
+	// Handle invalid scores
+	if score > 100 {
+		score = 100
+	} else if score < 0 {
+		score = 0
+	}
+
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap []infoStars) {
@@ -161,7 +169,7 @@ func (pp *PdfPrinter) printHeader(m pdf.Maroto) {
 // printFramework prints the PDF frameworks after the PDF header
 func (pp *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IFrameworkSummary) {
 	m.Row(10, func() {
-		m.Text(frameworksScoresToString(frameworks), props.Text{
+		m.Text(utils.FrameworksScoresToString(frameworks), props.Text{
 			Align:  consts.Center,
 			Size:   8,
 			Family: consts.Arial,
@@ -184,18 +192,21 @@ func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.Sum
 		}
 	}
 
+	size := 6.0
+	gridSize := []uint{1, 1, 6, 1, 1, 2}
+
 	m.TableList(headers, controls, props.TableList{
 		HeaderProp: props.TableListContent{
 			Family:    consts.Arial,
 			Style:     consts.Bold,
-			Size:      6.0,
-			GridSizes: []uint{1, 5, 2, 2, 2},
+			Size:      size,
+			GridSizes: gridSize,
 		},
 		ContentProp: props.TableListContent{
 			Family:                          consts.Courier,
 			Style:                           consts.Normal,
-			Size:                            6.0,
-			GridSizes:                       []uint{1, 5, 2, 2, 2},
+			Size:                            size,
+			GridSizes:                       gridSize,
 			CellTextColorChangerColumnIndex: 0,
 			CellTextColorChangerFunc: func(cellValue string) color.Color {
 				if cellValue == "Critical" {

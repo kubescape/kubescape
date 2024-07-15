@@ -10,7 +10,7 @@ jobs:
       NEW_TAG: ${{ steps.tag-calculator.outputs.NEW_TAG }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
+      - uses: actions/checkout@v4
       - id: tag-calculator
         uses: ./.github/actions/tag-action
         with:
@@ -19,7 +19,6 @@ jobs:
     permissions:
       actions: read
       checks: read
-      contents: read
       deployments: read
       discussions: read
       id-token: write
@@ -30,13 +29,15 @@ jobs:
       repository-projects: read
       security-events: read
       statuses: read
+      contents: write
+      attestations: write
     needs: [retag]
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
       COMPONENT_NAME: kubescape
-      CGO_ENABLED: 1
+      CGO_ENABLED: 0
       GO111MODULE: ""
-      GO_VERSION: "1.20"
+      GO_VERSION: "1.21"
       RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
       CLIENT: release
     secrets: inherit
@@ -55,6 +56,7 @@ jobs:
       repository-projects: read
       statuses: read
       security-events: read
+      attestations: read
     needs: [retag, binary-build]
     uses: ./.github/workflows/c-create-release.yaml
     with:
@@ -66,7 +68,6 @@ jobs:
     permissions:
       actions: read
       checks: read
-      contents: read
       deployments: read
       discussions: read
       id-token: write
@@ -77,6 +78,8 @@ jobs:
       repository-projects: read
       security-events: read
       statuses: read
+      attestations: read
+      contents: write
     uses: ./.github/workflows/d-publish-image.yaml
     needs: [create-release, retag]
     with:
@@ -86,3 +89,4 @@ jobs:
       support_platforms: true
       cosign: true
     secrets: inherit
+   

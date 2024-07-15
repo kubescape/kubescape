@@ -7,12 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/google/uuid"
@@ -35,18 +36,16 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		},
 		scanInfo: scanInfo,
 		scanID:   scanID,
+		ctx:      trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context())),
+		resp:     make(chan *utilsmetav1.Response, 1),
 	}
-	scanParams.ctx = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context()))
-
-	handler.scanResponseChan.set(scanID) // add scan to channel
-	defer handler.scanResponseChan.delete(scanID)
 
 	// send to scan queue
 	logger.L().Info("requesting scan", helpers.String("scanID", scanID), helpers.String("api", "v1/metrics"))
 	handler.scanRequestChan <- scanParams
 
 	// wait for scan to complete
-	results := <-handler.scanResponseChan.get(scanID)
+	results := <-scanParams.resp
 	defer removeResultsFile(scanID) // remove json format results file
 	defer os.Remove(resultsFile)    // remove prometheus format results file
 

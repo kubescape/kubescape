@@ -37,6 +37,12 @@ func TestResolveLocation(t *testing.T) {
 
 	resolver, _ := NewFixPathLocationResolver(yamlFilePath)
 
+	for fixPath, _ := range fixPathToExpectedLineAndColumn {
+		location, err := resolver.ResolveLocation(fixPath, 100000)
+		assert.Contains(t, err.Error(), "node index [100000] out of range ")
+		assert.Empty(t, location)
+	}
+
 	for fixPath, expected := range fixPathToExpectedLineAndColumn {
 		location, err := resolver.ResolveLocation(fixPath, 0)
 		assert.NoError(t, err)
@@ -61,4 +67,18 @@ func TestResolveLocation(t *testing.T) {
 	_, err := resolver.ResolveLocation("some invalid string as an input", 0)
 	assert.ErrorContains(t, err, "invalid input")
 
+}
+
+func TestFixPathLocationResolver_NonExistentYaml(t *testing.T) {
+	yamlFilePath := filepath.Join(onlineBoutiquePath(), "adservice_invalid.yaml")
+	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	assert.Nil(t, resolver)
+	assert.NotNil(t, err)
+}
+
+func TestFixPathLocationResolver_InvalidYaml(t *testing.T) {
+	yamlFilePath := filepath.Join(onlineBoutiquePath(), "invalid.yaml")
+	resolver, err := NewFixPathLocationResolver(yamlFilePath)
+	assert.Nil(t, resolver)
+	assert.NotNil(t, err)
 }

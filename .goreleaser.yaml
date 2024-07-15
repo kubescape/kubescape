@@ -1,0 +1,60 @@
+# This is an example .goreleaser.yml file with some sensible defaults.
+# Make sure to check the documentation at https://goreleaser.com
+
+# The lines bellow are called `modelines`. See `:help modeline`
+# Feel free to remove those if you don't want/need to use them.
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod tidy
+
+builds:
+  - goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - riscv64
+    ldflags:
+      - -s -w
+      - -X "github.com/kubescape/kubescape/v3/core/cautils.BuildNumber={{.Env.RELEASE}}"
+      - -X "github.com/kubescape/kubescape/v3/core/cautils.Client={{.Env.CLIENT}}"
+    binary: >-
+      {{ .ProjectName }}-
+      {{- if eq .Arch "amd64" }}
+      {{- else }}{{ .Arch }}-{{ end }}
+      {{- if eq .Os "darwin" }}macos
+      {{- else if eq .Os "linux" }}ubuntu
+      {{- else }}{{ .Os }}{{ end }}-latest
+    no_unique_dist_dir: true
+
+archives:
+  - format: binary
+    id: binaries
+    name_template: >-
+      {{ .Binary }}
+  - format: tar.gz
+    name_template: >-
+      {{ .Binary }}
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+checksum:
+  ids:
+    - binaries
+  split: true
+
+sboms:
+  - artifacts: binary
+    documents:
+      - "{{ .Binary }}.sbom"

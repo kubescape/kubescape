@@ -3,10 +3,8 @@ package version
 import (
 	"context"
 	"fmt"
-	"os"
 
-	"github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/spf13/cobra"
 )
 
@@ -17,13 +15,13 @@ func GetVersionCmd() *cobra.Command {
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := context.TODO()
-			v := cautils.NewIVersionCheckHandler(ctx)
-			v.CheckLatestVersion(ctx, cautils.NewVersionCheckRequest(cautils.BuildNumber, "", "", "version"))
-			fmt.Fprintf(os.Stdout,
+			v := versioncheck.NewIVersionCheckHandler(ctx)
+			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "version", nil)
+			v.CheckLatestVersion(ctx, versionCheckRequest)
+			fmt.Fprintf(cmd.OutOrStdout(),
 				"Your current version is: %s\n",
-				cautils.BuildNumber,
+				versionCheckRequest.ClientVersion,
 			)
-			logger.L().Debug(fmt.Sprintf("git enabled in build: %t", isGitEnabled()))
 			return nil
 		},
 	}

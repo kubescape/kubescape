@@ -1,6 +1,8 @@
 package configurationprinter
 
 import (
+	"io"
+	"os"
 	"reflect"
 	"testing"
 
@@ -21,13 +23,13 @@ func TestInitCategoryTableData(t *testing.T) {
 		{
 			name:               "Test1",
 			categoryType:       TypeCounting,
-			expectedHeaders:    []string{"Control Name", "Resources", "View Details"},
+			expectedHeaders:    []string{"Control name", "Resources", "View details"},
 			expectedAlignments: []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT},
 		},
 		{
 			name:               "Test2",
 			categoryType:       TypeStatus,
-			expectedHeaders:    []string{"", "Control Name", "Docs"},
+			expectedHeaders:    []string{"", "Control name", "Docs"},
 			expectedAlignments: []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER},
 		},
 	}
@@ -184,6 +186,151 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			row := generateCategoryStatusRow(tt.controlSummary, tt.infoToPrintInfo)
 			assert.True(t, reflect.DeepEqual(row, tt.expectedRows))
+		})
+	}
+}
+
+func TestGetCategoryTableWriter(t *testing.T) {
+	tests := []struct {
+		name            string
+		headers         []string
+		columnAligments []int
+		want            string
+	}{
+		{
+			name:            "Test1",
+			headers:         []string{"Control name", "Resources", "View details"},
+			columnAligments: []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT},
+			want:            "┌──────────────┬───────────┬──────────────┐\n│ Control name │ Resources │ View details │\n├──────────────┼───────────┼──────────────┤\n└──────────────┴───────────┴──────────────┘\n",
+		},
+		{
+			name:            "Test2",
+			headers:         []string{"", "Control name", "Docs"},
+			columnAligments: []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER},
+			want:            "┌──┬──────────────┬──────┐\n│  │ Control name │ Docs │\n├──┼──────────────┼──────┤\n└──┴──────────────┴──────┘\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary file to capture output
+			f, err := os.CreateTemp("", "print")
+			if err != nil {
+				panic(err)
+			}
+			defer f.Close()
+
+			tableWriter := getCategoryTableWriter(f, tt.headers, tt.columnAligments)
+
+			// Redirect stderr to the temporary file
+			oldStderr := os.Stderr
+			defer func() {
+				os.Stderr = oldStderr
+			}()
+			os.Stderr = f
+
+			tableWriter.Render()
+
+			// Read the contents of the temporary file
+			f.Seek(0, 0)
+			got, err := io.ReadAll(f)
+			if err != nil {
+				panic(err)
+			}
+
+			assert.NotNil(t, tableWriter)
+			assert.Equal(t, tt.want, string(got))
+		})
+	}
+}
+
+func TestRenderSingleCategory(t *testing.T) {
+	tests := []struct {
+		name            string
+		categoryName    string
+		rows            [][]string
+		infoToPrintInfo []utils.InfoStars
+		headers         []string
+		columnAligments []int
+		want            string
+	}{
+		{
+			name:         "Test1",
+			categoryName: "Resources",
+			rows: [][]string{
+				{"Regular", "regular line", "1"},
+				{"Thick", "particularly thick line", "2"},
+				{"Double", "double line", "3"},
+			},
+			infoToPrintInfo: []utils.InfoStars{
+				utils.InfoStars{
+					Stars: "1",
+					Info:  "Low severity",
+				},
+				utils.InfoStars{
+					Stars: "5",
+					Info:  "Critical severity",
+				},
+			},
+			headers:         []string{"Control name", "Resources", "View details"},
+			columnAligments: []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT},
+			want:            "Resources\n┌──────────────┬─────────────────────────┬──────────────┐\n│ Control name │ Resources               │ View details │\n├──────────────┼─────────────────────────┼──────────────┤\n│ Regular      │      regular line       │ 1            │\n│ Thick        │ particularly thick line │ 2            │\n│ Double       │       double line       │ 3            │\n└──────────────┴─────────────────────────┴──────────────┘\n1 Low severity\n5 Critical severity\n\n",
+		},
+		{
+			name:         "Test2",
+			categoryName: "Control name",
+			rows: [][]string{
+				{"Regular", "regular line", "1"},
+				{"Thick", "particularly thick line", "2"},
+				{"Double", "double line", "3"},
+			},
+			infoToPrintInfo: []utils.InfoStars{
+				utils.InfoStars{
+					Stars: "1",
+					Info:  "Low severity",
+				},
+				utils.InfoStars{
+					Stars: "5",
+					Info:  "Critical severity",
+				},
+				utils.InfoStars{
+					Stars: "4",
+					Info:  "High severity",
+				},
+			},
+			headers:         []string{"Control name", "Resources", "View details"},
+			columnAligments: []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT},
+			want:            "Control name\n┌──────────────┬─────────────────────────┬──────────────┐\n│ Control name │ Resources               │ View details │\n├──────────────┼─────────────────────────┼──────────────┤\n│ Regular      │      regular line       │ 1            │\n│ Thick        │ particularly thick line │ 2            │\n│ Double       │       double line       │ 3            │\n└──────────────┴─────────────────────────┴──────────────┘\n1 Low severity\n5 Critical severity\n4 High severity\n\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a temporary file to capture output
+			f, err := os.CreateTemp("", "print")
+			if err != nil {
+				panic(err)
+			}
+			defer f.Close()
+
+			tableWriter := getCategoryTableWriter(f, tt.headers, tt.columnAligments)
+
+			// Redirect stderr to the temporary file
+			oldStderr := os.Stderr
+			defer func() {
+				os.Stderr = oldStderr
+			}()
+			os.Stderr = f
+
+			renderSingleCategory(f, tt.categoryName, tableWriter, tt.rows, tt.infoToPrintInfo)
+
+			// Read the contents of the temporary file
+			f.Seek(0, 0)
+			got, err := io.ReadAll(f)
+			if err != nil {
+				panic(err)
+			}
+
+			assert.NotNil(t, tableWriter)
+			assert.Equal(t, tt.want, string(got))
 		})
 	}
 }

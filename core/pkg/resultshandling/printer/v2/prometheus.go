@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/anchore/grype/grype/presenter/models"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -37,6 +37,13 @@ func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
 }
 
 func (pp *PrometheusPrinter) Score(score float32) {
+	// Handle invalid scores
+	if score > 100 {
+		score = 100
+	} else if score < 0 {
+		score = 0
+	}
+
 	fmt.Printf("\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 

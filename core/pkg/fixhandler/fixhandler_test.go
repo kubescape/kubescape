@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/internal/testutils"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
@@ -262,6 +264,392 @@ func Test_fixPathToValidYamlExpression(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := FixPathToValidYamlExpression(tt.args.fixPath, tt.args.value, tt.args.documentIndexInYaml); got != tt.want {
 				t.Errorf("fixPathToValidYamlExpression() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestJoinStrings(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			name: "nil array",
+			args: nil,
+			want: "",
+		},
+		{
+			name: "empty array",
+			args: []string{},
+			want: "",
+		},
+		{
+			name: "single element",
+			args: []string{"a"},
+			want: "a",
+		},
+		{
+			name: "two elements",
+			args: []string{"a", "b"},
+			want: "ab",
+		},
+		{
+			name: "three elements",
+			args: []string{"a", "b", "c"},
+			want: "abc",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := joinStrings(tt.args...); got != tt.want {
+				t.Errorf("joinStrings() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGetFileString(t *testing.T) {
+	type args struct {
+		filePath string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    string
+		wantErr bool
+	}{
+		{
+			name: "file not found",
+			args: args{
+				filePath: "notfound.yaml",
+			},
+			want:    "",
+			wantErr: true,
+		},
+		{
+			name: "file found",
+			args: args{
+				filePath: filepath.Join("testdata", "inserts", "tc-01-00-input-mapping-insert-mapping.yaml"),
+			},
+			want: `# Fix to Apply:
+# "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false"
+
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+
+spec:
+  containers:
+  - name: nginx_container
+    image: nginx
+`,
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if runtime.GOOS == "windows" {
+				return
+			}
+			got, err := GetFileString(tt.args.filePath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("getFileString() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if got != tt.want && !tt.wantErr {
+				t.Errorf("getFileString() got = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDetermineNewlineSeparator(t *testing.T) {
+	type args struct {
+		fileString string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "empty",
+			args: args{
+				fileString: "",
+			},
+			want: "\n",
+		},
+		{
+			name: "windows newline",
+			args: args{
+				fileString: "a\r\nb\r\nc\r\n",
+			},
+			want: "\r\n",
+		},
+		{
+			name: "linux newline",
+			args: args{
+				fileString: "a\nb\nc\n",
+			},
+			want: "\n",
+		},
+		{
+			name: "oldmac newline",
+			args: args{
+				fileString: "a\rb\rc\r",
+			},
+			want: "\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := determineNewlineSeparator(tt.args.fileString); got != tt.want {
+				t.Errorf("determineNewlineSeparator() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeYaml(t *testing.T) {
+	type args struct {
+		fileString string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "empty yaml",
+			args: args{
+				fileString: "",
+			},
+			want: "",
+		},
+		{
+			name: "empty yaml with two characters",
+			args: args{
+				fileString: "##",
+			},
+			want: "##",
+		},
+		{
+			name: "yaml/v3",
+			args: args{
+				fileString: `apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+`,
+			},
+			want: `apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+`,
+		},
+		{
+			name: "yaml/v2",
+			args: args{
+				fileString: `apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_2
+`,
+			},
+			want: `apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_2
+`,
+		},
+		{
+			name: "yaml/v1",
+			args: args{
+				fileString: `---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+`,
+			},
+			want: `# ---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: insert_to_mapping_node_1
+`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sanitizeYaml(tt.args.fileString); got != tt.want {
+				t.Errorf("sanitizeYaml() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReduceYamlExpressions(t *testing.T) {
+	type args struct {
+		yamlExpressions []string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "empty",
+			args: args{
+				yamlExpressions: []string{},
+			},
+			want: "",
+		},
+		{
+			name: "one expression",
+			args: args{
+				yamlExpressions: []string{
+					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+				},
+			},
+			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+		},
+		{
+			name: "two expressions",
+			args: args{
+				yamlExpressions: []string{
+					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+					"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+				},
+			},
+			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false | select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+		},
+		{
+			name: "Duplicate expressions",
+			args: args{
+				yamlExpressions: []string{
+					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+					"select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+					"select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false",
+				},
+			},
+			want: "select(di==0).spec.containers[0].securityContext.allowPrivilegeEscalation |= false | select(di==0).spec.containers[0].securityContext.capabilities.drop += [\"NET_RAW\"]",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resource := &ResourceFixInfo{}
+			resource.YamlExpressions = make(map[string]armotypes.FixPath)
+
+			for _, yamlExpression := range tt.args.yamlExpressions {
+				resource.YamlExpressions[yamlExpression] = armotypes.FixPath{}
+			}
+			got := reduceYamlExpressions(resource)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetLocalPath(t *testing.T) {
+	type args struct {
+		report *reporthandlingv2.PostureReport
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "empty report",
+			args: args{
+				report: &reporthandlingv2.PostureReport{},
+			},
+			want: "",
+		},
+		{
+			name: "No scan metadata",
+			args: args{
+				report: &reporthandlingv2.PostureReport{
+					Metadata: reporthandlingv2.Metadata{
+						ScanMetadata: reporthandlingv2.ScanMetadata{},
+					},
+				},
+			},
+			want: "",
+		},
+		{
+			name: "Scan target GitLocal",
+			args: args{
+				report: &reporthandlingv2.PostureReport{
+					Metadata: reporthandlingv2.Metadata{
+						ScanMetadata: reporthandlingv2.ScanMetadata{
+							ScanningTarget: reporthandlingv2.ScanningTarget(3),
+						},
+						ContextMetadata: reporthandlingv2.ContextMetadata{
+							RepoContextMetadata: &reporthandlingv2.RepoContextMetadata{
+								LocalRootPath: os.TempDir(),
+							},
+						},
+					},
+				},
+			},
+			want: os.TempDir(),
+		},
+		{
+			name: "Scan target Directory",
+			args: args{
+				report: &reporthandlingv2.PostureReport{
+					Metadata: reporthandlingv2.Metadata{
+						ScanMetadata: reporthandlingv2.ScanMetadata{
+							ScanningTarget: reporthandlingv2.ScanningTarget(2),
+						},
+						ContextMetadata: reporthandlingv2.ContextMetadata{
+							DirectoryContextMetadata: &reporthandlingv2.DirectoryContextMetadata{
+								BasePath: os.TempDir(),
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "Scan target File",
+			args: args{
+				report: &reporthandlingv2.PostureReport{
+					Metadata: reporthandlingv2.Metadata{
+						ScanMetadata: reporthandlingv2.ScanMetadata{
+							ScanningTarget: reporthandlingv2.ScanningTarget(1),
+						},
+						ContextMetadata: reporthandlingv2.ContextMetadata{
+							FileContextMetadata: &reporthandlingv2.FileContextMetadata{
+								FilePath: filepath.Join(os.TempDir(), "target.yaml"),
+							},
+						},
+					},
+				},
+			},
+			want: filepath.Dir(filepath.Join(os.TempDir(), "target.yaml")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := getLocalPath(tt.args.report); got != tt.want {
+				t.Errorf("getLocalPath() = %v, want %v", got, tt.want)
 			}
 		})
 	}

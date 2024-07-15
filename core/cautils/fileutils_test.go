@@ -27,7 +27,7 @@ func TestListFiles(t *testing.T) {
 
 	files, errs := listFiles(filesPath)
 	assert.Equal(t, 0, len(errs))
-	assert.Equal(t, 12, len(files))
+	assert.Equal(t, 13, len(files))
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
@@ -45,10 +45,11 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads, sourceToChartName := LoadResourcesFromHelmCharts(context.TODO(), helmChartPath())
+	sourceToWorkloads, sourceToChartName, _ := LoadResourcesFromHelmCharts(context.TODO(), helmChartPath())
 	assert.Equal(t, 6, len(sourceToWorkloads))
 
 	for file, workloads := range sourceToWorkloads {
+
 		assert.Equalf(t, 1, len(workloads), "expected 1 workload in file %s", file)
 
 		w := workloads[0]
@@ -104,4 +105,111 @@ func TestLoadFile(t *testing.T) {
 func getRelativePath(p string) string {
 	pp := strings.SplitAfter(p, "api=")
 	return pp[1]
+}
+
+// Converts a YAML object to a JSON object
+func TestConvertYamlToJson(t *testing.T) {
+	tests := []struct {
+		yamlObj map[interface{}]interface{}
+		jsonObj map[string]interface{}
+	}{
+		{
+			yamlObj: map[interface{}]interface{}{
+				"name": "John",
+				"age":  30,
+				"city": "New York",
+			},
+			jsonObj: map[string]interface{}{
+				"name": "John",
+				"age":  30,
+				"city": "New York",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run("", func(t *testing.T) {
+			assert.Equal(t, tt.jsonObj, convertYamlToJson(tt.yamlObj))
+		})
+	}
+}
+
+func TestIsYaml(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{
+			path: "temp.yaml",
+			want: true,
+		},
+		{
+			path: "temp.json",
+			want: false,
+		},
+		{
+			path: "random.txt",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsYaml(tt.path))
+		})
+	}
+}
+
+func TestIsJson(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{
+			path: "temp.yaml",
+			want: false,
+		},
+		{
+			path: "temp.json",
+			want: true,
+		},
+		{
+			path: "random.txt",
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsJson(tt.path))
+		})
+	}
+
+}
+
+func TestGetFileFormat(t *testing.T) {
+	tests := []struct {
+		path string
+		want FileFormat
+	}{
+		{
+			path: "temp.yaml",
+			want: YAML_FILE_FORMAT,
+		},
+		{
+			path: "temp.json",
+			want: JSON_FILE_FORMAT,
+		},
+		{
+			path: "random.txt",
+			want: "random.txt",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			assert.Equal(t, tt.want, getFileFormat(tt.path))
+		})
+	}
+
 }

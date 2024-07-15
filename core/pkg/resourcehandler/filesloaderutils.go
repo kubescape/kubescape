@@ -2,37 +2,13 @@ package resourcehandler
 
 import (
 	"fmt"
-	"path/filepath"
 
-	giturl "github.com/kubescape/go-git-url"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 )
-
-// Clone git repository
-func cloneGitRepo(path *string) (string, error) {
-	var clonedDir string
-
-	// Clone git repository if needed
-	gitURL, err := giturl.NewGitAPI(*path)
-	if err == nil {
-		logger.L().Info("cloning", helpers.String("repository url", gitURL.GetURL().String()))
-		cautils.StartSpinner()
-		clonedDir, err = cloneRepo(gitURL)
-		cautils.StopSpinner()
-		if err != nil {
-			return "", fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
-		}
-
-		*path = filepath.Join(clonedDir, gitURL.GetPath())
-
-	}
-	return clonedDir, nil
-}
 
 func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
@@ -90,7 +66,7 @@ func findScanObjectResource(mappedResources map[string][]workloadinterface.IMeta
 
 	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
 
-	wls := []workloadinterface.IWorkload{}
+	var wls []workloadinterface.IWorkload
 	for _, resources := range mappedResources {
 		for _, r := range resources {
 			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {

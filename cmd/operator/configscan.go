@@ -21,7 +21,7 @@ var operatorScanConfigExamples = fmt.Sprintf(`
 func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *cobra.Command {
 	configCmd := &cobra.Command{
 		Use:     "configurations",
-		Short:   "Trigger configuration scanning from the Kubescape-Operator microservice",
+		Short:   "Trigger configuration scanning from the Kubescape Operator microservice",
 		Long:    ``,
 		Example: operatorScanConfigExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
@@ -29,17 +29,17 @@ func getOperatorScanConfigCmd(ks meta.IKubescape, operatorInfo cautils.OperatorI
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo)
+			operatorAdapter, err := core.NewOperatorAdapter(operatorInfo.OperatorScanInfo, operatorInfo.Namespace)
 			if err != nil {
 				return err
 			}
-			logger.L().Start("Kubescape-Operator Triggering for configuration scanning")
+			logger.L().Start("Kubescape Operator Triggering for configuration scanning")
 			_, err = operatorAdapter.OperatorScan()
 			if err != nil {
-				logger.L().StopError("Failed to triggering Kubescape-Operator for configuration scanning", helpers.Error(err))
+				logger.L().StopError("Failed to triggering Kubescape Operator for configuration scanning", helpers.Error(err))
 				return err
 			}
-			logger.L().StopSuccess("Triggered Kubescape-Operator for configuration scanning")
+			logger.L().StopSuccess("Triggered Kubescape Operator for configuration scanning")
 			return nil
 		},
 	}

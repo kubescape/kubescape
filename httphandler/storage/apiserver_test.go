@@ -216,7 +216,7 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 				Name:       "mypod",
 			},
 			relatedObjects: nil,
-			expected:       "v1-pod-default-mypod-b5fd-df1b",
+			expected:       "pod-mypod",
 		},
 		{
 			resource: &FakeMetadata{
@@ -226,7 +226,7 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 				Name:       "mypod",
 			},
 			relatedObjects: nil,
-			expected:       "pod--mypod-8282-f27b",
+			expected:       "pod-mypod",
 		},
 		{
 			name: "with related objects (role, rolebinding)",
@@ -247,7 +247,7 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 					Namespace: "namespace-2",
 				},
 			},
-			expected: "serviceaccount-kubescape-sa-2--role-namespace-1-myrole--rolebinding-namespace-2-myrolebinding-eacf-57fc",
+			expected: "serviceaccount-sa-2-role-myrole-rolebinding-myrolebinding",
 		},
 		{
 			name: "with related objects (cluster role, cluster rolebinding)",
@@ -266,7 +266,7 @@ func TestGetWorkloadScanK8sResourceName(t *testing.T) {
 					Name: "myrolebinding",
 				},
 			},
-			expected: "serviceaccount-kubescape-sa-1--clusterrole--myrole--clusterrolebinding--myrolebinding-af38-ce0e",
+			expected: "serviceaccount-sa-1-clusterrole-myrole-clusterrolebinding-myrolebinding",
 		},
 	}
 
@@ -306,11 +306,7 @@ func TestGetManifestObjectLabelsAndAnnotations(t *testing.T) {
 				"kubescape.io/workload-namespace":   "test-namespace",
 			},
 			expectedAnnotations: map[string]string{
-				"kubescape.io/workload-api-group":   "",
-				"kubescape.io/workload-api-version": "v1",
-				"kubescape.io/workload-kind":        "Pod",
-				"kubescape.io/workload-name":        "test-pod",
-				"kubescape.io/workload-namespace":   "test-namespace",
+				"kubescape.io/wlid": "wlid://cluster-minikube/namespace-test-namespace/pod-test-pod",
 			},
 		},
 		{
@@ -348,20 +344,11 @@ func TestGetManifestObjectLabelsAndAnnotations(t *testing.T) {
 				"kubescape.io/rolebinding-namespace": "test-namespace",
 			},
 			expectedAnnotations: map[string]string{
-				"kubescape.io/workload-api-group":    "",
-				"kubescape.io/workload-api-version":  "v1",
-				"kubescape.io/workload-kind":         "Pod",
-				"kubescape.io/workload-name":         "test-pod",
-				"kubescape.io/workload-namespace":    "test-namespace",
-				"kubescape.io/rbac-resource":         "true",
-				"kubescape.io/role-name":             "test-role",
-				"kubescape.io/role-namespace":        "test-namespace",
-				"kubescape.io/rolebinding-name":      "test-role-binding",
-				"kubescape.io/rolebinding-namespace": "test-namespace",
+				"kubescape.io/wlid": "wlid://cluster-minikube/namespace-test-namespace/rolebinding-test-role-binding",
 			},
 		},
 		{
-			name: "with related objects (role, rolebinding)",
+			name: "with related objects (clusterrole, clusterrolebinding)",
 			resource: &FakeMetadata{
 				Namespace:  "test-namespace",
 				ApiVersion: "v1",
@@ -391,22 +378,14 @@ func TestGetManifestObjectLabelsAndAnnotations(t *testing.T) {
 				"kubescape.io/clusterrolebinding-name": "test-role-binding",
 			},
 			expectedAnnotations: map[string]string{
-				"kubescape.io/workload-api-group":      "",
-				"kubescape.io/workload-api-version":    "v1",
-				"kubescape.io/workload-kind":           "Pod",
-				"kubescape.io/workload-name":           "test-pod",
-				"kubescape.io/workload-namespace":      "test-namespace",
-				"kubescape.io/rbac-resource":           "true",
-				"kubescape.io/clusterrole-name":        "test-role",
-				"kubescape.io/clusterrolebinding-name": "test-role-binding",
+				"kubescape.io/wlid": "wlid://cluster-minikube/namespace-/clusterrolebinding-test-role-binding",
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			labels, annotations, err := getManifestObjectLabelsAndAnnotations(ctx, tt.resource, tt.relatedObjects)
+			labels, annotations, err := getManifestObjectLabelsAndAnnotations("minikube", tt.resource, tt.relatedObjects)
 			assert.NoError(t, err)
 			assert.Equal(t, tt.expectedLabels, labels)
 			assert.Equal(t, tt.expectedAnnotations, annotations)
@@ -426,7 +405,7 @@ func Test_RoleBindingResourceTripletToSlug(t *testing.T) {
 			role:        "testdata/role_1.json",
 			roleBinding: "testdata/rolebinding_1.json",
 			expectedSlugs: []string{
-				"rbac.authorization.k8s.io-group--system-serviceaccounts-rbac.authorization.k8s.io-v1-clusterrole--system-service-account-issuer-discovery-rbac.authorization.k8s.io-v1-clusterrolebinding--system-service-account-issuer-discovery-b4a3-66fa",
+				"group-system-serviceaccounts-clusterrole-system-service-account-issuer-discovery-clusterrolebinding-system-service-account-issuer-discovery",
 			},
 		},
 		{
@@ -434,7 +413,7 @@ func Test_RoleBindingResourceTripletToSlug(t *testing.T) {
 			role:        "testdata/role_2.json",
 			roleBinding: "testdata/rolebinding_2.json",
 			expectedSlugs: []string{
-				"serviceaccount-kube-system-expand-controller-rbac.authorization.k8s.io-v1-clusterrole--system-controller-expand-controller-rbac.authorization.k8s.io-v1-clusterrolebinding--system-controller-expand-controller-e022-82b2",
+				"serviceaccount-expand-controller-clusterrole-system-controller-expand-controller-clusterrolebinding-system-controller-expand-controller",
 			},
 		},
 		{
@@ -442,8 +421,8 @@ func Test_RoleBindingResourceTripletToSlug(t *testing.T) {
 			role:        "testdata/role_3.json",
 			roleBinding: "testdata/rolebinding_3.json",
 			expectedSlugs: []string{
-				"rbac.authorization.k8s.io-user--system-kube-scheduler-rbac.authorization.k8s.io-v1-role-kube-system-system--leader-locking-kube-scheduler-rbac.authorization.k8s.io-v1-rolebinding-kube-system-system--leader-locking-kube-scheduler-169f-c8e9",
-				"serviceaccount-kube-system-kube-scheduler-rbac.authorization.k8s.io-v1-role-kube-system-system--leader-locking-kube-scheduler-rbac.authorization.k8s.io-v1-rolebinding-kube-system-system--leader-locking-kube-scheduler-ff4b-6277",
+				"user-system-kube-scheduler-role-system--leader-locking-kube-scheduler-rolebinding-system--leader-locking-kube-scheduler",
+				"serviceaccount-kube-scheduler-role-system--leader-locking-kube-scheduler-rolebinding-system--leader-locking-kube-scheduler",
 			},
 		},
 	}

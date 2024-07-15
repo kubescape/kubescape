@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -307,7 +307,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventTy
 	}
 }
 
-// tearDownNamespace manage the host-scanner deletion.
+// tearDownHostScanner manage the host-scanner deletion.
 func (hsh *HostSensorHandler) tearDownHostScanner(namespace string) error {
 	client := hsh.k8sObj.KubernetesClient
 
@@ -416,7 +416,15 @@ func loadHostSensorFromFile(hostSensorYAMLFile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// TODO - Add file validation
+
+	if len(dat) == 0 {
+		return "", fmt.Errorf("empty file")
+	}
+
+	if !cautils.IsYaml(hostSensorYAMLFile) {
+		return "", fmt.Errorf("invalid file format")
+	}
+
 	return string(dat), err
 }
 

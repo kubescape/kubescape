@@ -13,7 +13,8 @@ import (
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
 	servicediscoveryv1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
-	logger "github.com/kubescape/go-logger"
+	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
@@ -294,10 +295,16 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
 	if urlsConfigMap != nil {
 		if jsonConf, ok := urlsConfigMap.Data["services"]; ok {
 			services, err := servicediscovery.GetServices(
-				servicediscoveryv1.NewServiceDiscoveryStreamV1([]byte(jsonConf)),
+				servicediscoveryv2.NewServiceDiscoveryStreamV2([]byte(jsonConf)),
 			)
 			if err != nil {
-				return err
+				// try to parse as v1
+				services, err = servicediscovery.GetServices(
+					servicediscoveryv1.NewServiceDiscoveryStreamV1([]byte(jsonConf)),
+				)
+				if err != nil {
+					return err
+				}
 			}
 
 			if services.GetApiServerUrl() != "" {
@@ -473,7 +480,6 @@ func updateCloudURLs(configObj *ConfigObj) {
 
 func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 	if ksCloud := getter.GetKSCloudAPIConnector(); ksCloud != nil {
-		logger.L().Debug("KS Cloud API already initialized")
 
 		if val := c.GetCloudAPIURL(); val != "" && val != ksCloud.GetCloudAPIURL() {
 			logger.L().Debug("updating KS Cloud API from config", helpers.String("old", ksCloud.GetCloudAPIURL()), helpers.String("new", val))

@@ -29,7 +29,7 @@ func GetOperatorCmd(ks meta.IKubescape) *cobra.Command {
 
 	operatorCmd := &cobra.Command{
 		Use:     "operator",
-		Short:   "The operator is used to communicate with the Kubescape-Operator within the cluster components.",
+		Short:   "The operator is used to communicate with the Kubescape Operator within the cluster components.",
 		Long:    ``,
 		Example: operatorExamples,
 		Args: func(cmd *cobra.Command, args []string) error {

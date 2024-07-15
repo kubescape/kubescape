@@ -23,7 +23,7 @@ jobs:
     permissions:
       id-token: write
       packages: write
-      contents: read
+      contents: write
       pull-requests: read
     uses: kubescape/workflows/.github/workflows/incluster-comp-pr-merged.yaml@main
     with:
@@ -33,7 +33,7 @@ jobs:
       CGO_ENABLED: 0
       GO111MODULE: "on"
       BUILD_PLATFORM: ${{ inputs.PLATFORMS && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-      GO_VERSION: "1.20"
+      GO_VERSION: "1.21"
       REQUIRED_TESTS: '[]'
       COSIGN: ${{ inputs.CO_SIGN }}
       HELM_E2E_TEST: false

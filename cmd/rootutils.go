@@ -7,8 +7,8 @@ import (
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
-	sdClientV1 "github.com/kubescape/backend/pkg/servicediscovery/v1"
-	logger "github.com/kubescape/go-logger"
+	sdClientV2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/go-logger/zaplogger"
@@ -66,7 +66,7 @@ func initEnvironment() {
 
 	logger.L().Debug("fetching URLs from service discovery server", helpers.String("server", rootInfo.DiscoveryServerURL))
 
-	client, err := sdClientV1.NewServiceDiscoveryClientV1(rootInfo.DiscoveryServerURL)
+	client, err := sdClientV2.NewServiceDiscoveryClientV2(rootInfo.DiscoveryServerURL)
 	if err != nil {
 		logger.L().Fatal("failed to create service discovery client", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
 		return
@@ -77,7 +77,7 @@ func initEnvironment() {
 	)
 
 	if err != nil {
-		logger.L().Fatal("failed to to get services from server", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
+		logger.L().Fatal("failed to get services from server", helpers.Error(err), helpers.String("server", rootInfo.DiscoveryServerURL))
 		return
 	}
 

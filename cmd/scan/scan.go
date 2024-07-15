@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -45,12 +46,17 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				setSecurityViewScanInfo(args, &scanInfo)
 
-				return securityScan(scanInfo, ks)
+				if err := securityScan(scanInfo, ks); err != nil {
+					logger.L().Fatal(err.Error())
+				}
+			} else if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
+				if err := getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...)); err != nil {
+					logger.L().Fatal(err.Error())
+				}
+			} else {
+				return fmt.Errorf("kubescape did not do anything")
 			}
 
-			if len(args) == 0 || (args[0] != "framework" && args[0] != "control") {
-				return getFrameworkCmd(ks, &scanInfo).RunE(cmd, append([]string{strings.Join(getter.NativeFrameworks, ",")}, args...))
-			}
 			return nil
 		},
 		PostRun: func(cmd *cobra.Command, args []string) {
@@ -59,6 +65,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	}
 
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ControlsInputs, "controls-config", "", "Path to an controls-config obj. If not set will download controls-config from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseExceptions, "exceptions", "", "Path to an exceptions obj. If not set will download exceptions from ARMO management portal")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
@@ -68,7 +75,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"`)
+	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"`)
 	scanCmd.PersistentFlags().StringVar(&scanInfo.IncludeNamespaces, "include-namespaces", "", "scan specific namespaces. e.g: --include-namespaces ns-a,ns-b")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Local, "keep-local", "", false, "If you do not want your Kubescape results reported to configured backend.")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Output, "output", "o", "", "Output file. Print output to file and not stdout")
@@ -84,16 +91,13 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 
-	scanCmd.PersistentFlags().MarkDeprecated("silent", "use '--logger' flag instead. Flag will be removed at 1.May.2022")
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
-
-	scanCmd.PersistentFlags().MarkDeprecated("client-id", "Client ID is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Create account is no longer supported. In case of a missing Account ID and a configured backend server, a new account id will be generated automatically by Kubescape. Feel free to contact the Kubescape maintainers for more information.")
-	scanCmd.PersistentFlags().MarkDeprecated("secret-key", "Secret Key is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
 
 	// hidden flags
 	scanCmd.PersistentFlags().MarkHidden("omit-raw-resources")
 	scanCmd.PersistentFlags().MarkHidden("print-attack-tree")
+	scanCmd.PersistentFlags().MarkHidden("format-version")
 
 	// Retrieve --kubeconfig flag from https://github.com/kubernetes/kubectl/blob/master/pkg/cmd/cmd.go
 	scanCmd.PersistentFlags().AddGoFlag(flag.Lookup("kubeconfig"))
@@ -120,10 +124,11 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
 	if len(args) > 0 {
 		scanInfo.SetScanType(cautils.ScanTypeRepo)
 		scanInfo.InputPatterns = args
+		scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 	} else {
 		scanInfo.SetScanType(cautils.ScanTypeCluster)
+		scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 	}
-	scanInfo.SetPolicyIdentifiers([]string{"clusterscan", "mitre", "nsa"}, v1.KindFramework)
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {

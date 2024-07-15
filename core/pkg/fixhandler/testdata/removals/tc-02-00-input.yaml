@@ -13,3 +13,4 @@ spec:
 
   - name: container_with_security_issues
     image: image_with_security_issues
+  restartPolicy: Always

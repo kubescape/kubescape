@@ -8,7 +8,9 @@
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fkubescape%2Fkubescape.svg?type=shield&issueType=license)](https://app.fossa.com/projects/git%2Bgithub.com%2Fkubescape%2Fkubescape?ref=badge_shield&issueType=license)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/6944/badge)](https://www.bestpractices.dev/projects/6944)
 [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/kubescape/kubescape/badge)](https://securityscorecards.dev/viewer/?uri=github.com/kubescape/kubescape)
+[![Stars](https://img.shields.io/github/stars/kubescape/kubescape?style=social)](https://github.com/kubescape/kubescape/stargazers)
 [![Twitter Follow](https://img.shields.io/twitter/follow/kubescape?style=social)](https://twitter.com/kubescape)
+[![Slack](https://img.shields.io/badge/slack-kubescape-blueviolet?logo=slack)](https://cloud-native.slack.com/archives/C04EY3ZF9GE)
 
 # Kubescape
 
@@ -65,6 +67,14 @@ _Did you know you can use Kubescape in all these places?_
     <img src="docs/img/ksfromcodetodeploy.png" alt="Places you can use Kubescape: in your IDE, CI, CD, or against a running cluster.">
 </div>
 
+## Kubescape-operator Helm-Chart
+
+Besides the CLI, the Kubescape operator can also be installed via a Helm chart. Installing the Helm chart is an excellent way to begin using Kubescape, as it provides extensive features such as continuous scanning, image vulnerability scanning, runtime analysis, network policy generation, and more. You can find the Helm chart in the [Kubescape-operator documentation](https://kubescape.io/docs/install-operator/).
+
+## Kubescape GitHub Action
+
+Kubescape can be used as a GitHub Action. This is a great way to integrate Kubescape into your CI/CD pipeline. You can find the Kubescape GitHub Action in the [GitHub Action marketplace](https://github.com/marketplace/actions/kubescape).
+
 ## Under the hood
 
 Kubescape uses [Open Policy Agent](https://github.com/open-policy-agent/opa) to verify Kubernetes objects against [a library of posture controls](https://github.com/kubescape/regolibrary).
@@ -82,7 +92,8 @@ It retrieves Kubernetes objects from the API server and runs a set of [Rego snip
 
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We are part of the cloud-native community and are enhancing the project as the ecosystem develops.
 
-We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, every other week, at 14:00 GMT. ([See that in your local time zone](https://time.is/compare/1400_in_GMT)).
+
+We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, every other week, at 15:00 CET. ([See that in your local time zone](https://time.is/compare/1400_in_GMT)).
 
 The Kubescape project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 

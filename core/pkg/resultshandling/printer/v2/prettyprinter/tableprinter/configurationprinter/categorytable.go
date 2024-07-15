@@ -13,11 +13,11 @@ import (
 const (
 	docsPrefix        = "https://hub.armosec.io/docs"
 	scanControlPrefix = "$ kubescape scan control"
-	controlNameHeader = "Control Name"
+	controlNameHeader = "Control name"
 	statusHeader      = ""
 	docsHeader        = "Docs"
 	resourcesHeader   = "Resources"
-	runHeader         = "View Details"
+	runHeader         = "View details"
 )
 
 // initializes the table headers and column alignments based on the category type
@@ -91,14 +91,15 @@ func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments 
 	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 	var headerColors []tablewriter.Colors
 	for range headers {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
+		headerColors = append(headerColors, tablewriter.Colors{tablewriter.FgHiYellowColor})
 	}
 	table.SetHeaderColor(headerColors...)
 	return table
 }
 
 func renderSingleCategory(writer io.Writer, categoryName string, table *tablewriter.Table, rows [][]string, infoToPrintInfo []utils.InfoStars) {
-	cautils.InfoTextDisplay(writer, categoryName+"\n")
+
+	cautils.InfoDisplay(writer, categoryName+"\n")
 
 	table.ClearRows()
 	table.AppendBulk(rows)

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 )
 

@@ -2,6 +2,7 @@ package printer
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -40,23 +41,28 @@ func Test_generateRowPdf(t *testing.T) {
 			t.Errorf("got %s, want either of these: %s", c[0], "Low, Medium, High, Critical")
 		}
 
+		// Validating length of control ID
+		if len(c[1]) > 6 {
+			t.Errorf("got %s, want %s", c[1], "less than 7 characters")
+		}
+
 		// Validating length of control name
-		if len(c[1]) > 53 {
-			t.Errorf("got %s, want %s", c[1], "less than 54 characters")
+		if len(c[2]) > controlNameMaxLength {
+			t.Errorf("got %s, want %s", c[1], fmt.Sprintf("less than %d characters", controlNameMaxLength))
 		}
 
 		// Validating numeric fields
-		_, err := strconv.Atoi(c[2])
+		_, err := strconv.Atoi(c[3])
 		if err != nil {
 			t.Errorf("got %s, want an integer %s", c[2], err)
 		}
 
-		_, err = strconv.Atoi(c[3])
+		_, err = strconv.Atoi(c[4])
 		if err != nil {
 			t.Errorf("got %s, want an integer %s", c[3], err)
 		}
 
-		assert.NotEmpty(t, c[4], "expected a non-empty string")
+		assert.NotEmpty(t, c[5], "expected a non-empty string")
 
 	}
 

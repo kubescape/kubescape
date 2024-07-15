@@ -1,5 +1,18 @@
 name: d-publish-image
-permissions: read-all
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  deployments: read
+  discussions: read
+  id-token: write
+  issues: read
+  packages: read
+  pages: read
+  pull-requests: read
+  repository-projects: read
+  statuses: read
+  security-events: read
 on:
   workflow_call:
     inputs:
@@ -46,7 +59,7 @@ jobs:
     name: Build image and upload to registry
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ac593985615ec2ede58e132d2e21d2b1cbd6127c # ratchet:actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Set up QEMU
@@ -62,19 +75,35 @@ jobs:
         id: download-artifact
         with:
           path: .
+      - name: mv kubescape amd64 binary
+        run: mv ${{steps.download-artifact.outputs.download-path}}/kubescape/kubescape-ubuntu-latest kubescape-amd64-ubuntu-latest
+      - name: mv kubescape arm64 binary
+        run: mv ${{steps.download-artifact.outputs.download-path}}/kubescape/kubescape-arm64-ubuntu-latest kubescape-arm64-ubuntu-latest
       - name: chmod +x
-        run: chmod +x -v kubescape-*/kubescape-*
-      - name: Build and push image for linux/amd64
-        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --build-arg ks_binary=kubescape-ubuntu-latest/kubescape-ubuntu-latest --push --platform linux/amd64
-      - name: Build and push image for linux/arm64
-        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --build-arg ks_binary=kubescape-arm64-ubuntu-latest/kubescape-arm64-ubuntu-latest --push --platform linux/arm64
+        run: chmod +x -v kubescape-a*
+      - name: Build and push images
+        run: docker buildx build . --file build/kubescape-cli.Dockerfile --tag ${{ inputs.image_name }}:${{ inputs.image_tag }} --tag ${{ inputs.image_name }}:latest --build-arg image_version=${{ inputs.image_tag }} --build-arg client=${{ inputs.client }} --push --platform linux/amd64,linux/arm64
       - name: Install cosign
-        uses: sigstore/cosign-installer@4079ad3567a89f68395480299c77e40170430341 # ratchet:sigstore/cosign-installer@main
+        uses: sigstore/cosign-installer@main
         with:
-          cosign-release: 'v1.12.0'
+          cosign-release: 'v2.2.2'
       - name: sign kubescape container image
         if: ${{ inputs.cosign }}
         env:
           COSIGN_EXPERIMENTAL: "true"
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY_V1 }}
+          COSIGN_PRIVATE_KEY_PASSWORD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
+          COSIGN_PUBLIC_KEY: ${{ secrets.COSIGN_PUBLIC_KEY_V1 }}
         run: |
-          cosign sign --force ${{ inputs.image_name }}
+            # Sign the image with keyless mode
+            cosign sign -y ${{ inputs.image_name }}:${{ inputs.image_tag }}
+
+            # Sign the image with key for verifier clients without keyless support
+            # Put the key from environment variable to a file
+            echo "$COSIGN_PRIVATE_KEY" > cosign.key
+            printf "$COSIGN_PRIVATE_KEY_PASSWORD" | cosign sign -key cosign.key -y ${{ inputs.image_name }}:${{ inputs.image_tag }}
+            rm cosign.key
+            # Verify the image
+            echo "$COSIGN_PUBLIC_KEY" > cosign.pub
+            cosign verify -key cosign.pub ${{ inputs.image_name }}:${{ inputs.image_tag }}
+

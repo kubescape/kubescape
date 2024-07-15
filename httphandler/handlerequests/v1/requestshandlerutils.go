@@ -9,7 +9,8 @@ import (
 	"strings"
 
 	"github.com/armosec/utils-go/boolutils"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
@@ -24,11 +25,12 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+var scanImpl = scan // Override for testing
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{}
 
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-	_, err := scan(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
+	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
 	if err != nil {
 		logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
 		if scanReq.scanQueryParams.ReturnResults {
@@ -38,14 +40,18 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	} else {
 		logger.L().Ctx(scanReq.ctx).Success("done scanning", helpers.String("ID", scanReq.scanID))
 		if scanReq.scanQueryParams.ReturnResults {
+			//TODO(ttimonen) should we actually pass the PostureReport here somehow?
 			response.Type = utilsapisv1.ResultsV1ScanResponseType
 		}
 	}
 
 	handler.state.setNotBusy(scanReq.scanID)
 
-	// return results
-	handler.scanResponseChan.push(scanReq.scanID, response)
+	// return results, if someone's waiting for them; never block.
+	select {
+	case scanReq.resp <- response:
+	default:
+	}
 }
 
 // executeScan execute the scan request passed in the channel
@@ -63,8 +69,8 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	ks := core.NewKubescape()
 
 	spanScan.AddEvent("scanning metadata",
-		trace.WithAttributes(attribute.String("version", cautils.BuildNumber)),
-		trace.WithAttributes(attribute.String("build", cautils.Client)),
+		trace.WithAttributes(attribute.String("version", versioncheck.BuildNumber)),
+		trace.WithAttributes(attribute.String("build", versioncheck.Client)),
 		trace.WithAttributes(attribute.String("scanID", scanInfo.ScanID)),
 		trace.WithAttributes(attribute.Bool("scanAll", scanInfo.ScanAll)),
 		trace.WithAttributes(attribute.Bool("HostSensorEnabled", scanInfo.HostSensorEnabled.GetBool())),

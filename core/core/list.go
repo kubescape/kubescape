@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	v2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
+	"github.com/maruel/natural"
 	"github.com/olekukonko/tablewriter"
 )
 
@@ -29,9 +30,12 @@ var listFormatFunc = map[string]func(context.Context, string, []string){
 
 func ListSupportActions() []string {
 	commands := []string{}
-	for k := range listFunc {
-		commands = append(commands, k)
+	for key := range listFunc {
+		commands = append(commands, key)
 	}
+
+	// Sort the keys
+	sort.Strings(commands)
 	return commands
 }
 func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies) error {
@@ -40,7 +44,7 @@ func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies
 		if err != nil {
 			return err
 		}
-		sort.Strings(policies)
+		policies = naturalSortPolicies(policies)
 
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
 			listFormatFunction(ctx, listPolicies.Target, policies)
@@ -51,6 +55,13 @@ func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies
 		return nil
 	}
 	return fmt.Errorf("unknown command to download")
+}
+
+func naturalSortPolicies(policies []string) []string {
+	sort.Slice(policies, func(i, j int) bool {
+		return natural.Less(policies[i], policies[j])
+	})
+	return policies
 }
 
 func listFrameworks(ctx context.Context, listPolicies *metav1.ListPolicies) ([]string, error) {
@@ -134,13 +145,13 @@ func prettyPrintControls(ctx context.Context, policies []string) {
 
 	controlRows := generateControlRows(policies)
 
-	short := utils.CheckShortTerminalWidth(controlRows, []string{"Control ID", "Control Name", "Docs", "Frameworks"})
+	short := utils.CheckShortTerminalWidth(controlRows, []string{"Control ID", "Control name", "Docs", "Frameworks"})
 	if short {
 		controlsTable.SetAutoWrapText(false)
 		controlsTable.SetHeader([]string{"Controls"})
 		controlRows = shortFormatControlRows(controlRows)
 	} else {
-		controlsTable.SetHeader([]string{"Control ID", "Control Name", "Docs", "Frameworks"})
+		controlsTable.SetHeader([]string{"Control ID", "Control name", "Docs", "Frameworks"})
 	}
 	var headerColors []tablewriter.Colors
 	for range controlRows[0] {
@@ -159,8 +170,21 @@ func generateControlRows(policies []string) [][]string {
 	rows := [][]string{}
 
 	for _, control := range policies {
+
 		idAndControlAndFrameworks := strings.Split(control, "|")
-		id, control, framework := idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
+
+		var id, control, framework string
+
+		switch len(idAndControlAndFrameworks) {
+		case 0:
+			continue
+		case 1:
+			id = idAndControlAndFrameworks[0]
+		case 2:
+			id, control = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1]
+		default:
+			id, control, framework = idAndControlAndFrameworks[0], idAndControlAndFrameworks[1], idAndControlAndFrameworks[2]
+		}
 
 		docs := cautils.GetControlLink(id)
 

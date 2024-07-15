@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"os"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/metrics"
 	"github.com/kubescape/kubescape/v3/httphandler/docs"
 	handlerequestsv1 "github.com/kubescape/kubescape/v3/httphandler/handlerequests/v1"
@@ -59,7 +59,7 @@ func SetupHTTPListener() error {
 	otelMiddleware := otelmux.Middleware("kubescape-svc")
 	v1SubRouter := rtr.PathPrefix(v1PathPrefix).Subrouter()
 	v1SubRouter.Use(otelMiddleware)
-	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics)
+	v1SubRouter.HandleFunc(v1PrometheusMetricsPath, httpHandler.Metrics) // deprecated
 	v1SubRouter.HandleFunc(v1ScanPath, httpHandler.Scan)
 	v1SubRouter.HandleFunc(v1StatusPath, httpHandler.Status)
 	v1SubRouter.HandleFunc(v1ResultsPath, httpHandler.Results)
@@ -69,7 +69,7 @@ func SetupHTTPListener() error {
 
 	server.Handler = rtr
 
-	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", cautils.BuildNumber))
+	logger.L().Info("Started Kubescape server", helpers.String("port", getPort()), helpers.String("version", versioncheck.BuildNumber))
 
 	servePprof()
 

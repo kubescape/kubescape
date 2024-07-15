@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/schema"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 
 	"github.com/google/uuid"
 )
@@ -30,19 +30,16 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
-	state            *serverState
-	scanResponseChan *scanResponseChan
-	scanRequestChan  chan *scanRequestParams
+	state           *serverState
+	scanRequestChan chan *scanRequestParams
 }
 
 func NewHTTPHandler() *HTTPHandler {
 	handler := &HTTPHandler{
-		state:            newServerState(),
-		scanRequestChan:  make(chan *scanRequestParams),
-		scanResponseChan: newScanResponseChan(),
+		state:           newServerState(),
+		scanRequestChan: make(chan *scanRequestParams),
 	}
 	go handler.watchForScan()
-
 	return handler
 }
 
@@ -90,7 +87,6 @@ func (handler *HTTPHandler) Status(w http.ResponseWriter, r *http.Request) {
 // ============================================== SCAN ========================================================
 // Scan API
 func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
-
 	// generate id
 	scanID := uuid.NewString()
 
@@ -101,7 +97,6 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-
 	scanRequestParams, err := getScanParamsFromRequest(r, scanID)
 	if err != nil {
 		handler.writeError(w, err, "")
@@ -111,14 +106,6 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 
 	handler.state.setBusy(scanID)
 
-	response := &utilsmetav1.Response{}
-	response.ID = scanID
-	response.Type = utilsapisv1.BusyScanResponseType
-	response.Response = fmt.Sprintf("scanning '%s' is in progress", scanID)
-
-	handler.scanResponseChan.set(scanID) // add channel
-	defer handler.scanResponseChan.delete(scanID)
-
 	// you must use a goroutine since the executeScan function is not always listening to the channel
 	go func() {
 		// send to scanning handler
@@ -126,9 +113,14 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.scanRequestChan <- scanRequestParams
 	}()
 
-	if scanRequestParams.scanQueryParams.ReturnResults {
+	response := &utilsmetav1.Response{
+		ID:       scanID,
+		Type:     utilsapisv1.BusyScanResponseType,
+		Response: fmt.Sprintf("scanning '%s' is in progress", scanID),
+	}
+	if scanRequestParams.resp != nil {
 		// wait for scan to complete
-		response = <-handler.scanResponseChan.get(scanID)
+		response = <-scanRequestParams.resp
 
 		if scanRequestParams.scanQueryParams.KeepResults {
 			// delete results after returning

@@ -2,9 +2,10 @@ package config
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
@@ -40,10 +41,16 @@ var supportConfigSet = map[string]func(*metav1.SetConfig, string){
 }
 
 func stringKeysToSlice(m map[string]func(*metav1.SetConfig, string)) []string {
-	l := []string{}
-	for i := range m {
-		l = append(l, i)
+	keys := []string{}
+	for key := range m {
+		keys = append(keys, key)
 	}
+
+	// Sort the keys of the map
+	sort.Strings(keys)
+
+	l := []string{}
+	l = append(l, keys...)
 	return l
 }
 

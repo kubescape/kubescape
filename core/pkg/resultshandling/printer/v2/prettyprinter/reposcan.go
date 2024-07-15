@@ -3,7 +3,7 @@ package prettyprinter
 import (
 	"fmt"
 	"os"
-	"strings"
+	"path/filepath"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/configurationprinter"
@@ -42,7 +42,7 @@ func (rp *RepoPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary
 }
 
 func (rp *RepoPrinter) PrintNextSteps() {
-	printNextSteps(rp.writer, rp.getNextSteps(), false)
+	printNextSteps(rp.writer, rp.getNextSteps(), true)
 }
 
 func (rp *RepoPrinter) getNextSteps() []string {
@@ -56,10 +56,7 @@ func (rp *RepoPrinter) getNextSteps() []string {
 
 func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IResource) {
 	txt := getTopWorkloadsTitle(len(topWorkloadsByScore))
-	cautils.InfoTextDisplay(rp.writer, txt)
-
-	cautils.SimpleDisplay(rp.writer, fmt.Sprintf("%s\n", strings.Repeat("─", len(txt))))
-
+	cautils.SectionHeadingDisplay(rp.writer, txt)
 	cautils.SimpleDisplay(rp.writer, highStakesWlsText)
 
 	for i, wl := range topWorkloadsByScore {
@@ -71,7 +68,7 @@ func (rp *RepoPrinter) printTopWorkloads(topWorkloadsByScore []reporthandling.IR
 		cautils.SimpleDisplay(rp.writer, fmt.Sprintf("   %s\n", getCallToActionString(rp.getWorkloadScanCommand(ns, kind, name, *wl.GetSource()))))
 	}
 
-	cautils.InfoTextDisplay(rp.writer, "\n")
+	cautils.SimpleDisplay(rp.writer, "\n")
 }
 
 func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source reporthandling.Source) string {
@@ -81,9 +78,8 @@ func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source repo
 	}
 
 	if source.FileType == reporthandling.SourceTypeHelmChart {
-		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.HelmPath, fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
-
+		return fmt.Sprintf("%s --chart-path=%s --file-path=%s", cmd, source.HelmPath, filepath.Join(source.Path, source.RelativePath))
 	} else {
-		return fmt.Sprintf("%s --file-path=%s", cmd, fmt.Sprintf("%s/%s", source.Path, source.RelativePath))
+		return fmt.Sprintf("%s --file-path=%s", cmd, filepath.Join(source.Path, source.RelativePath))
 	}
 }

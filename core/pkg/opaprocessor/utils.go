@@ -2,10 +2,9 @@ package opaprocessor
 
 import (
 	"fmt"
+	"strings"
 
-	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -19,9 +18,9 @@ import (
 )
 
 // convertFrameworksToPolicies convert list of frameworks to list of policies
-func convertFrameworksToPolicies(frameworks []reporthandling.Framework, version string, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) *cautils.Policies {
+func convertFrameworksToPolicies(frameworks []reporthandling.Framework, excludedRules map[string]bool, scanningScope reporthandling.ScanningScopeType) *cautils.Policies {
 	policies := cautils.NewPolicies()
-	policies.Set(frameworks, version, excludedRules, scanningScope)
+	policies.Set(frameworks, excludedRules, scanningScope)
 	return policies
 }
 
@@ -77,7 +76,9 @@ var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.T
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
-	result, err := verify(string(aStr), string(bStr))
+	// Replace double backslashes with single backslashes
+	bbStr := strings.Replace(string(bStr), "\\n", "\n", -1)
+	result, err := verify(string(aStr), bbStr)
 	if err != nil {
 		// Do not change this log from debug level. We might find a lot of images without signature
 		logger.L().Debug("failed to verify signature", helpers.String("image", string(aStr)), helpers.String("key", string(bStr)), helpers.Error(err))
@@ -110,14 +111,4 @@ var imageNameNormalizeDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 	}
 	normalizedName, err := cautils.NormalizeImageName(string(aStr))
 	return ast.StringTerm(normalizedName), err
-}
-
-func getScanningScope(ContextMetadata reporthandlingv2.ContextMetadata) reporthandling.ScanningScopeType {
-	if ContextMetadata.ClusterContextMetadata != nil {
-		if ContextMetadata.ClusterContextMetadata.CloudMetadata != nil && ContextMetadata.ClusterContextMetadata.CloudMetadata.CloudProvider != "" {
-			return reporthandling.ScanningScopeType(ContextMetadata.ClusterContextMetadata.CloudMetadata.CloudProvider)
-		}
-		return reporthandling.ScopeCluster
-	}
-	return reporthandling.ScopeFile
 }

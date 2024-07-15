@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -37,9 +37,6 @@ var (
 
   # Download the configured controls-inputs 
   %[1]s download controls-inputs 
-
-  # Download the attack tracks
-  %[1]s download attack-tracks
 `, cautils.ExecName())
 )
 
@@ -70,6 +67,11 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			if filepath.Ext(downloadInfo.Path) == ".json" {
 				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
 			}
+
+			if len(args) == 0 {
+				return fmt.Errorf("no arguements provided")
+			}
+
 			downloadInfo.Target = args[0]
 			if len(args) >= 2 {
 
@@ -84,9 +86,7 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 	}
 
 	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccessKey, "accessKey", "", "", "Kubescape SaaS access key. Default will load access key from cache")
-	downloadCmd.PersistentFlags().MarkDeprecated("client-id", "Client ID is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
-	downloadCmd.PersistentFlags().MarkDeprecated("secret-key", "Secret Key is no longer supported. Feel free to contact the Kubescape maintainers for more information.")
+	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 	return downloadCmd

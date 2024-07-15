@@ -3,7 +3,9 @@ package opaprocessor
 import (
 	"context"
 
-	logger "github.com/kubescape/go-logger"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -97,7 +99,7 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 
 func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) map[string][]workloadinterface.IMetadata {
 	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
-	externalObjs := getKubenetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
+	externalObjs := getKubernetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
 	if len(externalObjs) > 0 {
 		l, ok := k8sObjects[clusterScope]
 		if !ok {
@@ -109,7 +111,7 @@ func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources
 	return k8sObjects
 }
 
-func getKubenetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getKubernetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 
 	for m := range match {
@@ -215,16 +217,39 @@ func removePodData(workload workloadinterface.IWorkload) {
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
-	containers, err := workload.GetContainers()
-	if err != nil || len(containers) == 0 {
-		return
+	// containers
+	if containers, err := workload.GetContainers(); err == nil && len(containers) > 0 {
+		removeContainersData(containers)
+		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
 	}
+
+	// init containers
+
+	if initContainers, err := workload.GetInitContainers(); err == nil && len(initContainers) > 0 {
+		removeContainersData(initContainers)
+		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "initContainers", initContainers)
+	}
+
+	// ephemeral containers
+	if ephemeralContainers, err := workload.GetEphemeralContainers(); err == nil && len(ephemeralContainers) > 0 {
+		removeEphemeralContainersData(ephemeralContainers)
+		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "ephemeralContainers", ephemeralContainers)
+	}
+}
+
+func removeContainersData(containers []corev1.Container) {
 	for i := range containers {
 		for j := range containers[i].Env {
 			containers[i].Env[j].Value = "XXXXXX"
 		}
 	}
-	workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
+}
+func removeEphemeralContainersData(containers []corev1.EphemeralContainer) {
+	for i := range containers {
+		for j := range containers[i].Env {
+			containers[i].Env[j].Value = "XXXXXX"
+		}
+	}
 }
 
 func ruleData(rule *reporthandling.PolicyRule) string {
