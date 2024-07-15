@@ -90,7 +90,7 @@ By default, the results are printed in a console-friendly manner, but they can b
 It retrieves Kubernetes objects from the API server and runs a set of [Rego snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
 
 ## Architecture 
-![kubescape](docs/img/Kubescape_Diagram.png)
+![kubescape](docs/img/architecture-diagram.png)
 
 **Otel collector** - is not built-in, Otel endpoint spec is need to be added at setup [Setting Otel](https://kubescape.io/docs/operator/telemetry/)
 
