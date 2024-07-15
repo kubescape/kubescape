@@ -78,7 +78,7 @@ Kubescape can be used as a GitHub Action. This is a great way to integrate Kubes
 ## Under the hood
 
 Kubescape uses [Open Policy Agent](https://github.com/open-policy-agent/opa) to verify Kubernetes objects against [a library of posture controls](https://github.com/kubescape/regolibrary).
-For images scanning, it uses [Grype](https://github.com/anchore/grype).
+For image scanning, it uses [Grype](https://github.com/anchore/grype).
 For image patching, it uses [Copacetic](https://github.com/project-copacetic/copacetic).
 
 By default, the results are printed in a console-friendly manner, but they can be:
@@ -94,7 +94,7 @@ It retrieves Kubernetes objects from the API server and runs a set of [Rego snip
 Kubescape is an open source project, we welcome your feedback and ideas for improvement. We are part of the cloud-native community and are enhancing the project as the ecosystem develops.
 
 
-We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, every other week, at 15:00 CET. ([See that in your local time zone](https://time.is/compare/1400_in_GMT)).
+We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, every other week, at 15:00 CET. ([See that in your local time zone](https://time.is/compare/1500_in_CET).
 
 The Kubescape project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
