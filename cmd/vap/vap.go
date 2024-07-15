@@ -203,7 +203,7 @@ func createPolicyBinding(bindingName string, policyName string, action string, p
 		policyBinding.Spec.MatchResources.NamespaceSelector = &metav1.LabelSelector{
 			MatchExpressions: []metav1.LabelSelectorRequirement{
 				{
-					Key:      "name",
+					Key:      "kubernetes.io/metadata.name",
 					Operator: metav1.LabelSelectorOpIn,
 					Values:   namespaceArr,
 				},
