@@ -79,6 +79,7 @@ Kubescape can be used as a GitHub Action. This is a great way to integrate Kubes
 
 Kubescape uses [Open Policy Agent](https://github.com/open-policy-agent/opa) to verify Kubernetes objects against [a library of posture controls](https://github.com/kubescape/regolibrary).
 For images scanning, it uses [Grype](https://github.com/anchore/grype).
+For image patching, it uses [Copacetic](https://github.com/project-copacetic/copacetic).
 
 By default, the results are printed in a console-friendly manner, but they can be:
 
