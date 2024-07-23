@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.22-bullseye as builder
+FROM --platform=$BUILDPLATFORM golang:1.22-bullseye AS builder
 
 ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /work
