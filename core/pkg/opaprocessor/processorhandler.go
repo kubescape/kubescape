@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -37,10 +38,12 @@ type OPAProcessor struct {
 	clusterName          string
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
-	opaRegisterOnce sync.Once
+	opaRegisterOnce   sync.Once
+	excludeNamespaces []string
+	includeNamespaces []string
 }
 
-func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string) *OPAProcessor {
+func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
 		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
@@ -50,6 +53,8 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		OPASessionObj:        sessionObj,
 		regoDependenciesData: regoDependenciesData,
 		clusterName:          clusterName,
+		excludeNamespaces:    split(excludeNamespaces),
+		includeNamespaces:    split(includeNamespaces),
 	}
 }
 
@@ -211,6 +216,9 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 		inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 
 		for i, inputResource := range inputResources {
+			if opap.skipNamespace(inputResource.GetNamespace()) {
+				continue
+			}
 			resources[inputResource.GetID()] = &resourcesresults.ResourceAssociatedRule{
 				Name:                  rule.Name,
 				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
@@ -229,6 +237,9 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 		for _, ruleResponse := range ruleResponses {
 			failedResources := objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources())
 			for _, failedResource := range failedResources {
+				if opap.skipNamespace(failedResource.GetNamespace()) {
+					continue
+				}
 				var ruleResult *resourcesresults.ResourceAssociatedRule
 				if r, found := resources[failedResource.GetID()]; found {
 					ruleResult = r
@@ -386,4 +397,26 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConf
 		DataControlInputs:    dataControlInputs,
 		PostureControlInputs: postureControlInputs,
 	}
+}
+
+func (opap *OPAProcessor) skipNamespace(ns string) bool {
+	if includeNamespaces := opap.includeNamespaces; len(includeNamespaces) > 0 {
+		if !slices.Contains(includeNamespaces, ns) {
+			// skip ns not in IncludeNamespaces
+			return true
+		}
+	} else if excludeNamespaces := opap.excludeNamespaces; len(excludeNamespaces) > 0 {
+		if slices.Contains(excludeNamespaces, ns) {
+			// skip ns in ExcludeNamespaces
+			return true
+		}
+	}
+	return false
+}
+
+func split(namespaces string) []string {
+	if namespaces == "" {
+		return nil
+	}
+	return strings.Split(namespaces, ",")
 }
