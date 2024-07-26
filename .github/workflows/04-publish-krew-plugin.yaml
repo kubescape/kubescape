@@ -1,9 +1,10 @@
 name: 04-publish_krew_plugin
 permissions: read-all
 on:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+  release:
+    types: [published]
+    branches:
+      - 'master'
 jobs:
   publish_krew_plugin:
     name: Publish Krew plugin
