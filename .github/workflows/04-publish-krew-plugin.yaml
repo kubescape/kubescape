@@ -4,7 +4,7 @@ on:
   release:
     types: [published]
     branches:
-      - 'master'
+      - 'main'
 jobs:
   publish_krew_plugin:
     name: Publish Krew plugin
