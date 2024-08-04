@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -74,9 +75,14 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 	}
 
 	if scanRequest.Exceptions != nil {
-		scanInfo.UseExceptions = loadexception(scanRequest)
-
+		path, err := saveExceptions(scanRequest.Exceptions)
+		if err != nil {
+			logger.L().Warning("failed to save exceptions, scanning without them", helpers.Error(err))
+		} else {
+			scanInfo.UseExceptions = path
+		}
 	}
+
 	return scanInfo
 }
 
@@ -103,25 +109,14 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 	}
 }
 
-func loadexception(exceptions *utilsmetav1.PostScanRequest) (path string) {
-	exceptionJSON, err := json.Marshal(exceptions.Exceptions)
+func saveExceptions(exceptions []armotypes.PostureExceptionPolicy) (string, error) {
+	exceptionsJSON, err := json.Marshal(exceptions)
 	if err != nil {
-		logger.L().Error("Failed to marshal exceptions", helpers.Error(err))
-	} else {
-		exePath, err := os.Executable()
-		if err != nil {
-			fmt.Printf("Failed to get executable path, reason: %s", err)
-		}
-		exeDir := filepath.Dir(exePath)
-		exdir := filepath.Dir(exeDir)
-		edir := filepath.Dir(exdir)
-		exceptionpath := filepath.Join(edir, ".kubescape", "exceptions.json")
-		if err := os.WriteFile(exceptionpath, exceptionJSON, 0644); err != nil {
-			logger.L().Error("Failed to write exceptions file to disk", helpers.String("path", exceptionpath), helpers.Error(err))
-			return
-		}
-		print(exceptionpath)
-		return exceptionpath // to test
+		return "", fmt.Errorf("failed to marshal exceptions: %w", err)
 	}
-	return
+	exceptionsPath := filepath.Join("/tmp", "exceptions.json") // FIXME potential race condition
+	if err := os.WriteFile(exceptionsPath, exceptionsJSON, 0644); err != nil {
+		return "", fmt.Errorf("failed to write exceptions file to disk: %w", err)
+	}
+	return exceptionsPath, nil
 }
