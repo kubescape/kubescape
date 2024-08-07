@@ -40,7 +40,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 		Password: patchInfo.Password,
 	}
 	// Scan the image
-	scanResults, err := svc.Scan(ctx, patchInfo.Image, creds)
+	scanResults, err := svc.Scan(ctx, patchInfo.Image, creds, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +84,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 
 	logger.L().Start(fmt.Sprintf("Re-scanning image: %s", patchedImageName))
 
-	scanResultsPatched, err := svc.Scan(ctx, patchedImageName, creds)
+	scanResultsPatched, err := svc.Scan(ctx, patchedImageName, creds, nil, nil)
 	if err != nil {
 		return nil, err
 	}
