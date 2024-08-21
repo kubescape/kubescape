@@ -1,4 +1,4 @@
-FROM --platform=$BUILDPLATFORM golang:1.22-bullseye AS builder
+FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS builder
 
 ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /work
@@ -9,7 +9,7 @@ RUN --mount=target=. \
     --mount=type=cache,target=/go/pkg \
     cd httphandler && GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/ksserver .
 
-FROM gcr.io/distroless/static-debian11:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot
 
 USER nonroot
 WORKDIR /home/nonroot/
