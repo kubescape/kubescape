@@ -1,4 +1,4 @@
-FROM gcr.io/distroless/base-debian11:debug-nonroot
+FROM gcr.io/distroless/base-debian12:debug-nonroot
 
 USER nonroot
 WORKDIR /home/nonroot/
