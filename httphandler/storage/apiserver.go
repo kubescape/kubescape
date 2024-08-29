@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -9,7 +10,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/names"
-	"golang.org/x/exp/maps"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
@@ -60,6 +60,9 @@ func NewAPIServerStorage(clusterName string, namespace string, config *rest.Conf
 	// disable rate limiting
 	config.QPS = 0
 	config.RateLimiter = nil
+	// force GRPC
+	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
+	config.ContentType = "application/vnd.kubernetes.protobuf"
 	clientset, err := versioned.NewForConfig(config)
 	if err != nil {
 		return nil, err
@@ -417,11 +420,11 @@ func GetWorkloadScanK8sResourceName(ctx context.Context, resource workloadinterf
 }
 
 func calculateSeveritiesSummaryFromControls(controls map[string]v1beta1.ScannedControlSummary) v1beta1.WorkloadConfigurationScanSeveritiesSummary {
-	critical := 0
-	high := 0
-	medium := 0
-	low := 0
-	unknown := 0
+	var critical int64
+	var high int64
+	var medium int64
+	var low int64
+	var unknown int64
 
 	for _, control := range controls {
 		if apis.ScanningStatus(control.Status.Status) != apis.StatusFailed {
@@ -491,8 +494,7 @@ func parseScannedControlRules(control *resourcesresults.ResourceAssociatedContro
 			appliedIgnoreRules[j] = exception.GetName()
 		}
 
-		controlConfigurations := make(map[string][]string)
-		maps.Copy(controlConfigurations, rule.ControlConfigurations)
+		controlConfigurations := ruleToControlConfigurations(rule)
 
 		relatedResourceIds := []string{}
 		copy(relatedResourceIds, rule.RelatedResourcesIDs)
@@ -509,6 +511,19 @@ func parseScannedControlRules(control *resourcesresults.ResourceAssociatedContro
 		}
 	}
 	return rules
+}
+
+func ruleToControlConfigurations(rule resourcesresults.ResourceAssociatedRule) map[string]json.RawMessage {
+	controlConfigurations := make(map[string]json.RawMessage)
+	for key, value := range rule.ControlConfigurations {
+		rawValue, err := json.Marshal(value)
+		if err != nil {
+			logger.L().Warning("failed to marshal control configuration value", helpers.Error(err))
+			continue
+		}
+		controlConfigurations[key] = rawValue
+	}
+	return controlConfigurations
 }
 
 func parseScannedControlStatus(control *resourcesresults.ResourceAssociatedControl) v1beta1.ScannedControlStatus {
