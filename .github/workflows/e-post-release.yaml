@@ -1,21 +1,17 @@
-name: 03-post_release
+name: e-post_release
 permissions: read-all
 on:
-  release:
-    types: [published]
-    branches:
-      - 'master'
-      - 'main'
+  workflow_call: {}
 jobs:
   post_release:
     name: Post release jobs
     runs-on: ubuntu-latest
     steps:
-      - name: Digest
-        uses: MCJack123/ghaction-generate-release-hashes@c03f3111b39432dde3edebe401c5a8d1ffbbf917 # ratchet:MCJack123/ghaction-generate-release-hashes@v1
+      - uses: actions/checkout@v4
         with:
-          hash-type: sha1
-          file-name: kubescape-release-digests
+          submodules: recursive
+      - name: Update new version in krew-index
+        uses: rajatjindal/krew-release-bot@92da038bbf995803124a8e50ebd438b2f37bbbb0 # ratchet:rajatjindal/krew-release-bot@v0.0.43
       - name: Invoke workflow to update packaging
         uses: benc-uk/workflow-dispatch@v1
         if: github.repository_owner == 'kubescape'
