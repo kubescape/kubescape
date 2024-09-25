@@ -29,7 +29,7 @@ require (
 	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-git-url v0.0.30
 	github.com/kubescape/go-logger v0.0.22
-	github.com/kubescape/k8s-interface v0.0.168
+	github.com/kubescape/k8s-interface v0.0.174
 	github.com/kubescape/opa-utils v0.0.281
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary/v2 v2.0.1
