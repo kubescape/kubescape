@@ -4,6 +4,10 @@
 
 The Kubescape project is an open-source initiative dedicated to improve security and best practices in Kubernetes environments. This document outlines the governance structure of the Kubescape project and provides guidance for its community contributors.
 
+## Code of Conduct
+
+Please follow our [code of conduct](CODE_OF_CONDUCT.md) in all of your interactions within the project.
+
 ## Decision Making
 
 ### Maintainers
