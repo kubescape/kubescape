@@ -3,13 +3,15 @@
 First, it is awesome that you are considering contributing to Kubescape! Contributing is important and fun and we welcome your efforts.
 
 When contributing, we categorize contributions into two:
-* Small code changes or fixes, whose scope is limited to a single or two files
+* Small code changes or fixes, whose scope is limited to one or two files
 * Complex features and improvements, with potentially unlimited scope
 
 If you have a small change, feel free to fire up a Pull Request.
 
-When planning a bigger change, please first discuss the change you wish to make via an issue,
+When planning a bigger change, please first discuss the change you wish to make via an [issue](https://github.com/kubescape/kubescape/issues),
 so the maintainers are able to help guide you and let you know if you are going in the right direction.
+
+[You can also find the maintainers on the CNCF Slack](https://kubescape.io/project/community/#slack) or [join our bi-weekly project meeting](https://kubescape.io/project/community/#community-meetings).
 
 ## Code of Conduct
 
