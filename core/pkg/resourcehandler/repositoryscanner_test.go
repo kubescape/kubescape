@@ -1,6 +1,7 @@
 package resourcehandler
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +13,27 @@ var (
 	urlC = "https://github.com/kubescape/kubescape/tree/master/examples/online-boutique"
 	// urlD = "https://raw.githubusercontent.com/kubescape/kubescape/master/examples/online-boutique/adservice.yaml"
 )
+
+var mockTree = tree{
+	InnerTrees: []innerTree{
+		{Path: "charts/fluent-bit/values.yaml"},
+		{Path: "charts/fluent-bit/templates/configmap.yaml"},
+		{Path: "charts/other-chart/templates/deployment.yaml"},
+		{Path: "README.md"},
+	},
+}
+
+func newMockGitHubRepository(path string, isFile bool) *GitHubRepository {
+	return &GitHubRepository{
+		host:   "github.com",
+		owner:  "grafana",
+		repo:   "helm-charts",
+		branch: "main",
+		path:   path,
+		isFile: isFile,
+		tree:   mockTree,
+	}
+}
 
 /*
 
@@ -141,5 +163,62 @@ func TestGithubParse(t *testing.T) {
 		assert.Equal(t, "master", gh.branch)
 		assert.Equal(t, "examples/online-boutique", gh.path)
 		assert.False(t, gh.isFile)
+	}
+}
+
+func TestGetFilesFromTree(t *testing.T) {
+	tests := []struct {
+		name            string
+		repo            *GitHubRepository
+		extensions      []string
+		expectedResults []string
+	}{
+		{
+			name:       "Scan entire repo for YAML files",
+			repo:       newMockGitHubRepository("", false),
+			extensions: []string{"yaml", "yml"},
+			expectedResults: []string{
+				"https://raw.githubusercontent.com/grafana/helm-charts/main/charts/fluent-bit/values.yaml",
+				"https://raw.githubusercontent.com/grafana/helm-charts/main/charts/fluent-bit/templates/configmap.yaml",
+				"https://raw.githubusercontent.com/grafana/helm-charts/main/charts/other-chart/templates/deployment.yaml",
+			},
+		},
+		{
+			name:       "Scan specific folder (fluent-bit) for YAML files",
+			repo:       newMockGitHubRepository("charts/fluent-bit", false),
+			extensions: []string{"yaml", "yml"},
+			expectedResults: []string{
+				"https://raw.githubusercontent.com/grafana/helm-charts/main/charts/fluent-bit/values.yaml",
+				"https://raw.githubusercontent.com/grafana/helm-charts/main/charts/fluent-bit/templates/configmap.yaml",
+			},
+		},
+		{
+			name:            "Scan root with non-matching extension (JSON)",
+			repo:            newMockGitHubRepository("", false),
+			extensions:      []string{"json"},
+			expectedResults: []string{},
+		},
+		{
+			name:       "Scan specific file",
+			repo:       newMockGitHubRepository("charts/fluent-bit/values.yaml", true),
+			extensions: []string{"yaml"},
+			expectedResults: []string{
+				"https://raw.githubusercontent.com/grafana/helm-charts/main/charts/fluent-bit/values.yaml",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.repo.getFilesFromTree(tt.extensions)
+
+			if len(got) == 0 && len(tt.expectedResults) == 0 {
+				return // both are empty, so this test case passes
+			}
+
+			if !reflect.DeepEqual(got, tt.expectedResults) {
+				t.Errorf("getFilesFromTree() = %v, want %v", got, tt.expectedResults)
+			}
+		})
 	}
 }
