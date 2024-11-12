@@ -229,8 +229,14 @@ func (g *GitHubRepository) getFilesFromTree(filesExtensions []string) []string {
 			return []string{}
 		}
 	}
+
+	basePath := g.path
+	if basePath != "" && !strings.HasSuffix(basePath, "/") {
+		basePath += "/"
+	}
+
 	for _, path := range g.tree.InnerTrees {
-		if g.path != "" && !strings.HasPrefix(path.Path, g.path) {
+		if basePath != "" && !strings.HasPrefix(path.Path, basePath) {
 			continue
 		}
 		if slices.Contains(filesExtensions, getFileExtension(path.Path)) {
@@ -239,6 +245,7 @@ func (g *GitHubRepository) getFilesFromTree(filesExtensions []string) []string {
 	}
 	return urls
 }
+
 
 func (g *GitHubRepository) rowYamlUrl() string {
 	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s", joinOwnerNRepo(g.owner, g.repo), g.branch)
