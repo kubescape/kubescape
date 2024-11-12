@@ -510,3 +510,5 @@ require (
 replace github.com/olekukonko/tablewriter => github.com/kubescape/tablewriter v0.0.6-0.20231106230230-aac7d2659c94
 
 replace github.com/docker/distribution v2.8.3+incompatible => github.com/docker/distribution v2.8.2+incompatible
+
+replace github.com/docker/docker v27.1.1+incompatible => github.com/docker/docker v26.1.5+incompatible
