@@ -27,7 +27,7 @@ jobs:
     name: Create cross-platform build
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu22-core4-mem16-ssd150
     steps:
 
       - uses: actions/checkout@v4
@@ -84,7 +84,7 @@ jobs:
       GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     name: PR Scanner
-    runs-on: ubuntu-latest
+    runs-on: ubuntu22-core4-mem16-ssd150
     steps:
       - uses: actions/checkout@v4
         with:
