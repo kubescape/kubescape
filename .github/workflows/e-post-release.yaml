@@ -11,7 +11,7 @@ jobs:
         with:
           submodules: recursive
       - name: Update new version in krew-index
-        uses: rajatjindal/krew-release-bot@92da038bbf995803124a8e50ebd438b2f37bbbb0 # ratchet:rajatjindal/krew-release-bot@v0.0.43
+        uses: rajatjindal/krew-release-bot@v0.0.47
       - name: Invoke workflow to update packaging
         uses: benc-uk/workflow-dispatch@v1
         if: github.repository_owner == 'kubescape'
