@@ -38,7 +38,7 @@ type Chart struct {
 }
 
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]Chart, map[string]MappingNodes) {
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]Chart) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -49,19 +49,14 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChart := make(map[string]Chart, 0)
-	sourceToNodes := map[string]MappingNodes{}
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
-			wls, templateToNodes, errs := chart.GetWorkloadsWithDefaultValues()
+			wls, errs := chart.GetWorkloadsWithDefaultValues()
 			if len(errs) > 0 {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
-			for k, v := range templateToNodes {
-				sourceToNodes[k] = v
-			}
-
 			chartName := chart.GetName()
 			for k, v := range wls {
 				sourceToWorkloads[k] = v
@@ -72,7 +67,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChart, sourceToNodes
+	return sourceToWorkloads, sourceToChart
 }
 
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will

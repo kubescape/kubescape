@@ -162,7 +162,11 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 
 		r, err := json.Marshal(v)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", v.GetResourceID(), err)
+			logger.L().Error("failed to marshal resource to JSON - skipping",
+				helpers.Error(err),
+				helpers.String("file", resource.GetSource().RelativePath),
+			)
+			continue
 		}
 
 		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Results) > 0 {
@@ -204,7 +208,11 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 		}
 		r, err := json.Marshal(resource)
 		if err != nil {
-			return fmt.Errorf("failed to unmarshal resource '%s', reason: %v", resourceID, err)
+			logger.L().Error("failed to marshal resource to JSON - skipping",
+				helpers.Error(err),
+				helpers.String("file", resource.GetSource().RelativePath),
+			)
+			continue
 		}
 
 		if *counter+len(r) >= MAX_REPORT_SIZE && len(reportObj.Resources) > 0 {
