@@ -39,13 +39,12 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 	for path := range scanInfo.InputPatterns {
 		var workloadIDToSource map[string]reporthandling.Source
 		var workloads []workloadinterface.IMetadata
-		var workloadIDToMappingNodes map[string]cautils.MappingNodes
 		var err error
 
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
-			workloadIDToSource, workloads, workloadIDToMappingNodes, _ = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath)
+			workloadIDToSource, workloads, _ = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath)
 		} else {
-			workloadIDToSource, workloads, workloadIDToMappingNodes, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path])
+			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path])
 			if err != nil {
 				return nil, allResources, nil, nil, err
 			}
@@ -56,7 +55,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 		for k, v := range workloadIDToSource {
 			sessionObj.ResourceSource[k] = v
-			sessionObj.TemplateMapping[k] = workloadIDToMappingNodes[k]
+			sessionObj.TemplateMapping[k] = cautils.MappingNodes{}
 		}
 
 		// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
@@ -102,7 +101,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
-func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, map[string]cautils.MappingNodes, error) {
+func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	clonedRepo := cautils.GetClonedPath(path)
 
 	if clonedRepo != "" {
@@ -116,38 +115,31 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
-	helmSourceToWorkloads, helmSourceToChart, helmSourceToNodes := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
+	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
 
 	wlSource, ok := helmSourceToWorkloads[workloadPath]
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("workload %s not found in chart %s", workloadPath, helmPath)
+		return nil, nil, fmt.Errorf("workload %s not found in chart %s", workloadPath, helmPath)
 	}
 
 	if len(wlSource) != 1 {
-		return nil, nil, nil, fmt.Errorf("workload %s found multiple times in chart %s", workloadPath, helmPath)
+		return nil, nil, fmt.Errorf("workload %s found multiple times in chart %s", workloadPath, helmPath)
 	}
 
 	helmChart, ok := helmSourceToChart[workloadPath]
 	if !ok {
-		return nil, nil, nil, fmt.Errorf("helmChart not found for workload %s", workloadPath)
-	}
-
-	templatesNodes, ok := helmSourceToNodes[workloadPath]
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("templatesNodes not found for workload %s", workloadPath)
+		return nil, nil, fmt.Errorf("helmChart not found for workload %s", workloadPath)
 	}
 
 	workloadSource := getWorkloadSourceHelmChart(repoRoot, helmPath, gitRepo, helmChart)
 
 	workloadIDToSource := make(map[string]reporthandling.Source, 1)
-	workloadIDToNodes := make(map[string]cautils.MappingNodes, 1)
 	workloadIDToSource[wlSource[0].GetID()] = workloadSource
-	workloadIDToNodes[wlSource[0].GetID()] = templatesNodes
 
 	var workloads []workloadinterface.IMetadata
 	workloads = append(workloads, wlSource...)
 
-	return workloadIDToSource, workloads, workloadIDToNodes, nil
+	return workloadIDToSource, workloads, nil
 
 }
 
@@ -181,9 +173,8 @@ func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils
 	}
 }
 
-func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, map[string]cautils.MappingNodes, error) {
+func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source)
-	workloadIDToNodes := make(map[string]cautils.MappingNodes)
 	var workloads []workloadinterface.IMetadata
 
 	clonedRepo := cautils.GetClonedPath(path)
@@ -270,14 +261,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 	}
 
 	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChart, helmSourceToNodes := cautils.LoadResourcesFromHelmCharts(ctx, path)
+	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, path)
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]
-		var templatesNodes cautils.MappingNodes
-		if nodes, ok := helmSourceToNodes[source]; ok {
-			templatesNodes = nodes
-		}
 
 		if clonedRepo != "" && gitRepo != nil {
 			url, err := gitRepo.GetRemoteUrl()
@@ -288,14 +275,12 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 			helmChart.Path = strings.TrimSuffix(url, ".git")
 			repoRoot = ""
 			source = strings.TrimPrefix(source, fmt.Sprintf("%s/", clonedRepo))
-			templatesNodes.TemplateFileName = source
 		}
 
 		workloadSource := getWorkloadSourceHelmChart(repoRoot, source, gitRepo, helmChart)
 
 		for i := range ws {
 			workloadIDToSource[ws[i].GetID()] = workloadSource
-			workloadIDToNodes[ws[i].GetID()] = templatesNodes
 		}
 	}
 
@@ -342,7 +327,7 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		}
 	}
 
-	return workloadIDToSource, workloads, workloadIDToNodes, nil
+	return workloadIDToSource, workloads, nil
 }
 
 func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
