@@ -45,7 +45,7 @@ func (hc *HelmChart) GetDefaultValues() map[string]interface{} {
 	return hc.chart.Values
 }
 
-// GetWorkloads renders chart template using the default values and returns a map of source file to its workloads
+// GetWorkloadsWithDefaultValues renders chart template using the default values and returns a map of source file to its workloads
 func (hc *HelmChart) GetWorkloadsWithDefaultValues() (map[string][]workloadinterface.IMetadata, []error) {
 	return hc.GetWorkloads(hc.GetDefaultValues())
 }
@@ -61,10 +61,8 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		return nil, []error{err}
 	}
 
-
-
-	workloads := make(map[string][]workloadinterface.IMetadata, 0)
-	errs := []error{}
+	workloads := make(map[string][]workloadinterface.IMetadata)
+	var errs []error
 
 	for path, renderedYaml := range sourceToFile {
 		if !IsYaml(strings.ToLower(path)) {
@@ -78,9 +76,8 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		if len(wls) == 0 {
 			continue
 		}
-		if firstPathSeparatorIndex := strings.Index(path, string("/")); firstPathSeparatorIndex != -1 {
+		if firstPathSeparatorIndex := strings.Index(path, "/"); firstPathSeparatorIndex != -1 {
 			absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
-
 
 			workloads[absPath] = []workloadinterface.IMetadata{}
 			for i := range wls {
@@ -106,30 +103,6 @@ func (hc *HelmChart) AddCommentToTemplate() {
 			}
 			templateWithComment := strings.Join(newLines, "\n")
 			hc.chart.Templates[index].Data = []byte(templateWithComment)
-		}
-	}
-}
-
-func RemoveComment(sourceToFile map[string]string) {
-	// commentRe := regexp.MustCompile(CommentFormat)
-	for fileName, file := range sourceToFile {
-		if !IsYaml(strings.ToLower((fileName))) {
-			continue
-		}
-		sourceToFile[fileName] = commentRe.ReplaceAllLiteralString(file, "")
-	}
-}
-
-func GetTemplateMapping(sourceToFile map[string]string, fileMapping map[string]MappingNodes) {
-	for fileName, fileContent := range sourceToFile {
-		mappingNodes, err := GetMapping(fileName, fileContent)
-		if err != nil {
-			// if one file cannot get mapping nodes, generate error, then ignore it
-			logger.L().Warning("Failed to get File Mapping nodes", helpers.String("file name", fileName), helpers.Error(err))
-			continue
-		}
-		if len(mappingNodes.Nodes) != 0 {
-			fileMapping[fileName] = *mappingNodes
 		}
 	}
 }
