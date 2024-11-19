@@ -182,7 +182,7 @@ func (ks *Kubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*res
 	defer spanOpa.End()
 
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces)
+	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint)
 	if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
 		// TODO - do something
 		return resultsHandling, fmt.Errorf("%w", err)

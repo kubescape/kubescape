@@ -15,12 +15,12 @@ import (
 )
 
 var scanCmdExamples = fmt.Sprintf(`
-  Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks 
-  
+  Scan command is for scanning an existing cluster or kubernetes manifest files based on pre-defined frameworks
+
   # Scan current cluster
   %[1]s scan
 
-  # Scan kubernetes manifest files 
+  # Scan kubernetes manifest files
   %[1]s scan .
 
   # Scan and save the results in the JSON format
@@ -29,7 +29,7 @@ var scanCmdExamples = fmt.Sprintf(`
   # Display all resources
   %[1]s scan --verbose
 
-  # Scan different clusters from the kubectl context 
+  # Scan different clusters from the kubectl context
   %[1]s scan --kube-context <kubernetes context>
 `, cautils.ExecName())
 
@@ -89,6 +89,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.Submit, "submit", "", false, "Submit the scan results to Kubescape SaaS where you can see the results in a user-friendly UI, choose your preferred compliance framework, check risk results history and trends, manage exceptions, get remediation recommendations and much more. By default the results are not submitted")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.OmitRawResources, "omit-raw-resources", "", false, "Omit raw resources from the output. By default the raw resources are included in the output")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
+	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
