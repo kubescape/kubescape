@@ -1,7 +1,12 @@
 name: e-post_release
 permissions: read-all
 on:
-  workflow_call: {}
+  workflow_call:
+    inputs:
+      TAG:
+        description: 'Tag name'
+        required: true
+        type: string
 jobs:
   post_release:
     name: Post release jobs
@@ -12,6 +17,9 @@ jobs:
           submodules: recursive
       - name: Update new version in krew-index
         uses: rajatjindal/krew-release-bot@v0.0.47
+        if: github.repository_owner == 'kubescape'
+        env:
+          GITHUB_REF: ${{ inputs.TAG }}
       - name: Invoke workflow to update packaging
         uses: benc-uk/workflow-dispatch@v1
         if: github.repository_owner == 'kubescape'
