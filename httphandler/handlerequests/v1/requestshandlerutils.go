@@ -184,6 +184,7 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo.Format = envToString("KS_FORMAT", "json")                             // default output should be json
 	scanInfo.Submit = envToBool("KS_SUBMIT", false)                                // publish results to Kubescape SaaS
 	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                             // do not publish results to Kubescape SaaS
+	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)                   // print rego rules
 	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", false)) // enable host scanner
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)

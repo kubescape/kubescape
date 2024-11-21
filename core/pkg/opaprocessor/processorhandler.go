@@ -21,6 +21,7 @@ import (
 	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/storage"
+	opaprint "github.com/open-policy-agent/opa/topdown/print"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slices"
 )
@@ -41,9 +42,10 @@ type OPAProcessor struct {
 	opaRegisterOnce   sync.Once
 	excludeNamespaces []string
 	includeNamespaces []string
+	printEnabled      bool
 }
 
-func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string) *OPAProcessor {
+func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
 		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
@@ -55,6 +57,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		clusterName:          clusterName,
 		excludeNamespaces:    split(excludeNamespaces),
 		includeNamespaces:    split(includeNamespaces),
+		printEnabled:         enableRegoPrint,
 	}
 }
 
@@ -319,7 +322,9 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	modules[rule.Name] = getRuleData(rule)
 
 	// NOTE: OPA module compilation is the most resource-intensive operation.
-	compiled, err := ast.CompileModules(modules)
+	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		EnablePrintStatements: opap.printEnabled,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("in 'runRegoOnK8s', failed to compile rule, name: %s, reason: %w", rule.Name, err)
 	}
@@ -338,12 +343,20 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	return results, nil
 }
 
+func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
+	msg := fmt.Sprintf("opa-print: {%v} - %s", ctx.Location, str)
+	logger.L().Ctx(ctx.Context).Debug(msg)
+	return nil
+}
+
 func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]interface{}, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
 	rego := rego.New(
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
 		rego.Input(inputObj),
 		rego.Store(*store),
+		rego.EnablePrintStatements(opap.printEnabled),
+		rego.PrintHook(opap),
 	)
 
 	// Run evaluation
