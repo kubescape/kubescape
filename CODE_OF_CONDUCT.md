@@ -1,3 +1,5 @@
-## Code of Conduct
+# Code of Conduct
 
-The Kubescape project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
+The Kubescape project manages this document in the central project repository.
+
+Go to the [centralized CODE_OF_CONDUCT.md](https://github.com/kubescape/project-governance/blob/main/CODE_OF_CONDUCT.md)
