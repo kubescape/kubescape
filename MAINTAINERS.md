@@ -9,4 +9,4 @@ The following table lists the Kubescape project core maintainers:
 | [Ben Hirschberg](https://www.linkedin.com/in/benyamin-ben-hirschberg-66141890) | [@slashben](https://github.com/slashben) | [ARMO](https://www.armosec.io/)
 | [Rotem Refael](https://www.linkedin.com/in/rotem-refael) | [@rotemamsa](https://github.com/rotemamsa) | [ARMO](https://www.armosec.io/)
 | [David Wertenteil](https://www.linkedin.com/in/david-wertenteil-0ba277b9) | [@dwertent](https://github.com/dwertent) | [Kaleido](https://kaleido.io/)
-
+| [Amir Malka](https://www.linkedin.com/in/amirmalka) | [@amirmalka](https://github.com/amirmalka) | [ARMO](https://www.armosec.io/)
