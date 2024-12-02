@@ -3,15 +3,16 @@ package reporter
 import (
 	"context"
 	"math/rand"
-	"net/url"
 	"os"
 	"strconv"
 	"sync"
 	"testing"
 
-	logger "github.com/kubescape/go-logger"
+	v1 "github.com/kubescape/backend/pkg/client/v1"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/prettylogger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,291 +21,77 @@ import (
 // mxStdio serializes the capture of os.Stderr or os.Stdout
 var mxStdio sync.Mutex
 
-func TestReportEventReceiver_addPathURL(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		report *ReportEventReceiver
-		urlObj *url.URL
-		want   *url.URL
-		name   string
-	}{
-		{
-			name: "URL for submitted data",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme:   "https",
-				Host:     "localhost:8080",
-				Path:     "compliance/test",
-				RawQuery: "",
-			},
-		},
-		{
-			name: "URL for first scan",
-			report: &ReportEventReceiver{
-				clusterName:   "test",
-				customerGUID:  "FFFF",
-				token:         "XXXX",
-				reportID:      "1234",
-				submitContext: SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme:   "https",
-				Host:     "localhost:8080",
-				Path:     "account/sign-up",
-				RawQuery: "customerGUID=FFFF&invitationToken=XXXX&utm_medium=createaccount&utm_source=ARMOgithub",
-			},
-		},
-		{
-			name: "add rbac path",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextRBAC,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "rbac-visualizer",
-			},
-		},
-		{
-			name: "add repository path",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextRepository,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "repository-scanning/1234",
-			},
-		},
-		{
-			name: "add default path",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XXXX",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContext("invalid"),
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "dashboard",
-			},
-		},
-		{
-			name: "path when no email and no token",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "",
-				customerAdminEMail: "",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "compliance/test",
-			},
-		},
-		{
-			name: "path when email and no token",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "",
-				customerAdminEMail: "test@test",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-				Path:   "compliance/test",
-			},
-		},
-		{
-			name: "path when no email and token",
-			report: &ReportEventReceiver{
-				clusterName:        "test",
-				customerGUID:       "FFFF",
-				token:              "XYZ",
-				customerAdminEMail: "",
-				reportID:           "1234",
-				submitContext:      SubmitContextScan,
-			},
-			urlObj: &url.URL{
-				Scheme: "https",
-				Host:   "localhost:8080",
-			},
-			want: &url.URL{
-				Scheme:   "https",
-				Host:     "localhost:8080",
-				Path:     "account/sign-up",
-				RawQuery: "customerGUID=FFFF&invitationToken=XYZ&utm_medium=createaccount&utm_source=ARMOgithub",
-			},
-		},
-	}
-	for _, toPin := range tests {
-		tc := toPin
-
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			tc.report.addPathURL(tc.urlObj)
-			require.Equal(t, tc.want.String(), tc.urlObj.String())
-		})
-	}
+type TenantConfigMock struct {
+	clusterName string
+	accountID   string
+	accessKey   string
 }
 
-func TestGetURL(t *testing.T) {
-	t.Parallel()
+const testGeneratedAccountIDString = "6a1ff233-5297-4193-bb51-5d67bc841cbf"
 
-	t.Run("with scan submit and registered url", func(t *testing.T) {
-		t.Parallel()
-
-		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:          "1234",
-				Token:              "token",
-				CustomerAdminEMail: "my@email",
-				ClusterName:        "test",
-			},
-			"",
-			SubmitContextScan,
-		)
-		assert.Equal(t, "https://cloud.armosec.io/compliance/test", reporter.GetURL())
-	})
-
-	t.Run("with rbac submit and registered url", func(t *testing.T) {
-		t.Parallel()
-
-		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:          "1234",
-				Token:              "token",
-				CustomerAdminEMail: "my@email",
-				ClusterName:        "test",
-			},
-			"",
-			SubmitContextRBAC,
-		)
-		assert.Equal(t, "https://cloud.armosec.io/rbac-visualizer", reporter.GetURL())
-	})
-
-	t.Run("with repository submit and registered url", func(t *testing.T) {
-		t.Parallel()
-
-		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:          "1234",
-				Token:              "token",
-				CustomerAdminEMail: "my@email",
-				ClusterName:        "test",
-			},
-			"XXXX",
-			SubmitContextRepository,
-		)
-		assert.Equal(t, "https://cloud.armosec.io/repository-scanning/XXXX", reporter.GetURL())
-	})
-
-	t.Run("with scan submit and NOT registered url", func(t *testing.T) {
-		t.Parallel()
-
-		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:   "1234",
-				Token:       "token",
-				ClusterName: "test",
-			},
-			"",
-			SubmitContextScan,
-		)
-		assert.Equal(t, "https://cloud.armosec.io/account/sign-up?customerGUID=1234&invitationToken=token&utm_medium=createaccount&utm_source=ARMOgithub", reporter.GetURL())
-	})
-
-	t.Run("with unknown submit and NOT registered url (default route)", func(t *testing.T) {
-		t.Parallel()
-
-		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:   "1234",
-				ClusterName: "test",
-			},
-			"",
-			SubmitContext("unknown"),
-		)
-		assert.Equal(t, "https://cloud.armosec.io/dashboard", reporter.GetURL())
-	})
+func (tcm *TenantConfigMock) UpdateCachedConfig() error {
+	return nil
+}
+func (tcm *TenantConfigMock) DeleteCachedConfig(ctx context.Context) error {
+	return nil
+}
+func (tcm *TenantConfigMock) GetContextName() string {
+	return tcm.clusterName
+}
+func (tcm *TenantConfigMock) GetAccountID() string {
+	return tcm.accountID
+}
+func (tcm *TenantConfigMock) IsStorageEnabled() bool {
+	return true
+}
+func (tcm *TenantConfigMock) GetConfigObj() *cautils.ConfigObj {
+	return &cautils.ConfigObj{
+		AccountID:   tcm.accountID,
+		ClusterName: tcm.clusterName,
+	}
+}
+func (tcm *TenantConfigMock) GetCloudReportURL() string {
+	return ""
+}
+func (tcm *TenantConfigMock) GetCloudAPIURL() string {
+	return ""
 }
 
-func TestDisplayReportURL(t *testing.T) {
+func (tcm *TenantConfigMock) GenerateAccountID() (string, error) {
+	tcm.accountID = testGeneratedAccountIDString
+	return testGeneratedAccountIDString, nil
+}
+
+func (tcm *TenantConfigMock) DeleteCredentials() error {
+	tcm.accountID = ""
+	tcm.accessKey = ""
+	return nil
+}
+
+func (tcm *TenantConfigMock) GetAccessKey() string {
+	return tcm.accessKey
+}
+
+func TestDisplayMessage(t *testing.T) {
 	t.Parallel()
 
 	t.Run("should display an empty message", func(t *testing.T) {
 		t.Parallel()
 
 		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:   "1234",
-				Token:       "token",
-				ClusterName: "test",
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   "1234",
 			},
 			"",
 			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
 		)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
-		reporter.DisplayReportURL()
+		reporter.DisplayMessage()
 		require.NoError(t, capture.Close())
 
 		buf, err := os.ReadFile(capture.Name())
@@ -317,28 +104,27 @@ func TestDisplayReportURL(t *testing.T) {
 		t.Parallel()
 
 		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:   "1234",
-				Token:       "token",
-				ClusterName: "test",
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   "1234",
 			},
 			"",
 			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
 		)
-		reporter.generateMessage()
+		reporter.setMessage("message returned from server")
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		defer clean()
 
-		reporter.DisplayReportURL()
+		reporter.DisplayMessage()
 		require.NoError(t, capture.Close())
 
 		buf, err := os.ReadFile(capture.Name())
 		require.NoError(t, err)
 
 		require.NotEmpty(t, buf)
-		assert.Contains(t, string(buf), "WOW!")
-		assert.Contains(t, string(buf), "https://cloud.armosec.io/account/sign-up")
+		assert.Contains(t, string(buf), "message returned from server")
 
 		t.Log(string(buf))
 	})
@@ -360,13 +146,13 @@ func TestPrepareReport(t *testing.T) {
 		}
 
 		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
-				Token:       "token",
-				ClusterName: "test",
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
 			},
 			"",
 			SubmitContextScan,
+			getter.GetKSCloudAPIConnector(),
 		)
 
 		for _, tc := range testCases {
@@ -396,39 +182,57 @@ func TestSubmit(t *testing.T) {
 	srv := mockAPIServer(t)
 	t.Cleanup(srv.Close)
 
+	const account = "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb"
+	const accessKey = "ef871116-b4c9-4dbc-9abb-f422f025429f"
+
 	t.Run("should submit simple report", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			account,
+			accessKey,
+			v1.WithHTTPClient(hijackedClient(t, srv))) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
+		require.NoError(t, err)
+
 		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
-				Token:       "",
-				ClusterName: "test",
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   account,
+				accessKey:   accessKey,
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
 			SubmitContextScan,
+			ksCloud,
 		)
 
 		opaSession := mockOPASessionObj(t)
-		reporter.httpClient = hijackedClient(t, srv) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
-
 		require.NoError(t,
 			reporter.Submit(ctx, opaSession),
 		)
 	})
 
-	t.Run("should warn when no customerGUID", func(t *testing.T) {
+	t.Run("should generate new account if account is empty", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			"",
+			"",
+			v1.WithHTTPClient(hijackedClient(t, srv))) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
+		require.NoError(t, err)
+
 		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				Token:       "",
-				ClusterName: "test",
+			&TenantConfigMock{
+				clusterName: "test",
+				accountID:   "",
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
 			SubmitContextScan,
+			ksCloud,
 		)
 
 		opaSession := mockOPASessionObj(t)
-		reporter.httpClient = hijackedClient(t, srv)
 
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -443,31 +247,34 @@ func TestSubmit(t *testing.T) {
 		require.NoError(t,
 			reporter.Submit(ctx, opaSession),
 		)
-		require.NoError(t, capture.Close())
 
-		buf, err := os.ReadFile(capture.Name())
-		require.NoError(t, err)
-
-		assert.Contains(t, string(buf), "failed to publish result")
-		assert.Contains(t, string(buf), "Unknown acc")
+		assert.Equalf(t, testGeneratedAccountIDString, reporter.GetAccountID(), "reporter should have generated a new account ID")
 	})
 
 	t.Run("should warn when no cluster name", func(t *testing.T) {
+		ksCloud, err := v1.NewKSCloudAPI(
+			srv.Root(),
+			srv.Root(),
+			account,
+			accessKey,
+			v1.WithHTTPClient(hijackedClient(t, srv))) // re-route the http client to our mock server, as this is not easily configurable in the reporter.
+		require.NoError(t, err)
+
 		reporter := NewReportEventReceiver(
-			&cautils.ConfigObj{
-				AccountID: "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
-				Token:     "",
+			&TenantConfigMock{
+				clusterName: "",
+				accountID:   account,
+				accessKey:   accessKey,
 			},
 			"cbabd56f-bac6-416a-836b-b815ef347647",
 			SubmitContextScan,
+			ksCloud,
 		)
 
 		opaSession := mockOPASessionObj(t)
 		opaSession.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 
-		reporter.httpClient = hijackedClient(t, srv)
-
-		capture, clean := captureStderr(t)
+		capture, clean := captureStdout(t)
 		if pretty, ok := logger.L().(*prettylogger.PrettyLogger); ok {
 			pretty.SetWriter(capture)
 		}
@@ -500,33 +307,32 @@ func TestSetters(t *testing.T) {
 	}
 
 	reporter := NewReportEventReceiver(
-		&cautils.ConfigObj{
-			AccountID: "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
-			Token:     "",
+		&TenantConfigMock{
+			clusterName: "",
+			accountID:   "1e3ae7c4-a8bb-4d7c-9bdf-eb86bc25e6bb",
 		},
 		"cbabd56f-bac6-416a-836b-b815ef347647",
 		SubmitContextScan,
+		getter.GetKSCloudAPIConnector(),
 	)
 
-	t.Run("should set customerID", func(t *testing.T) {
-		guid := pickString()
-		reporter.SetCustomerGUID(guid)
+	t.Run("should set tenantConfig", func(t *testing.T) {
+		clusterName := pickString()
+		accountID := pickString()
+		reporter.SetTenantConfig(&TenantConfigMock{
+			clusterName: clusterName,
+			accountID:   accountID,
+		})
 
-		require.Equal(t, guid, reporter.customerGUID)
-	})
-
-	t.Run("should set cluster name", func(t *testing.T) {
-		cluster := pickString()
-		reporter.SetClusterName(cluster)
-
-		require.Equal(t, cluster, reporter.clusterName)
+		require.Equal(t, accountID, reporter.GetAccountID())
+		require.Equal(t, clusterName, reporter.GetClusterName())
 	})
 
 	t.Run("should normalize cluster name", func(t *testing.T) {
 		const cluster = " x   y\t\tz"
-		reporter.SetClusterName(cluster)
+		reporter.SetTenantConfig(&TenantConfigMock{clusterName: cluster, accountID: ""})
 
-		require.Equal(t, "-x-y-z", reporter.clusterName)
+		require.Equal(t, "-x-y-z", reporter.GetClusterName())
 	})
 }
 
@@ -548,6 +354,28 @@ func captureStderr(t testing.TB) (*os.File, func()) {
 		_ = os.Remove(capture.Name())
 
 		os.Stderr = saved
+		mxStdio.Unlock()
+	}
+}
+
+func captureStdout(t testing.TB) (*os.File, func()) {
+	mxStdio.Lock()
+	saved := os.Stdout
+	capture, err := os.CreateTemp("", "stdout")
+	if !assert.NoError(t, err) {
+		mxStdio.Unlock()
+
+		t.FailNow()
+
+		return nil, nil
+	}
+	os.Stdout = capture
+
+	return capture, func() {
+		_ = capture.Close()
+		_ = os.Remove(capture.Name())
+
+		os.Stdout = saved
 		mxStdio.Unlock()
 	}
 }

@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -83,7 +83,6 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 	// store pod names
 	// make sure all pods are running, after X seconds treat has running anyway, and log an error on the pods not running yet
 	logger.L().Info("Installing host scanner")
-	logger.L().Debug("The host scanner is a DaemonSet that runs on each node in the cluster. The DaemonSet will be running in it's own Namespace and will be deleted once the scan is completed. If you do not wish to install the host scanner, please run the scan without the --enable-host-scan flag.")
 
 	// log is used to avoid log duplication
 	// coming from the different host-scanner instances
@@ -136,7 +135,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 	}
 
 	// Get namespace name
-	namespaceName := ""
+	namespaceName := cautils.GetConfigMapNamespace()
 	for i := range workloads {
 		if workloads[i].GetKind() == "Namespace" {
 			namespaceName = workloads[i].GetName()
@@ -154,6 +153,7 @@ func (hsh *HostSensorHandler) applyYAML(ctx context.Context) error {
 		}
 		// set namespace in all objects
 		if w.GetKind() != "Namespace" {
+			logger.L().Debug("Setting namespace", helpers.String("kind", w.GetKind()), helpers.String("name", w.GetName()), helpers.String("namespace", namespaceName))
 			w.SetNamespace(namespaceName)
 		}
 		// Get container port
@@ -307,7 +307,7 @@ func (hsh *HostSensorHandler) updatePodInListAtomic(ctx context.Context, eventTy
 	}
 }
 
-// tearDownNamespace manage the host-scanner deletion.
+// tearDownHostScanner manage the host-scanner deletion.
 func (hsh *HostSensorHandler) tearDownHostScanner(namespace string) error {
 	client := hsh.k8sObj.KubernetesClient
 
@@ -416,7 +416,15 @@ func loadHostSensorFromFile(hostSensorYAMLFile string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// TODO - Add file validation
+
+	if len(dat) == 0 {
+		return "", fmt.Errorf("empty file")
+	}
+
+	if !cautils.IsYaml(hostSensorYAMLFile) {
+		return "", fmt.Errorf("invalid file format")
+	}
+
 	return string(dat), err
 }
 

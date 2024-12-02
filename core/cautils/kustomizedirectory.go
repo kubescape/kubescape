@@ -4,7 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -20,18 +20,14 @@ type KustomizeDirectory struct {
 // Used for checking if there is "Kustomization" file in the given Directory
 var kustomizationFileMatchers = [3]string{"kustomization.yml", "kustomization.yaml", "Kustomization"}
 
-func IsKustomizeDirectory(path string) bool {
-	if isDir := IsDir(path); !isDir {
+func isKustomizeDirectory(path string) bool {
+	if ok := isDir(path); !ok {
 		return false
-	}
-
-	if lastChar := path[len(path)-1:]; lastChar != "/" {
-		path += "/"
 	}
 
 	matches := 0
 	for _, kustomizationFileMatcher := range kustomizationFileMatchers {
-		checkPath := path + kustomizationFileMatcher
+		checkPath := filepath.Join(path, kustomizationFileMatcher)
 		if _, err := os.Stat(checkPath); err == nil {
 			matches++
 		}
@@ -43,7 +39,7 @@ func IsKustomizeDirectory(path string) bool {
 	case 1:
 		return true
 	default:
-		logger.L().Info("Multiple kustomize files found while checking Kustomize Directory")
+		logger.L().Info("Multiple kustomize files found while checking the Kustomize Directory")
 		return false
 	}
 }
@@ -67,11 +63,12 @@ func NewKustomizeDirectory(path string) *KustomizeDirectory {
 	}
 }
 
-func GetKustomizeDirectoryName(path string) string {
-	if isKustomizeDirectory := IsKustomizeDirectory(path); !isKustomizeDirectory {
+func getKustomizeDirectoryName(path string) string {
+	if ok := isKustomizeDirectory(path); !ok {
 		return ""
 	}
-	return filepath.Dir(path)
+
+	return path
 }
 
 // Get Workloads, creates the yaml files(K8s resources) using Kustomize and

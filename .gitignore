@@ -1,5 +1,6 @@
 *.vs*
 *kubescape*
+!*Dockerfile*
 *debug*
 *vendor*
 *.pyc*
@@ -8,3 +9,5 @@
 ca.srl
 *.out
 ks
+
+dist/

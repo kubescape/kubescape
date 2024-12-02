@@ -3,10 +3,12 @@ package opaprocessor
 import (
 	"context"
 
-	logger "github.com/kubescape/go-logger"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -15,6 +17,10 @@ import (
 	resources "github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
 )
+
+const clusterScope = "clusterScope"
+
+var largeClusterSize int = -1
 
 // updateResults updates the results objects and report objects. This is a critical function - DO NOT CHANGE
 //
@@ -25,6 +31,10 @@ import (
 func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	_, span := otel.Tracer("").Start(ctx, "OPAProcessor.updateResults")
 	defer span.End()
+	defer logger.L().Ctx(ctx).Success("Done aggregating results")
+
+	cautils.StartSpinner()
+	defer cautils.StopSpinner()
 
 	// remove data from all objects
 	for i := range opap.AllResources {
@@ -42,7 +52,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 			t.SetExceptions(
 				resource,
 				opap.Exceptions,
-				cautils.ClusterName,
+				opap.clusterName,
 				opap.AllPolicies.Controls, // update status depending on action required
 				resourcesresults.WithExceptionsProcessor(processor),
 			)
@@ -87,14 +97,21 @@ func isEmptyResources(counters reportsummary.ICounters) bool {
 	return counters.Failed() == 0 && counters.Skipped() == 0 && counters.Passed() == 0
 }
 
-func getAllSupportedObjects(k8sResources *cautils.K8SResources, ksResources *cautils.KSResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) []workloadinterface.IMetadata {
-	k8sObjects := []workloadinterface.IMetadata{}
-	k8sObjects = append(k8sObjects, getKubernetesObjects(k8sResources, allResources, rule.Match)...)
-	k8sObjects = append(k8sObjects, getKSObjects(ksResources, allResources, rule.DynamicMatch)...)
+func getAllSupportedObjects(k8sResources cautils.K8SResources, externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, rule *reporthandling.PolicyRule) map[string][]workloadinterface.IMetadata {
+	k8sObjects := getKubernetesObjects(k8sResources, allResources, rule.Match)
+	externalObjs := getKubernetesObjectsFromExternalResources(externalResources, allResources, rule.DynamicMatch)
+	if len(externalObjs) > 0 {
+		l, ok := k8sObjects[clusterScope]
+		if !ok {
+			l = []workloadinterface.IMetadata{}
+		}
+		l = append(l, externalObjs...)
+		k8sObjects[clusterScope] = l
+	}
 	return k8sObjects
 }
 
-func getKSObjects(k8sResources *cautils.KSResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
+func getKubernetesObjectsFromExternalResources(externalResources cautils.ExternalResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
 	k8sObjects := []workloadinterface.IMetadata{}
 
 	for m := range match {
@@ -103,7 +120,7 @@ func getKSObjects(k8sResources *cautils.KSResources, allResources map[string]wor
 				for _, resource := range match[m].Resources {
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
-						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
+						if k8sObj, ok := externalResources[groupResource]; ok {
 							for i := range k8sObj {
 								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
 							}
@@ -114,11 +131,11 @@ func getKSObjects(k8sResources *cautils.KSResources, allResources map[string]wor
 		}
 	}
 
-	return filterOutChildResources(k8sObjects, match)
+	return k8sObjects
 }
 
-func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
-	k8sObjects := []workloadinterface.IMetadata{}
+func getKubernetesObjects(k8sResources cautils.K8SResources, allResources map[string]workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) map[string][]workloadinterface.IMetadata {
+	k8sObjects := map[string][]workloadinterface.IMetadata{}
 
 	for m := range match {
 		for _, groups := range match[m].APIGroups {
@@ -126,14 +143,18 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 				for _, resource := range match[m].Resources {
 					groupResources := k8sinterface.ResourceGroupToString(groups, version, resource)
 					for _, groupResource := range groupResources {
-						if k8sObj, ok := (*k8sResources)[groupResource]; ok {
-							/*
-								if k8sObj == nil {
-									// logger.L().Debug("skipping", helpers.String("resource", groupResource))
+						if k8sObj, ok := k8sResources[groupResource]; ok {
+							for i := range k8sObj {
+
+								obj := allResources[k8sObj[i]]
+								ns := getNamespaceName(obj, len(allResources))
+
+								l, ok := k8sObjects[ns]
+								if !ok {
+									l = []workloadinterface.IMetadata{}
 								}
-							*/
-							for i := range k8sObj {
-								k8sObjects = append(k8sObjects, allResources[k8sObj[i]])
+								l = append(l, obj)
+								k8sObjects[ns] = l
 							}
 						}
 					}
@@ -142,34 +163,9 @@ func getKubernetesObjects(k8sResources *cautils.K8SResources, allResources map[s
 		}
 	}
 
-	return filterOutChildResources(k8sObjects, match)
+	return k8sObjects
+	// return filterOutChildResources(k8sObjects, match)
 }
-
-// filterOutChildResources filter out child resources if the parent resource is in the list
-func filterOutChildResources(objects []workloadinterface.IMetadata, match []reporthandling.RuleMatchObjects) []workloadinterface.IMetadata {
-	response := []workloadinterface.IMetadata{}
-	owners := []string{}
-	for m := range match {
-		owners = append(owners, match[m].Resources...)
-	}
-
-	for i := range objects {
-		if !k8sinterface.IsTypeWorkload(objects[i].GetObject()) {
-			response = append(response, objects[i])
-			continue
-		}
-		w := workloadinterface.NewWorkloadObj(objects[i].GetObject())
-		ownerReferences, err := w.GetOwnerReferences()
-		if err != nil || len(ownerReferences) == 0 {
-			response = append(response, w)
-		} else if !k8sinterface.IsStringInSlice(owners, ownerReferences[0].Kind) {
-			response = append(response, w)
-		}
-	}
-
-	return response
-}
-
 func getRuleDependencies(ctx context.Context) (map[string]string, error) {
 	modules := resources.LoadRegoModules()
 	if len(modules) == 0 {
@@ -221,16 +217,39 @@ func removePodData(workload workloadinterface.IWorkload) {
 	workloadinterface.RemoveFromMap(workload.GetObject(), "metadata", "managedFields")
 	workloadinterface.RemoveFromMap(workload.GetObject(), "status")
 
-	containers, err := workload.GetContainers()
-	if err != nil || len(containers) == 0 {
-		return
+	// containers
+	if containers, err := workload.GetContainers(); err == nil && len(containers) > 0 {
+		removeContainersData(containers)
+		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
 	}
+
+	// init containers
+
+	if initContainers, err := workload.GetInitContainers(); err == nil && len(initContainers) > 0 {
+		removeContainersData(initContainers)
+		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "initContainers", initContainers)
+	}
+
+	// ephemeral containers
+	if ephemeralContainers, err := workload.GetEphemeralContainers(); err == nil && len(ephemeralContainers) > 0 {
+		removeEphemeralContainersData(ephemeralContainers)
+		workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "ephemeralContainers", ephemeralContainers)
+	}
+}
+
+func removeContainersData(containers []corev1.Container) {
 	for i := range containers {
 		for j := range containers[i].Env {
 			containers[i].Env[j].Value = "XXXXXX"
 		}
 	}
-	workloadinterface.SetInMap(workload.GetObject(), workloadinterface.PodSpec(workload.GetKind()), "containers", containers)
+}
+func removeEphemeralContainersData(containers []corev1.EphemeralContainer) {
+	for i := range containers {
+		for j := range containers[i].Env {
+			containers[i].Env[j].Value = "XXXXXX"
+		}
+	}
 }
 
 func ruleData(rule *reporthandling.PolicyRule) string {
@@ -239,4 +258,31 @@ func ruleData(rule *reporthandling.PolicyRule) string {
 
 func ruleEnumeratorData(rule *reporthandling.PolicyRule) string {
 	return rule.ResourceEnumerator
+}
+
+func getNamespaceName(obj workloadinterface.IMetadata, clusterSize int) string {
+
+	if !isLargeCluster(clusterSize) {
+		return clusterScope
+	}
+
+	// if the resource is in namespace scope, get the namespace
+	if k8sinterface.IsResourceInNamespaceScope(obj.GetKind()) {
+		return obj.GetNamespace()
+	}
+	if obj.GetKind() == "Namespace" {
+		return obj.GetName()
+	}
+
+	return clusterScope
+}
+
+// isLargeCluster returns true if the cluster size is larger than the largeClusterSize
+// This code is a workaround for large clusters. The final solution will be to scan resources individually
+func isLargeCluster(clusterSize int) bool {
+	if largeClusterSize < 0 {
+		// initialize large cluster size
+		largeClusterSize, _ = cautils.ParseIntEnvVar("LARGE_CLUSTER_SIZE", 2500)
+	}
+	return clusterSize > largeClusterSize
 }

@@ -3,9 +3,10 @@ package printer
 import (
 	"fmt"
 	"sort"
+	"strings"
 
-	"github.com/fatih/color"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/jwalton/gchalk"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
@@ -13,11 +14,13 @@ import (
 
 const (
 	columnSeverity        = iota
+	columnRef             = iota
 	columnName            = iota
 	columnCounterFailed   = iota
 	columnCounterAll      = iota
 	columnComplianceScore = iota
 	_rowLen               = iota
+	controlNameMaxLength  = 70
 )
 
 func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
@@ -29,16 +32,27 @@ func generateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo [
 	}
 
 	row[columnSeverity] = getSeverityColumn(controlSummary)
-	if len(controlSummary.GetName()) > 50 {
-		row[columnName] = controlSummary.GetName()[:50] + "..."
+	if len(controlSummary.GetName()) > controlNameMaxLength {
+		row[columnName] = controlSummary.GetName()[:controlNameMaxLength] + "..."
 	} else {
 		row[columnName] = controlSummary.GetName()
 	}
 	row[columnCounterFailed] = fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed())
 	row[columnCounterAll] = fmt.Sprintf("%d", controlSummary.NumberOfResources().All())
 	row[columnComplianceScore] = getComplianceScoreColumn(controlSummary, infoToPrintInfo)
+	if row[columnComplianceScore] == "-1%" {
+		row[columnComplianceScore] = "N/A"
+	}
 
 	return row
+}
+
+func shortFormatRow(dataRows [][]string) [][]string {
+	rows := [][]string{}
+	for _, dataRow := range dataRows {
+		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 11)+": %+v\nControl Name"+strings.Repeat(" ", 7)+": %+v\nFailed Resources"+strings.Repeat(" ", 3)+": %+v\nAll Resources"+strings.Repeat(" ", 6)+": %+v\n%% Compliance-Score"+strings.Repeat(" ", 1)+": %+v", dataRow[columnSeverity], dataRow[columnName], dataRow[columnCounterFailed], dataRow[columnCounterAll], dataRow[columnComplianceScore])})
+	}
+	return rows
 }
 
 func generateRowPdf(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars, verbose bool) []string {
@@ -50,8 +64,9 @@ func generateRowPdf(controlSummary reportsummary.IControlSummary, infoToPrintInf
 	}
 
 	row[columnSeverity] = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
-	if len(controlSummary.GetName()) > 50 {
-		row[columnName] = controlSummary.GetName()[:50] + "..."
+	row[columnRef] = controlSummary.GetID()
+	if len(controlSummary.GetName()) > controlNameMaxLength {
+		row[columnName] = controlSummary.GetName()[:controlNameMaxLength] + "..."
 	} else {
 		row[columnName] = controlSummary.GetName()
 	}
@@ -79,20 +94,21 @@ func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
-	return color.New(getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor())), color.Bold).SprintFunc()(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
+	return getColor(apis.ControlSeverityToInt(controlSummary.GetScoreFactor()))(apis.ControlSeverityToString(controlSummary.GetScoreFactor()))
 }
-func getColor(controlSeverity int) color.Attribute {
+
+func getColor(controlSeverity int) func(...string) string {
 	switch controlSeverity {
 	case apis.SeverityCritical:
-		return color.FgRed
+		return gchalk.WithAnsi256(1).Bold
 	case apis.SeverityHigh:
-		return color.FgYellow
+		return gchalk.WithAnsi256(196).Bold
 	case apis.SeverityMedium:
-		return color.FgCyan
+		return gchalk.WithAnsi256(166).Bold
 	case apis.SeverityLow:
-		return color.FgWhite
+		return gchalk.WithAnsi256(220).Bold
 	default:
-		return color.FgWhite
+		return gchalk.WithAnsi256(16).Bold
 	}
 }
 
@@ -124,13 +140,20 @@ func getSortedControlsNames(controls reportsummary.ControlSummaries) [][]string 
 }
 */
 
-func getControlTableHeaders() []string {
-	headers := make([]string, _rowLen)
-	headers[columnName] = "CONTROL NAME"
-	headers[columnCounterFailed] = "FAILED RESOURCES"
-	headers[columnCounterAll] = "ALL RESOURCES"
-	headers[columnSeverity] = "SEVERITY"
-	headers[columnComplianceScore] = "% COMPLIANCE-SCORE"
+func getControlTableHeaders(short bool) []string {
+	var headers []string
+	if short {
+		headers = make([]string, 1)
+		headers[0] = "Controls"
+	} else {
+		headers = make([]string, _rowLen)
+		headers[columnRef] = "Control reference"
+		headers[columnName] = "Control name"
+		headers[columnCounterFailed] = "Failed resources"
+		headers[columnCounterAll] = "All resources"
+		headers[columnSeverity] = "Severity"
+		headers[columnComplianceScore] = "Compliance score"
+	}
 	return headers
 }
 

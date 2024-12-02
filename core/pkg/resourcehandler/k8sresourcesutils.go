@@ -1,13 +1,16 @@
 package resourcehandler
 
 import (
+	"fmt"
 	"strings"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/utils/strings/slices"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 )
 
 var (
@@ -51,10 +54,10 @@ var (
 	}
 )
 
-func isEmptyImgVulns(ksResourcesMap cautils.KSResources) bool {
-	imgVulnResources := cautils.MapImageVulnResources(&ksResourcesMap)
+func isEmptyImgVulns(externalResourcesMap cautils.ExternalResources) bool {
+	imgVulnResources := cautils.MapImageVulnResources(externalResourcesMap)
 	for _, resource := range imgVulnResources {
-		if val, ok := ksResourcesMap[resource]; ok {
+		if val, ok := externalResourcesMap[resource]; ok {
 			if len(val) > 0 {
 				return false
 			}
@@ -63,50 +66,20 @@ func isEmptyImgVulns(ksResourcesMap cautils.KSResources) bool {
 	return true
 }
 
-func setK8sResourceMap(frameworks []reporthandling.Framework) *cautils.K8SResources {
-	k8sResources := make(cautils.K8SResources)
-	complexMap := setComplexK8sResourceMap(frameworks)
-	for group := range complexMap {
-		for version := range complexMap[group] {
-			for resource := range complexMap[group][version] {
-				groupResources := k8sinterface.ResourceGroupToString(group, version, resource)
-				for _, groupResource := range groupResources {
-					k8sResources[groupResource] = nil
-				}
-			}
-		}
-	}
-	return &k8sResources
-}
-
-func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) *cautils.KSResources {
-	ksResources := make(cautils.KSResources)
+func setKSResourceMap(frameworks []reporthandling.Framework, resourceToControl map[string][]string) cautils.ExternalResources {
+	externalResources := make(cautils.ExternalResources)
 	complexMap := setComplexKSResourceMap(frameworks, resourceToControl)
 	for group := range complexMap {
 		for version := range complexMap[group] {
 			for resource := range complexMap[group][version] {
 				groupResources := k8sinterface.ResourceGroupToString(group, version, resource)
 				for _, groupResource := range groupResources {
-					ksResources[groupResource] = nil
+					externalResources[groupResource] = nil
 				}
 			}
 		}
 	}
-	return &ksResources
-}
-
-func setComplexK8sResourceMap(frameworks []reporthandling.Framework) map[string]map[string]map[string]interface{} {
-	k8sResources := make(map[string]map[string]map[string]interface{})
-	for _, framework := range frameworks {
-		for _, control := range framework.Controls {
-			for _, rule := range control.Rules {
-				for _, match := range rule.Match {
-					insertResources(k8sResources, match)
-				}
-			}
-		}
-	}
-	return k8sResources
+	return externalResources
 }
 
 // [group][versionn][resource]
@@ -152,24 +125,6 @@ func insertControls(resource string, resourceToControl map[string][]string, cont
 	}
 }
 
-func insertResources(k8sResources map[string]map[string]map[string]interface{}, match reporthandling.RuleMatchObjects) {
-	for _, apiGroup := range match.APIGroups {
-		if v, ok := k8sResources[apiGroup]; !ok || v == nil {
-			k8sResources[apiGroup] = make(map[string]map[string]interface{})
-		}
-		for _, apiVersions := range match.APIVersions {
-			if v, ok := k8sResources[apiGroup][apiVersions]; !ok || v == nil {
-				k8sResources[apiGroup][apiVersions] = make(map[string]interface{})
-			}
-			for _, resource := range match.Resources {
-				if _, ok := k8sResources[apiGroup][apiVersions][resource]; !ok {
-					k8sResources[apiGroup][apiVersions][resource] = nil
-				}
-			}
-		}
-	}
-}
-
 func insertKSResourcesAndControls(k8sResources map[string]map[string]map[string]interface{}, match reporthandling.RuleMatchObjects, resourceToControl map[string][]string, control reporthandling.Control) {
 	for _, apiGroup := range match.APIGroups {
 		if v, ok := k8sResources[apiGroup]; !ok || v == nil {
@@ -199,4 +154,26 @@ func getGroupNVersion(apiVersion string) (string, string) {
 		version = gv[1]
 	}
 	return group, version
+}
+
+func getFieldSelectorFromScanInfo(scanInfo *cautils.ScanInfo) IFieldSelector {
+	if scanInfo.IncludeNamespaces != "" {
+		return NewIncludeSelector(scanInfo.IncludeNamespaces)
+	}
+	if scanInfo.ExcludedNamespaces != "" {
+		return NewExcludeSelector(scanInfo.ExcludedNamespaces)
+	}
+
+	return &EmptySelector{}
+}
+
+func getWorkloadFromScanObject(resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
+	if resource == nil {
+		return nil, nil
+	}
+	obj := resource.GetObject()
+	if k8sinterface.IsTypeWorkload(obj) {
+		return workloadinterface.NewWorkloadObj(obj), nil
+	}
+	return nil, fmt.Errorf("resource %s is not a valid workload", getReadableID(resource))
 }

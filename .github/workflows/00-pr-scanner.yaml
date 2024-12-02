@@ -1,13 +1,11 @@
 name: 00-pr_scanner
+permissions: read-all
 on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    branches:
-      - 'master'
-      - 'main'
-      - 'dev'
     paths-ignore:
       - '**.yaml'
+      - '**.yml'
       - '**.md'
       - '**.sh'
       - 'website/*'
@@ -15,7 +13,7 @@ on:
       - 'docs/*'
       - 'build/*'
       - '.github/*'
-      
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -23,9 +21,51 @@ concurrency:
 jobs:
   pr-scanner:
     permissions:
+      actions: read
+      checks: read
+      deployments: read
+      id-token: write
+      issues: read
+      discussions: read
+      packages: read
+      pages: read
       pull-requests: write
+      repository-projects: read
+      security-events: read
+      statuses: read
+      attestations: read
+      contents: write
     uses: ./.github/workflows/a-pr-scanner.yaml
     with:
       RELEASE: ""
+      CLIENT: test
+      CGO_ENABLED: 0
+      GO111MODULE: ""
+    secrets: inherit
+
+  binary-build:
+    if: ${{ github.actor == 'kubescape' }}
+    permissions:
+      actions: read
+      checks: read
+      contents: write
+      deployments: read
+      discussions: read
+      id-token: write
+      issues: read
+      packages: write
+      pages: read
+      pull-requests: read
+      repository-projects: read
+      security-events: read
+      statuses: read
+      attestations: read
+    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
+    with:
+      COMPONENT_NAME: kubescape
+      CGO_ENABLED: 0
+      GO111MODULE: ""
+      GO_VERSION: "1.21"
+      RELEASE: "latest"
       CLIENT: test
     secrets: inherit

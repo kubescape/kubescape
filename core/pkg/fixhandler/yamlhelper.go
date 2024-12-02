@@ -12,7 +12,7 @@ import (
 	"os"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"gopkg.in/yaml.v3"
 )
@@ -49,19 +49,26 @@ func matchNodes(nodeOne, nodeTwo *yaml.Node) NodeRelation {
 func adjustContentLines(contentToAdd *[]contentToAdd, linesSlice *[]string) {
 	for contentIdx, content := range *contentToAdd {
 		line := content.line
-
 		// Adjust line numbers such that there are no "empty lines or comment lines of next nodes" before them
 		for idx := line - 1; idx >= 0; idx-- {
-			if isEmptyLineOrComment((*linesSlice)[idx]) {
-				(*contentToAdd)[contentIdx].line -= 1
-			} else {
-				break
+			// If idx is exceeding the length of linesSlice, skip it
+			if idx < len(*linesSlice) {
+				if isEmptyLineOrComment((*linesSlice)[idx]) {
+					(*contentToAdd)[contentIdx].line -= 1
+				} else {
+					break
+				}
 			}
 		}
 	}
 }
 
 func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
+
+	if originalList == nil || fixedList == nil || len(*originalList) == 0 || len(*fixedList) == 0 {
+		return // Check for empty slices to avoid index out of range errors
+	}
+
 	differenceAtTop := (*originalList)[0].node.Line - (*fixedList)[0].node.Line
 
 	if differenceAtTop <= 0 {
@@ -77,6 +84,11 @@ func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
 }
 
 func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {
+
+	if tracker < 0 || tracker >= len(*nodeList) {
+		return "", fmt.Errorf("Index out of range for nodeList: tracker=%d, length=%d", tracker, len(*nodeList))
+	}
+
 	content := make([]*yaml.Node, 0)
 	currentNode := (*nodeList)[tracker].node
 	content = append(content, currentNode)
@@ -123,7 +135,17 @@ func getContent(ctx context.Context, parentNode *yaml.Node, nodeList *[]nodeInfo
 }
 
 func indentContent(content string, indentationSpaces int) string {
+
+	if content == "" {
+		return ""
+	}
+
 	indentedContent := ""
+
+	if indentationSpaces < 0 {
+		indentationSpaces = 0
+	}
+
 	indentSpaces := strings.Repeat(" ", indentationSpaces)
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
@@ -198,7 +220,7 @@ func getLastLineOfResource(linesSlice *[]string, currentLine int) (int, error) {
 }
 
 func getNodeLine(nodeList *[]nodeInfo, tracker int) int {
-	if tracker < len(*nodeList) {
+	if tracker >= 0 && tracker < len(*nodeList) {
 		return (*nodeList)[tracker].node.Line
 	} else {
 		return -1
@@ -253,6 +275,9 @@ func isOneLineSequenceNode(list *[]nodeInfo, currentTracker int) (bool, int) {
 
 // Checks if nodes are of same kind, value, line and column
 func isSameNode(nodeOne, nodeTwo *yaml.Node) bool {
+	if nodeOne == nil || nodeTwo == nil {
+		return false // Ensure neither node is nil to prevent runtime errors
+	}
 	sameLines := nodeOne.Line == nodeTwo.Line
 	sameColumns := nodeOne.Column == nodeTwo.Column
 	sameKinds := nodeOne.Kind == nodeTwo.Kind
@@ -339,15 +364,15 @@ func replaceSingleLineSequence(ctx context.Context, fixInfoMetadata *fixInfoMeta
 
 // Returns the first node in the given line that is not mapping node
 func getFirstNodeInLine(list *[]nodeInfo, line int) int {
-	tracker := 0
-
-	currentNode := (*list)[tracker].node
-	for currentNode.Line != line || currentNode.Kind == yaml.MappingNode {
-		tracker += 1
-		currentNode = (*list)[tracker].node
+	for tracker := 0; tracker < len(*list); tracker++ {
+		currentNode := (*list)[tracker].node
+		if currentNode.Line == line && currentNode.Kind != yaml.MappingNode {
+			return tracker
+		}
 	}
 
-	return tracker
+	// Return -1 to indicate that the node with the specified line was not found
+	return -1
 }
 
 // To not mess with the line number while inserting, removed lines are not deleted but replaced with "*"
@@ -356,6 +381,10 @@ func removeLines(linesToRemove *[]linesToRemove, linesSlice *[]string) {
 	for _, lineToRemove := range *linesToRemove {
 		startLine = lineToRemove.startLine - 1
 		endLine = lineToRemove.endLine - 1
+
+		if startLine < 0 || endLine >= len(*linesSlice) {
+			continue // Skip if the indices are out of bounds
+		}
 
 		for line := startLine; line <= endLine; line++ {
 			lineContent := (*linesSlice)[line]

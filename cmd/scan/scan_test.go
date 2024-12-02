@@ -4,8 +4,12 @@ import (
 	"context"
 
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/stretchr/testify/assert"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/mocks"
+	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 
@@ -111,7 +115,7 @@ func TestExceedsSeverity(t *testing.T) {
 			ScanInfo:         &cautils.ScanInfo{FailThresholdSeverity: "unknown"},
 			SeverityCounters: &reportsummary.SeverityCounters{LowSeverityCounter: 1},
 			Want:             false,
-			Error:            ErrUnknownSeverity,
+			Error:            shared.ErrUnknownSeverity,
 		},
 	}
 
@@ -184,17 +188,20 @@ type spyLogger struct {
 	setItems []spyLogMessage
 }
 
-func (l *spyLogger) Error(msg string, details ...helpers.IDetails)   {}
-func (l *spyLogger) Success(msg string, details ...helpers.IDetails) {}
-func (l *spyLogger) Warning(msg string, details ...helpers.IDetails) {}
-func (l *spyLogger) Info(msg string, details ...helpers.IDetails)    {}
-func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)   {}
-func (l *spyLogger) SetLevel(level string) error                     { return nil }
-func (l *spyLogger) GetLevel() string                                { return "" }
-func (l *spyLogger) SetWriter(w *os.File)                            {}
-func (l *spyLogger) GetWriter() *os.File                             { return &os.File{} }
-func (l *spyLogger) LoggerName() string                              { return "" }
-func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger           { return l }
+func (l *spyLogger) Error(msg string, details ...helpers.IDetails)       {}
+func (l *spyLogger) Success(msg string, details ...helpers.IDetails)     {}
+func (l *spyLogger) Warning(msg string, details ...helpers.IDetails)     {}
+func (l *spyLogger) Info(msg string, details ...helpers.IDetails)        {}
+func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)       {}
+func (l *spyLogger) SetLevel(level string) error                         { return nil }
+func (l *spyLogger) GetLevel() string                                    { return "" }
+func (l *spyLogger) SetWriter(w *os.File)                                {}
+func (l *spyLogger) GetWriter() *os.File                                 { return &os.File{} }
+func (l *spyLogger) LoggerName() string                                  { return "" }
+func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger               { return l }
+func (l *spyLogger) Start(msg string, details ...helpers.IDetails)       {}
+func (l *spyLogger) StopSuccess(msg string, details ...helpers.IDetails) {}
+func (l *spyLogger) StopError(msg string, details ...helpers.IDetails)   {}
 
 func (l *spyLogger) Fatal(msg string, details ...helpers.IDetails) {
 	firstDetail := details[0]
@@ -209,7 +216,7 @@ func (l *spyLogger) GetSpiedItems() []spyLogMessage {
 }
 
 func Test_terminateOnExceedingSeverity(t *testing.T) {
-	expectedMessage := "result exceeds severity threshold"
+	expectedMessage := "compliance result exceeds severity threshold"
 	expectedKey := "set severity threshold"
 
 	testCases := []struct {
@@ -253,4 +260,116 @@ func Test_terminateOnExceedingSeverity(t *testing.T) {
 			},
 		)
 	}
+}
+
+func TestSetSecurityViewScanInfo(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want *cautils.ScanInfo
+	}{
+		{
+			name: "no args",
+			args: []string{},
+			want: &cautils.ScanInfo{
+				InputPatterns: []string{},
+				ScanType:      cautils.ScanTypeCluster,
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "clusterscan",
+					},
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "mitre",
+					},
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "nsa",
+					},
+				},
+			},
+		},
+		{
+			name: "with args",
+			args: []string{
+				"file.yaml",
+				"file2.yaml",
+			},
+			want: &cautils.ScanInfo{
+				ScanType: cautils.ScanTypeRepo,
+				InputPatterns: []string{
+					"file.yaml",
+					"file2.yaml",
+				},
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "workloadscan",
+					},
+					{
+						Kind:       v1.KindFramework,
+						Identifier: "allcontrols",
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := &cautils.ScanInfo{
+				View: string(cautils.SecurityViewType),
+			}
+			setSecurityViewScanInfo(tt.args, got)
+
+			if len(tt.want.InputPatterns) != len(got.InputPatterns) {
+				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
+			}
+
+			if tt.want.ScanType != got.ScanType {
+				t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.ScanType, tt.want.ScanType)
+			}
+
+			for i := range tt.want.InputPatterns {
+				found := false
+				for j := range tt.want.InputPatterns[i] {
+					if tt.want.InputPatterns[i][j] == got.InputPatterns[i][j] {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.InputPatterns, tt.want.InputPatterns)
+				}
+			}
+
+			for i := range tt.want.PolicyIdentifier {
+				found := false
+				for j := range got.PolicyIdentifier {
+					if tt.want.PolicyIdentifier[i].Kind == got.PolicyIdentifier[j].Kind && tt.want.PolicyIdentifier[i].Identifier == got.PolicyIdentifier[j].Identifier {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("in test: %s, got: %v, want: %v", tt.name, got.PolicyIdentifier, tt.want.PolicyIdentifier)
+				}
+			}
+		})
+	}
+
+}
+
+func TestGetScanCommand(t *testing.T) {
+	// Create a mock Kubescape interface
+	mockKubescape := &mocks.MockIKubescape{}
+
+	cmd := GetScanCommand(mockKubescape)
+
+	// Verify the command name and short description
+	assert.Equal(t, "scan", cmd.Use)
+	assert.Equal(t, "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations", cmd.Short)
+	assert.Equal(t, "The action you want to perform", cmd.Long)
+	assert.Equal(t, scanCmdExamples, cmd.Example)
 }

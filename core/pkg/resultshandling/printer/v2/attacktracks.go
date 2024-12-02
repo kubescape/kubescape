@@ -2,14 +2,12 @@ package printer
 
 import (
 	"fmt"
-	"os"
 	"sort"
-	"strconv"
 	"strings"
 
-	"github.com/fatih/color"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/gotree"
+	"github.com/jwalton/gchalk"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/gotree"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
@@ -49,14 +47,12 @@ func (prettyPrinter *PrettyPrinter) createFailedControlList(node v1alpha1.IAttac
 func (prettyPrinter *PrettyPrinter) buildTreeFromAttackTrackStep(tree gotree.Tree, node v1alpha1.IAttackTrackStep) gotree.Tree {
 	nodeName := node.GetName()
 	if len(node.GetControls()) > 0 {
-		red := color.New(color.Bold, color.FgRed).SprintFunc()
-		nodeName = red(nodeName)
+		nodeName = gchalk.WithRed().Bold(nodeName)
 	}
 
 	controlText := prettyPrinter.createFailedControlList(node)
 	if len(controlText) > 0 {
-		controlStyle := color.New(color.FgWhite, color.Faint).SprintFunc()
-		controlText = controlStyle(fmt.Sprintf(" (%s)", controlText))
+		controlText = gchalk.WithWhite().Dim(fmt.Sprintf(" (%s)", controlText))
 	}
 
 	subTree := gotree.New(nodeName + controlText)
@@ -77,23 +73,14 @@ func (prettyPrinter *PrettyPrinter) printResourceAttackGraph(attackTrack v1alpha
 	fmt.Fprintln(prettyPrinter.writer, tree.Print())
 }
 
-func getNumericValueFromEnvVar(envVar string, defaultValue int) int {
-	value := os.Getenv(envVar)
-	if value != "" {
-		if value, err := strconv.Atoi(value); err == nil {
-			return value
-		}
-	}
-	return defaultValue
-}
 func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPASessionObj) {
 	if !prettyPrinter.printAttackTree || opaSessionObj.ResourceAttackTracks == nil {
 		return
 	}
 
 	// check if counters are set in env vars and use them, otherwise use default values
-	topResourceCount := getNumericValueFromEnvVar("ATTACK_TREE_TOP_RESOURCES", TOP_RESOURCE_COUNT)
-	topVectorCount := getNumericValueFromEnvVar("ATTACK_TREE_TOP_VECTORS", TOP_VECTOR_COUNT)
+	topResourceCount, _ := cautils.ParseIntEnvVar("ATTACK_TREE_TOP_RESOURCES", TOP_RESOURCE_COUNT)
+	topVectorCount, _ := cautils.ParseIntEnvVar("ATTACK_TREE_TOP_VECTORS", TOP_VECTOR_COUNT)
 
 	prioritizedResources := opaSessionObj.ResourcesPrioritized
 	resourceToAttackTrack := opaSessionObj.ResourceAttackTracks

@@ -2,41 +2,15 @@ package resourcehandler
 
 import (
 	"fmt"
-	"path/filepath"
 
-	giturl "github.com/kubescape/go-git-url"
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 )
 
-// Clone git repository
-func cloneGitRepo(path *string) (string, error) {
-	var clonedDir string
-
-	// Clone git repository if needed
-	gitURL, err := giturl.NewGitAPI(*path)
-	if err == nil {
-		logger.L().Info("cloning", helpers.String("repository url", gitURL.GetURL().String()))
-		cautils.StartSpinner()
-		clonedDir, err = cloneRepo(gitURL)
-		cautils.StopSpinner()
-		if err != nil {
-			return "", fmt.Errorf("failed to clone git repo '%s',  %w", gitURL.GetURL().String(), err)
-		}
-
-		*path = filepath.Join(clonedDir, gitURL.GetPath())
-
-	}
-	return clonedDir, nil
-}
-
-// build resources map
-func mapResources(workloads []workloadinterface.IMetadata) map[string][]workloadinterface.IMetadata {
-
-	allResources := map[string][]workloadinterface.IMetadata{}
+func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
 		if err != nil {
@@ -58,8 +32,6 @@ func mapResources(workloads []workloadinterface.IMetadata) map[string][]workload
 			allResources[resourceTriplets] = []workloadinterface.IMetadata{workloads[i]}
 		}
 	}
-	return allResources
-
 }
 
 /* unused for now
@@ -85,3 +57,55 @@ func addCommitData(input string, workloadIDToSource map[string]reporthandling.So
 	}
 }
 */
+
+// findScanObjectResource finds the requested k8s object to be scanned in the resources map
+func findScanObjectResource(mappedResources map[string][]workloadinterface.IMetadata, resource *objectsenvelopes.ScanObject) (workloadinterface.IWorkload, error) {
+	if resource == nil {
+		return nil, nil
+	}
+
+	logger.L().Debug("Single resource scan", helpers.String("resource", resource.GetID()))
+
+	var wls []workloadinterface.IWorkload
+	for _, resources := range mappedResources {
+		for _, r := range resources {
+			if r.GetKind() == resource.GetKind() && r.GetName() == resource.GetName() {
+				if resource.GetNamespace() != "" && resource.GetNamespace() != r.GetNamespace() {
+					continue
+				}
+				if resource.GetApiVersion() != "" && resource.GetApiVersion() != r.GetApiVersion() {
+					continue
+				}
+
+				if k8sinterface.IsTypeWorkload(r.GetObject()) {
+					wl := workloadinterface.NewWorkloadObj(r.GetObject())
+					wls = append(wls, wl)
+				}
+			}
+		}
+	}
+
+	if len(wls) == 0 {
+		return nil, fmt.Errorf("k8s resource '%s' not found", getReadableID(resource))
+	} else if len(wls) > 1 {
+		return nil, fmt.Errorf("more than one k8s resource found for '%s'", getReadableID(resource))
+	}
+
+	return wls[0], nil
+}
+
+// TODO: move this to k8s-interface
+func getReadableID(obj *objectsenvelopes.ScanObject) string {
+	var ID string
+	if obj.GetApiVersion() != "" {
+		ID += fmt.Sprintf("%s/", k8sinterface.JoinGroupVersion(k8sinterface.SplitApiVersion(obj.GetApiVersion())))
+	}
+
+	if obj.GetNamespace() != "" {
+		ID += fmt.Sprintf("%s/", obj.GetNamespace())
+	}
+
+	ID += fmt.Sprintf("%s/%s", obj.GetKind(), obj.GetName())
+
+	return ID
+}

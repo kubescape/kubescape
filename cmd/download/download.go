@@ -6,12 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/core"
-	"github.com/kubescape/kubescape/v2/core/meta"
-	v1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v3/core/meta"
+	v1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
+	"golang.org/x/exp/slices"
 )
 
 var (
@@ -36,9 +37,6 @@ var (
 
   # Download the configured controls-inputs 
   %[1]s download controls-inputs 
-
-  # Download the attack tracks
-  %[1]s download attack-tracks
 `, cautils.ExecName())
 )
 
@@ -55,7 +53,7 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			if len(args) < 1 {
 				return fmt.Errorf("policy type required, supported: %v", supported)
 			}
-			if cautils.StringInSlice(core.DownloadSupportCommands(), args[0]) == cautils.ValueNotFound {
+			if !slices.Contains(core.DownloadSupportCommands(), args[0]) {
 				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
 			}
 			return nil
@@ -69,6 +67,11 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 			if filepath.Ext(downloadInfo.Path) == ".json" {
 				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
 			}
+
+			if len(args) == 0 {
+				return fmt.Errorf("no arguements provided")
+			}
+
 			downloadInfo.Target = args[0]
 			if len(args) >= 2 {
 
@@ -82,9 +85,8 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 		},
 	}
 
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.Account, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.ClientID, "client-id", "", "", "Kubescape SaaS client ID. Default will load client ID from cache, read more - https://hub.armosec.io/docs/authentication")
-	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.Credentials.SecretKey, "secret-key", "", "", "Kubescape SaaS secret key. Default will load secret key from cache, read more - https://hub.armosec.io/docs/authentication")
+	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccountID, "account", "", "", "Kubescape SaaS account ID. Default will load account ID from cache")
+	downloadCmd.PersistentFlags().StringVarP(&downloadInfo.AccessKey, "access-key", "", "", "Kubescape SaaS access key. Default will load access key from cache")
 	downloadCmd.Flags().StringVarP(&downloadInfo.Path, "output", "o", "", "Output file. If not specified, will save in `~/.kubescape/<policy name>.json`")
 
 	return downloadCmd
@@ -94,5 +96,5 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 func flagValidationDownload(downloadInfo *v1.DownloadInfo) error {
 
 	// Validate the user's credentials
-	return downloadInfo.Credentials.Validate()
+	return cautils.ValidateAccountID(downloadInfo.AccountID)
 }

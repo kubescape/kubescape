@@ -8,13 +8,14 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/backend/pkg/versioncheck"
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 
@@ -24,20 +25,17 @@ import (
 type ScanningContext string
 
 const (
-	ContextCluster  ScanningContext = "cluster"
-	ContextFile     ScanningContext = "single-file"
-	ContextDir      ScanningContext = "local-dir"
-	ContextGitURL   ScanningContext = "git-url"
-	ContextGitLocal ScanningContext = "git-local"
+	ContextCluster   ScanningContext = "cluster"
+	ContextFile      ScanningContext = "single-file"
+	ContextDir       ScanningContext = "local-dir"
+	ContextGitLocal  ScanningContext = "git-local"
+	ContextGitRemote ScanningContext = "git-remote"
 )
 
 const ( // deprecated
 	ScopeCluster = "cluster"
-	ScopeYAML    = "yaml"
 )
 const (
-	// ScanCluster                string = "cluster"
-	// ScanLocalFiles             string = "yaml"
 	localControlInputsFilename string = "controls-inputs.json"
 	LocalExceptionsFilename    string = "exceptions.json"
 	LocalAttackTracksFilename  string = "attack-tracks.json"
@@ -87,52 +85,62 @@ func (bpf *BoolPtrFlag) Set(val string) error {
 
 // TODO - UPDATE
 type ViewTypes string
+type EnvScopeTypes string
+type ManageClusterTypes string
 
 const (
 	ResourceViewType ViewTypes = "resource"
+	SecurityViewType ViewTypes = "security"
 	ControlViewType  ViewTypes = "control"
 )
 
 type PolicyIdentifier struct {
-	Identifier  string                        // policy Identifier e.g. c-0012 for control, nsa,mitre for frameworks
-	Kind        apisv1.NotificationPolicyKind // policy kind e.g. Framework,Control,Rule
-	Designators armotypes.PortalDesignator
+	Identifier string                        // policy Identifier e.g. c-0012 for control, nsa,mitre for frameworks
+	Kind       apisv1.NotificationPolicyKind // policy kind e.g. Framework,Control,Rule
 }
 
 type ScanInfo struct {
-	Getters                                  // TODO - remove from object
-	PolicyIdentifier      []PolicyIdentifier // TODO - remove from object
-	UseExceptions         string             // Load file with exceptions configuration
-	ControlsInputs        string             // Load file with inputs for controls
-	AttackTracks          string             // Load file with attack tracks
-	UseFrom               []string           // Load framework from local file (instead of download). Use when running offline
-	UseDefault            bool               // Load framework from cached file (instead of download). Use when running offline
-	UseArtifactsFrom      string             // Load artifacts from local path. Use when running offline
-	VerboseMode           bool               // Display all of the input resources and not only failed resources
-	View                  string             // Display all of the input resources and not only failed resources
-	Format                string             // Format results (table, json, junit ...)
-	Output                string             // Store results in an output file, Output file name
-	FormatVersion         string             // Output object can be different between versions, this is for testing and backward compatibility
-	CustomClusterName     string             // Set the custom name of the cluster
-	ExcludedNamespaces    string             // used for host scanner namespace
-	IncludeNamespaces     string             //
-	InputPatterns         []string           // Yaml files input patterns
-	Silent                bool               // Silent mode - Do not print progress logs
-	FailThreshold         float32            // DEPRECATED - Failure score threshold
-	ComplianceThreshold   float32            // Compliance score threshold
-	FailThresholdSeverity string             // Severity at and above which the command should fail
-	Submit                bool               // Submit results to Kubescape Cloud BE
-	CreateAccount         bool               // Create account in Kubescape Cloud BE if no account found in local cache
-	ScanID                string             // Report id of the current scan
-	HostSensorEnabled     BoolPtrFlag        // Deploy Kubescape K8s host scanner to collect data from certain controls
-	HostSensorYamlPath    string             // Path to hostsensor file
-	Local                 bool               // Do not submit results
-	Credentials           Credentials        // account ID
-	KubeContext           string             // context name
-	FrameworkScan         bool               // false if scanning control
-	ScanAll               bool               // true if scan all frameworks
-	OmitRawResources      bool               // true if omit raw resources from the output
-	PrintAttackTree       bool               // true if print attack tree
+	Getters                                            // TODO - remove from object
+	PolicyIdentifier      []PolicyIdentifier           // TODO - remove from object
+	UseExceptions         string                       // Load file with exceptions configuration
+	ControlsInputs        string                       // Load file with inputs for controls
+	AttackTracks          string                       // Load file with attack tracks
+	UseFrom               []string                     // Load framework from local file (instead of download). Use when running offline
+	UseDefault            bool                         // Load framework from cached file (instead of download). Use when running offline
+	UseArtifactsFrom      string                       // Load artifacts from local path. Use when running offline
+	VerboseMode           bool                         // Display all the input resources and not only failed resources
+	View                  string                       //
+	Format                string                       // Format results (table, json, junit ...)
+	Output                string                       // Store results in an output file, Output file name
+	FormatVersion         string                       // Output object can be different between versions, this is for testing and backward compatibility
+	CustomClusterName     string                       // Set the custom name of the cluster
+	ExcludedNamespaces    string                       // used for host scanner namespace
+	IncludeNamespaces     string                       //
+	InputPatterns         []string                     // Yaml files input patterns
+	Silent                bool                         // Silent mode - Do not print progress logs
+	FailThreshold         float32                      // DEPRECATED - Failure score threshold
+	ComplianceThreshold   float32                      // Compliance score threshold
+	FailThresholdSeverity string                       // Severity at and above which the command should fail
+	Submit                bool                         // Submit results to Kubescape Cloud BE
+	ScanID                string                       // Report id of the current scan
+	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
+	HostSensorYamlPath    string                       // Path to hostsensor file
+	Local                 bool                         // Do not submit results
+	AccountID             string                       // account ID
+	AccessKey             string                       // access key
+	FrameworkScan         bool                         // false if scanning control
+	ScanAll               bool                         // true if scan all frameworks
+	OmitRawResources      bool                         // true if omit raw resources from the output
+	PrintAttackTree       bool                         // true if print attack tree
+	EnableRegoPrint       bool                         // true if print rego
+	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
+	IsDeletedScanObject   bool                         // indicates whether the ScanObject is a deleted K8S resource
+	ScanType              ScanTypes
+	ScanImages            bool
+	ChartPath             string
+	FilePath              string
+	scanningContext       *ScanningContext
+	cleanups              []func()
 }
 
 type Getters struct {
@@ -148,7 +156,12 @@ func (scanInfo *ScanInfo) Init(ctx context.Context) {
 	if scanInfo.ScanID == "" {
 		scanInfo.ScanID = uuid.NewString()
 	}
+}
 
+func (scanInfo *ScanInfo) Cleanup() {
+	for _, cleanup := range scanInfo.cleanups {
+		cleanup()
+	}
 }
 
 func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
@@ -204,6 +217,10 @@ func (scanInfo *ScanInfo) Formats() []string {
 	}
 }
 
+func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
+	scanInfo.ScanType = scanType
+}
+
 func (scanInfo *ScanInfo) SetPolicyIdentifiers(policies []string, kind apisv1.NotificationPolicyKind) {
 	for _, policy := range policies {
 		if !scanInfo.contains(policy) {
@@ -248,7 +265,7 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 		metadata.ScanMetadata.TargetNames = append(metadata.ScanMetadata.TargetNames, policy.Identifier)
 	}
 
-	metadata.ScanMetadata.KubescapeVersion = BuildNumber
+	metadata.ScanMetadata.KubescapeVersion = versioncheck.BuildNumber
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.FailThreshold = scanInfo.FailThreshold
 	metadata.ScanMetadata.ComplianceThreshold = scanInfo.ComplianceThreshold
@@ -256,52 +273,63 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 	metadata.ScanMetadata.VerboseMode = scanInfo.VerboseMode
 	metadata.ScanMetadata.ControlsInputs = scanInfo.ControlsInputs
 
-	inputFiles := ""
-	if len(scanInfo.InputPatterns) > 0 {
-		inputFiles = scanInfo.InputPatterns[0]
-	}
-	switch GetScanningContext(inputFiles) {
+	switch scanInfo.GetScanningContext() {
 	case ContextCluster:
 		// cluster
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
 	case ContextFile:
 		// local file
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.File
-	case ContextGitURL:
-		// url
-		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Repo
 	case ContextGitLocal:
 		// local-git
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.GitLocal
+	case ContextGitRemote:
+		// remote
+		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Repo
 	case ContextDir:
 		// directory
 		metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Directory
 
 	}
 
-	setContextMetadata(ctx, &metadata.ContextMetadata, inputFiles)
+	scanInfo.setContextMetadata(ctx, &metadata.ContextMetadata)
 
 	return metadata
 }
 
-func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
-	input := ""
+func (scanInfo *ScanInfo) GetInputFiles() string {
 	if len(scanInfo.InputPatterns) > 0 {
-		input = scanInfo.InputPatterns[0]
+		return scanInfo.InputPatterns[0]
 	}
-	return GetScanningContext(input)
+	return ""
 }
 
-// GetScanningContext get scanning context from the input param
-func GetScanningContext(input string) ScanningContext {
+func (scanInfo *ScanInfo) GetScanningContext() ScanningContext {
+	if scanInfo.scanningContext == nil {
+		scanningContext := scanInfo.getScanningContext(scanInfo.GetInputFiles())
+		scanInfo.scanningContext = &scanningContext
+	}
+	return *scanInfo.scanningContext
+}
+
+// getScanningContext get scanning context from the input param
+// this function should be called only once. Call GetScanningContext() to get the scanning context
+func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	//  cluster
 	if input == "" {
 		return ContextCluster
 	}
 
-	// url
+	// git url
 	if _, err := giturl.NewGitURL(input); err == nil {
-		return ContextGitURL
+		if repo, err := CloneGitRepo(&input); err == nil {
+			if _, err := NewLocalGitRepository(repo); err == nil {
+				scanInfo.cleanups = append(scanInfo.cleanups, func() {
+					_ = os.RemoveAll(repo)
+				})
+				return ContextGitRemote
+			}
+		}
 	}
 
 	if !filepath.IsAbs(input) { // parse path
@@ -316,73 +344,65 @@ func GetScanningContext(input string) ScanningContext {
 	}
 
 	//  single file
-	if IsFile(input) {
+	if isFile(input) {
 		return ContextFile
 	}
 
 	//  dir/glob
 	return ContextDir
 }
-func setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata, input string) {
-	switch GetScanningContext(input) {
+
+func (scanInfo *ScanInfo) setContextMetadata(ctx context.Context, contextMetadata *reporthandlingv2.ContextMetadata) {
+	input := scanInfo.GetInputFiles()
+	switch scanInfo.GetScanningContext() {
 	case ContextCluster:
 		contextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{
 			ContextName: k8sinterface.GetContextName(),
 		}
-	case ContextGitURL:
-		// url
-		context, err := metadataGitURL(input)
-		if err != nil {
-			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
-		}
-		contextMetadata.RepoContextMetadata = context
 	case ContextDir:
 		contextMetadata.DirectoryContextMetadata = &reporthandlingv2.DirectoryContextMetadata{
 			BasePath: getAbsPath(input),
 			HostName: getHostname(),
 		}
+		// add repo context for submitting
+		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
+			Provider:      "none",
+			Repo:          fmt.Sprintf("path@%s", getAbsPath(input)),
+			Owner:         getHostname(),
+			Branch:        "none",
+			DefaultBranch: "none",
+			LocalRootPath: getAbsPath(input),
+		}
+
 	case ContextFile:
 		contextMetadata.FileContextMetadata = &reporthandlingv2.FileContextMetadata{
 			FilePath: getAbsPath(input),
 			HostName: getHostname(),
 		}
+		// add repo context for submitting
+		contextMetadata.RepoContextMetadata = &reporthandlingv2.RepoContextMetadata{
+			Provider:      "none",
+			Repo:          fmt.Sprintf("file@%s", getAbsPath(input)),
+			Owner:         getHostname(),
+			Branch:        "none",
+			DefaultBranch: "none",
+			LocalRootPath: getAbsPath(input),
+		}
 	case ContextGitLocal:
 		// local
-		context, err := metadataGitLocal(input)
+		repoContext, err := metadataGitLocal(input)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitURL), helpers.Error(err))
+			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitLocal), helpers.Error(err))
 		}
-		contextMetadata.RepoContextMetadata = context
+		contextMetadata.RepoContextMetadata = repoContext
+	case ContextGitRemote:
+		// remote
+		repoContext, err := metadataGitLocal(GetClonedPath(input))
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("in setContextMetadata", helpers.Interface("case", ContextGitRemote), helpers.Error(err))
+		}
+		contextMetadata.RepoContextMetadata = repoContext
 	}
-}
-
-func metadataGitURL(input string) (*reporthandlingv2.RepoContextMetadata, error) {
-	context := &reporthandlingv2.RepoContextMetadata{}
-	gitParser, err := giturl.NewGitAPI(input)
-	if err != nil {
-		return context, fmt.Errorf("%w", err)
-	}
-	if gitParser.GetBranchName() == "" {
-		gitParser.SetDefaultBranchName()
-	}
-	context.Provider = gitParser.GetProvider()
-	context.Repo = gitParser.GetRepoName()
-	context.Owner = gitParser.GetOwnerName()
-	context.Branch = gitParser.GetBranchName()
-	context.RemoteURL = gitParser.GetURL().String()
-
-	commit, err := gitParser.GetLatestCommit()
-	if err != nil {
-		return context, fmt.Errorf("%w", err)
-	}
-
-	context.LastCommit = reporthandling.LastCommit{
-		Hash:          commit.SHA,
-		Date:          commit.Committer.Date,
-		CommitterName: commit.Committer.Name,
-	}
-
-	return context, nil
 }
 
 func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, error) {
@@ -394,31 +414,31 @@ func metadataGitLocal(input string) (*reporthandlingv2.RepoContextMetadata, erro
 	if err != nil {
 		return nil, fmt.Errorf("%w", err)
 	}
-	context := &reporthandlingv2.RepoContextMetadata{}
+	repoContext := &reporthandlingv2.RepoContextMetadata{}
 	gitParserURL, err := giturl.NewGitURL(remoteURL)
 	if err != nil {
-		return context, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
 	}
 	gitParserURL.SetBranchName(gitParser.GetBranchName())
 
-	context.Provider = gitParserURL.GetProvider()
-	context.Repo = gitParserURL.GetRepoName()
-	context.Owner = gitParserURL.GetOwnerName()
-	context.Branch = gitParserURL.GetBranchName()
-	context.RemoteURL = gitParserURL.GetURL().String()
+	repoContext.Provider = gitParserURL.GetProvider()
+	repoContext.Repo = gitParserURL.GetRepoName()
+	repoContext.Owner = gitParserURL.GetOwnerName()
+	repoContext.Branch = gitParserURL.GetBranchName()
+	repoContext.RemoteURL = gitParserURL.GetURL().String()
 
 	commit, err := gitParser.GetLastCommit()
 	if err != nil {
-		return context, fmt.Errorf("%w", err)
+		return repoContext, fmt.Errorf("%w", err)
 	}
-	context.LastCommit = reporthandling.LastCommit{
+	repoContext.LastCommit = reporthandling.LastCommit{
 		Hash:          commit.SHA,
 		Date:          commit.Committer.Date,
 		CommitterName: commit.Committer.Name,
 	}
-	context.LocalRootPath, _ = gitParser.GetRootDir()
+	repoContext.LocalRootPath, _ = gitParser.GetRootDir()
 
-	return context, nil
+	return repoContext, nil
 }
 func getHostname() string {
 	if h, e := os.Hostname(); e == nil {
@@ -434,12 +454,4 @@ func getAbsPath(p string) string {
 		}
 	}
 	return p
-}
-
-// ScanningContextToScanningScope convert the context to the deprecated scope
-func ScanningContextToScanningScope(scanningContext ScanningContext) string {
-	if scanningContext == ContextCluster {
-		return ScopeCluster
-	}
-	return ScopeYAML
 }

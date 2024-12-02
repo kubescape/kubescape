@@ -4,68 +4,194 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/anchore/clio"
+	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/enescakir/emoji"
+	"github.com/jwalton/gchalk"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
-	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
+	"k8s.io/utils/strings/slices"
 )
 
 const (
-	prettyPrinterOutputFile = "report"
-	prettyPrinterOutputExt  = ".txt"
+	prettyPrinterOutputFile             = "report"
+	clusterScanningScopeInformationLink = "https://github.com/kubescape/regolibrary/tree/master#add-a-framework"
 )
 
 var _ printer.IPrinter = &PrettyPrinter{}
 
 type PrettyPrinter struct {
+	mainPrinter     prettyprinter.MainPrinter
 	writer          *os.File
 	formatVersion   string
 	viewType        cautils.ViewTypes
+	scanType        cautils.ScanTypes
+	clusterName     string
+	inputPatterns   []string
 	verboseMode     bool
 	printAttackTree bool
 }
 
-func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes) *PrettyPrinter {
-	return &PrettyPrinter{
+func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, viewType cautils.ViewTypes, scanType cautils.ScanTypes, inputPatterns []string, clusterName string) *PrettyPrinter {
+	prettyPrinter := &PrettyPrinter{
 		verboseMode:     verboseMode,
 		formatVersion:   formatVersion,
 		viewType:        viewType,
 		printAttackTree: attackTree,
+		scanType:        scanType,
+		inputPatterns:   inputPatterns,
+		clusterName:     clusterName,
+	}
+
+	return prettyPrinter
+}
+
+func (pp *PrettyPrinter) SetMainPrinter() {
+	switch pp.scanType {
+	case cautils.ScanTypeCluster:
+		pp.mainPrinter = prettyprinter.NewClusterPrinter(pp.writer)
+	case cautils.ScanTypeRepo:
+		pp.mainPrinter = prettyprinter.NewRepoPrinter(pp.writer, pp.inputPatterns)
+	case cautils.ScanTypeImage:
+		pp.mainPrinter = prettyprinter.NewImagePrinter(pp.writer, pp.verboseMode)
+	case cautils.ScanTypeWorkload:
+		pp.mainPrinter = prettyprinter.NewWorkloadPrinter(pp.writer)
+	default:
+		pp.mainPrinter = prettyprinter.NewSummaryPrinter(pp.writer, pp.verboseMode)
 	}
 }
 
-func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj) {
-	fmt.Fprintf(pp.writer, "\n"+getSeparator("^")+"\n")
+func (pp *PrettyPrinter) PrintNextSteps() {
+	pp.mainPrinter.PrintNextSteps()
+}
 
-	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+// convertToImageScanSummary takes a list of image scan data and converts it to a single image scan summary
+func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.ImageScanData) (*imageprinter.ImageScanSummary, error) {
+	imageScanSummary := imageprinter.ImageScanSummary{
+		CVEs:                  []imageprinter.CVE{},
+		PackageScores:         map[string]*imageprinter.PackageScore{},
+		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
+	}
 
-	switch pp.viewType {
-	case cautils.ControlViewType:
-		pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
-	case cautils.ResourceViewType:
-		if pp.verboseMode {
-			pp.resourceTable(opaSessionObj)
+	for i := range imageScanData {
+		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
+			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
 		}
+
+		presenterConfig := imageScanData[i].PresenterConfig
+		doc, err := models.NewDocument(clio.Identification{}, presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
+		if err != nil {
+			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
+			continue
+		}
+
+		CVEs := extractCVEs(doc.Matches)
+		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
+
+		setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
+
+		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
 	}
 
-	pp.printSummaryTable(&opaSessionObj.Report.SummaryDetails, sortedControlIDs)
+	return &imageScanSummary, nil
+}
 
-	// When writing to Stdout, we aren’t really writing to an output file,
-	// so no need to print that we are
-	if pp.writer.Name() != os.Stdout.Name() {
-		printer.LogOutputFile(pp.writer.Name())
+func (pp *PrettyPrinter) PrintImageScan(imageScanData []cautils.ImageScanData) {
+	imageScanSummary, err := pp.convertToImageScanSummary(imageScanData)
+	if err != nil {
+		logger.L().Error("failed to convert to image scan summary", helpers.Error(err))
+		return
+	}
+	pp.mainPrinter.PrintImageScanning(imageScanSummary)
+}
+
+func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj != nil {
+		// TODO line is currently printed on framework scan only
+		if isPrintSeparatorType(pp.scanType) {
+			fmt.Fprintf(pp.writer, "\n"+
+				gchalk.WithAnsi256(238).Bold(fmt.Sprintf("%s\n", strings.Repeat("─", 50)))+
+				"\n")
+		} else {
+			fmt.Fprintf(pp.writer, "\n")
+		}
+
+		sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls) // ListControls().All())
+
+		switch pp.viewType {
+		case cautils.ControlViewType:
+			pp.printResults(&opaSessionObj.Report.SummaryDetails.Controls, opaSessionObj.AllResources, sortedControlIDs)
+		case cautils.ResourceViewType:
+			if pp.verboseMode {
+				pp.resourceTable(opaSessionObj)
+			}
+		}
+
+		pp.printOverview(opaSessionObj, pp.verboseMode)
+
+		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs, opaSessionObj.TopWorkloadsByScore)
+
+		// When writing to Stdout, we aren’t really writing to an output file,
+		// so no need to print that we are
+		if pp.writer.Name() != os.Stdout.Name() {
+			printer.LogOutputFile(pp.writer.Name())
+		}
+
+		pp.printAttackTracks(opaSessionObj)
 	}
 
-	pp.printAttackTracks(opaSessionObj)
+	if len(imageScanData) > 0 {
+		pp.PrintImageScan(imageScanData)
+	}
+}
+
+func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, printExtraLine bool) {
+	if printExtraLine {
+		fmt.Fprintf(pp.writer, "\n")
+	}
+
+	pp.printHeader(opaSessionObj)
+}
+
+func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
+	if pp.scanType == cautils.ScanTypeCluster {
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName))
+		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
+	} else if pp.scanType == cautils.ScanTypeRepo {
+		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", ")))
+	} else if pp.scanType == cautils.ScanTypeWorkload {
+		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
+		ns := opaSessionObj.SingleResourceScan.GetNamespace()
+		rows := [][]string{}
+		if ns != "" {
+			rows = append(rows, []string{"Namespace", gchalk.WithBrightWhite().Bold(opaSessionObj.SingleResourceScan.GetNamespace())})
+		}
+		rows = append(rows, []string{"Kind", gchalk.WithBrightWhite().Bold(opaSessionObj.SingleResourceScan.GetKind())})
+		rows = append(rows, []string{"Name", gchalk.WithBrightWhite().Bold(opaSessionObj.SingleResourceScan.GetName())})
+
+		table := tablewriter.NewWriter(pp.writer)
+
+		table.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
+		table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+		table.AppendBulk(rows)
+
+		table.Render()
+
+		cautils.SimpleDisplay(pp.writer, "\nIn this overview, Kubescape shows you a summary of the security posture of a workload, including key controls that apply to its configuration, and the vulnerability status of the container image.\n\n\n")
+	}
+
 }
 
 func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
@@ -74,17 +200,13 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 	// otherwise
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
+		pp.SetMainPrinter()
 		return
 	}
 
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = prettyPrinterOutputFile
-	}
-	if filepath.Ext(strings.TrimSpace(outputFile)) != junitOutputExt {
-		outputFile = outputFile + prettyPrinterOutputExt
-	}
-
 	pp.writer = printer.GetWriter(ctx, outputFile)
+
+	pp.SetMainPrinter()
 }
 
 func (pp *PrettyPrinter) Score(score float32) {
@@ -113,6 +235,7 @@ func (prettyPrinter *PrettyPrinter) printSummary(controlName string, controlSumm
 	cautils.DescriptionDisplay(prettyPrinter.writer, "\n")
 
 }
+
 func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.IControlSummary) {
 	cautils.InfoDisplay(prettyPrinter.writer, "[control: %s - %s] ", controlSummary.GetName(), cautils.GetControlLink(controlSummary.GetID()))
 	statusDetails := ""
@@ -132,6 +255,7 @@ func (prettyPrinter *PrettyPrinter) printTitle(controlSummary reportsummary.ICon
 		cautils.WarningDisplay(prettyPrinter.writer, "Reason: %v\n", controlSummary.GetStatus().Info())
 	}
 }
+
 func (pp *PrettyPrinter) printResources(controlSummary reportsummary.IControlSummary, allResources map[string]workloadinterface.IMetadata) {
 
 	workloadsSummary := listResultSummary(controlSummary, allResources)
@@ -199,110 +323,20 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 	}
 	return relatedStr
 }
-func generateFooter(summaryDetails *reportsummary.SummaryDetails) []string {
-	// Severity | Control name | failed resources | all resources | % success
-	row := make([]string, _rowLen)
-	row[columnName] = "Resource Summary"
-	row[columnCounterFailed] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().Failed())
-	row[columnCounterAll] = fmt.Sprintf("%d", summaryDetails.NumberOfResources().All())
-	row[columnSeverity] = " "
-	row[columnComplianceScore] = fmt.Sprintf("%.2f%s", summaryDetails.ComplianceScore, "%")
 
-	return row
-}
-func (pp *PrettyPrinter) printSummaryTable(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-
-	if summaryDetails.NumberOfControls().All() == 0 {
-		fmt.Fprintf(pp.writer, "\nKubescape did not scan any of the resources, make sure you are scanning valid kubernetes manifests (Deployments, Pods, etc.)\n")
-		return
-	}
-	cautils.InfoTextDisplay(pp.writer, "\n"+controlCountersForSummary(summaryDetails.NumberOfControls())+"\n")
-	cautils.InfoTextDisplay(pp.writer, renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters())+"\n\n")
-
-	// cautils.InfoTextDisplay(prettyPrinter.writer, "\n"+"Severities: SOME OTHER"+"\n\n")
-
-	summaryTable := tablewriter.NewWriter(pp.writer)
-	summaryTable.SetAutoWrapText(false)
-	summaryTable.SetHeader(getControlTableHeaders())
-	summaryTable.SetHeaderLine(true)
-	summaryTable.SetColumnAlignment(getColumnsAlignments())
-
-	printAll := pp.verboseMode
-	if summaryDetails.NumberOfResources().Failed() == 0 {
-		// if there are no failed controls, print the resource table and detailed information
-		printAll = true
-	}
-
-	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
-			row := generateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfo, printAll)
-			if len(row) > 0 {
-				summaryTable.Append(row)
-			}
-		}
-	}
-
-	summaryTable.SetFooter(generateFooter(summaryDetails))
-
-	summaryTable.Render()
-
-	// When scanning controls the framework list will be empty
-	cautils.InfoTextDisplay(pp.writer, frameworksScoresToString(summaryDetails.ListFrameworks()))
-
-	pp.printInfo(infoToPrintInfo)
-
-}
-
-func (pp *PrettyPrinter) printInfo(infoToPrintInfo []infoStars) {
-	fmt.Println()
-	for i := range infoToPrintInfo {
-		cautils.InfoDisplay(pp.writer, fmt.Sprintf("%s %s\n", infoToPrintInfo[i].stars, infoToPrintInfo[i].info))
-	}
-}
-
-func frameworksScoresToString(frameworks []reportsummary.IFrameworkSummary) string {
-	if len(frameworks) == 1 {
-		if frameworks[0].GetName() != "" {
-			return fmt.Sprintf("FRAMEWORK %s\n", frameworks[0].GetName())
-			// cautils.InfoTextDisplay(prettyPrinter.writer, ))
-		}
-	} else if len(frameworks) > 1 {
-		p := "FRAMEWORKS: "
-		i := 0
-		for ; i < len(frameworks)-1; i++ {
-			p += fmt.Sprintf("%s (compliance: %.2f), ", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
-		}
-		p += fmt.Sprintf("%s (compliance: %.2f)\n", frameworks[i].GetName(), frameworks[i].GetComplianceScore())
-		return p
-	}
-	return ""
-}
-
-// renderSeverityCountersSummary renders the string that reports severity counters summary
-func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) string {
-	critical := counters.NumberOfCriticalSeverity()
-	high := counters.NumberOfHighSeverity()
-	medium := counters.NumberOfMediumSeverity()
-	low := counters.NumberOfLowSeverity()
-
-	return fmt.Sprintf(
-		"Failed Resources by Severity: Critical — %d, High — %d, Medium — %d, Low — %d",
-		critical, high, medium, low,
-	)
-}
-
-func controlCountersForSummary(counters reportsummary.ICounters) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, Passed: %d, Action Required: %d)", counters.All(), counters.Failed(), counters.Passed(), counters.Skipped())
-}
-
-func controlCountersForResource(l *helpersv1.AllLists) string {
-	return fmt.Sprintf("Controls: %d (Failed: %d, action required: %d)", l.Len(), l.Failed(), l.Skipped())
-}
 func getSeparator(sep string) string {
 	s := ""
 	for i := 0; i < 80; i++ {
 		s += sep
 	}
 	return s
+}
+
+func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
+	switch scanType {
+	case cautils.ScanTypeCluster, cautils.ScanTypeRepo, cautils.ScanTypeImage, cautils.ScanTypeWorkload:
+		return false
+	default:
+		return true
+	}
 }

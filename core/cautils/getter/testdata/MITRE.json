@@ -2,16 +2,15 @@
   "guid": "",
   "name": "MITRE",
   "attributes": {
-    "armoBuiltin": true
   },
   "creationTime": "",
   "description": "Testing MITRE for Kubernetes as suggested by microsoft in https://www.microsoft.com/security/blog/wp-content/uploads/2020/04/k8s-matrix.png",
+  "typeTags": ["compliance"],
   "controls": [
     {
       "guid": "",
       "name": "Access container service account",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -40,7 +39,6 @@
           "guid": "",
           "name": "access-container-service-account",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Credential Access::Access container service account, Lateral Movement::Container service account",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -114,7 +112,6 @@
           "guid": "",
           "name": "access-container-service-account-v1",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Credential Access::Access container service account, Lateral Movement::Container service account",
             "useFromKubescapeVersion": "v1.0.133"
           },
@@ -195,7 +192,6 @@
       "guid": "",
       "name": "Access Kubernetes dashboard",
       "attributes": {
-        "armoBuiltin": true,
         "controlTypeTags": [
           "compliance"
         ],
@@ -215,7 +211,6 @@
           "guid": "",
           "name": "rule-access-dashboard",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Lateral Movement::Access Kubernetes dashboard, Discovery::Access Kubernetes dashboard",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -249,7 +244,6 @@
           "guid": "",
           "name": "rule-access-dashboard-subject-v1",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Lateral Movement::Access Kubernetes dashboard, Discovery::Access Kubernetes dashboard",
             "resourcesAggregator": "subject-role-rolebinding",
             "useFromKubescapeVersion": "v1.0.133"
@@ -286,7 +280,6 @@
           "guid": "",
           "name": "rule-access-dashboard-wl-v1",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Lateral Movement::Access Kubernetes dashboard, Discovery::Access Kubernetes dashboard",
             "useFromKubescapeVersion": "v1.0.133"
           },
@@ -353,7 +346,6 @@
       "guid": "",
       "name": "Applications credentials in configuration files",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -388,7 +380,6 @@
           "guid": "",
           "name": "rule-credentials-in-env-var",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Credential access::Applications credentials in configuration files, Lateral Movement::Applications credentials in configuration files"
           },
           "creationTime": "",
@@ -460,7 +451,6 @@
           "guid": "",
           "name": "rule-credentials-configmap",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Credential access::Applications credentials in configuration files, Lateral Movement::Applications credentials in configuration files"
           },
           "creationTime": "",
@@ -519,7 +509,6 @@
       "guid": "",
       "name": "Cluster-admin binding",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -548,7 +537,6 @@
           "guid": "",
           "name": "rule-list-all-cluster-admins",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Privilege Escalation::Cluster-admin binding",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -588,7 +576,6 @@
           "guid": "",
           "name": "rule-list-all-cluster-admins-v1",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Privilege Escalation::Cluster-admin binding",
             "resourcesAggregator": "subject-role-rolebinding",
             "useFromKubescapeVersion": "v1.0.133"
@@ -632,7 +619,6 @@
       "guid": "",
       "name": "Cluster internal networking",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -660,7 +646,6 @@
           "guid": "",
           "name": "internal-networking",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Lateral Movement::Container internal networking, Discovery::Network mapping"
           },
           "creationTime": "",
@@ -709,7 +694,6 @@
       "guid": "",
       "name": "Exec into container",
       "attributes": {
-        "armoBuiltin": true,
         "controlTypeTags": [
           "compliance",
           "security-impact"
@@ -729,7 +713,6 @@
           "guid": "",
           "name": "exec-into-container",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Privilege Escalation::Exec into container",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -769,7 +752,6 @@
           "guid": "",
           "name": "exec-into-container-v1",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Privilege Escalation::Exec into container",
             "resourcesAggregator": "subject-role-rolebinding",
             "useFromKubescapeVersion": "v1.0.133"
@@ -813,7 +795,6 @@
       "guid": "",
       "name": "Exposed sensitive interfaces",
       "attributes": {
-        "armoBuiltin": true,
         "controlTypeTags": [
           "compliance"
         ],
@@ -831,7 +812,6 @@
           "guid": "",
           "name": "exposed-sensitive-interfaces",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Initial access::Exposed sensitive interfaces",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -903,7 +883,6 @@
           "guid": "",
           "name": "exposed-sensitive-interfaces-v1",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Initial access::Exposed sensitive interfaces",
             "useFromKubescapeVersion": "v1.0.133"
           },
@@ -982,7 +961,6 @@
       "guid": "",
       "name": "HostPath mount",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -1009,7 +987,6 @@
           "guid": "",
           "name": "alert-any-hostpath",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Privilege Escalation::hostPath mount"
           },
           "creationTime": "",
@@ -1073,7 +1050,6 @@
       "guid": "",
       "name": "Instance Metadata API",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -1102,7 +1078,6 @@
           "guid": "",
           "name": "instance-metadata-api-access",
           "attributes": {
-            "armoBuiltin": true,
             "hostSensorRule": "true",
             "m$K8sThreatMatrix": "Credential Access::Instance Metadata API"
           },
@@ -1142,7 +1117,6 @@
       "guid": "",
       "name": "Kubernetes CronJob",
       "attributes": {
-        "armoBuiltin": true,
         "controlTypeTags": [
           "compliance"
         ],
@@ -1160,7 +1134,6 @@
           "guid": "",
           "name": "rule-deny-cronjobs",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Persistence::Kubernetes Cronjob"
           },
           "creationTime": "",
@@ -1198,7 +1171,6 @@
       "guid": "",
       "name": "List Kubernetes secrets",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -1226,7 +1198,6 @@
           "guid": "",
           "name": "rule-can-list-get-secrets",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Discovery::Access the K8s API server",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -1266,7 +1237,6 @@
           "guid": "",
           "name": "rule-can-list-get-secrets-v1",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Discovery::Access the K8s API server",
             "resourcesAggregator": "subject-role-rolebinding",
             "useFromKubescapeVersion": "v1.0.133"
@@ -1310,7 +1280,6 @@
       "guid": "",
       "name": "Mount service principal",
       "attributes": {
-        "armoBuiltin": true,
         "controlTypeTags": [
           "compliance"
         ],
@@ -1328,7 +1297,6 @@
           "guid": "",
           "name": "alert-mount-potential-credentials-paths",
           "attributes": {
-            "armoBuiltin": true
           },
           "creationTime": "",
           "rule": "package armo_builtins\nimport future.keywords.if\n\n\ndeny[msga] {\n\tprovider := data.dataControlInputs.cloudProvider\n\tprovider != \"\"\n\tresources := input[_]\n\tvolumes_data := get_volumes(resources)\n    volumes := volumes_data[\"volumes\"]\n    volume := volumes[i]\n\tbeggining_of_path := volumes_data[\"beggining_of_path\"]\n    result := is_unsafe_paths(volume, beggining_of_path, provider,i)\n\n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"%v: %v has: %v as volume with potential credentials access.\", [resources.kind, resources.metadata.name, volume.name]),\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"alertScore\": 7,\n\t\t\"failedPaths\": [result],\n\t\t\"fixPaths\":[],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [resources]\n\t\t}\n\t}\t\n}\n\n\t\n# get_volume - get resource volumes paths for {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\nget_volumes(resources) := result {\n\tresources_kinds := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tresources_kinds[resources.kind]\n\tresult = {\"volumes\": resources.spec.template.spec.volumes, \"beggining_of_path\": \"spec.template.spec.\"}\n}\n\n# get_volume - get resource volumes paths for \"Pod\"\nget_volumes(resources) := result {\n\tresources.kind == \"Pod\"\n\tresult = {\"volumes\": resources.spec.volumes, \"beggining_of_path\": \"spec.\"}\n}\n\n# get_volume - get resource volumes paths for \"CronJob\"\nget_volumes(resources) := result {\n\tresources.kind == \"CronJob\"\n\tresult = {\"volumes\": resources.spec.jobTemplate.spec.template.spec.volumes, \"beggining_of_path\": \"spec.jobTemplate.spec.template.spec.\"}\n}\n\n\n# is_unsafe_paths - looking for cloud provider (eks/gke/aks) paths that have the potential of accessing credentials\nis_unsafe_paths(volume, beggining_of_path, provider, i) = result {\n\tunsafe :=  unsafe_paths(provider)\n\tunsafe[_] == fix_path(volume.hostPath.path)\n\tresult= sprintf(\"%vvolumes[%d].hostPath.path\", [beggining_of_path, i])\n}\n\n\n# fix_path - adding \"/\" at the end of the path if doesn't exist and if not a file path.\nfix_path(path) := result if {\n\n\t# filter file path\n    not regex.match(`[\\\\w-]+\\\\.`, path)\n\n\t# filter path that doesn't end with \"/\"\n    not endswith(path, \"/\")\n\n\t# adding \"/\" to the end of the path\n    result = sprintf(\"%v/\", [path])\n} else := path\n\n\n\n# eks unsafe paths\nunsafe_paths(x) := [\"/.aws/\", \n\t\t\t\t\t\"/.aws/config/\", \n\t\t\t\t\t\"/.aws/credentials/\"] if {x==\"eks\"}\n\n# aks unsafe paths\nunsafe_paths(x) := [\"/etc/\",\n\t\t\t\t\t\"/etc/kubernetes/\",\n\t\t\t\t\t\"/etc/kubernetes/azure.json\", \n\t\t\t\t\t\"/.azure/\",\n\t\t\t\t\t\"/.azure/credentials/\", \n\t\t\t\t\t\"/etc/kubernetes/azure.json\"] if {x==\"aks\"}\n\n# gke unsafe paths\nunsafe_paths(x) := [\"/.config/gcloud/\", \n\t\t\t\t\t\"/.config/\", \n\t\t\t\t\t\"/gcloud/\", \n\t\t\t\t\t\"/.config/gcloud/application_default_credentials.json\",\n\t\t\t\t\t\"/gcloud/application_default_credentials.json\"] if {x==\"gke\"}\n\n",
@@ -1395,7 +1363,6 @@
       "guid": "",
       "name": "Privileged container",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -1421,7 +1388,6 @@
           "guid": "",
           "name": "rule-privilege-escalation",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Privilege Escalation::privileged container",
             "mitre": "Privilege Escalation",
             "mitreCode": "TA0004"
@@ -1487,7 +1453,6 @@
       "guid": "",
       "name": "SSH server running inside container",
       "attributes": {
-        "armoBuiltin": true,
         "controlTypeTags": [
           "compliance"
         ],
@@ -1505,7 +1470,6 @@
           "guid": "",
           "name": "rule-can-ssh-to-pod",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Execution::SSH server running inside container",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -1565,7 +1529,6 @@
           "guid": "",
           "name": "rule-can-ssh-to-pod-v1",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Execution::SSH server running inside container",
             "useFromKubescapeVersion": "v1.0.133"
           },
@@ -1632,7 +1595,6 @@
       "guid": "",
       "name": "Writable hostPath mount",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -1663,7 +1625,6 @@
           "guid": "",
           "name": "alert-rw-hostpath",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Persistence::Writable hostPath mount, Lateral Movement::Writable volume mounts on the host"
           },
           "creationTime": "",
@@ -1734,7 +1695,6 @@
       "guid": "",
       "name": "Malicious admission controller (mutating)",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -1761,7 +1721,6 @@
           "guid": "",
           "name": "list-all-mutating-webhooks",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Persistence::Malicious admission controller"
           },
           "creationTime": "",
@@ -1799,7 +1758,6 @@
       "guid": "",
       "name": "Malicious admission controller (validating)",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -1827,7 +1785,6 @@
           "guid": "",
           "name": "list-all-validating-webhooks",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Credential Access::Malicious admission controller"
           },
           "creationTime": "",
@@ -1865,7 +1822,6 @@
       "guid": "",
       "name": "Delete Kubernetes events",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -1893,7 +1849,6 @@
           "guid": "",
           "name": "rule-can-delete-k8s-events",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Defense Evasion::Delete K8S events",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -1933,7 +1888,6 @@
           "guid": "",
           "name": "rule-can-delete-k8s-events-v1",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Defense Evasion::Delete K8S events",
             "resourcesAggregator": "subject-role-rolebinding",
             "useFromKubescapeVersion": "v1.0.133"
@@ -1977,7 +1931,6 @@
       "guid": "",
       "name": "CoreDNS poisoning",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -2003,7 +1956,6 @@
           "guid": "",
           "name": "rule-can-update-configmap",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Lateral Movement::CoreDNS poisoning",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -2044,7 +1996,6 @@
           "guid": "",
           "name": "rule-can-update-configmap-v1",
           "attributes": {
-            "armoBuiltin": true,
             "microsoftK8sThreatMatrix": "Lateral Movement::CoreDNS poisoning",
             "resourcesAggregator": "subject-role-rolebinding",
             "useFromKubescapeVersion": "v1.0.133"
@@ -2088,7 +2039,6 @@
       "guid": "",
       "name": "Data Destruction",
       "attributes": {
-        "armoBuiltin": true,
         "controlTypeTags": [
           "compliance"
         ],
@@ -2107,7 +2057,6 @@
           "guid": "",
           "name": "rule-excessive-delete-rights",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Impact::Data Destruction",
             "useUntilKubescapeVersion": "v1.0.133"
           },
@@ -2143,7 +2092,6 @@
           "guid": "",
           "name": "rule-excessive-delete-rights-v1",
           "attributes": {
-            "armoBuiltin": true,
             "m$K8sThreatMatrix": "Impact::Data Destruction",
             "resourcesAggregator": "subject-role-rolebinding",
             "useFromKubescapeVersion": "v1.0.133"
@@ -2187,7 +2135,6 @@
       "guid": "",
       "name": "CVE-2021-25741 - Using symlink for arbitrary host file system access.",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -2212,7 +2159,6 @@
           "guid": "",
           "name": "Symlink-Exchange-Can-Allow-Host-Filesystem-Access",
           "attributes": {
-            "armoBuiltin": true
           },
           "creationTime": "",
           "rule": "package armo_builtins\n\n\ndeny[msga] {\n\tnodes := input[_]\n\tcurrent_version := nodes.status.nodeInfo.kubeletVersion\n    is_vulnerable_version(current_version)\n    pod := input[_]\n    pod.kind == \"Pod\"\n\tcontainer := pod.spec.containers[i]\n\tbeggining_of_path := \"spec.\"\n    final_path := is_sub_path_container(container, i, beggining_of_path)\n\n\tmsga := {\n\t\t\t\"alertMessage\": sprintf(\"You may be vulnerable to CVE-2021-25741. You have a Node with a vulnerable version and the following container : %v in pod : %v with subPath/subPathExpr\", [container.name, pod.metadata.name]),\n\t\t\t\"alertObject\": {\"k8SApiObjects\": [pod]},\n\t\t\t\"failedPaths\": final_path,\n\t\t\t\"fixPaths\": [],\n\t\t}\n}\n\n\ndeny[msga] {\n\tnodes := input[_]\n\tcurrent_version := nodes.status.nodeInfo.kubeletVersion\n    is_vulnerable_version(current_version)\n    wl := input[_]\n\tspec_template_spec_patterns := {\"Deployment\",\"ReplicaSet\",\"DaemonSet\",\"StatefulSet\",\"Job\"}\n\tspec_template_spec_patterns[wl.kind]\n    container := wl.spec.template.spec.containers[i]\n\tbeggining_of_path := \"spec.template.spec.\"\n    final_path := is_sub_path_container(container, i, beggining_of_path)\n       \n\tmsga := {\n\t\"alertMessage\": sprintf(\"You may be vulnerable to CVE-2021-25741. You have a Node with a vulnerable version and the following container : %v in %v : %v with subPath/subPathExpr\", [container.name, wl.kind, wl.metadata.name]),\n\t\t\t\"alertObject\": {\"k8SApiObjects\": [wl]},\n\t\t\t\"failedPaths\": final_path,\n\t\t\t\"fixPaths\": [],\n\t\t}\n}\n\n\n\ndeny[msga] {\n\tnodes := input[_]\n\tcurrent_version := nodes.status.nodeInfo.kubeletVersion\n    is_vulnerable_version(current_version)\n    wl := input[_]\n\twl.kind == \"CronJob\"\n\tcontainer = wl.spec.jobTemplate.spec.template.spec.containers[i]\n\tbeggining_of_path := \"spec.jobTemplate.spec.template.spec.\"\n    final_path := is_sub_path_container(container, i, beggining_of_path)\n    \n\tmsga := {\n\t\t\"alertMessage\": sprintf(\"You may be vulnerable to CVE-2021-25741. You have a Node with a vulnerable version and the following container : %v in %v : %v with subPath/subPathExpr\", [container.name, wl.kind, wl.metadata.name]),\n\t\t\t\"alertObject\": {\"k8SApiObjects\": [wl]},\n\t\t\t\"failedPaths\": final_path,\n\t\t\t\"fixPaths\": [],\n\t\t}\n}\n\n\n\nis_sub_path_container(container, i, beggining_of_path) = path {\n\tpath = [sprintf(\"%vcontainers[%v].volumeMounts[%v].subPath\" ,[beggining_of_path, format_int(i, 10), format_int(j, 10)]) | volume_mount = container.volumeMounts[j];  volume_mount.subPath]\n\tcount(path) \u003e 0\n}\n\nis_vulnerable_version(version)  {\n    version \u003c=  \"v1.19.14\"\n}\n\nis_vulnerable_version(version){\n    version \u003e= \"v1.22.0\"\n    version \u003c= \"v1.22.1\"\n}\n\n\nis_vulnerable_version(version){\n    version \u003e= \"v1.21.0\"\n    version \u003c= \"v1.21.4\"\n}\n\n\nis_vulnerable_version(version){\n    version \u003e= \"v1.20.0\"\n    version \u003c= \"v1.20.9\"\n}\n\nis_vulnerable_version(version){\n\tversion == \"v1.20.10\"\n}\n\n\n",
@@ -2276,7 +2222,6 @@
       "guid": "",
       "name": "CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -2301,7 +2246,6 @@
           "guid": "",
           "name": "nginx-ingress-snippet-annotation-vulnerability",
           "attributes": {
-            "armoBuiltin": true
           },
           "creationTime": "",
           "rule": "package armo_builtins\n\ndeny[msga] {\n\tdeployment := input[_]\n\tdeployment.kind == \"Deployment\"\n\timage := deployment.spec.template.spec.containers[i].image\n\tis_nginx_image(image)\n\tis_tag_image(image)\n\n\t# Extracting version from image tag\n\ttag_version_match := regex.find_all_string_submatch_n(\"[0-9]+\\\\.[0-9]+\\\\.[0-9]+\", image, -1)[0][0]\n    image_version_str_arr := split(tag_version_match,\".\")\n\timage_version_arr := [to_number(image_version_str_arr[0]),to_number(image_version_str_arr[1]),to_number(image_version_str_arr[2])]\n\n\t# Check if vulnerable \n\tis_vulnerable(image_version_arr, deployment.metadata.namespace)\n\n\tpath := sprintf(\"spec.template.spec.containers[%v].image\", [format_int(i, 10)])\n\tmsga := {\n\t\t\t\"alertMessage\": sprintf(\"You may be vulnerable to CVE-2021-25742. Deployment %v\", [deployment.metadata.name]),\n\t\t\t\"failedPaths\": [path],\n\t\t\t\"fixPaths\":[],\n\t\t\t\"alertObject\": {\"k8SApiObjects\": [deployment]},\n\t\t}\n}\n\n\t\nis_nginx_image(image) {\n\tcontains(image, \"nginx-controller\")\n}\n\nis_nginx_image(image) {\n\tcontains(image, \"ingress-controller\")\n}\n\nis_nginx_image(image) {\n\tcontains(image, \"ingress-nginx\")\n}\n\nis_allow_snippet_annotation_on(namespace) {\n    configmaps := [configmap | configmap = input[_]; configmap.kind == \"ConfigMap\"]\n\tconfigmap_on_ingress_namespace := [configmap |  configmap= configmaps[_]; configmap.metadata.namespace == namespace]\n\tconfig_maps_with_snippet := [configmap |  configmap= configmap_on_ingress_namespace[_];  configmap.data[\"allow-snippet-annotations\"] == \"false\"]\n\tcount(config_maps_with_snippet) \u003c 1\n}\n\nis_vulnerable(image_version, namespace) {\n\timage_version[0] == 0\n\timage_version[1] \u003c 49\n\tis_allow_snippet_annotation_on(namespace)\n}\n\nis_vulnerable(image_version, namespace) {\n\timage_version[0] == 0\n\timage_version[1] == 49\n\timage_version[2] == 0\n\tis_allow_snippet_annotation_on(namespace)\n}\n\t\nis_vulnerable(image_version, namespace) {\n\timage_version[0] == 1\n\timage_version[1] == 0\n\timage_version[2] == 0\n\tis_allow_snippet_annotation_on(namespace)\n}\n\nis_tag_image(image) {\n    reg := \":[\\\\w][\\\\w.-]{0,127}(\\/)?\"\n    version := regex.find_all_string_submatch_n(reg, image, -1)\n    v := version[_]\n    img := v[_]\n    not endswith(img, \"/\")\n}",
@@ -2339,7 +2283,6 @@
       "guid": "",
       "name": "Audit logs enabled",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "container",
@@ -2363,7 +2306,6 @@
           "guid": "",
           "name": "k8s-audit-logs-enabled-cloud",
           "attributes": {
-            "armoBuiltin": true
           },
           "creationTime": "",
           "rule": "package armo_builtins\nimport data.cautils as cautils\n\n# Check if audit logs is enabled for GKE\ndeny[msga] {\n\tcluster_config := input[_]\n\tcluster_config.apiVersion == \"container.googleapis.com/v1\"\n\tcluster_config.kind == \"ClusterDescribe\"\n    cluster_config.metadata.provider == \"gke\"\t\n\tconfig := cluster_config.data\n\t\n    # If enableComponents is empty, it will disable logging\n    # https://cloud.google.com/kubernetes-engine/docs/reference/rest/v1beta1/projects.locations.clusters#loggingcomponentconfig\n\tis_logging_disabled(config)\n\tmsga := {\n\t\t\"alertMessage\": \"audit logs is disabled\",\n\t\t\"alertScore\": 3,\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": [],\n\t\t\"fixCommand\":\"\",\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [],\n            \"externalObjects\": cluster_config\n\t\t}\n\t}\n}\n\n\n# Check if audit logs is enabled for EKS\ndeny[msga] {\n\tcluster_config := input[_]\n\tcluster_config.apiVersion == \"eks.amazonaws.com/v1\"\n\tcluster_config.kind == \"ClusterDescribe\"\n    cluster_config.metadata.provider == \"eks\"\t\n\tconfig := cluster_config.data\n    # logSetup is an object representing the enabled or disabled Kubernetes control plane logs for your cluster.\n    # types - available cluster control plane log types\n    # https://docs.aws.amazon.com/eks/latest/APIReference/API_LogSetup.html\n    goodTypes := [logSetup  | logSetup =  config.Cluster.Logging.ClusterLogging[_];  isAuditLogs(logSetup)]\n    count(goodTypes) == 0\n\t\n\tmsga := {\n\t\t\"alertMessage\": \"audit logs is disabled\",\n\t\t\"alertScore\": 3,\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [],\n\t\t\"fixCommand\":\"aws eks update-cluster-config --region \u003cregion_code\u003e --name \u003ccluster_name\u003e --logging '{'clusterLogging':[{'types':['\u003capi/audit/authenticator\u003e'],'enabled':true}]}'\",\n\t\t\"fixPaths\": [],\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [],\n\t\t\t\"externalObjects\": cluster_config\n\t\t}\n\t}\n}\n\n\nis_logging_disabled(cluster_config) {\n\tnot cluster_config.logging_config.component_config.enable_components\n}\nis_logging_disabled(cluster_config) {\n\tcluster_config.logging_config.component_config.enable_components\n\tcount(cluster_config.logging_config.component_config.enable_components) == 0\n}\n\nisAuditLogs(logSetup) {\n    logSetup.Enabled == true\n    cautils.list_contains(logSetup.Types, \"api\")\n}\n\nisAuditLogs(logSetup) {\n    logSetup.Enabled == true\n    cautils.list_contains(logSetup.Types, \"audit\")\n}\n\nisAuditLogs(logSetup) {\n    logSetup.enabled == true\n    cautils.list_contains(logSetup.Types, \"authenticator\")\n}",
@@ -2405,7 +2347,6 @@
           "guid": "",
           "name": "k8s-audit-logs-enabled-native",
           "attributes": {
-            "armoBuiltin": true,
             "resourcesAggregator": "apiserver-pod",
             "useFromKubescapeVersion": "v1.0.133"
           },
@@ -2445,7 +2386,6 @@
       "guid": "",
       "name": "Secret/ETCD encryption enabled",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "node",
@@ -2469,7 +2409,6 @@
           "guid": "",
           "name": "secret-etcd-encryption-cloud",
           "attributes": {
-            "armoBuiltin": true
           },
           "creationTime": "",
           "rule": "package armo_builtins\n\n\n# Check if encryption in etcd in enabled for EKS\ndeny[msga] {\n\tcluster_config := input[_]\n\tcluster_config.apiVersion == \"eks.amazonaws.com/v1\"\n\tcluster_config.kind == \"ClusterDescribe\"\n    cluster_config.metadata.provider == \"eks\"\t\n\tconfig = cluster_config.data\n\n\tis_not_encrypted_EKS(config)\n    \n\t\n\tmsga := {\n\t\t\"alertMessage\": \"etcd/secret encryption is not enabled\",\n\t\t\"alertScore\": 3,\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": [],\n\t\t\"fixCommand\": \"eksctl utils enable-secrets-encryption --cluster=\u003ccluster\u003e --key-arn=arn:aws:kms:\u003ccluster_region\u003e:\u003caccount\u003e:key/\u003ckey\u003e --region=\u003cregion\u003e\",\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [],\n            \"externalObjects\": cluster_config\n\t\t}\n\t}\n}\n\n\n\n# Check if encryption in etcd in enabled for GKE\ndeny[msga] {\n\tcluster_config := input[_]\n\tcluster_config.apiVersion == \"container.googleapis.com/v1\"\n\tcluster_config.kind == \"ClusterDescribe\"\n    cluster_config.metadata.provider == \"gke\"\t\n\tconfig := cluster_config.data\n\n\tnot is_encrypted_GKE(config)\n    \n\t\n\tmsga := {\n\t\t\"alertMessage\": \"etcd/secret encryption is not enabled\",\n\t\t\"alertScore\": 3,\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [\"data.database_encryption.state\"],\n\t\t\"fixPaths\": [],\n\t\t\"fixCommand\": \"gcloud container clusters update \u003ccluster_name\u003e --region=\u003ccompute_region\u003e --database-encryption-key=\u003ckey_project_id\u003e/locations/\u003clocation\u003e/keyRings/\u003cring_name\u003e/cryptoKeys/\u003ckey_name\u003e --project=\u003ccluster_project_id\u003e\",\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [],\n            \"externalObjects\": cluster_config\n\t\t}\n\t}\n}\n\nis_encrypted_GKE(config) {\n\t config.database_encryption.state == \"1\"\n}\nis_encrypted_GKE(config) {\n\t config.database_encryption.state == \"ENCRYPTED\"\n}\n\nis_not_encrypted_EKS(cluster_config) {\n\tencryptionConfig := cluster_config.Cluster.EncryptionConfig[_]\n    goodResources := [resource  | resource =   cluster_config.Cluster.EncryptionConfig.Resources[_]; resource == \"secrets\"]\n\tcount(goodResources) == 0\n}\n\nis_not_encrypted_EKS(cluster_config) {\n\tcluster_config.Cluster.EncryptionConfig == null\n}\n\nis_not_encrypted_EKS(cluster_config) {\n\tcount(cluster_config.Cluster.EncryptionConfig) == 0\n}\n\nis_not_encrypted_EKS(cluster_config) {\n\tencryptionConfig := cluster_config.Cluster.EncryptionConfig[_]\n    count(encryptionConfig.Resources) == 0\n}",
@@ -2511,7 +2450,6 @@
           "guid": "",
           "name": "etcd-encryption-native",
           "attributes": {
-            "armoBuiltin": true,
             "resourcesAggregator": "apiserver-pod",
             "useFromKubescapeVersion": "v1.0.133"
           },
@@ -2551,7 +2489,6 @@
       "guid": "",
       "name": "PSP enabled",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -2575,7 +2512,6 @@
           "guid": "",
           "name": "psp-enabled-cloud",
           "attributes": {
-            "armoBuiltin": true
           },
           "creationTime": "",
           "rule": "package armo_builtins\n\n\n# Check if PSP is enabled for GKE\ndeny[msga] {\n\tcluster_config := input[_]\n\tcluster_config.apiVersion == \"container.googleapis.com/v1\"\n\tcluster_config.kind == \"ClusterDescribe\"\n    cluster_config.metadata.provider == \"gke\"\t\n\tconfig := cluster_config.data\n    not config.pod_security_policy_config.enabled == true\n\n\t\n\tmsga := {\n\t\t\"alertMessage\": \"pod security policy configuration is not enabled\",\n\t\t\"alertScore\": 3,\n\t\t\"packagename\": \"armo_builtins\",\n\t\t\"failedPaths\": [],\n\t\t\"fixPaths\": [],\n\t\t\"fixCommand\": \"gcloud beta container clusters update \u003ccluster_name\u003e --enable-pod-security-policy\",\n\t\t\"alertObject\": {\n\t\t\t\"k8sApiObjects\": [],\n            \"externalObjects\": cluster_config\n\t\t}\n\t}\n}",
@@ -2617,7 +2553,6 @@
           "guid": "",
           "name": "psp-enabled-native",
           "attributes": {
-            "armoBuiltin": true,
             "resourcesAggregator": "apiserver-pod",
             "useFromKubescapeVersion": "v1.0.133"
           },
@@ -2657,7 +2592,6 @@
       "guid": "",
       "name": "Disable anonymous access to Kubelet service",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "kubeapi",
@@ -2681,7 +2615,6 @@
           "guid": "",
           "name": "anonymous-requests-to-kubelet-service-updated",
           "attributes": {
-            "armoBuiltin": true,
             "hostSensorRule": "true"
           },
           "creationTime": "",
@@ -2726,7 +2659,6 @@
       "guid": "",
       "name": "Enforce Kubelet client TLS authentication",
       "attributes": {
-        "armoBuiltin": true,
         "attackTracks": [
           {
             "attackTrack": "node",
@@ -2750,7 +2682,6 @@
           "guid": "",
           "name": "enforce-kubelet-client-tls-authentication",
           "attributes": {
-            "armoBuiltin": true,
             "hostSensorRule": "true"
           },
           "creationTime": "",

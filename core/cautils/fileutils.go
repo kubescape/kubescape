@@ -11,8 +11,9 @@ import (
 
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"golang.org/x/exp/slices"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 
@@ -31,8 +32,13 @@ const (
 	JSON_FILE_FORMAT FileFormat = "json"
 )
 
+type Chart struct {
+	Name string
+	Path string
+}
+
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]string) {
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]Chart) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -42,7 +48,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 	}
 
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
-	sourceToChartName := map[string]string{}
+	sourceToChart := make(map[string]Chart, 0)
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
@@ -51,21 +57,23 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
-
 			chartName := chart.GetName()
 			for k, v := range wls {
 				sourceToWorkloads[k] = v
-				sourceToChartName[k] = chartName
+				sourceToChart[k] = Chart{
+					Name: chartName,
+					Path: helmDir,
+				}
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChartName
+	return sourceToWorkloads, sourceToChart
 }
 
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
 // generate yaml files using "Kustomize" & renders a map of workloads from those yaml files
 func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, string) {
-	isKustomizeDirectory := IsKustomizeDirectory(basePath)
+	isKustomizeDirectory := isKustomizeDirectory(basePath)
 	isKustomizeFile := IsKustomizeFile(basePath)
 	if ok := isKustomizeDirectory || isKustomizeFile; !ok {
 		return nil, ""
@@ -85,7 +93,7 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 	}
 
 	wls, errs := kustomizeDirectory.GetWorkloads(newBasePath)
-	kustomizeDirectoryName := GetKustomizeDirectoryName(newBasePath)
+	kustomizeDirectoryName := getKustomizeDirectoryName(newBasePath)
 
 	if len(errs) > 0 {
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
@@ -128,7 +136,7 @@ func loadFiles(rootPath string, filePaths []string) (map[string][]workloadinterf
 			continue // empty file
 		}
 
-		w, e := ReadFile(f, GetFileFormat(filePaths[i]))
+		w, e := ReadFile(f, getFileFormat(filePaths[i]))
 		if e != nil {
 			logger.L().Debug("failed to read file", helpers.String("file", filePaths[i]), helpers.Error(e))
 		}
@@ -187,14 +195,14 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 		pattern = filepath.Join(o, pattern)
 	}
 
-	if !onlyDirectories && IsFile(pattern) {
+	if !onlyDirectories && isFile(pattern) {
 		paths = append(paths, pattern)
 		return paths, errs
 	}
 
 	root, shouldMatch := filepath.Split(pattern)
 
-	if IsDir(pattern) {
+	if isDir(pattern) {
 		root = pattern
 		shouldMatch = "*"
 	}
@@ -284,11 +292,11 @@ func convertYamlToJson(i interface{}) interface{} {
 }
 
 func IsYaml(filePath string) bool {
-	return StringInSlice(YAML_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", "")) != ValueNotFound
+	return slices.Contains(YAML_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
 }
 
 func IsJson(filePath string) bool {
-	return StringInSlice(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", "")) != ValueNotFound
+	return slices.Contains(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
 }
 
 func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
@@ -315,7 +323,7 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 		if info.IsDir() {
 			return nil
 		}
-		fileFormat := GetFileFormat(path)
+		fileFormat := getFileFormat(path)
 		if !(fileFormat == JSON_FILE_FORMAT || fileFormat == YAML_FILE_FORMAT) {
 			return nil
 		}
@@ -333,8 +341,8 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 	return matches, nil
 }
 
-// IsFile checks if a given path is a file
-func IsFile(name string) bool {
+// isFile checks if a given path is a file
+func isFile(name string) bool {
 	if fi, err := os.Stat(name); err == nil {
 		if fi.Mode().IsRegular() {
 			return true
@@ -343,8 +351,8 @@ func IsFile(name string) bool {
 	return false
 }
 
-// IsDir checks if a given path is a directory
-func IsDir(name string) bool {
+// isDir checks if a given path is a directory
+func isDir(name string) bool {
 	if info, err := os.Stat(name); err == nil {
 		if info.IsDir() {
 			return true
@@ -353,7 +361,7 @@ func IsDir(name string) bool {
 	return false
 }
 
-func GetFileFormat(filePath string) FileFormat {
+func getFileFormat(filePath string) FileFormat {
 	if IsYaml(filePath) {
 		return YAML_FILE_FORMAT
 	} else if IsJson(filePath) {

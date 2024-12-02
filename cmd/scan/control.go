@@ -9,10 +9,11 @@ import (
 
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/meta"
 
 	"github.com/spf13/cobra"
 )
@@ -91,6 +92,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			}
 
 			scanInfo.FrameworkScan = false
+			scanInfo.SetScanType(cautils.ScanTypeControl)
 
 			if err := validateControlScanInfo(scanInfo); err != nil {
 				return err
@@ -128,7 +130,7 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
 	}
 
-	if err := validateSeverity(severity); severity != "" && err != nil {
+	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
 	return nil

@@ -6,9 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 var INDENT = "   "
@@ -24,7 +24,8 @@ const (
 )
 
 type IPrinter interface {
-	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj)
+	PrintNextSteps()
+	ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData)
 	SetWriter(ctx context.Context, outputFile string)
 	Score(score float32)
 }
@@ -47,7 +48,7 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 }
 
 func LogOutputFile(fileName string) {
-	if fileName != os.Stdout.Name() && fileName != os.Stderr.Name() {
+	if fileName != os.Stdout.Name() && fileName != os.Stderr.Name() && fileName != os.DevNull {
 		logger.L().Success("Scan results saved", helpers.String("filename", fileName))
 	}
 }

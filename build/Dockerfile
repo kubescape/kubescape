@@ -1,51 +1,22 @@
-FROM golang:1.20-alpine as builder
+FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS builder
 
-ARG image_version
-ARG client
-
-ENV RELEASE=$image_version
-ENV CLIENT=$client
-
-ENV GO111MODULE=
-
-ENV CGO_ENABLED=1
-
-# Install required python/pip
-ENV PYTHONUNBUFFERED=1
-RUN apk add --update --no-cache python3 gcc make git libc-dev binutils-gold cmake pkgconfig && ln -sf python3 /usr/bin/python
-RUN python3 -m ensurepip
-RUN pip3 install --no-cache --upgrade pip setuptools
-
+ENV GO111MODULE=on CGO_ENABLED=0
 WORKDIR /work
-ADD . .
+ARG TARGETOS TARGETARCH
 
-# install libgit2
-RUN rm -rf git2go && make libgit2
+RUN --mount=target=. \
+    --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg \
+    cd httphandler && GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/ksserver .
 
-# build kubescape server
-WORKDIR /work/httphandler
-RUN python build.py
-RUN ls -ltr build/
+FROM gcr.io/distroless/static-debian12:nonroot
 
-# build kubescape cmd
-WORKDIR /work
-RUN python build.py
+USER nonroot
+WORKDIR /home/nonroot/
 
-RUN /work/build/kubescape-ubuntu-latest download artifacts -o /work/artifacts
+COPY --from=builder /out/ksserver /usr/bin/ksserver
 
-FROM alpine:3.16.2
-
-RUN addgroup -S ks && adduser -S ks -G ks
-
-COPY --from=builder /work/artifacts/ /home/ks/.kubescape
-
-RUN chown -R ks:ks /home/ks/.kubescape
-
-USER ks
-
-WORKDIR /home/ks
-
-COPY --from=builder /work/httphandler/build/kubescape-ubuntu-latest /usr/bin/ksserver
-COPY --from=builder /work/build/kubescape-ubuntu-latest /usr/bin/kubescape
+ARG image_version client
+ENV RELEASE=$image_version CLIENT=$client
 
 ENTRYPOINT ["ksserver"]

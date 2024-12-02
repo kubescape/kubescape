@@ -4,14 +4,13 @@ import (
 	"context"
 	"crypto"
 	"fmt"
-
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/sigstore/cosign/cmd/cosign/cli/options"
-	"github.com/sigstore/cosign/cmd/cosign/cli/sign"
-	"github.com/sigstore/cosign/pkg/cosign"
-	"github.com/sigstore/cosign/pkg/cosign/pkcs11key"
-	ociremote "github.com/sigstore/cosign/pkg/oci/remote"
-	sigs "github.com/sigstore/cosign/pkg/signature"
+	"github.com/sigstore/cosign/v2/cmd/cosign/cli/options"
+	"github.com/sigstore/cosign/v2/cmd/cosign/cli/sign"
+	"github.com/sigstore/cosign/v2/pkg/cosign"
+	"github.com/sigstore/cosign/v2/pkg/cosign/pkcs11key"
+	ociremote "github.com/sigstore/cosign/v2/pkg/oci/remote"
+	sigs "github.com/sigstore/cosign/v2/pkg/signature"
 )
 
 // VerifyCommand verifies a signature on a supplied container image
@@ -65,6 +64,11 @@ func verify(img string, key string) (bool, error) {
 	ref, err = sign.GetAttachedImageRef(ref, attachment, ociremoteOpts...)
 	if err != nil {
 		return false, fmt.Errorf("resolving attachment type %s for image %s: %w", attachment, img, err)
+	}
+
+	co.RekorPubKeys, err = cosign.GetRekorPubs(context.Background())
+	if err != nil {
+		return false, fmt.Errorf("getting Rekor public keys: %w", err)
 	}
 
 	_, _, err = cosign.VerifyImageSignatures(context.TODO(), ref, co)

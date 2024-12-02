@@ -5,13 +5,19 @@ package update
 //          kubescape update
 
 import (
+	"context"
 	"fmt"
-	"os/exec"
-	"runtime"
+	"strings"
 
-	logger "github.com/kubescape/go-logger"
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/backend/pkg/versioncheck"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/spf13/cobra"
+)
+
+const (
+	installationLink string = "https://kubescape.io/docs/install-cli/"
 )
 
 var updateCmdExamples = fmt.Sprintf(`
@@ -22,42 +28,27 @@ var updateCmdExamples = fmt.Sprintf(`
 func GetUpdateCmd() *cobra.Command {
 	updateCmd := &cobra.Command{
 		Use:     "update",
-		Short:   "Update your version",
+		Short:   "Update to latest release version",
 		Long:    ``,
 		Example: updateCmdExamples,
 		RunE: func(_ *cobra.Command, args []string) error {
+			ctx := context.TODO()
+			v := versioncheck.NewVersionCheckHandler()
+			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "update", nil)
+			v.CheckLatestVersion(ctx, versionCheckRequest)
+
 			//Checking the user's version of kubescape to the latest release
-			if cautils.BuildNumber == cautils.LatestReleaseVersion {
+			if versioncheck.BuildNumber == "" || strings.Contains(versioncheck.BuildNumber, "rc") {
+				//your version is unknown
+				fmt.Printf("Nothing to update: you are running the development version\n")
+			} else if versioncheck.LatestReleaseVersion == "" {
+				//Failed to check for updates
+				logger.L().Info("Failed to check for updates")
+			} else if versioncheck.BuildNumber == versioncheck.LatestReleaseVersion {
 				//your version == latest version
-				logger.L().Info(("You are in the latest version"))
+				logger.L().Info("Nothing to update: you are running the latest version", helpers.String("Version", versioncheck.BuildNumber))
 			} else {
-
-				const OSTYPE string = runtime.GOOS
-				var ShellToUse string
-				switch OSTYPE {
-
-				case "windows":
-					cautils.StartSpinner()
-					//run the installation command for windows
-					ShellToUse = "powershell"
-					_, err := exec.Command(ShellToUse, "-c", "iwr -useb https://raw.githubusercontent.com/kubescape/kubescape/master/install.ps1 | iex").Output()
-
-					if err != nil {
-						logger.L().Fatal(err.Error())
-					}
-					cautils.StopSpinner()
-
-				default:
-					ShellToUse = "bash"
-					cautils.StartSpinner()
-					//run the installation command for linux and macOS
-					_, err := exec.Command(ShellToUse, "-c", "curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash").Output()
-					if err != nil {
-						logger.L().Fatal(err.Error())
-					}
-
-					cautils.StopSpinner()
-				}
+				fmt.Printf("Version %s is available. Please refer to our installation documentation: %s\n", versioncheck.LatestReleaseVersion, installationLink)
 			}
 			return nil
 		},

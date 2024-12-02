@@ -5,11 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
@@ -19,6 +19,17 @@ type ResourcesPrioritizationHandler struct {
 	resourceToAttackTracks map[string]v1alpha1.IAttackTrack
 	attackTracks           []v1alpha1.IAttackTrack
 	buildResourcesMap      bool
+}
+
+var supportedKinds = []string{
+	"Deployment",
+	"Pod",
+	"ReplicaSet",
+	"Node",
+	"DaemonSet",
+	"StatefulSet",
+	"Job",
+	"CronJob",
 }
 
 func NewResourcesPrioritizationHandler(ctx context.Context, attackTracksGetter getter.IAttackTracksGetter, buildResourcesMap bool) (*ResourcesPrioritizationHandler, error) {
@@ -147,16 +158,10 @@ func (handler *ResourcesPrioritizationHandler) PrioritizeResources(sessionObj *c
 
 func (handler *ResourcesPrioritizationHandler) isSupportedKind(obj workloadinterface.IMetadata) bool {
 	if obj != nil {
-		switch obj.GetKind() {
-		case "Deployment",
-			"Pod",
-			"ReplicaSet",
-			"Node",
-			"DaemonSet",
-			"StatefulSet",
-			"Job",
-			"CronJob":
-			return true
+		for _, kind := range supportedKinds {
+			if obj.GetKind() == kind {
+				return true
+			}
 		}
 	}
 	return false

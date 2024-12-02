@@ -4,7 +4,7 @@ $BASE_DIR=$env:USERPROFILE + "\.kubescape"
 $packageName = "/kubescape.exe"
 
 # Get latest release url
-$config = Invoke-WebRequest "https://api.github.com/repos/kubescape/kubescape/releases/latest" | ConvertFrom-Json
+$config = Invoke-WebRequest -UseBasicParsing "https://api.github.com/repos/kubescape/kubescape/releases/latest" | ConvertFrom-Json
 $url = $config.html_url.Replace("/tag/","/download/")
 $fullUrl = $url + $packageName
 
@@ -36,4 +36,4 @@ if (-not $currentPath.Contains($BASE_DIR)) {
 
 Write-Host "Finished Installation.`n" -ForegroundColor Green
 kubescape version
-Write-Host "`nUsage: $ kubescape scan --enable-host-scan" -ForegroundColor Magenta
+Write-Host "`nUsage: $ kubescape scan" -ForegroundColor Magenta

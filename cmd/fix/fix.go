@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/meta"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 
 	"github.com/spf13/cobra"
 )
@@ -27,7 +27,7 @@ func GetFixCmd(ks meta.IKubescape) *cobra.Command {
 
 	fixCmd := &cobra.Command{
 		Use:     "fix <report output file>",
-		Short:   "Fix misconfiguration in files",
+		Short:   "Propose a fix for the misconfiguration found when scanning Kubernetes manifest files",
 		Long:    ``,
 		Example: fixCmdExamples,
 		RunE: func(cmd *cobra.Command, args []string) error {

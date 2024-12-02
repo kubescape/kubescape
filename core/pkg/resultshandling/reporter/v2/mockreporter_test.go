@@ -16,9 +16,9 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/reporter"
-	"github.com/kubescape/kubescape/v2/internal/testutils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v3/internal/testutils"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -67,18 +67,11 @@ func TestReportMockGetURL(t *testing.T) {
 
 			var reportMock reporter.IReport = NewReportMock(tc.fields.query, tc.fields.message)
 
-			t.Run("mock reports should support GetURL", func(t *testing.T) {
-				got := reportMock.GetURL()
-				require.Equalf(t, tc.want, got,
-					"ReportMock.GetURL() = %v, want %v", got, tc.want,
-				)
-			})
-
-			t.Run("mock reports should support DisplayReportURL", func(t *testing.T) {
+			t.Run("mock reports should support DisplayMessage", func(t *testing.T) {
 				capture, clean := captureStderr(t)
 				defer clean()
 
-				reportMock.DisplayReportURL()
+				reportMock.DisplayMessage()
 				require.NoError(t, capture.Close())
 
 				buf, err := os.ReadFile(capture.Name())
@@ -146,8 +139,8 @@ type (
 	// mockableOPASessionObj reproduces OPASessionObj with concrete types instead of interfaces.
 	// It may be unmarshaled from a JSON fixture.
 	mockableOPASessionObj struct {
-		K8SResources          *cautils.K8SResources
-		ArmoResource          *cautils.KSResources
+		K8SResources          cautils.K8SResources
+		ExternalResources     cautils.ExternalResources
 		AllPolicies           *cautils.Policies
 		AllResources          map[string]*workloadinterface.Workload
 		ResourcesResult       map[string]resourcesresults.Result
@@ -193,9 +186,9 @@ func mockOPASessionObj(t testing.TB) *cautils.OPASessionObj {
 	)
 
 	o := cautils.OPASessionObj{
-		K8SResources: v.K8SResources,
-		ArmoResource: v.ArmoResource,
-		AllPolicies:  v.AllPolicies,
+		K8SResources:      v.K8SResources,
+		ExternalResources: v.ExternalResources,
+		AllPolicies:       v.AllPolicies,
 		//AllResources          map[string]*workloadinterface.Workload        // all scanned resources, map[<resource ID>]<resource>
 		ResourcesResult:      v.ResourcesResult,
 		ResourceSource:       v.ResourceSource,

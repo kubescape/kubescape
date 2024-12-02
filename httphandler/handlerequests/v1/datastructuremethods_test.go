@@ -3,9 +3,10 @@ package v1
 import (
 	"testing"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
+	objectsenvelopes "github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -21,7 +22,7 @@ func TestToScanInfo(t *testing.T) {
 			TargetNames:        []string{"nsa", "mitre"},
 		}
 		s := ToScanInfo(req)
-		assert.Equal(t, "abc", s.Credentials.Account)
+		assert.Equal(t, "abc", s.AccountID)
 		assert.Equal(t, "v2", s.FormatVersion)
 		assert.Equal(t, "pdf", s.Format)
 		assert.Equal(t, 2, len(s.PolicyIdentifier))
@@ -57,6 +58,25 @@ func TestToScanInfo(t *testing.T) {
 		s := ToScanInfo(req)
 		assert.True(t, s.ScanAll)
 		assert.True(t, s.FrameworkScan)
+		assert.Nil(t, s.ScanObject)
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			ScanObject: &objectsenvelopes.ScanObject{
+				ApiVersion: "apps/v1",
+				Kind:       "Deployment",
+				Metadata: objectsenvelopes.ScanObjectMetadata{
+					Name:      "nginx",
+					Namespace: "ns1",
+				},
+			},
+		}
+		s := ToScanInfo(req)
+		assert.NotNil(t, s.ScanObject)
+		assert.Equal(t, "apps/v1", s.ScanObject.GetApiVersion())
+		assert.Equal(t, "Deployment", s.ScanObject.GetKind())
+		assert.Equal(t, "nginx", s.ScanObject.GetName())
+		assert.Equal(t, "ns1", s.ScanObject.GetNamespace())
 	}
 }
 
@@ -71,6 +91,17 @@ func TestSetTargetInScanInfo(t *testing.T) {
 		assert.True(t, scanInfo.FrameworkScan)
 		assert.True(t, scanInfo.ScanAll)
 		assert.Equal(t, 0, len(scanInfo.PolicyIdentifier))
+	}
+	{
+		req := &utilsmetav1.PostScanRequest{
+			TargetType:  apisv1.KindFramework,
+			TargetNames: []string{"", "security"},
+		}
+		scanInfo := &cautils.ScanInfo{}
+		setTargetInScanInfo(req, scanInfo)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.True(t, scanInfo.ScanAll)
+		assert.Equal(t, 1, len(scanInfo.PolicyIdentifier))
 	}
 	{
 		req := &utilsmetav1.PostScanRequest{

@@ -3,8 +3,8 @@ package config
 import (
 	"fmt"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/meta"
 	"github.com/spf13/cobra"
 )
 
@@ -23,14 +23,8 @@ var (
   # Set account id
   %[1]s config set accountID <account id>
 
-  # Set client id
-  %[1]s config set clientID <client id> 
-
-  # Set access key
-  %[1]s config set secretKey <access key>
-
-  # Set cloudAPIURL
-  %[1]s config set cloudAPIURL <cloud API URL>
+  # Set cloud report URL
+  %[1]s config set cloudReportURL <cloud Report URL>
 `, cautils.ExecName())
 )
 

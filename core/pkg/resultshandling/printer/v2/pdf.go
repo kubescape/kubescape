@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 
 	"github.com/johnfercher/maroto/pkg/color"
@@ -43,18 +44,27 @@ func NewPdfPrinter() *PdfPrinter {
 }
 
 func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
-	// Ensure to have an available output file, otherwise create it.
-	if strings.TrimSpace(outputFile) == "" {
-		outputFile = pdfOutputFile
-	}
-	// Ensure to have the right file extension.
-	if filepath.Ext(strings.TrimSpace(outputFile)) != pdfOutputExt {
-		outputFile = outputFile + pdfOutputExt
+	if outputFile != "" {
+		// Ensure to have an available output file, otherwise create it.
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = pdfOutputFile
+		}
+		// Ensure to have the right file extension.
+		if filepath.Ext(strings.TrimSpace(outputFile)) != pdfOutputExt {
+			outputFile = outputFile + pdfOutputExt
+		}
 	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 
 func (pp *PdfPrinter) Score(score float32) {
+	// Handle invalid scores
+	if score > 100 {
+		score = 100
+	} else if score < 0 {
+		score = 0
+	}
+
 	fmt.Fprintf(os.Stderr, "\nOverall compliance-score (100- Excellent, 0- All failed): %d\n", cautils.Float32ToInt(score))
 }
 func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, infoMap []infoStars) {
@@ -63,10 +73,10 @@ func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.Summ
 		if infoMap[i].info != "" {
 			m.Row(5, func() {
 				m.Col(12, func() {
-					m.Text(fmt.Sprintf("%v %v", infoMap[i].stars, infoMap[i].info),props.Text{
-						Style: consts.Bold,
-						Align:  consts.Left,
-						Size:   8,
+					m.Text(fmt.Sprintf("%v %v", infoMap[i].stars, infoMap[i].info), props.Text{
+						Style:       consts.Bold,
+						Align:       consts.Left,
+						Size:        8,
 						Extrapolate: false,
 						Color: color.Color{
 							Red:   0,
@@ -85,7 +95,16 @@ func (pp *PdfPrinter) printInfo(m pdf.Maroto, summaryDetails *reportsummary.Summ
 
 }
 
-func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj) {
+func (pp *PdfPrinter) PrintNextSteps() {
+
+}
+
+func (pp *PdfPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {
+	if opaSessionObj == nil {
+		logger.L().Ctx(ctx).Error("failed to print results, missing data")
+		return
+	}
+
 	sortedControlIDs := getSortedControlsIDs(opaSessionObj.Report.SummaryDetails.Controls)
 
 	infoToPrintInfo := mapInfoToPrintInfo(opaSessionObj.Report.SummaryDetails.Controls)
@@ -150,7 +169,7 @@ func (pp *PdfPrinter) printHeader(m pdf.Maroto) {
 // printFramework prints the PDF frameworks after the PDF header
 func (pp *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IFrameworkSummary) {
 	m.Row(10, func() {
-		m.Text(frameworksScoresToString(frameworks), props.Text{
+		m.Text(utils.FrameworksScoresToString(frameworks), props.Text{
 			Align:  consts.Center,
 			Size:   8,
 			Family: consts.Arial,
@@ -161,7 +180,7 @@ func (pp *PdfPrinter) printFramework(m pdf.Maroto, frameworks []reportsummary.IF
 
 // printTable creates the PDF table
 func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
-	headers := getControlTableHeaders()
+	headers := getControlTableHeaders(false)
 	infoToPrintInfoMap := mapInfoToPrintInfo(summaryDetails.Controls)
 	var controls [][]string
 	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
@@ -173,18 +192,21 @@ func (pp *PdfPrinter) printTable(m pdf.Maroto, summaryDetails *reportsummary.Sum
 		}
 	}
 
+	size := 6.0
+	gridSize := []uint{1, 1, 6, 1, 1, 2}
+
 	m.TableList(headers, controls, props.TableList{
 		HeaderProp: props.TableListContent{
 			Family:    consts.Arial,
 			Style:     consts.Bold,
-			Size:      6.0,
-			GridSizes: []uint{1, 5, 2, 2, 2},
+			Size:      size,
+			GridSizes: gridSize,
 		},
 		ContentProp: props.TableListContent{
 			Family:                          consts.Courier,
 			Style:                           consts.Normal,
-			Size:                            6.0,
-			GridSizes:                       []uint{1, 5, 2, 2, 2},
+			Size:                            size,
+			GridSizes:                       gridSize,
 			CellTextColorChangerColumnIndex: 0,
 			CellTextColorChangerFunc: func(cellValue string) color.Color {
 				if cellValue == "Critical" {

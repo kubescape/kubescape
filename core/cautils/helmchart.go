@@ -2,9 +2,10 @@ package cautils
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
@@ -44,7 +45,7 @@ func (hc *HelmChart) GetDefaultValues() map[string]interface{} {
 	return hc.chart.Values
 }
 
-// GetWorkloads renders chart template using the default values and returns a map of source file to its workloads
+// GetWorkloadsWithDefaultValues renders chart template using the default values and returns a map of source file to its workloads
 func (hc *HelmChart) GetWorkloadsWithDefaultValues() (map[string][]workloadinterface.IMetadata, []error) {
 	return hc.GetWorkloads(hc.GetDefaultValues())
 }
@@ -55,14 +56,13 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 	if err != nil {
 		return nil, []error{err}
 	}
-
 	sourceToFile, err := helmengine.Render(hc.chart, vals)
 	if err != nil {
 		return nil, []error{err}
 	}
 
-	workloads := make(map[string][]workloadinterface.IMetadata, 0)
-	errs := []error{}
+	workloads := make(map[string][]workloadinterface.IMetadata)
+	var errs []error
 
 	for path, renderedYaml := range sourceToFile {
 		if !IsYaml(strings.ToLower(path)) {
@@ -76,8 +76,7 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		if len(wls) == 0 {
 			continue
 		}
-		// separate base path and file name. We do not use the os.Separator because the paths returned from the helm engine are not OS specific (e.g. mychart/templates/myfile.yaml)
-		if firstPathSeparatorIndex := strings.Index(path, string("/")); firstPathSeparatorIndex != -1 {
+		if firstPathSeparatorIndex := strings.Index(path, "/"); firstPathSeparatorIndex != -1 {
 			absPath := filepath.Join(hc.path, path[firstPathSeparatorIndex:])
 
 			workloads[absPath] = []workloadinterface.IMetadata{}
@@ -89,4 +88,21 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		}
 	}
 	return workloads, errs
+}
+
+func (hc *HelmChart) AddCommentToTemplate() {
+	for index, t := range hc.chart.Templates {
+		if IsYaml(strings.ToLower(t.Name)) {
+			var newLines []string
+			originalTemplate := string(t.Data)
+			lines := strings.Split(originalTemplate, "\n")
+
+			for index, line := range lines {
+				comment := " #This is the " + strconv.Itoa(index+1) + " line"
+				newLines = append(newLines, line+comment)
+			}
+			templateWithComment := strings.Join(newLines, "\n")
+			hc.chart.Templates[index].Data = []byte(templateWithComment)
+		}
+	}
 }

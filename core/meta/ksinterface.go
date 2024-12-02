@@ -3,10 +3,10 @@ package meta
 import (
 	"context"
 
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/meta/cliinterfaces"
-	metav1 "github.com/kubescape/kubescape/v2/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v2/core/pkg/resultshandling"
+	"github.com/anchore/grype/grype/presenter/models"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 )
 
 type IKubescape interface {
@@ -16,18 +16,17 @@ type IKubescape interface {
 	List(ctx context.Context, listPolicies *metav1.ListPolicies) error     // TODO - return list response
 	Download(ctx context.Context, downloadInfo *metav1.DownloadInfo) error // TODO - return downloaded policies
 
-	// submit
-	Submit(ctx context.Context, submitInterfaces cliinterfaces.SubmitInterfaces) error            // TODO - func should receive object
-	SubmitExceptions(ctx context.Context, credentials *cautils.Credentials, excPath string) error // TODO - remove
-
 	// config
 	SetCachedConfig(setConfig *metav1.SetConfig) error
 	ViewCachedConfig(viewConfig *metav1.ViewConfig) error
 	DeleteCachedConfig(ctx context.Context, deleteConfig *metav1.DeleteConfig) error
 
-	// delete
-	DeleteExceptions(deleteexceptions *metav1.DeleteExceptions) error
-
 	// fix
 	Fix(ctx context.Context, fixInfo *metav1.FixInfo) error
+
+	// patch
+	Patch(ctx context.Context, patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error)
+
+	// scan image
+	ScanImage(ctx context.Context, imgScanInfo *metav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error)
 }

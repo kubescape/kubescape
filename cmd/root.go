@@ -4,22 +4,24 @@ import (
 	"fmt"
 	"strings"
 
-	logger "github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v2/cmd/completion"
-	"github.com/kubescape/kubescape/v2/cmd/config"
-	"github.com/kubescape/kubescape/v2/cmd/delete"
-	"github.com/kubescape/kubescape/v2/cmd/download"
-	"github.com/kubescape/kubescape/v2/cmd/fix"
-	"github.com/kubescape/kubescape/v2/cmd/list"
-	"github.com/kubescape/kubescape/v2/cmd/scan"
-	"github.com/kubescape/kubescape/v2/cmd/submit"
-	"github.com/kubescape/kubescape/v2/cmd/update"
-	"github.com/kubescape/kubescape/v2/cmd/version"
-	"github.com/kubescape/kubescape/v2/core/cautils"
-	"github.com/kubescape/kubescape/v2/core/cautils/getter"
-	"github.com/kubescape/kubescape/v2/core/core"
-	"github.com/kubescape/kubescape/v2/core/meta"
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/kubescape/v3/cmd/completion"
+	"github.com/kubescape/kubescape/v3/cmd/config"
+	"github.com/kubescape/kubescape/v3/cmd/download"
+	"github.com/kubescape/kubescape/v3/cmd/fix"
+	"github.com/kubescape/kubescape/v3/cmd/list"
+	"github.com/kubescape/kubescape/v3/cmd/operator"
+	"github.com/kubescape/kubescape/v3/cmd/patch"
+	"github.com/kubescape/kubescape/v3/cmd/scan"
+	"github.com/kubescape/kubescape/v3/cmd/update"
+	"github.com/kubescape/kubescape/v3/cmd/vap"
+	"github.com/kubescape/kubescape/v3/cmd/version"
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/core"
+	"github.com/kubescape/kubescape/v3/core/meta"
 
 	"github.com/spf13/cobra"
 )
@@ -27,11 +29,11 @@ import (
 var rootInfo cautils.RootInfo
 
 var ksExamples = fmt.Sprintf(`
-  # Scan command
+  # Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations
   %[1]s scan
 
-  # List supported frameworks
-  %[1]s list frameworks
+  # List supported controls
+  %[1]s list controls
 
   # Download artifacts (air-gapped environment support)
   %[1]s download artifacts
@@ -51,6 +53,13 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		Use:     "kubescape",
 		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://hub.armosec.io/docs",
 		Example: ksExamples,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
+			initLogger()
+			initLoggerLevel()
+			initEnvironment()
+			initCacheDir()
+		},
 	}
 
 	if cautils.IsKrewPlugin() {
@@ -63,9 +72,10 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 		rootCmd.SetUsageTemplate(newUsageTemplate)
 	}
 
-	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLsDep, "environment", "", envFlagUsage)
-	rootCmd.PersistentFlags().StringVar(&rootInfo.KSCloudBEURLs, "env", "", envFlagUsage)
-	rootCmd.PersistentFlags().MarkDeprecated("environment", "use 'env' instead")
+	rootCmd.PersistentFlags().StringVar(&rootInfo.DiscoveryServerURL, "server", "", "Backend discovery server URL")
+
+	rootCmd.PersistentFlags().MarkDeprecated("environment", "'environment' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
+	rootCmd.PersistentFlags().MarkDeprecated("env", "'env' is no longer supported, Use 'server' instead. Feel free to contact the Kubescape maintainers for more information.")
 	rootCmd.PersistentFlags().MarkHidden("environment")
 	rootCmd.PersistentFlags().MarkHidden("env")
 
@@ -74,22 +84,32 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
-	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable Color output for logging")
-	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable Color output for logging")
+	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable color output for logging")
+	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable color output for logging")
 
-	cobra.OnInitialize(initLogger, initLoggerLevel, initEnvironment, initCacheDir)
-
+	rootCmd.PersistentFlags().StringVarP(&rootInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	// Supported commands
 	rootCmd.AddCommand(scan.GetScanCommand(ks))
 	rootCmd.AddCommand(download.GetDownloadCmd(ks))
-	rootCmd.AddCommand(delete.GetDeleteCmd(ks))
 	rootCmd.AddCommand(list.GetListCmd(ks))
-	rootCmd.AddCommand(submit.GetSubmitCmd(ks))
 	rootCmd.AddCommand(completion.GetCompletionCmd())
 	rootCmd.AddCommand(version.GetVersionCmd())
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
 	rootCmd.AddCommand(update.GetUpdateCmd())
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
+	rootCmd.AddCommand(patch.GetPatchCmd(ks))
+	rootCmd.AddCommand(vap.GetVapHelperCmd())
+	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
+
+	// deprecated commands
+	rootCmd.AddCommand(&cobra.Command{
+		Use:        "submit",
+		Deprecated: "This command is deprecated. Contact Kubescape maintainers for more information.",
+	})
+	rootCmd.AddCommand(&cobra.Command{
+		Use:        "delete",
+		Deprecated: "This command is deprecated. Contact Kubescape maintainers for more information.",
+	})
 
 	return rootCmd
 }
