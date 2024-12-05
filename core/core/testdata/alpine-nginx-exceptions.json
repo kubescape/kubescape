@@ -1,0 +1,67 @@
+[
+    {   
+        "metadata": {
+                "name": "alpine-exceptions"
+        },
+        "kind": "VulnerabilitiesIgnorePolicy",
+        "targets": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "imageName": "alpine*"
+                }
+            }
+        ],
+        "severities": [
+            "medium"
+         ]
+    },
+    {   
+        "metadata": {
+                "name": "nginx-exceptions"
+        },
+        "kind": "VulnerabilitiesIgnorePolicy",
+        "targets": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "imageName": "nginx*"
+                }
+            }
+        ],
+        "vulnerabilities": [
+            "invalid-cve",
+            "CVE-2023-45853",
+            "CVE-2023-49463"
+        ],
+        "severities": [
+            "critical",
+            "medium",
+            "invalid-severity"
+         ]
+    },
+    {   
+        "metadata": {
+                "name": "applicable-only-to-quay-registry-images"
+        },
+        "kind": "VulnerabilitiesIgnorePolicy",
+        "targets": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "registry": "quay.io"
+                }
+            }
+        ],
+        "vulnerabilities": [
+            "CVE-2023-42365"
+        ],
+        "severities": [
+            "critical",
+            "medium",
+            "high",
+            "low"
+         ]
+    }   
+]
+
