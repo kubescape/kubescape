@@ -277,7 +277,7 @@ func getAttackTracksGetter(ctx context.Context, attackTracks, accountID string, 
 	return downloadReleasedPolicy
 }
 
-// getUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
+// GetUIPrinter returns a printer that will be used to print to the program’s UI (terminal)
 func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName string) printer.IPrinter {
 	var p printer.IPrinter
 	if helpers.ToLevel(logger.L().GetLevel()) >= helpers.WarningLevel {
