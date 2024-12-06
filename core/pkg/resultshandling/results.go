@@ -54,7 +54,7 @@ func (rh *ResultsHandler) SetData(data *cautils.OPASessionObj) {
 	rh.ScanData = data
 }
 
-// GetPrinter returns all printers
+// GetPrinters returns all printers
 func (rh *ResultsHandler) GetPrinters() []printer.IPrinter {
 	return rh.PrinterObjs
 }
