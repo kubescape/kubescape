@@ -22,21 +22,9 @@
 
 _Comprehensive Kubernetes Security from Development to Runtime_
 
-Kubescape is an open-source Kubernetes security platform that provides comprehensive security coverage from left to right across the entire development and deployment lifecycle. It offers hardening, posture management, and runtime security capabilities to ensure robust protection for Kubernetes environments.
+Kubescape is an open-source Kubernetes security platform that provides comprehensive security coverage, from left to right across the entire development and deployment lifecycle. It offers hardening, posture management, and runtime security capabilities to ensure robust protection for Kubernetes environments. It saves Kubernetes users and admins precious time, effort, and resources.
 
-**Key features of Kubescape include**
-
-* **Shift-left security**: Kubescape enables developers to scan for misconfigurations as early as the manifest file submission stage, promoting a proactive approach to security.  
-* **IDE and CI/CD integration**: The tool integrates seamlessly with popular IDEs like VSCode and Lens, as well as CI/CD platforms such as GitHub and GitLab, allowing for security checks throughout the development process.
-* **Cluster scanning**: Kubescape can scan active Kubernetes clusters for vulnerabilities, misconfigurations, and security issues
-* **Multiple framework support**: Kubescape can test against various security frameworks, including NSA, MITRE, SOC2, and more.
-* **YAML and Helm chart validation**: The tool checks YAML files and Helm charts for correct configuration according to the frameworks above, without requiring an active cluster.
-* **Kubernetes hardening**: Kubescape ensures proactive identification and rapid remediation of misconfigurations and vulnerabilities through manual, recurring, or event-triggered scans.
-* **Runtime security**: Kubescape extends its protection to the runtime environment, providing continuous monitoring and threat detection for deployed applications.
-* **Compliance management**: The tool aids in maintaining compliance with recognized frameworks and standards, simplifying the process of meeting regulatory requirements.
-* **Multi-cloud support**: Kubescape offers frictionless security across various cloud providers and Kubernetes distributions.
-
-By providing this comprehensive security coverage from development to production, Kubescape enables organizations to implement a robust security posture throughout their Kubernetes deployment, addressing potential vulnerabilities and threats at every stage of the application lifecycle.
+Kubescape scans clusters, YAML files, and Helm charts. It detects misconfigurations according to multiple frameworks (including [NSA-CISA](https://www.armosec.io/blog/kubernetes-hardening-guidance-summary-by-armo/?utm_source=github&utm_medium=repository), [MITRE ATT&CK®](https://www.armosec.io/glossary/mitre-attck-framework/?utm_source=github&utm_medium=repository) and the [CIS Benchmark](https://www.armosec.io/blog/cis-kubernetes-benchmark-framework-scanning-tools-comparison/?utm_source=github&utm_medium=repository)).
 
 Kubescape was created by [ARMO](https://www.armosec.io/?utm_source=github&utm_medium=repository) and is a [Cloud Native Computing Foundation (CNCF) sandbox project](https://www.cncf.io/sandbox-projects/).
 
@@ -80,9 +68,10 @@ Kubescape can be used as a GitHub Action. This is a great way to integrate Kubes
 
 ## Under the hood
 
-Kubescape uses [Open Policy Agent](https://github.com/open-policy-agent/opa) to verify Kubernetes objects against [a library of posture controls](https://github.com/kubescape/regolibrary). Kubescape retrieves Kubernetes resources from the API server and runs a set of [Rego snippets](https://www.openpolicyagent.org/docs/latest/policy-language/) developed by [ARMO](https://www.armosec.io?utm_source=github&utm_medium=repository).
-
-Container image scanning is powered by [Grype](https://github.com/anchore/grype) and image patching uses [Copacetic](https://github.com/project-copacetic/copacetic).
+Kubescape uses [Open Policy Agent](https://github.com/open-policy-agent/opa) to verify Kubernetes objects against [a library of posture controls](https://github.com/kubescape/regolibrary).
+For image scanning, it uses [Grype](https://github.com/anchore/grype).  
+For image patching, it uses [Copacetic](https://github.com/project-copacetic/copacetic).
+For eBPF, it uses [Inspektor Gadget](https://github.com/inspektor-gadget)
 
 By default, CLI scan results are printed in a console-friendly manner, but they can be:
 
@@ -96,28 +85,20 @@ By default, CLI scan results are printed in a console-friendly manner, but they 
 
 ## Community
 
-We welcome user feedback and ideas for improvement.
+Kubescape is an open source project. We welcome your feedback and ideas for improvement. We are part of the CNCF community and are evolving Kubescape in sync with the security needs of Kubernetes users. To learn more about where Kubescape is heading, please check out our [ROADMAP](https://github.com/kubescape/project-governance/blob/main/ROADMAP.md).
 
-Kubescape users and developers meet on the CNCF Slack. [Join it](https://slack.cncf.io/) and find us in [#kubescape](https://cloud-native.slack.com/archives/C04EY3ZF9GE) or [#kubescape-dev](https://cloud-native.slack.com/archives/C04GY6H082K).
+If you feel inspired to contribute to Kubescape, check out our [CONTRIBUTING](https://github.com/kubescape/project-governance/blob/main/CONTRIBUTING.md) file to learn how. You can find the issues we are working on (triage to development) on the [Kubescaping board](https://github.com/orgs/kubescape/projects/4/views/1)
 
-We hold [community meetings](https://zoom.us/j/95174063585) on Zoom, every second Tuesday, at 15:00 CET. ([See that in your local time zone](https://time.is/compare/1500_in_CET). 
-
-* Meetings are announced in [#kubescape-dev](https://cloud-native.slack.com/archives/C04GY6H082K) on Slack (including any cancellations).
-* [The agenda and notes are in a public Google doc](https://docs.google.com/document/d/1X_eyhPzJvb4ascVQ2e0jN87LAvq7lTuXT5d4gQxi8us/edit?tab=t.0).
-* [Recordings are posted to YouTube](https://www.youtube.com/@kubescape).
+* Feel free to pick a task from the [board](https://github.com/orgs/kubescape/projects/4) or suggest a feature of your own.
+* Open an issue on the board. We aim to respond to all issues within 48 hours.
+* [Join the CNCF Slack](https://slack.cncf.io/) and then our [users](https://cloud-native.slack.com/archives/C04EY3ZF9GE) or [developers](https://cloud-native.slack.com/archives/C04GY6H082K) channel.
 
 The Kubescape project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
 
-### Adopters
+For more information about the Kubescape community, please visit [COMMUNITY](https://github.com/kubescape/project-governance/blob/main/COMMUNITY.md).
 
-See [here](ADOPTERS.md) for a list of reference adopters.
 
-### Contributions
-
-Thanks to all our contributors!  Check out our [CONTRIBUTING](CONTRIBUTING.md) file to learn how to join them.
-
-* Feel free to pick a task from the [issues](https://github.com/kubescape/kubescape/issues?q=is%3Aissue+is%3Aopen+label%3A%22open+for+contribution%22), [roadmap](docs/roadmap.md) or suggest a feature of your own.
-* [Open an issue](https://github.com/kubescape/kubescape/issues/new/choose): we aim to respond to all issues within 48 hours.
+We would like to take this opportunity to thank all our contibutors to date.
 
 <br>
 
