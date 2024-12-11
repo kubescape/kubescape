@@ -4,15 +4,19 @@ header:
   last-reviewed: '2023-10-12'
   expiration-date: '2024-10-12T01:00:00.000Z'
   project-url: https://github.com/kubescape/kubescape/
-  project-release: '1.0.0'
+  project-release: 1.0.0
 project-lifecycle:
   status: active
   bug-fixes-only: false
   core-maintainers:
-  - github:slashben
+  - github:amirmalka
+  - github:amitschendel
+  - github:bezbran
   - github:craigbox
-  - github:matthyx
   - github:dwertent
+  - github:matthyx
+  - github:rotemamsa
+  - github:slashben
 contribution-policy:
   accepts-pull-requests: true
   accepts-automated-pull-requests: false
