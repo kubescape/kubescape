@@ -377,12 +377,13 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
 
 		// list resources
+		lenBefore := len(resourceList)
 		if err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			return clientResource.List(ctx, opts)
 		}).EachListItem(context.Background(), listOptions, func(obj runtime.Object) error {
 			uObject := obj.(*unstructured.Unstructured)
 			if k8sinterface.IsTypeWorkload(uObject.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObject.Object)) {
-				logger.L().Debug("Skipping resource with parent", helpers.String("kind", uObject.GetKind()), helpers.String("name", uObject.GetName()))
+				logger.L().Debug("Skipping resource with parent", helpers.String("resource", resource.String()), helpers.String("namespace", uObject.GetNamespace()), helpers.String("name", uObject.GetName()))
 				return nil
 			}
 			resourceList = append(resourceList, *obj.(*unstructured.Unstructured))
@@ -390,7 +391,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 		}); err != nil {
 			return nil, fmt.Errorf("failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w", resource, listOptions.LabelSelector, listOptions.FieldSelector, err)
 		}
-
+		logger.L().Debug("Pulled resources", helpers.String("resource", resource.String()), helpers.String("fieldSelector", listOptions.FieldSelector), helpers.String("labelSelector", listOptions.LabelSelector), helpers.Int("count", len(resourceList)-lenBefore))
 	}
 
 	return resourceList, nil
