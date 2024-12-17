@@ -39,40 +39,65 @@ import (
 // 	assert.IsType(t, Service{}, svc)
 // }
 
-// func TestScan(t *testing.T) {
-// 	tt := []struct {
-// 		name  string
-// 		image string
-// 		creds RegistryCredentials
-// 	}{
-// 		{
-// 			name:  "Valid image name produces a non-nil scan result",
-// 			image: "nginx",
-// 		},
-// 		{
-// 			name:  "Scanning a valid image with provided credentials should produce a non-nil scan result",
-// 			image: "nginx",
-// 			creds: RegistryCredentials{
-// 				Username: "test",
-// 				Password: "password",
-// 			},
-// 		},
-// 	}
+func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
+	dbCfg, _ := NewDefaultDBConfig()
+	svc := NewScanService(dbCfg)
+	creds := RegistryCredentials{}
 
-// 	for _, tc := range tt {
-// 		t.Run(tc.name, func(t *testing.T) {
-// 			ctx := context.Background()
-// 			dbCfg, _ := NewDefaultDBConfig()
-// 			svc := NewScanService(dbCfg)
-// 			creds := RegistryCredentials{}
+	tests := []struct {
+		name                    string
+		image                   string
+		vulnerabilityExceptions []string
+		ignoredLen              int
+		severityExceptions      []string
+		filteredLen             int
+	}{
+		{
+			name:               "alpine:3.19.1 without medium vulnerabilities",
+			image:              "alpine:3.19.1",
+			ignoredLen:         0,
+			severityExceptions: []string{"MEDIUM"},
+			filteredLen:        0,
+		},
+		{
+			name:                    "nginx:1.25.3",
+			image:                   "nginx:1.25.3",
+			vulnerabilityExceptions: []string{"CVE-2023-6879", "CVE-2023-45853", "CVE-2023-49463"},
+			ignoredLen:              3,
+			severityExceptions:      []string{"HIGH", "MEDIUM"},
+			filteredLen:             86,
+		},
+		{
+			name:                    "nginx:1.25.3 with invalid vulnerability and severity exceptions",
+			image:                   "nginx:1.25.3",
+			vulnerabilityExceptions: []string{"invalid-cve", "CVE-2023-45853", "CVE-2023-49463"},
+			ignoredLen:              2,
+			severityExceptions:      []string{"CRITICAL", "MEDIUM", "invalid-severity"},
+			filteredLen:             100,
+		},
+	}
 
-// 			scanResults, err := svc.Scan(ctx, tc.image, creds)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store, status, dbCloser, err := NewVulnerabilityDB(svc.dbCfg, true)
+			assert.NoError(t, validateDBLoad(err, status))
 
-// 			assert.NoError(t, err)
-// 			assert.IsType(t, &models.PresenterConfig{}, scanResults)
-// 		})
-// 	}
-// }
+			packages, pkgContext, _, err := pkg.Provide(tc.image, getProviderConfig(creds))
+			assert.NoError(t, err)
+
+			if dbCloser != nil {
+				defer dbCloser.Close()
+			}
+
+			remainingMatches, ignoredMatches, err := getIgnoredMatches(tc.vulnerabilityExceptions, store, packages, pkgContext)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.ignoredLen, len(ignoredMatches))
+
+			filteredMatches := filterMatchesBasedOnSeverity(tc.severityExceptions, *remainingMatches, store)
+			assert.Equal(t, tc.filteredLen, filteredMatches.Count())
+		})
+	}
+}
 
 // fakeMetaProvider is a test double that fakes an actual MetadataProvider
 type fakeMetaProvider struct {
