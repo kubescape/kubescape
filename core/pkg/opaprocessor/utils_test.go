@@ -3,13 +3,12 @@ package opaprocessor
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestConvertFrameworksToPolicies(t *testing.T) {

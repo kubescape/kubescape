@@ -7,26 +7,24 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	"github.com/kubescape/kubescape/v3/core/metrics"
-	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
-	"github.com/kubescape/opa-utils/objectsenvelopes"
-	"github.com/kubescape/opa-utils/reporthandling/apis"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/pager"
-
 	"github.com/kubescape/k8s-interface/cloudsupport"
 	cloudapis "github.com/kubescape/k8s-interface/cloudsupport/apis"
 	cloudv1 "github.com/kubescape/k8s-interface/cloudsupport/v1"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/metrics"
+	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	k8slabels "k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
+	"k8s.io/client-go/tools/pager"
 )
 
 type cloudResourceGetter func(string, string) (workloadinterface.IMetadata, error)

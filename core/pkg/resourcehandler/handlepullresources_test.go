@@ -8,7 +8,6 @@ import (
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"

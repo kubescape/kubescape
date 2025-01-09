@@ -3,20 +3,17 @@ package v1
 import (
 	"context"
 	"fmt"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"net/http"
 	_ "net/http/pprof"
 
+	"github.com/google/uuid"
+	"github.com/gorilla/schema"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/gorilla/schema"
-
-	"github.com/kubescape/go-logger"
-
-	"github.com/google/uuid"
 )
 
 var OutputDir = "./results/"

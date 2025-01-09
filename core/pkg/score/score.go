@@ -3,9 +3,8 @@ package score
 import (
 	"fmt"
 
-	"github.com/kubescape/opa-utils/score"
-
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/score"
 )
 
 /*

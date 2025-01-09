@@ -11,7 +11,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
-
 	"github.com/spf13/cobra"
 )
 

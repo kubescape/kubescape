@@ -3,8 +3,6 @@ package opaprocessor
 import (
 	"context"
 
-	corev1 "k8s.io/api/core/v1"
-
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -16,6 +14,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	resources "github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const clusterScope = "clusterScope"

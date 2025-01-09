@@ -6,14 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/kubescape/k8s-interface/workloadinterface"
-	"github.com/kubescape/opa-utils/reporthandling"
-	"k8s.io/apimachinery/pkg/version"
-
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"k8s.io/apimachinery/pkg/version"
 )
 
 // FileResourceHandler handle resources from files and URLs

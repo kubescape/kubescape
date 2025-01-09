@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/kubescape/backend/pkg/versioncheck"
 	giturl "github.com/kubescape/go-git-url"
 	"github.com/kubescape/go-logger"
@@ -18,8 +19,6 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-
-	"github.com/google/uuid"
 )
 
 type ScanningContext string

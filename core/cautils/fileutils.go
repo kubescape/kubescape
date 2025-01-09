@@ -9,14 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-	"golang.org/x/exp/slices"
-
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
-
+	"golang.org/x/exp/slices"
 	"gopkg.in/yaml.v3"
 )
 

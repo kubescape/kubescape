@@ -22,7 +22,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/kubescape/kubescape/v3/core/meta"
-
 	"github.com/spf13/cobra"
 )
 

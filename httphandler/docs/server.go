@@ -1,10 +1,9 @@
 package docs
 
 import (
+	_ "embed"
 	"fmt"
 	"net/http"
-
-	_ "embed"
 
 	"github.com/go-openapi/runtime/middleware"
 	"github.com/kubescape/go-logger"

@@ -8,13 +8,10 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/names"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -26,6 +23,7 @@ import (
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 )

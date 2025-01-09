@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
-
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )

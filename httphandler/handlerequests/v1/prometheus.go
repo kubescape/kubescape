@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -15,8 +16,6 @@ import (
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"go.opentelemetry.io/otel/trace"
-
-	"github.com/google/uuid"
 )
 
 // Metrics http listener for prometheus support

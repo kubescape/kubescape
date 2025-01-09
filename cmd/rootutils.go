@@ -14,7 +14,6 @@ import (
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-
 	"github.com/mattn/go-isatty"
 )
 

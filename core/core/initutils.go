@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -16,11 +17,8 @@ import (
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
-	"go.opentelemetry.io/otel"
-
-	"github.com/google/uuid"
-
 	"github.com/kubescape/rbac-utils/rbacscanner"
+	"go.opentelemetry.io/otel"
 )
 
 // getKubernetesApi

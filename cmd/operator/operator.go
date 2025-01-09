@@ -6,7 +6,6 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
-
 	"github.com/spf13/cobra"
 )
 
