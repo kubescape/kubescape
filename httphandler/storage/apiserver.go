@@ -203,13 +203,12 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 			result.Annotations = manifest.Annotations
 			result.Labels = manifest.Labels
 			result.Spec = mergeWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
-			manifest = *result
 			// try to send the updated workload configuration scan manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScan manifest in storage", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScan manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", manifest.Name))
 		} else {
 			logger.L().Debug("updated WorkloadConfigurationScan manifest in storage", helpers.String("name", manifest.Name))
@@ -306,13 +305,12 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 			result.Annotations = manifest.Annotations
 			result.Labels = manifest.Labels
 			result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
-			manifest = *result
 			// try to send the updated manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScanSummary manifest in storage", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScanSummary manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", manifest.Name))
 		} else {
 			logger.L().Debug("updated WorkloadConfigurationScanSummary manifest in storage",
