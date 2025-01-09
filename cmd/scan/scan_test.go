@@ -2,20 +2,18 @@ package scan
 
 import (
 	"context"
+	"os"
+	"reflect"
+	"testing"
 
 	"github.com/kubescape/go-logger/helpers"
-	"github.com/stretchr/testify/assert"
-
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-
-	"os"
-	"reflect"
-	"testing"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestExceedsSeverity(t *testing.T) {

@@ -4,13 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"k8s.io/utils/strings/slices"
-
-	"github.com/kubescape/k8s-interface/k8sinterface"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 )
 
 var (

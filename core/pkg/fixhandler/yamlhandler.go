@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
-
 	"gopkg.in/yaml.v3"
 )
 

@@ -9,11 +9,10 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
-	"sigs.k8s.io/yaml"
-
 	"github.com/spf13/cobra"
 	admissionv1 "k8s.io/api/admissionregistration/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/yaml"
 )
 
 var vapHelperCmdExamples = fmt.Sprintf(`

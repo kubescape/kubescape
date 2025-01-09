@@ -8,13 +8,10 @@ import (
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/names"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
-
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -26,6 +23,7 @@ import (
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 )
@@ -203,13 +201,12 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 			result.Annotations = manifest.Annotations
 			result.Labels = manifest.Labels
 			result.Spec = mergeWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
-			manifest = *result
 			// try to send the updated workload configuration scan manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScan manifest in storage", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScan manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", manifest.Name))
 		} else {
 			logger.L().Debug("updated WorkloadConfigurationScan manifest in storage", helpers.String("name", manifest.Name))
@@ -306,13 +303,12 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 			result.Annotations = manifest.Annotations
 			result.Labels = manifest.Labels
 			result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
-			manifest = *result
 			// try to send the updated manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
-			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScanSummary manifest in storage", helpers.Error(err),
+			logger.L().Ctx(ctx).Warning("failed to update WorkloadConfigurationScanSummary manifest in storage", helpers.Error(retryErr),
 				helpers.String("name", manifest.Name))
 		} else {
 			logger.L().Debug("updated WorkloadConfigurationScanSummary manifest in storage",

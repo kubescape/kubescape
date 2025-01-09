@@ -8,10 +8,8 @@ type SetConfig struct {
 	CloudReportURL string
 	CloudAPIURL    string
 }
-
 type ViewConfig struct {
 	Writer io.Writer
 }
-
 type DeleteConfig struct {
 }

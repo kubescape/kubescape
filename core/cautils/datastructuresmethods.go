@@ -1,12 +1,11 @@
 package cautils
 
 import (
-	"golang.org/x/mod/semver"
-
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"golang.org/x/mod/semver"
 )
 
 func NewPolicies() *Policies {

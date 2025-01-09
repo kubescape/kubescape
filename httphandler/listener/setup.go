@@ -6,14 +6,13 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/gorilla/mux"
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/metrics"
 	"github.com/kubescape/kubescape/v3/httphandler/docs"
 	handlerequestsv1 "github.com/kubescape/kubescape/v3/httphandler/handlerequests/v1"
-
-	"github.com/gorilla/mux"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
 )
 
@@ -43,7 +42,7 @@ func SetupHTTPListener() error {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
 	}
 
-	httpHandler := handlerequestsv1.NewHTTPHandler()
+	httpHandler := handlerequestsv1.NewHTTPHandler(getOffline())
 
 	// Setup the OpenAPI UI handler
 	openApiHandler := docs.NewOpenAPIUIHandler()
@@ -89,6 +88,10 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("failed to load key pair: %v", err)
 	}
 	return &pair, nil
+}
+
+func getOffline() bool {
+	return os.Getenv("KS_OFFLINE") == "true"
 }
 
 func getPort() string {

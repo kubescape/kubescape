@@ -3,11 +3,9 @@ package opaprocessor
 import (
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
-
-	"github.com/stretchr/testify/assert"
-
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestRemoveData(t *testing.T) {

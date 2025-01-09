@@ -13,9 +13,8 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
-	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-
 	"github.com/kubescape/go-logger"
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"

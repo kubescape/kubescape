@@ -9,22 +9,19 @@ import (
 
 	"github.com/anchore/grype/grype/presenter"
 	"github.com/anchore/grype/grype/presenter/models"
+	copaGrype "github.com/anubhav06/copa-grype/grype"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
-
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	ksmetav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
-
-	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
-	log "github.com/sirupsen/logrus"
-
-	copaGrype "github.com/anubhav06/copa-grype/grype"
 	"github.com/project-copacetic/copacetic/pkg/buildkit"
 	"github.com/project-copacetic/copacetic/pkg/pkgmgr"
 	"github.com/project-copacetic/copacetic/pkg/types/unversioned"
 	"github.com/project-copacetic/copacetic/pkg/utils"
+	log "github.com/sirupsen/logrus"
 )
 
 func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {

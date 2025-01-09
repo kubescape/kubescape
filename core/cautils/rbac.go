@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"time"
 
-	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
-
 	"github.com/google/uuid"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"github.com/kubescape/rbac-utils/rbacutils"
 )

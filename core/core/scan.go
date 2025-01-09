@@ -21,11 +21,10 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
+	"github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
 	"golang.org/x/exp/slices"
 	"k8s.io/client-go/kubernetes"
-
-	"github.com/kubescape/opa-utils/resources"
 )
 
 type componentInterfaces struct {

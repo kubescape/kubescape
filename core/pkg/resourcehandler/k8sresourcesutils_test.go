@@ -1,11 +1,11 @@
 package resourcehandler
 
 import (
+	"testing"
+
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/stretchr/testify/assert"
-
-	"testing"
 )
 
 func TestSsEmptyImgVulns(t *testing.T) {

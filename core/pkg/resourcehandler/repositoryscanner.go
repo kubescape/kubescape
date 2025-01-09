@@ -246,7 +246,6 @@ func (g *GitHubRepository) getFilesFromTree(filesExtensions []string) []string {
 	return urls
 }
 
-
 func (g *GitHubRepository) rowYamlUrl() string {
 	return fmt.Sprintf("https://raw.githubusercontent.com/%s/%s", joinOwnerNRepo(g.owner, g.repo), g.branch)
 }
