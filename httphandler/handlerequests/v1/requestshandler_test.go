@@ -35,7 +35,7 @@ func TestScan(t *testing.T) {
 	}
 
 	var (
-		h  = NewHTTPHandler()
+		h  = NewHTTPHandler(false)
 		rq = httptest.NewRequest("POST", "/scan?wait=true", testBody(t))
 		w  = httptest.NewRecorder()
 	)

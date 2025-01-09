@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"fmt"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"net/http"
 	_ "net/http/pprof"
 
@@ -30,12 +31,14 @@ type ScanResponse struct {
 }
 
 type HTTPHandler struct {
+	offline         bool
 	state           *serverState
 	scanRequestChan chan *scanRequestParams
 }
 
-func NewHTTPHandler() *HTTPHandler {
+func NewHTTPHandler(offline bool) *HTTPHandler {
 	handler := &HTTPHandler{
+		offline:         offline,
 		state:           newServerState(),
 		scanRequestChan: make(chan *scanRequestParams),
 	}
@@ -103,6 +106,11 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	scanRequestParams.ctx = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context()))
+
+	if handler.offline {
+		scanRequestParams.scanInfo.UseDefault = true
+		scanRequestParams.scanInfo.UseArtifactsFrom = getter.DefaultLocalStore
+	}
 
 	handler.state.setBusy(scanID)
 

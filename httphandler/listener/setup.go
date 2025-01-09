@@ -43,7 +43,7 @@ func SetupHTTPListener() error {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
 	}
 
-	httpHandler := handlerequestsv1.NewHTTPHandler()
+	httpHandler := handlerequestsv1.NewHTTPHandler(getOffline())
 
 	// Setup the OpenAPI UI handler
 	openApiHandler := docs.NewOpenAPIUIHandler()
@@ -89,6 +89,10 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 		return nil, fmt.Errorf("failed to load key pair: %v", err)
 	}
 	return &pair, nil
+}
+
+func getOffline() bool {
+	return os.Getenv("KS_OFFLINE") == "true"
 }
 
 func getPort() string {
