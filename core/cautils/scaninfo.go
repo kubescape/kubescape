@@ -134,6 +134,7 @@ type ScanInfo struct {
 	EnableRegoPrint       bool                         // true if print rego
 	ScanObject            *objectsenvelopes.ScanObject // identifies a single resource (k8s object) to be scanned
 	IsDeletedScanObject   bool                         // indicates whether the ScanObject is a deleted K8S resource
+	TriggeredByCLI        bool                         // indicates whether the scan was triggered by the CLI
 	ScanType              ScanTypes
 	ScanImages            bool
 	ChartPath             string

@@ -1173,8 +1173,8 @@ github.com/kubescape/go-logger v0.0.23 h1:5xh+Nm8eGImhFbtippRKLaFgsvlKE1ufvQhNM2
 github.com/kubescape/go-logger v0.0.23/go.mod h1:Ayg7g769c7sXVB+P3fkJmbsJpoEmMmaUf9jeo+XuC3U=
 github.com/kubescape/k8s-interface v0.0.174 h1:I62Dc0RZmdESJrZLhtv2ZDqvf35XQ8g19T1LQPLARsk=
 github.com/kubescape/k8s-interface v0.0.174/go.mod h1:PAJHWlN7v+VI3jx4v2xH2VqvbN+4bcy7paqXd5/tQ4I=
-github.com/kubescape/opa-utils v0.0.282 h1:cE6EwRqQOLPWYlr1/simUmlr3tWA8UMzhj1nn3y8Dqs=
-github.com/kubescape/opa-utils v0.0.282/go.mod h1:N/UnbZHpoiHQH7O50yadhIXZvVl0IVtTGBmePPrSQSg=
+github.com/kubescape/opa-utils v0.0.284 h1:I7wLXzRjeSCLrAVrktxr0/2cFHRQ3P9SCjh/nkJGrwo=
+github.com/kubescape/opa-utils v0.0.284/go.mod h1:N/UnbZHpoiHQH7O50yadhIXZvVl0IVtTGBmePPrSQSg=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G+oFazeYmZQKoPczLEflBQpwpHCU8DoLLyfj8=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/regolibrary/v2 v2.0.1 h1:7lKj171gslgTbbcmmGVHk34AZNqxForOXZIINoQfdzQ=

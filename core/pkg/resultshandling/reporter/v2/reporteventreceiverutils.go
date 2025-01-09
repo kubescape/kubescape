@@ -15,6 +15,7 @@ func (report *ReportEventReceiver) setSubReport(opaSessionObj *cautils.OPASessio
 		Attributes:            opaSessionObj.Report.Attributes,
 		ClusterAPIServerInfo:  opaSessionObj.Report.ClusterAPIServerInfo,
 		CustomerGUIDGenerated: report.accountIdGenerated,
+		TriggeredByCLI:        opaSessionObj.TriggeredByCLI,
 	}
 	if opaSessionObj.Metadata != nil {
 		reportObj.Metadata = *opaSessionObj.Metadata
