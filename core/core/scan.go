@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
@@ -23,7 +24,6 @@ import (
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/exp/slices"
 	"k8s.io/client-go/kubernetes"
 )
 

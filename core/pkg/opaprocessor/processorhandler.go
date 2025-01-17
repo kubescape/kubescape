@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -23,7 +24,6 @@ import (
 	"github.com/open-policy-agent/opa/storage"
 	opaprint "github.com/open-policy-agent/opa/topdown/print"
 	"go.opentelemetry.io/otel"
-	"golang.org/x/exp/slices"
 )
 
 const ScoreConfigPath = "/resources/config"

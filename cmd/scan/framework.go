@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -18,7 +19,6 @@ import (
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/spf13/cobra"
-	"golang.org/x/exp/slices"
 )
 
 var (
