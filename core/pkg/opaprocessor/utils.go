@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -14,7 +15,6 @@ import (
 	"github.com/open-policy-agent/opa/rego"
 	"github.com/open-policy-agent/opa/topdown/builtins"
 	"github.com/open-policy-agent/opa/types"
-	"golang.org/x/exp/slices"
 )
 
 // convertFrameworksToPolicies convert list of frameworks to list of policies
