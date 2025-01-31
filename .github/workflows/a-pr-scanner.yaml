@@ -39,7 +39,6 @@ jobs:
         name: Installing go
         with:
           go-version: ${{ inputs.GO_VERSION }}
-          cache: true
 
       - name: Test core pkg
         run: ${{ env.DOCKER_CMD }} go test -v ./...
@@ -93,8 +92,7 @@ jobs:
       - uses: actions/setup-go@v4
         name: Installing go
         with:
-          go-version: '1.21'
-          cache: true
+          go-version: "1.23"
       - name: Scanning - Forbidden Licenses (go-licenses)
         id: licenses-scan
         continue-on-error: true

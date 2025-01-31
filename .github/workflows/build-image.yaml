@@ -33,7 +33,7 @@ jobs:
       CGO_ENABLED: 0
       GO111MODULE: "on"
       BUILD_PLATFORM: ${{ inputs.PLATFORMS && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
-      GO_VERSION: "1.21"
+      GO_VERSION: "1.23"
       REQUIRED_TESTS: '[]'
       COSIGN: ${{ inputs.CO_SIGN }}
       HELM_E2E_TEST: false

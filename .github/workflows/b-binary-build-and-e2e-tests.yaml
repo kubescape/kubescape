@@ -163,7 +163,6 @@ jobs:
         name: Installing go
         with:
           go-version: ${{ inputs.GO_VERSION }}
-          cache: true
 
       - name: (debug) Step 3 - Check disk space before build
         run: df -h

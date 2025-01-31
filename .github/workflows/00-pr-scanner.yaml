@@ -65,7 +65,7 @@ jobs:
       COMPONENT_NAME: kubescape
       CGO_ENABLED: 0
       GO111MODULE: ""
-      GO_VERSION: "1.21"
+      GO_VERSION: "1.23"
       RELEASE: "latest"
       CLIENT: test
     secrets: inherit
