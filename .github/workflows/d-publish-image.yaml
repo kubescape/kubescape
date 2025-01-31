@@ -71,7 +71,7 @@ jobs:
           QUAY_PASSWORD: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
           QUAY_USERNAME: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
         run: docker login -u="${QUAY_USERNAME}" -p="${QUAY_PASSWORD}" quay.io
-      - uses: actions/download-artifact@9bc31d5ccc31df68ecc42ccf4149144866c47d8a # ratchet:actions/download-artifact@v3.0.2
+      - uses: actions/download-artifact@v4
         id: download-artifact
         with:
           path: .
@@ -106,4 +106,3 @@ jobs:
             # Verify the image
             echo "$COSIGN_PUBLIC_KEY" > cosign.pub
             cosign verify -key cosign.pub ${{ inputs.image_name }}:${{ inputs.image_tag }}
-
