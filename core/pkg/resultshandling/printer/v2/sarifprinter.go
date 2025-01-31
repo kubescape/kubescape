@@ -201,7 +201,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			}
 
 			// If the fileType is helm chart
-			if templateNodes, ok := opaSessionObj.TemplateMapping[resourceID]; ok {
+			if templateNodes, ok := opaSessionObj.TemplateMapping[resourceID]; ok && len(templateNodes.Nodes) > 0 {
 				mappingnodes = templateNodes.Nodes
 				helmChartFileType = true
 			}
