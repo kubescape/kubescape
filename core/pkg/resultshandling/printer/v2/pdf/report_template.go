@@ -193,14 +193,3 @@ func (t TableObject) GetContent(i int) core.Row {
 
 	return r
 }
-
-func (t TableObject) getSeverityColor(severity string) *props.Color {
-	if severity == "Critical" {
-		return &props.Color{Red: 255, Green: 0, Blue: 0}
-	} else if severity == "High" {
-		return &props.Color{Red: 0, Green: 0, Blue: 255}
-	} else if severity == "Medium" {
-		return &props.Color{Red: 252, Green: 186, Blue: 3}
-	}
-	return &props.BlackColor
-}
