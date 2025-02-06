@@ -10,16 +10,33 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
-const (
-	columnSeverity        = iota
-	columnRef             = iota
-	columnName            = iota
-	columnCounterFailed   = iota
-	columnCounterAll      = iota
-	columnComplianceScore = iota
-	_rowLen               = iota
-	controlNameMaxLength  = 70
-)
+const controlNameMaxLength = 70
+
+type TableRow struct {
+	ref             string
+	name            string
+	counterFailed   string
+	counterAll      string
+	severity        string
+	complianceScore string
+}
+
+// generateTableRow is responsible for generating the row that will be printed in the table
+func generateTableRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) *TableRow {
+	tableRow := &TableRow{
+		ref:             controlSummary.GetID(),
+		name:            controlSummary.GetName(),
+		counterFailed:   fmt.Sprintf("%d", controlSummary.NumberOfResources().Failed()),
+		counterAll:      fmt.Sprintf("%d", controlSummary.NumberOfResources().All()),
+		severity:        apis.ControlSeverityToString(controlSummary.GetScoreFactor()),
+		complianceScore: getComplianceScoreColumn(controlSummary, infoToPrintInfo),
+	}
+	if len(controlSummary.GetName()) > controlNameMaxLength {
+		tableRow.name = controlSummary.GetName()[:controlNameMaxLength] + "..."
+	}
+
+	return tableRow
+}
 
 func getInfoColumn(controlSummary reportsummary.IControlSummary, infoToPrintInfo []infoStars) string {
 	for i := range infoToPrintInfo {
@@ -34,7 +51,12 @@ func getComplianceScoreColumn(controlSummary reportsummary.IControlSummary, info
 	if controlSummary.GetStatus().IsSkipped() {
 		return fmt.Sprintf("%s %s", "Action Required", getInfoColumn(controlSummary, infoToPrintInfo))
 	}
-	return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
+	if compliance := cautils.Float32ToInt(controlSummary.GetComplianceScore()); compliance < 0 {
+		return "N/A"
+	} else {
+		return fmt.Sprintf("%d", cautils.Float32ToInt(controlSummary.GetComplianceScore())) + "%"
+	}
+
 }
 
 func getSeverityColumn(controlSummary reportsummary.IControlSummary) string {
