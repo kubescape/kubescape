@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/johnfercher/maroto/v2/pkg/props"
 	"github.com/kubescape/go-logger"
@@ -87,9 +88,8 @@ func (pp *PdfPrinter) generatePdf(summaryDetails *reportsummary.SummaryDetails) 
 	infoToPrintInfo := mapInfoToPrintInfo(summaryDetails.Controls)
 
 	template := pdf.NewReportTemplate()
-	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()))
-	err := template.GenerateTable(getSeverityColor,
-		pp.getTableObjects(summaryDetails, sortedControlIDs),
+	template.GenerateHeader(utils.FrameworksScoresToString(summaryDetails.ListFrameworks()), time.Now().Format(time.DateTime))
+	err := template.GenerateTable(pp.getTableObjects(summaryDetails, sortedControlIDs),
 		summaryDetails.NumberOfResources().Failed(), summaryDetails.NumberOfResources().All(), summaryDetails.ComplianceScore)
 
 	if err != nil {

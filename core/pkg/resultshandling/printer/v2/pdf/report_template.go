@@ -3,8 +3,8 @@ package pdf
 import (
 	_ "embed"
 	"fmt"
-	"time"
 
+	"github.com/johnfercher/go-tree/node"
 	"github.com/johnfercher/maroto/v2"
 	"github.com/johnfercher/maroto/v2/pkg/components/image"
 	"github.com/johnfercher/maroto/v2/pkg/components/line"
@@ -30,13 +30,13 @@ var (
 type getTextColorFunc func(severity string) *props.Color
 
 type Template struct {
-	Maroto core.Maroto
+	maroto core.Maroto
 }
 
 // New Report Template is responsible for creating an object that generates a report with the submitted data
 func NewReportTemplate() *Template {
 	return &Template{
-		Maroto: maroto.New(
+		maroto: maroto.New(
 			config.NewBuilder().
 				WithPageSize(pagesize.A4).
 				WithOrientation(orientation.Vertical).
@@ -49,7 +49,7 @@ func NewReportTemplate() *Template {
 
 // GetPdf is responsible for generating the pdf and returning the file's bytes
 func (t *Template) GetPdf() ([]byte, error) {
-	doc, err := t.Maroto.Generate()
+	doc, err := t.maroto.Generate()
 	if err != nil {
 		return nil, err
 	}
@@ -57,13 +57,13 @@ func (t *Template) GetPdf() ([]byte, error) {
 }
 
 // printHeader prints the Kubescape logo, report date and framework
-func (t *Template) GenerateHeader(scoreOfScannedFrameworks string) *Template {
-	t.Maroto.AddRow(40, image.NewFromBytesCol(12, kubescapeLogo, extension.Png, props.Rect{
+func (t *Template) GenerateHeader(scoreOfScannedFrameworks, reportDate string) *Template {
+	t.maroto.AddRow(40, image.NewFromBytesCol(12, kubescapeLogo, extension.Png, props.Rect{
 		Center:  true,
 		Percent: 100,
 	}))
 
-	t.Maroto.AddRow(6, text.NewCol(12, fmt.Sprintf("Report date: %s", time.Now().Format(time.DateTime)),
+	t.maroto.AddRow(6, text.NewCol(12, fmt.Sprintf("Report date: %s", reportDate),
 		props.Text{
 			Align:  align.Left,
 			Size:   6.0,
@@ -71,9 +71,9 @@ func (t *Template) GenerateHeader(scoreOfScannedFrameworks string) *Template {
 			Family: fontfamily.Arial,
 		}))
 
-	t.Maroto.AddAutoRow(line.NewCol(12, props.Line{Thickness: 0.3, SizePercent: 100}))
+	t.maroto.AddAutoRow(line.NewCol(12, props.Line{Thickness: 0.3, SizePercent: 100}))
 
-	t.Maroto.AddRow(10, text.NewCol(12, scoreOfScannedFrameworks, props.Text{
+	t.maroto.AddRow(10, text.NewCol(12, scoreOfScannedFrameworks, props.Text{
 		Align:  align.Center,
 		Size:   8,
 		Family: fontfamily.Arial,
@@ -84,13 +84,13 @@ func (t *Template) GenerateHeader(scoreOfScannedFrameworks string) *Template {
 }
 
 // GenerateTable is responsible for adding data in table format to the pdf
-func (t *Template) GenerateTable(getTextColor getTextColorFunc, tableRows *[]TableObject, totalFailed, total int, score float32) error {
+func (t *Template) GenerateTable(tableRows *[]TableObject, totalFailed, total int, score float32) error {
 	rows, err := list.Build[TableObject](*tableRows)
 	if err != nil {
 		return err
 	}
-	t.Maroto.AddRows(rows...)
-	t.Maroto.AddRows(
+	t.maroto.AddRows(rows...)
+	t.maroto.AddRows(
 		line.NewAutoRow(props.Line{Thickness: 0.3, SizePercent: 100}),
 		row.New(2),
 	)
@@ -102,7 +102,7 @@ func (t *Template) GenerateTable(getTextColor getTextColorFunc, tableRows *[]Tab
 // GenerateInfoRows is responsible for adding the information in pdf
 func (t *Template) GenerateInfoRows(rows []string) *Template {
 	for _, row := range rows {
-		t.Maroto.AddAutoRow(text.NewCol(12, row, props.Text{
+		t.maroto.AddAutoRow(text.NewCol(12, row, props.Text{
 			Style: fontstyle.Bold,
 			Align: align.Left,
 			Top:   2.5,
@@ -125,12 +125,16 @@ func (t *Template) generateTableTableResult(totalFailed, total int, score float3
 		Family: fontfamily.Arial,
 	}
 
-	t.Maroto.AddRow(10,
+	t.maroto.AddRow(10,
 		text.NewCol(5, "Resource summary", defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", totalFailed), defaultProps),
 		text.NewCol(2, fmt.Sprintf("%d", total), defaultProps),
 		text.NewCol(2, fmt.Sprintf("%.2f%s", score, "%"), defaultProps),
 	)
+}
+
+func (t *Template) GetStructure() *node.Node[core.Structure] {
+	return t.maroto.GetStructure()
 }
 
 // TableObject is responsible for mapping the table data, it will be sent to Maroto and will make it possible to generate the table
