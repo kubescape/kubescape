@@ -1,0 +1,377 @@
+{
+    "type": "maroto",
+    "details": {
+        "chunk_workers": 1,
+        "config_margin_bottom": 20.0025,
+        "config_margin_left": 10,
+        "config_margin_right": 10,
+        "config_margin_top": 15,
+        "config_max_grid_sum": 12,
+        "config_provider_type": "gofpdf",
+        "generation_mode": "sequential",
+        "maroto_dimension_height": 297,
+        "maroto_dimension_width": 210,
+        "prop_font_color": "RGB(0, 0, 0)",
+        "prop_font_family": "arial",
+        "prop_font_size": 10
+    },
+    "nodes": [
+        {
+            "type": "page",
+            "nodes": [
+                {
+                    "value": 10,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "Severity",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 6,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "Control reference",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 6,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 6,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "Control name",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 6,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "Failed resources",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 6,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "All resources",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 6,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 2,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "Compliance score",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 6,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "value": 3,
+                    "type": "row",
+                    "details": {
+                        "prop_background_color": "RGB(224, 224, 224)"
+                    },
+                    "nodes": [
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "severity",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "courier",
+                                        "prop_font_size": 6
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "ref",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "courier",
+                                        "prop_font_size": 6
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 6,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "name",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "courier",
+                                        "prop_font_size": 6
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "failed",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "courier",
+                                        "prop_font_size": 6
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 1,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "all",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "courier",
+                                        "prop_font_size": 6
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 2,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "score",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "courier",
+                                        "prop_font_size": 6,
+                                        "prop_vertical_padding": 1
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "value": 0.3,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 0,
+                            "type": "col",
+                            "details": {
+                                "is_max": true
+                            },
+                            "nodes": [
+                                {
+                                    "type": "line",
+                                    "details": {
+                                        "prop_offset_percent": 5,
+                                        "prop_orientation": "horizontal",
+                                        "prop_size_percent": 100,
+                                        "prop_style": "solid",
+                                        "prop_thickness": 0.3
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "value": 2,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 0,
+                            "type": "col",
+                            "details": {
+                                "is_max": true
+                            }
+                        }
+                    ]
+                },
+                {
+                    "value": 10,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 5,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "Resource summary",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 8,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 2,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "100",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 8,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 2,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "10",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 8,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        },
+                        {
+                            "value": 2,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "10.00%",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 0)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 8,
+                                        "prop_font_style": "B"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "value": 236.6975,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 12,
+                            "type": "col"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -23,45 +23,43 @@ func Test_generateRowPdf(t *testing.T) {
 	infoToPrintInfoMap := mapInfoToPrintInfo(mockSummary.Controls)
 	sortedControlIDs := getSortedControlsIDs(mockSummary.Controls)
 
-	var results [][]string
+	var rows []TableRow
 
 	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
 		for _, c := range sortedControlIDs[i] {
-			result := generateRowPdf(mockSummary.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap, true)
-			if len(result) > 0 {
-				results = append(results, result)
-			}
+			row := *generateTableRow(mockSummary.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfoMap)
+			rows = append(rows, row)
 		}
 	}
 
-	for _, c := range results {
+	for _, row := range rows {
 		//validating severity column
-		if c[0] != "Low" && c[0] != "Medium" && c[0] != "High" && c[0] != "Critical" {
-			t.Errorf("got %s, want either of these: %s", c[0], "Low, Medium, High, Critical")
+		if row.severity != "Low" && row.severity != "Medium" && row.severity != "High" && row.severity != "Critical" {
+			t.Errorf("got %s, want either of these: %s", row.severity, "Low, Medium, High, Critical")
 		}
 
 		// Validating length of control ID
-		if len(c[1]) > 6 {
-			t.Errorf("got %s, want %s", c[1], "less than 7 characters")
+		if len(row.ref) > 6 {
+			t.Errorf("got %s, want %s", row.ref, "less than 7 characters")
 		}
 
 		// Validating length of control name
-		if len(c[2]) > controlNameMaxLength {
-			t.Errorf("got %s, want %s", c[1], fmt.Sprintf("less than %d characters", controlNameMaxLength))
+		if len(row.name) > controlNameMaxLength {
+			t.Errorf("got %s, want %s", row.name, fmt.Sprintf("less than %d characters", controlNameMaxLength))
 		}
 
 		// Validating numeric fields
-		_, err := strconv.Atoi(c[3])
+		_, err := strconv.Atoi(row.counterFailed)
 		if err != nil {
-			t.Errorf("got %s, want an integer %s", c[2], err)
+			t.Errorf("got %s, want an integer %s", row.counterFailed, err)
 		}
 
-		_, err = strconv.Atoi(c[4])
+		_, err = strconv.Atoi(row.counterAll)
 		if err != nil {
-			t.Errorf("got %s, want an integer %s", c[3], err)
+			t.Errorf("got %s, want an integer %s", row.counterAll, err)
 		}
 
-		assert.NotEmpty(t, c[5], "expected a non-empty string")
+		assert.NotEmpty(t, row.complianceScore, "expected a non-empty string")
 
 	}
 

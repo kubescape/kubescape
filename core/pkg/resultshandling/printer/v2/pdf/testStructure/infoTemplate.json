@@ -1,0 +1,110 @@
+{
+    "type": "maroto",
+    "details": {
+        "chunk_workers": 1,
+        "config_margin_bottom": 20.0025,
+        "config_margin_left": 10,
+        "config_margin_right": 10,
+        "config_margin_top": 15,
+        "config_max_grid_sum": 12,
+        "config_provider_type": "gofpdf",
+        "generation_mode": "sequential",
+        "maroto_dimension_height": 297,
+        "maroto_dimension_width": 210,
+        "prop_font_color": "RGB(0, 0, 0)",
+        "prop_font_family": "arial",
+        "prop_font_size": 10
+    },
+    "nodes": [
+        {
+            "type": "page",
+            "nodes": [
+                {
+                    "value": 5.322222222222223,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 12,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "row info 1",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 255)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 8,
+                                        "prop_font_style": "B",
+                                        "prop_top": 2.5
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "value": 5.322222222222223,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 12,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "row info 2",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 255)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 8,
+                                        "prop_font_style": "B",
+                                        "prop_top": 2.5
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "value": 5.322222222222223,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 12,
+                            "type": "col",
+                            "nodes": [
+                                {
+                                    "value": "row info 3",
+                                    "type": "text",
+                                    "details": {
+                                        "prop_align": "L",
+                                        "prop_breakline_strategy": "empty_space_strategy",
+                                        "prop_color": "RGB(0, 0, 255)",
+                                        "prop_font_family": "arial",
+                                        "prop_font_size": 8,
+                                        "prop_font_style": "B",
+                                        "prop_top": 2.5
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "value": 246.03083333333333,
+                    "type": "row",
+                    "nodes": [
+                        {
+                            "value": 12,
+                            "type": "col"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
