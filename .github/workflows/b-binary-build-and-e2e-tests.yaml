@@ -181,7 +181,7 @@ jobs:
       - name: (debug) Step 5 - Check disk space before setting up Syft
         run: df -h
 
-      - uses: anchore/sbom-action/download-syft@v0.15.2
+      - uses: anchore/sbom-action/download-syft@v0
         name: Setup Syft
 
       - name: (debug) Step 6 - Check disk space before goreleaser
@@ -306,7 +306,7 @@ jobs:
           repository: armosec/system-tests
           path: .
 
-      - uses: actions/setup-python@d27e3f3d7c64b4bbf8e4abfb9b63b83e846e0435 # ratchet:actions/setup-python@v4
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.8.13'
           cache: 'pip'
@@ -351,7 +351,7 @@ jobs:
           deactivate
 
       - name: Test Report
-        uses: mikepenz/action-junit-report@6e9933f4a97f4d2b99acef4d7b97924466037882 # ratchet:mikepenz/action-junit-report@v3.6.1
+        uses: mikepenz/action-junit-report@v5
         if: always() # always run even if the previous step fails
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

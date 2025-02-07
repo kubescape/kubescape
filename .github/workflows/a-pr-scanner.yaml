@@ -105,7 +105,7 @@ jobs:
         if: ${{ env.GITGUARDIAN_API_KEY }}
         continue-on-error: true
         id: credentials-scan
-        uses: GitGuardian/ggshield-action@4ab2994172fadab959240525e6b833d9ae3aca61 # ratchet:GitGuardian/ggshield-action@master
+        uses: GitGuardian/ggshield-action@master
         with:
           args: -v --all-policies
         env:
@@ -118,7 +118,7 @@ jobs:
         if: ${{ env.SNYK_TOKEN }}
         id: vulnerabilities-scan
         continue-on-error: true
-        uses: snyk/actions/golang@806182742461562b67788a64410098c9d9b96adb # ratchet:snyk/actions/golang@master
+        uses: snyk/actions/golang@master
         with:
           command: test --all-projects
         env:
@@ -140,7 +140,7 @@ jobs:
 
       - name: Comment results to PR
         continue-on-error: true # Warning: This might break opening PRs from forks
-        uses: peter-evans/create-or-update-comment@5adcb0bb0f9fb3f95ef05400558bdb3f329ee808 # ratchet:peter-evans/create-or-update-comment@v2.1.0
+        uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body: |
