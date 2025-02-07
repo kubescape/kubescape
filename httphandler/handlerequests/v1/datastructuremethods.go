@@ -1,8 +1,15 @@
 package v1
 
 import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -67,6 +74,15 @@ func ToScanInfo(scanRequest *utilsmetav1.PostScanRequest) *cautils.ScanInfo {
 		scanInfo.IsDeletedScanObject = *scanRequest.IsDeletedScanObject
 	}
 
+	if scanRequest.Exceptions != nil {
+		path, err := saveExceptions(scanRequest.Exceptions)
+		if err != nil {
+			logger.L().Warning("failed to save exceptions, scanning without them", helpers.Error(err))
+		} else {
+			scanInfo.UseExceptions = path
+		}
+	}
+
 	return scanInfo
 }
 
@@ -91,4 +107,16 @@ func setTargetInScanInfo(scanRequest *utilsmetav1.PostScanRequest, scanInfo *cau
 		scanInfo.FrameworkScan = true
 		scanInfo.ScanAll = true
 	}
+}
+
+func saveExceptions(exceptions []armotypes.PostureExceptionPolicy) (string, error) {
+	exceptionsJSON, err := json.Marshal(exceptions)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal exceptions: %w", err)
+	}
+	exceptionsPath := filepath.Join("/tmp", "exceptions.json") // FIXME potential race condition
+	if err := os.WriteFile(exceptionsPath, exceptionsJSON, 0644); err != nil {
+		return "", fmt.Errorf("failed to write exceptions file to disk: %w", err)
+	}
+	return exceptionsPath, nil
 }
