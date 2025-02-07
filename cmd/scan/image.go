@@ -24,12 +24,17 @@ var (
   # Scan the 'nginx' image and see the full report 
   %[1]s scan image "nginx" -v
 
+  # Scan the 'nginx' image and use exceptions
+  %[1]s scan image "nginx" --exceptions exceptions.json
+
 `, cautils.ExecName())
 )
 
 // getImageCmd returns the scan image command
 func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	var imgCredentials shared.ImageCredentials
+	var exceptions string
+
 	cmd := &cobra.Command{
 		Use:     "image <image>:<tag> [flags]",
 		Short:   "Scan an image for vulnerabilities",
@@ -50,9 +55,10 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			imgScanInfo := &metav1.ImageScanInfo{
-				Image:    args[0],
-				Username: imgCredentials.Username,
-				Password: imgCredentials.Password,
+				Image:      args[0],
+				Username:   imgCredentials.Username,
+				Password:   imgCredentials.Password,
+				Exceptions: exceptions,
 			}
 
 			results, err := ks.ScanImage(context.Background(), imgScanInfo, scanInfo)
@@ -68,6 +74,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 		},
 	}
 
+	// The exceptions flag
+	cmd.PersistentFlags().StringVarP(&exceptions, "exceptions", "", "", "Path to the exceptions file")
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Username, "username", "u", "", "Username for registry login")
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Password, "password", "p", "", "Password for registry login")
 

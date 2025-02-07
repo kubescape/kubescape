@@ -2,9 +2,12 @@ package imagescan
 
 import (
 	"errors"
+	"net/http"
+	"path"
 	"testing"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype/db"
 	grypedb "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
@@ -16,63 +19,71 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// import (
-// 	"context"
-// 	"testing"
+func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
+	go func() {
+		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata"))) //nolint:gosec
+	}()
+	dbCfg := db.Config{
+		DBRootDir:  path.Join(xdg.CacheHome, "grype-light", "db"),
+		ListingURL: "http://localhost:8000/listing.json",
+	}
+	svc := NewScanService(dbCfg)
+	creds := RegistryCredentials{}
 
-// 	"github.com/anchore/grype/grype/db"
-// 	grypedb "github.com/anchore/grype/grype/db/v5"
-// 	"github.com/anchore/grype/grype/match"
-// 	"github.com/anchore/grype/grype/pkg"
-// 	"github.com/anchore/grype/grype/presenter/models"
-// 	"github.com/anchore/grype/grype/vulnerability"
-// 	syftPkg "github.com/anchore/syft/syft/pkg"
-// 	"github.com/google/uuid"
-// 	"github.com/stretchr/testify/assert"
-// )
+	tests := []struct {
+		name                    string
+		image                   string
+		vulnerabilityExceptions []string
+		ignoredLen              int
+		severityExceptions      []string
+		filteredLen             int
+	}{
+		{
+			name:               "alpine:3.19.1 without medium vulnerabilities",
+			image:              "alpine:3.19.1",
+			ignoredLen:         0,
+			severityExceptions: []string{"MEDIUM"},
+			filteredLen:        0,
+		},
+		{
+			name:                    "alpine:3.9.6",
+			image:                   "alpine:3.9.6",
+			vulnerabilityExceptions: []string{"CVE-2020-1971", "CVE-2020-28928", "CVE-2021-23840"},
+			ignoredLen:              6,
+			severityExceptions:      []string{"HIGH", "MEDIUM"},
+			filteredLen:             8,
+		},
+		{
+			name:                    "alpine:3.9.6 with invalid vulnerability and severity exceptions",
+			image:                   "alpine:3.9.6",
+			vulnerabilityExceptions: []string{"invalid-cve", "CVE-2020-28928", "CVE-2021-23840"},
+			ignoredLen:              4,
+			severityExceptions:      []string{"CRITICAL", "MEDIUM", "invalid-severity"},
+			filteredLen:             10,
+		},
+	}
 
-// func TestNewScanService(t *testing.T) {
-// 	dbCfg, _ := NewDefaultDBConfig()
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			store, status, dbCloser, err := NewVulnerabilityDB(svc.dbCfg, true)
+			assert.NoError(t, validateDBLoad(err, status))
 
-// 	svc := NewScanService(dbCfg)
+			packages, pkgContext, _, err := pkg.Provide(tc.image, getProviderConfig(creds))
+			assert.NoError(t, err)
 
-// 	assert.IsType(t, Service{}, svc)
-// }
+			if dbCloser != nil {
+				defer dbCloser.Close()
+			}
 
-// func TestScan(t *testing.T) {
-// 	tt := []struct {
-// 		name  string
-// 		image string
-// 		creds RegistryCredentials
-// 	}{
-// 		{
-// 			name:  "Valid image name produces a non-nil scan result",
-// 			image: "nginx",
-// 		},
-// 		{
-// 			name:  "Scanning a valid image with provided credentials should produce a non-nil scan result",
-// 			image: "nginx",
-// 			creds: RegistryCredentials{
-// 				Username: "test",
-// 				Password: "password",
-// 			},
-// 		},
-// 	}
+			remainingMatches, ignoredMatches, err := getIgnoredMatches(tc.vulnerabilityExceptions, store, packages, pkgContext)
+			assert.NoError(t, err)
+			assert.Equal(t, tc.ignoredLen, len(ignoredMatches))
 
-// 	for _, tc := range tt {
-// 		t.Run(tc.name, func(t *testing.T) {
-// 			ctx := context.Background()
-// 			dbCfg, _ := NewDefaultDBConfig()
-// 			svc := NewScanService(dbCfg)
-// 			creds := RegistryCredentials{}
-
-// 			scanResults, err := svc.Scan(ctx, tc.image, creds)
-
-// 			assert.NoError(t, err)
-// 			assert.IsType(t, &models.PresenterConfig{}, scanResults)
-// 		})
-// 	}
-// }
+			filteredMatches := filterMatchesBasedOnSeverity(tc.severityExceptions, *remainingMatches, store)
+			assert.Equal(t, tc.filteredLen, filteredMatches.Count())
+		})
+	}
+}
 
 // fakeMetaProvider is a test double that fakes an actual MetadataProvider
 type fakeMetaProvider struct {

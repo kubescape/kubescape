@@ -5,11 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
 	"github.com/anchore/grype/grype/db"
 	"github.com/anchore/grype/grype/grypeerr"
+	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/matcher"
 	"github.com/anchore/grype/grype/matcher/dotnet"
 	"github.com/anchore/grype/grype/matcher/golang"
@@ -116,9 +118,67 @@ type Service struct {
 	dbCfg db.Config
 }
 
-func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials) (*models.PresenterConfig, error) {
-	var err error
+func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, packages []pkg.Package, pkgContext pkg.Context) (*match.Matches, []match.IgnoredMatch, error) {
+	if vulnerabilityExceptions == nil {
+		vulnerabilityExceptions = []string{}
+	}
 
+	var ignoreRules []match.IgnoreRule
+	for _, exception := range vulnerabilityExceptions {
+		rule := match.IgnoreRule{
+			Vulnerability: exception,
+		}
+		ignoreRules = append(ignoreRules, rule)
+	}
+
+	matcher := grype.VulnerabilityMatcher{
+		Store:       *store,
+		Matchers:    getMatchers(),
+		IgnoreRules: ignoreRules,
+	}
+
+	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, pkgContext)
+	if err != nil {
+		if !errors.Is(err, grypeerr.ErrAboveSeverityThreshold) {
+			return nil, nil, err
+		}
+	}
+
+	return remainingMatches, ignoredMatches, nil
+}
+
+// Filter the remaing matches based on severity exceptions.
+func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, store *store.Store) match.Matches {
+	if severityExceptions == nil {
+		return remainingMatches
+	}
+
+	filteredMatches := match.NewMatches()
+
+	for m := range remainingMatches.Enumerate() {
+		metadata, err := store.GetMetadata(m.Vulnerability.ID, m.Vulnerability.Namespace)
+		if err != nil {
+			continue
+		}
+
+		// Skip this match if the severity of this match is present in severityExceptions.
+		excludeSeverity := false
+		for _, sever := range severityExceptions {
+			if strings.ToUpper(metadata.Severity) == sever {
+				excludeSeverity = true
+				continue
+			}
+		}
+
+		if !excludeSeverity {
+			filteredMatches.Add(m)
+		}
+	}
+
+	return filteredMatches
+}
+
+func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*models.PresenterConfig, error) {
 	store, status, dbCloser, err := NewVulnerabilityDB(s.dbCfg, true)
 	if err = validateDBLoad(err, status); err != nil {
 		return nil, err
@@ -133,20 +193,15 @@ func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCred
 		defer dbCloser.Close()
 	}
 
-	matcher := grype.VulnerabilityMatcher{
-		Store:    *store,
-		Matchers: getMatchers(),
+	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, store, packages, pkgContext)
+	if err != nil {
+		return nil, err
 	}
 
-	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, pkgContext)
-	if err != nil {
-		if !errors.Is(err, grypeerr.ErrAboveSeverityThreshold) {
-			return nil, err
-		}
-	}
+	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, store)
 
 	pb := models.PresenterConfig{
-		Matches:          *remainingMatches,
+		Matches:          filteredMatches,
 		IgnoredMatches:   ignoredMatches,
 		Packages:         packages,
 		Context:          pkgContext,
