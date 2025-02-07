@@ -7,14 +7,14 @@ jobs:
     if: github.event.label.name == 'typo'
     runs-on: ubuntu-latest
     steps:
-      - uses: ben-z/actions-comment-on-issue@10be23f9c43ac792663043420fda29dde07e2f0f # ratchet:ben-z/actions-comment-on-issue@1.0.2
+      - uses: ben-z/actions-comment-on-issue@1.0.2
         with:
           message: "Hello! :wave:\n\nThis issue is being automatically closed, Please open a PR with a relevant fix."
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   auto_close_issues:
     runs-on: ubuntu-latest
     steps:
-      - uses: lee-dohm/close-matching-issues@e9e43aad2fa6f06a058cedfd8fb975fd93b56d8f # ratchet:lee-dohm/close-matching-issues@v2
+      - uses: lee-dohm/close-matching-issues@v2
         with:
           query: 'label:typo'
           token: ${{ secrets.GITHUB_TOKEN }}

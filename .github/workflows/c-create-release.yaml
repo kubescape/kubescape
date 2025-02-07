@@ -50,7 +50,7 @@ jobs:
           find . -type f -print
 
       - name: Release
-        uses: softprops/action-gh-release@975c1b265e11dd76618af1c374e7981f9a6ff44a
+        uses: softprops/action-gh-release@v2
         with:
           token: ${{ steps.set-token.outputs.token }}
           name: ${{ inputs.RELEASE_NAME }}
