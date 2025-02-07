@@ -1,12 +1,9 @@
 package core
 
 import (
-	"context"
 	"sort"
 	"testing"
 
-	"github.com/kubescape/kubescape/v3/core/cautils"
-	ksmetav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -418,48 +415,6 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 			sort.Strings(vulnerabilities)
 			assert.Equal(t, tt.expectedVulnerabilities, vulnerabilities)
 			assert.Equal(t, tt.expectedSeverities, severities)
-		})
-	}
-}
-
-func TestScanImage(t *testing.T) {
-	ctx := context.Background()
-	tests := []struct {
-		name        string
-		imgScanInfo *ksmetav1.ImageScanInfo
-		scanInfo    *cautils.ScanInfo
-		ignoreLen   int
-		filteredLen int
-	}{
-		{
-			name: "alpine:3.19.1 without medium vulnerabilities",
-			imgScanInfo: &ksmetav1.ImageScanInfo{
-				Image:      "alpine:3.19.1",
-				Exceptions: "./testdata/alpine-nginx-exceptions.json",
-			},
-			scanInfo:    &cautils.ScanInfo{},
-			ignoreLen:   0,
-			filteredLen: 0,
-		},
-		{
-			name: "nginx:1.25.3 with invalid vulnerability and severity exceptions",
-			imgScanInfo: &ksmetav1.ImageScanInfo{
-				Image:      "nginx:1.25.3",
-				Exceptions: "./testdata/alpine-nginx-exceptions.json",
-			},
-			scanInfo:    &cautils.ScanInfo{},
-			ignoreLen:   2,
-			filteredLen: 100,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ks := NewKubescape()
-			pconfig, err := ks.ScanImage(ctx, tt.imgScanInfo, tt.scanInfo)
-			assert.NoError(t, err)
-			assert.Equal(t, tt.ignoreLen, len(pconfig.IgnoredMatches))
-			assert.Equal(t, tt.filteredLen, pconfig.Matches.Count())
 		})
 	}
 }

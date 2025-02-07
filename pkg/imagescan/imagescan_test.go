@@ -2,9 +2,12 @@ package imagescan
 
 import (
 	"errors"
+	"net/http"
+	"path"
 	"testing"
 	"time"
 
+	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype/db"
 	grypedb "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
@@ -16,31 +19,14 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// import (
-// 	"context"
-// 	"testing"
-
-// 	"github.com/anchore/grype/grype/db"
-// 	grypedb "github.com/anchore/grype/grype/db/v5"
-// 	"github.com/anchore/grype/grype/match"
-// 	"github.com/anchore/grype/grype/pkg"
-// 	"github.com/anchore/grype/grype/presenter/models"
-// 	"github.com/anchore/grype/grype/vulnerability"
-// 	syftPkg "github.com/anchore/syft/syft/pkg"
-// 	"github.com/google/uuid"
-// 	"github.com/stretchr/testify/assert"
-// )
-
-// func TestNewScanService(t *testing.T) {
-// 	dbCfg, _ := NewDefaultDBConfig()
-
-// 	svc := NewScanService(dbCfg)
-
-// 	assert.IsType(t, Service{}, svc)
-// }
-
 func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
-	dbCfg, _ := NewDefaultDBConfig()
+	go func() {
+		_ = http.ListenAndServe(":8000", http.FileServer(http.Dir("testdata"))) //nolint:gosec
+	}()
+	dbCfg := db.Config{
+		DBRootDir:  path.Join(xdg.CacheHome, "grype-light", "db"),
+		ListingURL: "http://localhost:8000/listing.json",
+	}
 	svc := NewScanService(dbCfg)
 	creds := RegistryCredentials{}
 
@@ -60,20 +46,20 @@ func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
 			filteredLen:        0,
 		},
 		{
-			name:                    "nginx:1.25.3",
-			image:                   "nginx:1.25.3",
-			vulnerabilityExceptions: []string{"CVE-2023-6879", "CVE-2023-45853", "CVE-2023-49463"},
-			ignoredLen:              3,
+			name:                    "alpine:3.9.6",
+			image:                   "alpine:3.9.6",
+			vulnerabilityExceptions: []string{"CVE-2020-1971", "CVE-2020-28928", "CVE-2021-23840"},
+			ignoredLen:              6,
 			severityExceptions:      []string{"HIGH", "MEDIUM"},
-			filteredLen:             86,
+			filteredLen:             8,
 		},
 		{
-			name:                    "nginx:1.25.3 with invalid vulnerability and severity exceptions",
-			image:                   "nginx:1.25.3",
-			vulnerabilityExceptions: []string{"invalid-cve", "CVE-2023-45853", "CVE-2023-49463"},
-			ignoredLen:              2,
+			name:                    "alpine:3.9.6 with invalid vulnerability and severity exceptions",
+			image:                   "alpine:3.9.6",
+			vulnerabilityExceptions: []string{"invalid-cve", "CVE-2020-28928", "CVE-2021-23840"},
+			ignoredLen:              4,
 			severityExceptions:      []string{"CRITICAL", "MEDIUM", "invalid-severity"},
-			filteredLen:             100,
+			filteredLen:             10,
 		},
 	}
 
