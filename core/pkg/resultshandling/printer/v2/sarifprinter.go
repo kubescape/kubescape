@@ -209,8 +209,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			rsrcAbsPath := path.Join(basePath, filepath)
 			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath) //
 			if err != nil && !helmChartFileType {
-				logger.L().Debug("failed to create location resolver", helpers.Error(err))
-				continue
+				logger.L().Debug("failed to create location resolver, will use default location", helpers.Error(err))
 			}
 
 			for _, toPin := range result.AssociatedControls {
