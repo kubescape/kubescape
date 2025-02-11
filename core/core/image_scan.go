@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -162,7 +161,7 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 	return uniqueVulnsList, uniqueSeversList
 }
 
-func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
+func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
 	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
@@ -185,7 +184,7 @@ func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageS
 		vulnerabilityExceptions, severityExceptions = getUniqueVulnerabilitiesAndSeverities(exceptionPolicies, imgScanInfo.Image)
 	}
 
-	scanResults, err := svc.Scan(ctx, imgScanInfo.Image, creds, vulnerabilityExceptions, severityExceptions)
+	scanResults, err := svc.Scan(ks.Context(), imgScanInfo.Image, creds, vulnerabilityExceptions, severityExceptions)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to scan image: %s", imgScanInfo.Image))
 		return nil, err
@@ -195,9 +194,9 @@ func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageS
 
 	scanInfo.SetScanType(cautils.ScanTypeImage)
 
-	outputPrinters := GetOutputPrinters(scanInfo, ctx, "")
+	outputPrinters := GetOutputPrinters(scanInfo, ks.Context(), "")
 
-	uiPrinter := GetUIPrinter(ctx, scanInfo, "")
+	uiPrinter := GetUIPrinter(ks.Context(), scanInfo, "")
 
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 
@@ -208,5 +207,5 @@ func (ks *Kubescape) ScanImage(ctx context.Context, imgScanInfo *ksmetav1.ImageS
 		},
 	}
 
-	return scanResults, resultsHandler.HandleResults(ctx)
+	return scanResults, resultsHandler.HandleResults(ks.Context())
 }

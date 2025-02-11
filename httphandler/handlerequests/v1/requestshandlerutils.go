@@ -66,7 +66,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.scan")
 	defer spanScan.End()
 
-	ks := core.NewKubescape()
+	ks := core.NewKubescape(ctx)
 
 	spanScan.AddEvent("scanning metadata",
 		trace.WithAttributes(attribute.String("version", versioncheck.BuildNumber)),
@@ -79,7 +79,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 		trace.WithAttributes(attribute.String("hostSensorYamlPath", scanInfo.HostSensorYamlPath)),
 	)
 
-	result, err := ks.Scan(ctx, scanInfo)
+	result, err := ks.Scan(scanInfo)
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}

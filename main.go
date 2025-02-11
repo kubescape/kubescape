@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
@@ -11,21 +12,17 @@ import (
 
 func main() {
 	// Capture interrupt signal
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Handle interrupt signal
 	go func() {
-		<-signalChan
+		<-ctx.Done()
 		// Perform cleanup or graceful shutdown here
 		logger.L().StopError("Received interrupt signal, exiting...")
-
-		// Exit the program with proper exit code for SIGINT
-		os.Exit(130)
 	}()
 
-	if err := cmd.Execute(); err != nil {
+	if err := cmd.Execute(ctx); err != nil {
 		logger.L().Fatal(err.Error())
 	}
-
 }

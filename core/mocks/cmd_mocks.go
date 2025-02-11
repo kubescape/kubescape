@@ -11,15 +11,19 @@ import (
 
 type MockIKubescape struct{}
 
-func (m *MockIKubescape) Scan(ctx context.Context, scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
+func (m *MockIKubescape) Context() context.Context {
+	return context.TODO()
+}
+
+func (m *MockIKubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	return nil, nil
 }
 
-func (m *MockIKubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies) error {
+func (m *MockIKubescape) List(listPolicies *metav1.ListPolicies) error {
 	return nil
 }
 
-func (m *MockIKubescape) Download(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func (m *MockIKubescape) Download(downloadInfo *metav1.DownloadInfo) error {
 	return nil
 }
 
@@ -31,18 +35,18 @@ func (m *MockIKubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 	return nil
 }
 
-func (m *MockIKubescape) DeleteCachedConfig(ctx context.Context, deleteConfig *metav1.DeleteConfig) error {
+func (m *MockIKubescape) DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error {
 	return nil
 }
 
-func (m *MockIKubescape) Fix(ctx context.Context, fixInfo *metav1.FixInfo) error {
+func (m *MockIKubescape) Fix(fixInfo *metav1.FixInfo) error {
 	return nil
 }
 
-func (m *MockIKubescape) Patch(ctx context.Context, patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
+func (m *MockIKubescape) Patch(patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
 	return nil, nil
 }
 
-func (m *MockIKubescape) ScanImage(ctx context.Context, imgScanInfo *metav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
+func (m *MockIKubescape) ScanImage(imgScanInfo *metav1.ImageScanInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
 	return nil, nil
 }

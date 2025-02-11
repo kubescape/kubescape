@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -42,8 +43,8 @@ var ksExamples = fmt.Sprintf(`
   %[1]s config view
 `, cautils.ExecName())
 
-func NewDefaultKubescapeCommand() *cobra.Command {
-	ks := core.NewKubescape()
+func NewDefaultKubescapeCommand(ctx context.Context) *cobra.Command {
+	ks := core.NewKubescape(ctx)
 	return getRootCmd(ks)
 }
 
@@ -93,7 +94,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(download.GetDownloadCmd(ks))
 	rootCmd.AddCommand(list.GetListCmd(ks))
 	rootCmd.AddCommand(completion.GetCompletionCmd())
-	rootCmd.AddCommand(version.GetVersionCmd())
+	rootCmd.AddCommand(version.GetVersionCmd(ks))
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
 	rootCmd.AddCommand(update.GetUpdateCmd())
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
@@ -115,7 +116,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	return rootCmd
 }
 
-func Execute() error {
-	ks := NewDefaultKubescapeCommand()
+func Execute(ctx context.Context) error {
+	ks := NewDefaultKubescapeCommand(ctx)
 	return ks.Execute()
 }

@@ -1,7 +1,6 @@
 package list
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -62,7 +61,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 
 			listPolicies.Target = args[0]
 
-			if err := ks.List(context.TODO(), &listPolicies); err != nil {
+			if err := ks.List(&listPolicies); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil
