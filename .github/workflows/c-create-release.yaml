@@ -35,7 +35,7 @@ jobs:
 
       # TODO: kubescape-windows-latest is deprecated and should be removed
       - name: Get kubescape.exe from kubescape-windows-latest.exe
-        run: cp ${{steps.download-artifact.outputs.download-path}}/kubescape/kubescape-${{ env.WINDOWS_OS }}.exe ${{steps.download-artifact.outputs.download-path}}/kubescape/kubescape.exe
+        run: cp ${{steps.download-artifact.outputs.download-path}}/kubescape-${{ env.WINDOWS_OS }}.exe ${{steps.download-artifact.outputs.download-path}}/kubescape.exe
 
       - name: Set release token
         id: set-token
@@ -61,32 +61,32 @@ jobs:
           prerelease: false
           fail_on_unmatched_files: true
           files: |
-            ./kubescape/kubescape-${{ env.MAC_OS }}
-            ./kubescape/kubescape-${{ env.MAC_OS }}.sbom
-            ./kubescape/kubescape-${{ env.MAC_OS }}.sha256
-            ./kubescape/kubescape-${{ env.MAC_OS }}.tar.gz
-            ./kubescape/kubescape-${{ env.UBUNTU_OS }}
-            ./kubescape/kubescape-${{ env.UBUNTU_OS }}.sbom
-            ./kubescape/kubescape-${{ env.UBUNTU_OS }}.sha256
-            ./kubescape/kubescape-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape/kubescape-${{ env.WINDOWS_OS }}.exe
-            ./kubescape/kubescape-${{ env.WINDOWS_OS }}.exe.sbom
-            ./kubescape/kubescape-${{ env.WINDOWS_OS }}.exe.sha256
-            ./kubescape/kubescape-${{ env.WINDOWS_OS }}.tar.gz
-            ./kubescape/kubescape-arm64-${{ env.MAC_OS }}
-            ./kubescape/kubescape-arm64-${{ env.MAC_OS }}.sbom
-            ./kubescape/kubescape-arm64-${{ env.MAC_OS }}.sha256
-            ./kubescape/kubescape-arm64-${{ env.MAC_OS }}.tar.gz
-            ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}
-            ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}.sbom
-            ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}.sha256
-            ./kubescape/kubescape-arm64-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.exe
-            ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.exe.sbom
-            ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.exe.sha256
-            ./kubescape/kubescape-arm64-${{ env.WINDOWS_OS }}.tar.gz
-            ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}
-            ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}.sbom
-            ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}.sha256
-            ./kubescape/kubescape-riscv64-${{ env.UBUNTU_OS }}.tar.gz
-            ./kubescape/kubescape.exe
+            ./kubescape-${{ env.MAC_OS }}
+            ./kubescape-${{ env.MAC_OS }}.sbom
+            ./kubescape-${{ env.MAC_OS }}.sha256
+            ./kubescape-${{ env.MAC_OS }}.tar.gz
+            ./kubescape-${{ env.UBUNTU_OS }}
+            ./kubescape-${{ env.UBUNTU_OS }}.sbom
+            ./kubescape-${{ env.UBUNTU_OS }}.sha256
+            ./kubescape-${{ env.UBUNTU_OS }}.tar.gz
+            ./kubescape-${{ env.WINDOWS_OS }}.exe
+            ./kubescape-${{ env.WINDOWS_OS }}.exe.sbom
+            ./kubescape-${{ env.WINDOWS_OS }}.exe.sha256
+            ./kubescape-${{ env.WINDOWS_OS }}.tar.gz
+            ./kubescape-arm64-${{ env.MAC_OS }}
+            ./kubescape-arm64-${{ env.MAC_OS }}.sbom
+            ./kubescape-arm64-${{ env.MAC_OS }}.sha256
+            ./kubescape-arm64-${{ env.MAC_OS }}.tar.gz
+            ./kubescape-arm64-${{ env.UBUNTU_OS }}
+            ./kubescape-arm64-${{ env.UBUNTU_OS }}.sbom
+            ./kubescape-arm64-${{ env.UBUNTU_OS }}.sha256
+            ./kubescape-arm64-${{ env.UBUNTU_OS }}.tar.gz
+            ./kubescape-arm64-${{ env.WINDOWS_OS }}.exe
+            ./kubescape-arm64-${{ env.WINDOWS_OS }}.exe.sbom
+            ./kubescape-arm64-${{ env.WINDOWS_OS }}.exe.sha256
+            ./kubescape-arm64-${{ env.WINDOWS_OS }}.tar.gz
+            ./kubescape-riscv64-${{ env.UBUNTU_OS }}
+            ./kubescape-riscv64-${{ env.UBUNTU_OS }}.sbom
+            ./kubescape-riscv64-${{ env.UBUNTU_OS }}.sha256
+            ./kubescape-riscv64-${{ env.UBUNTU_OS }}.tar.gz
+            ./kubescape.exe
