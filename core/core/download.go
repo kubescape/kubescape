@@ -44,12 +44,12 @@ func DownloadSupportCommands() []string {
 	return commands
 }
 
-func (ks *Kubescape) Download(ctx context.Context, downloadInfo *metav1.DownloadInfo) error {
+func (ks *Kubescape) Download(downloadInfo *metav1.DownloadInfo) error {
 	setPathAndFilename(downloadInfo)
 	if err := os.MkdirAll(downloadInfo.Path, os.ModePerm); err != nil {
 		return err
 	}
-	if err := downloadArtifact(ctx, downloadInfo, downloadFunc); err != nil {
+	if err := downloadArtifact(ks.Context(), downloadInfo, downloadFunc); err != nil {
 		return err
 	}
 	return nil

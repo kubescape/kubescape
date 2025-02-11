@@ -1,7 +1,17 @@
 package core
 
-type Kubescape struct{}
+import (
+	"context"
+)
 
-func NewKubescape() *Kubescape {
-	return &Kubescape{}
+type Kubescape struct {
+	Ctx context.Context
+}
+
+func (ks *Kubescape) Context() context.Context {
+	return ks.Ctx
+}
+
+func NewKubescape(ctx context.Context) *Kubescape {
+	return &Kubescape{Ctx: ctx}
 }

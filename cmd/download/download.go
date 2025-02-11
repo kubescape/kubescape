@@ -1,7 +1,6 @@
 package download
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -78,7 +77,7 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				downloadInfo.Identifier = args[1]
 
 			}
-			if err := ks.Download(context.TODO(), &downloadInfo); err != nil {
+			if err := ks.Download(&downloadInfo); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 			return nil

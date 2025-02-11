@@ -10,13 +10,14 @@ import (
 )
 
 func main() {
-	ks := core.NewKubescape()
+	ctx := context.TODO()
+	ks := core.NewKubescape(ctx)
 	downloads := []metav1.DownloadInfo{
 		{Target: "artifacts"},                         // download all artifacts
 		{Target: "framework", Identifier: "security"}, // force add the "security" framework
 	}
 	for _, download := range downloads {
-		if err := ks.Download(context.Background(), &download); err != nil {
+		if err := ks.Download(&download); err != nil {
 			logger.L().Error("failed to download artifact", helpers.Error(err), helpers.String("target", download.Target))
 		}
 	}

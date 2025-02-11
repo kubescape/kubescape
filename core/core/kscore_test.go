@@ -1,6 +1,7 @@
 package core
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -8,7 +9,8 @@ import (
 
 // The function should return a non-nil pointer.
 func TestNewKubescape_ReturnsNonNilPointer(t *testing.T) {
-	k := NewKubescape()
+	ctx := context.TODO()
+	k := NewKubescape(ctx)
 	assert.NotNil(t, k)
 }
 
@@ -19,5 +21,6 @@ func TestNewKubescape_DoesNotPanic(t *testing.T) {
 			t.Errorf("Function panicked: %v", r)
 		}
 	}()
-	NewKubescape()
+	ctx := context.TODO()
+	NewKubescape(ctx)
 }

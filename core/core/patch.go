@@ -24,7 +24,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
+func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
 
 	// ===================== Scan the image =====================
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
@@ -37,7 +37,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 		Password: patchInfo.Password,
 	}
 	// Scan the image
-	scanResults, err := svc.Scan(ctx, patchInfo.Image, creds, nil, nil)
+	scanResults, err := svc.Scan(ks.Context(), patchInfo.Image, creds, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +52,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
 	fileName = strings.ReplaceAll(fileName, "/", "-")
 
-	writer := printer.GetWriter(ctx, fileName)
+	writer := printer.GetWriter(ks.Context(), fileName)
 
 	if err = pres.Present(writer); err != nil {
 		return nil, err
@@ -68,7 +68,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 		disableCopaLogger()
 	}
 
-	if err = copaPatch(ctx, patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.BuildKitOpts); err != nil {
+	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.BuildKitOpts); err != nil {
 		return nil, err
 	}
 
@@ -81,7 +81,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 
 	logger.L().Start(fmt.Sprintf("Re-scanning image: %s", patchedImageName))
 
-	scanResultsPatched, err := svc.Scan(ctx, patchedImageName, creds, nil, nil)
+	scanResultsPatched, err := svc.Scan(ks.Context(), patchedImageName, creds, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -96,8 +96,8 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 	// ===================== Results Handling =====================
 
 	scanInfo.SetScanType(cautils.ScanTypeImage)
-	outputPrinters := GetOutputPrinters(scanInfo, ctx, "")
-	uiPrinter := GetUIPrinter(ctx, scanInfo, "")
+	outputPrinters := GetOutputPrinters(scanInfo, ks.Context(), "")
+	uiPrinter := GetUIPrinter(ks.Context(), scanInfo, "")
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
 	resultsHandler.ImageScanData = []cautils.ImageScanData{
 		{
@@ -106,7 +106,7 @@ func (ks *Kubescape) Patch(ctx context.Context, patchInfo *ksmetav1.PatchInfo, s
 		},
 	}
 
-	return scanResultsPatched, resultsHandler.HandleResults(ctx)
+	return scanResultsPatched, resultsHandler.HandleResults(ks.Context())
 }
 
 func disableCopaLogger() {

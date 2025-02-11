@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -35,8 +34,8 @@ func (ks *Kubescape) ViewCachedConfig(viewConfig *metav1.ViewConfig) error {
 	return nil
 }
 
-func (ks *Kubescape) DeleteCachedConfig(ctx context.Context, deleteConfig *metav1.DeleteConfig) error {
+func (ks *Kubescape) DeleteCachedConfig(deleteConfig *metav1.DeleteConfig) error {
 
 	tenant := cautils.GetTenantConfig("", "", "", "", nil) // change k8sinterface
-	return tenant.DeleteCachedConfig(ctx)
+	return tenant.DeleteCachedConfig(ks.Context())
 }

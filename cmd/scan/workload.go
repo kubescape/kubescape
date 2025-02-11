@@ -67,7 +67,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 
 			// todo: add api version if provided
 			ctx := context.TODO()
-			results, err := ks.Scan(ctx, scanInfo)
+			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}

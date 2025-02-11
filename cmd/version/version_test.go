@@ -2,6 +2,8 @@ package version
 
 import (
 	"bytes"
+	"context"
+	"github.com/kubescape/kubescape/v3/core/core"
 	"io"
 	"testing"
 
@@ -30,7 +32,8 @@ func TestGetVersionCmd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			versioncheck.BuildNumber = tt.buildNumber
 
-			if cmd := GetVersionCmd(); cmd != nil {
+			ks := core.NewKubescape(context.TODO())
+			if cmd := GetVersionCmd(ks); cmd != nil {
 				buf := bytes.NewBufferString("")
 				cmd.SetOut(buf)
 				cmd.Execute()

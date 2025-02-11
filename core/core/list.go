@@ -38,16 +38,16 @@ func ListSupportActions() []string {
 	sort.Strings(commands)
 	return commands
 }
-func (ks *Kubescape) List(ctx context.Context, listPolicies *metav1.ListPolicies) error {
+func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 	if policyListerFunc, ok := listFunc[listPolicies.Target]; ok {
-		policies, err := policyListerFunc(ctx, listPolicies)
+		policies, err := policyListerFunc(ks.Context(), listPolicies)
 		if err != nil {
 			return err
 		}
 		policies = naturalSortPolicies(policies)
 
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
-			listFormatFunction(ctx, listPolicies.Target, policies)
+			listFormatFunction(ks.Context(), listPolicies.Target, policies)
 		} else {
 			return fmt.Errorf("Invalid format \"%s\", Supported formats: 'pretty-print'/'json' ", listPolicies.Format)
 		}

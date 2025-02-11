@@ -1,7 +1,6 @@
 package patch
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -50,7 +49,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 				return err
 			}
 
-			results, err := ks.Patch(context.Background(), &patchInfo, &scanInfo)
+			results, err := ks.Patch(&patchInfo, &scanInfo)
 			if err != nil {
 				return err
 			}

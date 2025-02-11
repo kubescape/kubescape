@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/kubescape/go-logger"
@@ -61,7 +60,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				Exceptions: exceptions,
 			}
 
-			results, err := ks.ScanImage(context.Background(), imgScanInfo, scanInfo)
+			results, err := ks.ScanImage(imgScanInfo, scanInfo)
 			if err != nil {
 				return err
 			}

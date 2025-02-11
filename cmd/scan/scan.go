@@ -138,7 +138,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
 
 	ctx := context.TODO()
 
-	results, err := ks.Scan(ctx, &scanInfo)
+	results, err := ks.Scan(&scanInfo)
 	if err != nil {
 		return err
 	}
