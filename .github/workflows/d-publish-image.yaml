@@ -74,6 +74,7 @@ jobs:
       - uses: actions/download-artifact@v4
         id: download-artifact
         with:
+          name: kubescape
           path: .
       - name: mv kubescape amd64 binary
         run: mv ${{steps.download-artifact.outputs.download-path}}/kubescape/kubescape-ubuntu-latest kubescape-amd64-ubuntu-latest

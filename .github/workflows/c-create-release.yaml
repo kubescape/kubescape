@@ -30,6 +30,7 @@ jobs:
       - uses: actions/download-artifact@v4
         id: download-artifact
         with:
+          name: kubescape
           path: .
 
       # TODO: kubescape-windows-latest is deprecated and should be removed
