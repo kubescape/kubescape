@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -66,13 +65,12 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			setWorkloadScanInfo(scanInfo, kind, name)
 
 			// todo: add api version if provided
-			ctx := context.TODO()
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
 
-			if err = results.HandleResults(ctx); err != nil {
+			if err = results.HandleResults(ks.Context()); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 

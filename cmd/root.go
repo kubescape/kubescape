@@ -96,7 +96,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(completion.GetCompletionCmd())
 	rootCmd.AddCommand(version.GetVersionCmd(ks))
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
-	rootCmd.AddCommand(update.GetUpdateCmd())
+	rootCmd.AddCommand(update.GetUpdateCmd(ks))
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
 	rootCmd.AddCommand(patch.GetPatchCmd(ks))
 	rootCmd.AddCommand(vap.GetVapHelperCmd())

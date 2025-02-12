@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"strings"
@@ -135,15 +134,12 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
 }
 
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
-
-	ctx := context.TODO()
-
 	results, err := ks.Scan(&scanInfo)
 	if err != nil {
 		return err
 	}
 
-	if err = results.HandleResults(ctx); err != nil {
+	if err = results.HandleResults(ks.Context()); err != nil {
 		return err
 	}
 

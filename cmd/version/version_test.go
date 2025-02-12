@@ -3,9 +3,10 @@ package version
 import (
 	"bytes"
 	"context"
-	"github.com/kubescape/kubescape/v3/core/core"
 	"io"
 	"testing"
+
+	"github.com/kubescape/kubescape/v3/core/core"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/stretchr/testify/assert"

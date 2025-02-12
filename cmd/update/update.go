@@ -5,9 +5,10 @@ package update
 //          kubescape update
 
 import (
-	"context"
 	"fmt"
 	"strings"
+
+	"github.com/kubescape/kubescape/v3/core/meta"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
@@ -25,17 +26,18 @@ var updateCmdExamples = fmt.Sprintf(`
   %[1]s update
 `, cautils.ExecName())
 
-func GetUpdateCmd() *cobra.Command {
+func GetUpdateCmd(ks meta.IKubescape) *cobra.Command {
 	updateCmd := &cobra.Command{
 		Use:     "update",
 		Short:   "Update to latest release version",
 		Long:    ``,
 		Example: updateCmdExamples,
 		RunE: func(_ *cobra.Command, args []string) error {
-			ctx := context.TODO()
 			v := versioncheck.NewVersionCheckHandler()
 			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "update", nil)
-			v.CheckLatestVersion(ctx, versionCheckRequest)
+			if err := v.CheckLatestVersion(ks.Context(), versionCheckRequest); err != nil {
+				return err
+			}
 
 			//Checking the user's version of kubescape to the latest release
 			if versioncheck.BuildNumber == "" || strings.Contains(versioncheck.BuildNumber, "rc") {

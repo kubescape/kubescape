@@ -2,6 +2,7 @@ package version
 
 import (
 	"fmt"
+
 	"github.com/kubescape/kubescape/v3/core/meta"
 
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -16,7 +17,10 @@ func GetVersionCmd(ks meta.IKubescape) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			v := versioncheck.NewIVersionCheckHandler(ks.Context())
 			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "version", nil)
-			v.CheckLatestVersion(ks.Context(), versionCheckRequest)
+			if err := v.CheckLatestVersion(ks.Context(), versionCheckRequest); err != nil {
+				return err
+			}
+
 			fmt.Fprintf(cmd.OutOrStdout(),
 				"Your current version is: %s\n",
 				versionCheckRequest.ClientVersion,
