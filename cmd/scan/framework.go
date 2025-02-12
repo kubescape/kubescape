@@ -1,7 +1,6 @@
 package scan
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -113,13 +112,12 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			scanInfo.SetPolicyIdentifiers(frameworks, apisv1.KindFramework)
 
-			ctx := context.TODO()
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())
 			}
 
-			if err = results.HandleResults(ctx); err != nil {
+			if err = results.HandleResults(ks.Context()); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 
