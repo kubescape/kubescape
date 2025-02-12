@@ -94,7 +94,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 			if err := validateControlScanInfo(scanInfo); err != nil {
 				return err
 			}
-			
+
 			results, err := ks.Scan(scanInfo)
 			if err != nil {
 				logger.L().Fatal(err.Error())

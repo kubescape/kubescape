@@ -2,6 +2,7 @@ package version
 
 import (
 	"fmt"
+
 	"github.com/kubescape/kubescape/v3/core/meta"
 
 	"github.com/kubescape/backend/pkg/versioncheck"

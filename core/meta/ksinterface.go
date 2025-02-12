@@ -2,6 +2,7 @@ package meta
 
 import (
 	"context"
+
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
