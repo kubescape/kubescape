@@ -10,8 +10,6 @@ type RootInfo struct {
 	Logger             string // logger level
 	LoggerName         string // logger name ("pretty"/"zap"/"none")
 	CacheDir           string // cached dir
-	DisableColor       bool   // Disable Color
-	EnableColor        bool   // Force enable Color
 	DiscoveryServerURL string // Discovery Server URL  (See https://github.com/kubescape/backend/tree/main/pkg/servicediscovery)
 	KubeContext        string //  context name
 }

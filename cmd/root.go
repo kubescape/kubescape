@@ -85,8 +85,6 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.Logger, "logger", "l", helpers.InfoLevel.String(), fmt.Sprintf("Logger level. Supported: %s [$KS_LOGGER]", strings.Join(helpers.SupportedLevels(), "/")))
 	rootCmd.PersistentFlags().StringVar(&rootInfo.CacheDir, "cache-dir", getter.DefaultLocalStore, "Cache directory [$KS_CACHE_DIR]")
-	rootCmd.PersistentFlags().BoolVarP(&rootInfo.DisableColor, "disable-color", "", false, "Disable color output for logging")
-	rootCmd.PersistentFlags().BoolVarP(&rootInfo.EnableColor, "enable-color", "", false, "Force enable color output for logging")
 
 	rootCmd.PersistentFlags().StringVarP(&rootInfo.KubeContext, "kube-context", "", "", "Kube context. Default will use the current-context")
 	// Supported commands

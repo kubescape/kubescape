@@ -18,9 +18,6 @@ import (
 )
 
 func initLogger() {
-	logger.DisableColor(rootInfo.DisableColor)
-	logger.EnableColor(rootInfo.EnableColor)
-
 	if rootInfo.LoggerName == "" {
 		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
 			rootInfo.LoggerName = l
@@ -34,8 +31,8 @@ func initLogger() {
 	}
 
 	logger.InitLogger(rootInfo.LoggerName)
-
 }
+
 func initLoggerLevel() {
 	if rootInfo.Logger == helpers.InfoLevel.String() {
 	} else if l := os.Getenv("KS_LOGGER"); l != "" {
