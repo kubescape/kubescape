@@ -31,7 +31,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.30
 	github.com/kubescape/go-logger v0.0.23
 	github.com/kubescape/k8s-interface v0.0.174
-	github.com/kubescape/opa-utils v0.0.286-0.20250219133816-aa487a90143c
+	github.com/kubescape/opa-utils v0.0.286-0.20250219140303-b94e6e1442ae
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary/v2 v2.0.1
 	github.com/kubescape/sizing-checker v0.0.0-20250214150700-f76039e53ac3
@@ -524,10 +524,10 @@ require (
 // Using the forked version of tablewriter
 replace github.com/olekukonko/tablewriter => github.com/kubescape/tablewriter v0.0.6-0.20231106230230-aac7d2659c94
 
-replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-20240426103125-b762a3538c32
+replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-20250211130420-468901f0e973
 
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20240227132928-63ceb71ae0b9
 
-replace github.com/docker/distribution v2.8.3+incompatible => github.com/docker/distribution v2.8.2+incompatible
+// replace github.com/docker/distribution v2.8.3+incompatible => github.com/docker/distribution v2.8.2+incompatible
 
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
