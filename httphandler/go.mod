@@ -18,7 +18,7 @@ require (
 	github.com/kubescape/go-logger v0.0.23
 	github.com/kubescape/k8s-interface v0.0.174
 	github.com/kubescape/kubescape/v3 v3.0.4
-	github.com/kubescape/opa-utils v0.0.286-0.20250219140303-b94e6e1442ae
+	github.com/kubescape/opa-utils v0.0.286
 	github.com/kubescape/storage v0.0.111
 	github.com/spf13/viper v1.18.2
 	github.com/stretchr/testify v1.10.0
