@@ -4,6 +4,8 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/meta"
+	"github.com/kubescape/sizing-checker/pkg/checks/connectivitycheck"
+	"github.com/kubescape/sizing-checker/pkg/checks/ebpfcheck"
 	"github.com/kubescape/sizing-checker/pkg/checks/pvcheck"
 	"github.com/kubescape/sizing-checker/pkg/checks/sizing"
 	"github.com/kubescape/sizing-checker/pkg/common"
@@ -11,8 +13,6 @@ import (
 )
 
 func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
-	var activeChecks bool
-
 	// preReqCmd represents the prerequisites command
 	preReqCmd := &cobra.Command{
 		Use:   "prerequisites",
@@ -31,32 +31,16 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 
 			// 2) Run checks
 			sizingResult := sizing.RunSizingChecker(clusterData)
-
-			// Conditionally run resource-deploying checks
-			var pvResult *pvcheck.PVCheckResult
-			if activeChecks {
-				logger.L().Start("Running active checks")
-				pvResult = pvcheck.RunPVProvisioningCheck(ks.Context(), clientSet, clusterData)
-				logger.L().StopSuccess("Active checks complete")
-			} else {
-				// If not running active checks, fill with a "Skipped" result
-				pvResult = &pvcheck.PVCheckResult{
-					PassedCount:   0,
-					FailedCount:   0,
-					TotalNodes:    len(clusterData.Nodes),
-					ResultMessage: "Skipped (use --active-checks to run)",
-				}
-			}
+			pvResult := pvcheck.RunPVProvisioningCheck(ks.Context(), clientSet, clusterData, inCluster)
+			connectivityResult := connectivitycheck.RunConnectivityChecks(ks.Context(), clientSet, clusterData, inCluster)
+			ebpfResult := ebpfcheck.RunEbpfCheck(ks.Context(), clientSet, clusterData, inCluster)
 
 			// 3) Build and export the final ReportData
-			finalReport := common.BuildReportData(clusterData, sizingResult)
-			finalReport.PVProvisioningMessage = pvResult.ResultMessage
+			finalReport := common.BuildReportData(clusterData, sizingResult, pvResult, connectivityResult, ebpfResult)
+			finalReport.InCluster = inCluster
 
 			common.GenerateOutput(finalReport, inCluster)
 		},
 	}
-
-	preReqCmd.PersistentFlags().BoolVarP(&activeChecks, "active-checks", "", false, "If set, run checks that require resource deployment on the cluster.")
-
 	return preReqCmd
 }
