@@ -1,15 +1,28 @@
-# This is an example .goreleaser.yml file with some sensible defaults.
 # Make sure to check the documentation at https://goreleaser.com
 
-# The lines bellow are called `modelines`. See `:help modeline`
+# The lines below are called `modelines`. See `:help modeline`
 # Feel free to remove those if you don't want/need to use them.
 # yaml-language-server: $schema=https://goreleaser.com/static/schema.json
 # vim: set ts=2 sw=2 tw=0 fo=cnqoj
+
+version: 2
 
 before:
   hooks:
     # You may remove this if you don't use go modules.
     - go mod tidy
+
+archives:
+  - id: binaries
+    formats:
+      - binary
+    name_template: >-
+      {{ .Binary }}
+  - id: default
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .Binary }}
 
 builds:
   - goos:
@@ -33,15 +46,6 @@ builds:
       {{- else }}{{ .Os }}{{ end }}-latest
     no_unique_dist_dir: true
 
-archives:
-  - format: binary
-    id: binaries
-    name_template: >-
-      {{ .Binary }}
-  - format: tar.gz
-    name_template: >-
-      {{ .Binary }}
-
 changelog:
   sort: asc
   filters:
@@ -50,9 +54,7 @@ changelog:
       - "^test:"
 
 checksum:
-  ids:
-    - binaries
-  split: true
+  name_template: "checksums.sha256"
 
 sboms:
   - artifacts: binary
