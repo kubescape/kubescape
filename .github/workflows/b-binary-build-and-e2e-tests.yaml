@@ -227,7 +227,7 @@ jobs:
         name: Upload artifacts
         with:
           name: kubescape
-          path: dist/kubescape*
+          path: dist/*
           if-no-files-found: error
 
       - name: (debug) Step 10 - Check disk space after uploading artifacts
