@@ -187,7 +187,7 @@ jobs:
       - name: (debug) Step 6 - Check disk space before goreleaser
         run: df -h
 
-      - uses: goreleaser/goreleaser-action@v5
+      - uses: goreleaser/goreleaser-action@v6
         name: Build
         with:
           distribution: goreleaser
