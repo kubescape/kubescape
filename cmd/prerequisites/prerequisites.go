@@ -13,12 +13,14 @@ import (
 )
 
 func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
+	var kubeconfigPath *string
+
 	// preReqCmd represents the prerequisites command
 	preReqCmd := &cobra.Command{
 		Use:   "prerequisites",
 		Short: "Check prerequisites for installing Kubescape Operator",
 		Run: func(cmd *cobra.Command, args []string) {
-			clientSet, inCluster := common.BuildKubeClient()
+			clientSet, inCluster := common.BuildKubeClient(*kubeconfigPath)
 			if clientSet == nil {
 				logger.L().Fatal("Could not create kube client. Exiting.")
 			}
@@ -42,5 +44,8 @@ func GetPreReqCmd(ks meta.IKubescape) *cobra.Command {
 			common.GenerateOutput(finalReport, inCluster)
 		},
 	}
+
+	kubeconfigPath = preReqCmd.PersistentFlags().String("kubeconfig", "", "Path to the kubeconfig file. If not set, in-cluster config is used or $HOME/.kube/config if outside a cluster.")
+
 	return preReqCmd
 }

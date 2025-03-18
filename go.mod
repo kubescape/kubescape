@@ -34,7 +34,7 @@ require (
 	github.com/kubescape/opa-utils v0.0.287
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary/v2 v2.0.1
-	github.com/kubescape/sizing-checker v0.0.0-20250225194755-bed52921170a
+	github.com/kubescape/sizing-checker v0.0.0-20250316121643-6a57be537b60
 	github.com/maruel/natural v1.1.1
 	github.com/matthyx/go-gitlog v0.0.0-20231005131906-9ffabe3c5bcd
 	github.com/mattn/go-isatty v0.0.20
