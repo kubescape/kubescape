@@ -1189,8 +1189,8 @@ github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/regolibrary/v2 v2.0.1 h1:7lKj171gslgTbbcmmGVHk34AZNqxForOXZIINoQfdzQ=
 github.com/kubescape/regolibrary/v2 v2.0.1/go.mod h1:s0/Mi9PYw7s91vIf1VJTkuu1Blsl5ZLpYn5UA7yk/vM=
-github.com/kubescape/sizing-checker v0.0.0-20250316121643-6a57be537b60 h1:qkdDbR8o6GG9ptLJoCqmYCbvnWXmiw02t7/44yo6hqw=
-github.com/kubescape/sizing-checker v0.0.0-20250316121643-6a57be537b60/go.mod h1:xCg5Fh96STR7zQ3Tj2jrHi6oIMCwdwfr7ir5n1nJBQw=
+github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73 h1:XEAryANSWXNEytHoPITzlCTOR2S4bpa30keR39qMNRI=
+github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73/go.mod h1:raFzO50jkNPNdBCFNTMn2EGQtmAOcBDvzVTJiArQvfo=
 github.com/kubescape/tablewriter v0.0.6-0.20231106230230-aac7d2659c94 h1:uhabZUyrxo60JQrzGCQOp1gsJz06+6+PeDBTvXiKD7k=
 github.com/kubescape/tablewriter v0.0.6-0.20231106230230-aac7d2659c94/go.mod h1:clwQfF3MN2cpaf7R6hc84aB6fQsRr+bnm66pXXSNAv8=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
