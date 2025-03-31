@@ -178,15 +178,6 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 		},
 	}
 
-	// This is a workaround for the fact that the apiserver does not return already exist error on Create
-	existing, err := a.StorageClient.WorkloadConfigurationScans(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
-	if err == nil {
-		logger.L().Debug("found existing WorkloadConfigurationScan manifest in storage - merging manifests", helpers.String("name", manifest.Name))
-		manifest.Annotations = existing.Annotations
-		manifest.Labels = existing.Labels
-		manifest.Spec = mergeWorkloadConfigurationScanSpec(existing.Spec, manifest.Spec)
-	}
-
 	_, err = a.StorageClient.WorkloadConfigurationScans(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
@@ -221,6 +212,9 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 }
 
 func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {
+	if existingSpec.Controls == nil {
+		existingSpec.Controls = make(map[string]v1beta1.ScannedControl)
+	}
 	for ctrlID := range newSpec.Controls {
 		newCtrl := newSpec.Controls[ctrlID]
 		_, found := existingSpec.Controls[ctrlID]
@@ -241,6 +235,9 @@ func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurati
 }
 
 func mergeWorkloadConfigurationScanSummarySpec(existingSpec v1beta1.WorkloadConfigurationScanSummarySpec, newSpec v1beta1.WorkloadConfigurationScanSummarySpec) v1beta1.WorkloadConfigurationScanSummarySpec {
+	if existingSpec.Controls == nil {
+		existingSpec.Controls = make(map[string]v1beta1.ScannedControlSummary)
+	}
 	for ctrlID := range newSpec.Controls {
 		newCtrl := newSpec.Controls[ctrlID]
 		_, found := existingSpec.Controls[ctrlID]
@@ -280,16 +277,7 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 		},
 	}
 
-	// This is a workaround for the fact that the apiserver does not return already exist error on Create
-	existing, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
-	if err == nil {
-		logger.L().Debug("found existing WorkloadConfigurationScanSummary manifest in storage - merging manifests", helpers.String("name", manifest.Name))
-		manifest.Annotations = existing.Annotations
-		manifest.Labels = existing.Labels
-		manifest.Spec = mergeWorkloadConfigurationScanSummarySpec(existing.Spec, manifest.Spec)
-	}
-
-	_, err = a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
