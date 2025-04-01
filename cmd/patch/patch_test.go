@@ -1,6 +1,7 @@
 package patch
 
 import (
+	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"testing"
 
 	"github.com/kubescape/kubescape/v3/core/mocks"
@@ -49,4 +50,19 @@ func TestGetPatchCmdWithNonExistentImage(t *testing.T) {
 	expectedErrorMessage := "image tag is required"
 	assert.Error(t, err)
 	assert.Equal(t, expectedErrorMessage, err.Error())
+}
+
+func Test_validateImagePatchInfo_EmptyImage(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{}
+	err := validateImagePatchInfo(patchInfo)
+	assert.NotNil(t, err)
+	assert.Equal(t, "image tag is required", err.Error())
+}
+
+func Test_validateImagePatchInfo_Image(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image: "testing",
+	}
+	err := validateImagePatchInfo(patchInfo)
+	assert.Nil(t, err)
 }

@@ -94,3 +94,17 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	expectedErrorMessage = "invalid workload identifier"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
+
+func Test_parseWorkloadIdentifierString_Empty(t *testing.T) {
+	t.Run("empty identifier", func(t *testing.T) {
+		_, _, err := parseWorkloadIdentifierString("")
+		assert.Error(t, err)
+	})
+}
+
+func Test_parseWorkloadIdentifierString_NoError(t *testing.T) {
+	t.Run("valid identifier", func(t *testing.T) {
+		_, _, err := parseWorkloadIdentifierString("default/Deployment")
+		assert.NoError(t, err)
+	})
+}
