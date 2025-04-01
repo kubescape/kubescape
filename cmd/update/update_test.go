@@ -2,9 +2,10 @@ package update
 
 import (
 	"context"
+	"testing"
+
 	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/stretchr/testify/assert"
-	"testing"
 )
 
 func TestGetUpdateCmd(t *testing.T) {
