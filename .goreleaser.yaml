@@ -11,40 +11,104 @@ before:
   hooks:
     # You may remove this if you don't use go modules.
     - go mod tidy
+    - go test -v ./...
+    - go -C httphandler test -v ./...
 
 archives:
-  - id: binaries
+  - id: cli
+    ids:
+      - cli
     formats:
       - binary
-    name_template: >-
-      {{ .Binary }}
-  - id: default
-    formats:
       - tar.gz
-    name_template: >-
-      {{ .Binary }}
 
 builds:
-  - goos:
+  - id: cli
+    binary: kubescape
+    env:
+      - CGO_ENABLED=0
+    goos:
       - linux
-      - windows
-      - darwin
     goarch:
       - amd64
       - arm64
-      - riscv64
     ldflags:
       - -s -w
       - -X "github.com/kubescape/kubescape/v3/core/cautils.BuildNumber={{.Env.RELEASE}}"
       - -X "github.com/kubescape/kubescape/v3/core/cautils.Client={{.Env.CLIENT}}"
-    binary: >-
-      {{ .ProjectName }}-
-      {{- if eq .Arch "amd64" }}
-      {{- else }}{{ .Arch }}-{{ end }}
-      {{- if eq .Os "darwin" }}macos
-      {{- else if eq .Os "linux" }}ubuntu
-      {{- else }}{{ .Os }}{{ end }}-latest
-    no_unique_dist_dir: true
+    hooks:
+      post:
+        - "/bin/sh -lc 'sh build/goreleaser-post-e2e.sh'"
+  - id: downloader
+    dir: downloader
+    binary: downloader
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: http
+    dir: httphandler
+    binary: ksserver
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+nfpms:
+  - id: cli
+    package_name: kubescape
+    ids:
+      - cli
+    vendor: Kubescape
+    homepage: https://kubescape.io/
+    maintainer: matthiasb@kubescape.io
+    formats:
+      - apk
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+docker_signs:
+  - stdin: "{{ .Env.COSIGN_PWD }}"
+
+dockers_v2:
+  - id: cli
+    images:
+      - "quay.io/kubescape/kubescape-cli"
+    tags:
+      - "{{ .Tag }}"
+    labels:
+      "org.opencontainers.image.description": "Kubescape CLI"
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.name": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{.GitURL}}"
+    ids:
+      - cli
+    dockerfile: build/kubescape-cli.Dockerfile
+  - id: http
+    images:
+      - "quay.io/kubescape/kubescape"
+    tags:
+      - "{{ .Tag }}"
+    labels:
+      "org.opencontainers.image.description": "Kubescape microservice"
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.name": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{.GitURL}}"
+    ids:
+      - downloader
+      - http
+    dockerfile: build/Dockerfile
 
 changelog:
   sort: asc
@@ -58,5 +122,19 @@ checksum:
 
 sboms:
   - artifacts: binary
-    documents:
-      - "{{ .Binary }}.sbom"
+
+krews:
+  - name: kubescape
+    ids:
+      - cli
+    homepage: https://kubescape.io/
+    description: It includes risk analysis, security compliance, and misconfiguration scanning with an easy-to-use CLI interface, flexible output formats, and automated scanning capabilities.
+    short_description: Scan resources and cluster configs against security frameworks.
+
+release:
+  draft: true
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
