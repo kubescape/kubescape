@@ -25,7 +25,10 @@ archives:
       {{ .Binary }}
 
 builds:
-  - goos:
+  - id: cli
+    env:
+      - CGO_ENABLED=0
+    goos:
       - linux
       - windows
       - darwin
@@ -45,6 +48,16 @@ builds:
       {{- else if eq .Os "linux" }}ubuntu
       {{- else }}{{ .Os }}{{ end }}-latest
     no_unique_dist_dir: true
+  - id: http
+    dir: httphandler
+    binary: ksserver
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
 
 changelog:
   sort: asc
@@ -60,3 +73,11 @@ sboms:
   - artifacts: binary
     documents:
       - "{{ .Binary }}.sbom"
+
+release:
+  draft: true
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
