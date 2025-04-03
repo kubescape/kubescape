@@ -13,38 +13,125 @@ before:
     - go mod tidy
 
 archives:
-  - id: binaries
+  - id: default
+    builds:
+      - cli
     formats:
       - binary
-    name_template: >-
-      {{ .Binary }}
-  - id: default
-    formats:
       - tar.gz
-    name_template: >-
-      {{ .Binary }}
 
 builds:
-  - goos:
+  - id: cli
+    binary: kubescape
+    env:
+      - CGO_ENABLED=0
+    goos:
       - linux
-      - windows
-      - darwin
     goarch:
       - amd64
       - arm64
-      - riscv64
     ldflags:
       - -s -w
       - -X "github.com/kubescape/kubescape/v3/core/cautils.BuildNumber={{.Env.RELEASE}}"
       - -X "github.com/kubescape/kubescape/v3/core/cautils.Client={{.Env.CLIENT}}"
-    binary: >-
-      {{ .ProjectName }}-
-      {{- if eq .Arch "amd64" }}
-      {{- else }}{{ .Arch }}-{{ end }}
-      {{- if eq .Os "darwin" }}macos
-      {{- else if eq .Os "linux" }}ubuntu
-      {{- else }}{{ .Os }}{{ end }}-latest
-    no_unique_dist_dir: true
+  - id: downloader
+    dir: downloader
+    binary: downloader
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+  - id: http
+    dir: httphandler
+    binary: ksserver
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+nfpms:
+  - id: cli
+    package_name: kubescape
+    builds:
+      - cli
+    vendor: Kubescape
+    homepage: https://kubescape.io/
+    maintainer: matthiasb@kubescape.io
+    formats:
+      - apk
+      - deb
+      - rpm
+    bindir: /usr/bin
+
+docker_manifests:
+  - name_template: "quay.io/kubescape/kubescape-cli:{{ .Tag }}-prerelease"
+    image_templates:
+      - "quay.io/kubescape/kubescape-cli:{{ .Tag }}-amd64"
+      - "quay.io/kubescape/kubescape-cli:{{ .Tag }}-arm64"
+  - name_template: "quay.io/kubescape/kubescape:{{ .Tag }}-prerelease"
+    image_templates:
+      - "quay.io/kubescape/kubescape:{{ .Tag }}-amd64"
+      - "quay.io/kubescape/kubescape:{{ .Tag }}-arm64"
+
+docker_signs:
+  - artifacts: all
+    stdin: "{{ .Env.COSIGN_PWD }}"
+
+dockers:
+  - image_templates:
+      - "quay.io/kubescape/kubescape-cli:{{ .Tag }}-amd64"
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--build-arg"
+      - "image_version={{ .Tag }}"
+    ids:
+      - cli
+    dockerfile: build/kubescape-cli.Dockerfile
+  - image_templates:
+      - "quay.io/kubescape/kubescape-cli:{{ .Tag }}-arm64"
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--build-arg"
+      - "image_version={{ .Tag }}"
+    goarch: arm64
+    ids:
+      - cli
+    dockerfile: build/kubescape-cli.Dockerfile
+  - image_templates:
+      - "quay.io/kubescape/kubescape:{{ .Tag }}-amd64"
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+      - "--build-arg"
+      - "image_version={{ .Tag }}"
+    ids:
+      - downloader
+      - http
+    dockerfile: build/Dockerfile
+  - image_templates:
+      - "quay.io/kubescape/kubescape:{{ .Tag }}-arm64"
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+      - "--build-arg"
+      - "image_version={{ .Tag }}"
+    goarch: arm64
+    ids:
+      - downloader
+      - http
+    dockerfile: build/Dockerfile
 
 changelog:
   sort: asc
@@ -58,5 +145,11 @@ checksum:
 
 sboms:
   - artifacts: binary
-    documents:
-      - "{{ .Binary }}.sbom"
+
+release:
+  draft: true
+  footer: >-
+
+    ---
+
+    Released by [GoReleaser](https://github.com/goreleaser/goreleaser).
