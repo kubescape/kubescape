@@ -19,10 +19,10 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/rego"
-	"github.com/open-policy-agent/opa/storage"
-	opaprint "github.com/open-policy-agent/opa/topdown/print"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/open-policy-agent/opa/v1/storage"
+	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
 )
 
@@ -324,6 +324,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	// NOTE: OPA module compilation is the most resource-intensive operation.
 	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
 		EnablePrintStatements: opap.printEnabled,
+		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("in 'runRegoOnK8s', failed to compile rule, name: %s, reason: %w", rule.Name, err)
@@ -351,6 +352,7 @@ func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
 
 func (opap *OPAProcessor) regoEval(ctx context.Context, inputObj []map[string]interface{}, compiledRego *ast.Compiler, store *storage.Store) ([]reporthandling.RuleResponse, error) {
 	rego := rego.New(
+		rego.SetRegoVersion(ast.RegoV0),
 		rego.Query("data.armo_builtins"), // get package name from rule
 		rego.Compiler(compiledRego),
 		rego.Input(inputObj),
