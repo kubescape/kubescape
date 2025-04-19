@@ -33,10 +33,11 @@ func TestUserConfirmed(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(string(tt.input), func(t *testing.T) {
+			originalStdin := os.Stdin
 			r, w, _ := os.Pipe()
 			os.Stdin = r
 			defer func() {
-				os.Stdin = os.Stdin
+				os.Stdin = originalStdin
 			}()
 
 			go func() {
