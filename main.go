@@ -23,6 +23,7 @@ func main() {
 	}()
 
 	if err := cmd.Execute(ctx); err != nil {
+		stop()
 		logger.L().Fatal(err.Error())
 	}
 }
