@@ -13,6 +13,7 @@ import (
 	"github.com/kubescape/kubescape/v3/cmd/download"
 	"github.com/kubescape/kubescape/v3/cmd/fix"
 	"github.com/kubescape/kubescape/v3/cmd/list"
+	"github.com/kubescape/kubescape/v3/cmd/mcpserver"
 	"github.com/kubescape/kubescape/v3/cmd/operator"
 	"github.com/kubescape/kubescape/v3/cmd/patch"
 	"github.com/kubescape/kubescape/v3/cmd/prerequisites"
@@ -100,6 +101,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(vap.GetVapHelperCmd())
 	rootCmd.AddCommand(operator.GetOperatorCmd(ks))
 	rootCmd.AddCommand(prerequisites.GetPreReqCmd(ks))
+	rootCmd.AddCommand(mcpserver.GetMCPServerCmd())
 
 	// deprecated commands
 	rootCmd.AddCommand(&cobra.Command{
