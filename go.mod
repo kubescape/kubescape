@@ -543,3 +543,9 @@ replace github.com/google/go-containerregistry => github.com/matthyx/go-containe
 replace github.com/docker/distribution v2.8.3+incompatible => github.com/docker/distribution v2.8.2+incompatible
 
 replace github.com/mholt/archiver/v3 v3.5.1 => github.com/anchore/archiver/v3 v3.5.2
+
+replace github.com/docker/docker => github.com/docker/docker v26.1.5+incompatible
+
+replace github.com/docker/cli => github.com/docker/cli v26.1.0+incompatible
+
+replace github.com/sylabs/squashfs => github.com/sylabs/squashfs v0.6.1
