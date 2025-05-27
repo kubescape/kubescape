@@ -20,6 +20,8 @@ func main() {
 		<-ctx.Done()
 		// Perform cleanup or graceful shutdown here
 		logger.L().StopError("Received interrupt signal, exiting...")
+		// Clear the signal handler so that a second interrupt signal shuts down immediately
+		stop()
 	}()
 
 	if err := cmd.Execute(ctx); err != nil {
