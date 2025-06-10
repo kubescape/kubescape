@@ -19,12 +19,10 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
-	"github.com/kubescape/storage/pkg/generated/clientset/versioned"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 )
 
@@ -54,19 +52,9 @@ func GetStorage() *APIServerStore {
 }
 
 // NewAPIServerStorage initializes the APIServerStore struct
-func NewAPIServerStorage(clusterName string, namespace string, config *rest.Config) (*APIServerStore, error) {
-	// disable rate limiting
-	config.QPS = 0
-	config.RateLimiter = nil
-	// force GRPC
-	config.AcceptContentTypes = "application/vnd.kubernetes.protobuf"
-	config.ContentType = "application/vnd.kubernetes.protobuf"
-	clientset, err := versioned.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
+func NewAPIServerStorage(clusterName string, namespace string, ksClient spdxv1beta1.SpdxV1beta1Interface) (*APIServerStore, error) {
 	return &APIServerStore{
-		StorageClient: clientset.SpdxV1beta1(),
+		StorageClient: ksClient,
 		clusterName:   clusterName,
 		namespace:     namespace,
 	}, nil

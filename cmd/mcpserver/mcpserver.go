@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kubescape/go-logger"
+	helpersv1 "github.com/kubescape/k8s-interface/instanceidhandler/v1/helpers"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -241,9 +242,9 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		var manifests *v1beta1.VulnerabilityManifestList
 		var err error
 		if labelSelector == "" {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests("kubescape").List(context.Background(), metav1.ListOptions{})
+			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
 		} else {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests("kubescape").List(context.Background(), metav1.ListOptions{
+			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{
 				LabelSelector: labelSelector,
 			})
 		}
@@ -255,21 +256,21 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 
 		vulnerabilityManifests := []map[string]interface{}{}
 		for _, manifest := range manifests.Items {
-			isImageLevel := manifest.Annotations["kubescape.io/wlid"] == ""
-			manifest := map[string]interface{}{
+			isImageLevel := manifest.Annotations[helpersv1.WlidMetadataKey] == ""
+			manifestMap := map[string]interface{}{
 				"type":                    "workload",
 				"namespace":               manifest.Namespace,
 				"manifest_name":           manifest.Name,
 				"image-level":             isImageLevel,
 				"workload-level":          !isImageLevel,
-				"image-id":                manifest.Annotations["kubescape.io/image-id"],
-				"image-tag":               manifest.Annotations["kubescape.io/image-tag"],
-				"workload-id":             manifest.Annotations[" kubescape.io/wlid"],
-				"workload-container-name": manifest.Annotations["kubescape.io/workload-container-name"],
+				"image-id":                manifest.Annotations[helpersv1.ImageIDMetadataKey],
+				"image-tag":               manifest.Annotations[helpersv1.ImageTagMetadataKey],
+				"workload-id":             manifest.Annotations[helpersv1.WlidMetadataKey],
+				"workload-container-name": manifest.Annotations[helpersv1.ContainerNameMetadataKey],
 				"resource_uri": fmt.Sprintf("kubescape://vulnerability-manifests/%s/%s",
 					manifest.Namespace, manifest.Name),
 			}
-			vulnerabilityManifests = append(vulnerabilityManifests, manifest)
+			vulnerabilityManifests = append(vulnerabilityManifests, manifestMap)
 		}
 		result["vulnerability_manifests"].(map[string]interface{})["manifests"] = vulnerabilityManifests
 
