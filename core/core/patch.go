@@ -18,7 +18,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/project-copacetic/copacetic/pkg/buildkit"
-	"github.com/project-copacetic/copacetic/pkg/pkgmgr"
 	"github.com/project-copacetic/copacetic/pkg/types/unversioned"
 	"github.com/project-copacetic/copacetic/pkg/utils"
 	log "github.com/sirupsen/logrus"
@@ -161,38 +160,12 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	}
 
 	// Parse report for update packages
-	updates, err := tryParseScanReport(reportFile)
-	if err != nil {
-		return err
-	}
 
 	client, err := buildkit.NewClient(ctx, bkOpts)
 	if err != nil {
 		return err
 	}
 	defer client.Close()
-
-	// Configure buildctl/client for use by package manager
-	config, err := buildkit.InitializeBuildkitConfig(ctx, client, image, updates)
-	if err != nil {
-		return err
-	}
-
-	// Create package manager helper
-	pkgmgr, err := pkgmgr.GetPackageManager(updates.Metadata.OS.Type, config, workingFolder)
-	if err != nil {
-		return err
-	}
-
-	// Export the patched image state to Docker
-	patchedImageState, _, err := pkgmgr.InstallUpdates(ctx, updates, ignoreError)
-	if err != nil {
-		return err
-	}
-
-	if err = buildkit.SolveToDocker(ctx, config.Client, patchedImageState, config.ConfigData, patchedImageName); err != nil {
-		return err
-	}
 
 	return nil
 }
