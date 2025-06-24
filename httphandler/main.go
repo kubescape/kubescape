@@ -19,7 +19,7 @@ import (
 	_ "github.com/kubescape/kubescape/v3/httphandler/docs"
 	"github.com/kubescape/kubescape/v3/httphandler/listener"
 	"github.com/kubescape/kubescape/v3/httphandler/storage"
-	"k8s.io/client-go/rest"
+	"github.com/kubescape/kubescape/v3/pkg/ksinit"
 )
 
 const (
@@ -68,19 +68,13 @@ func initializeStorage(clusterName string, cfg config.Config) {
 	namespace := getNamespace(cfg)
 	logger.L().Debug("initializing storage", helpers.String("namespace", namespace))
 
-	// for local storage, use the k8s config
-	var config *rest.Config
-	if os.Getenv("LOCAL_STORAGE") == "true" {
-		config = k8sinterface.GetK8sConfig()
-	} else {
-		var err error
-		config, err = rest.InClusterConfig()
-		if err != nil {
-			logger.L().Fatal("storage initialization error", helpers.Error(err))
-		}
+	// Use shared ksinit logic for storage connection
+	ksClient, err := ksinit.CreateKsObjectConnection(namespace, 0)
+	if err != nil {
+		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}
 
-	s, err := storage.NewAPIServerStorage(clusterName, namespace, config)
+	s, err := storage.NewAPIServerStorage(clusterName, namespace, ksClient)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}
