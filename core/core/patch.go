@@ -106,7 +106,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		},
 	}
 
-	return scanResultsPatched, resultsHandler.HandleResults(ks.Context())
+	return scanResultsPatched, resultsHandler.HandleResults(ks.Context(), scanInfo)
 }
 
 func disableCopaLogger() {

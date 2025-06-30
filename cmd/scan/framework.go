@@ -117,7 +117,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 				logger.L().Fatal(err.Error())
 			}
 
-			if err = results.HandleResults(ks.Context()); err != nil {
+			if err = results.HandleResults(ks.Context(), scanInfo); err != nil {
 				logger.L().Fatal(err.Error())
 			}
 

@@ -83,7 +83,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	if err != nil {
 		return nil, writeScanErrorToFile(err, scanID)
 	}
-	if err := result.HandleResults(ctx); err != nil {
+	if err := result.HandleResults(ctx, scanInfo); err != nil {
 		return nil, err
 	}
 	storage := storage.GetStorage()

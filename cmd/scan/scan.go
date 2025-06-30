@@ -139,7 +139,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
 		return err
 	}
 
-	if err = results.HandleResults(ks.Context()); err != nil {
+	if err = results.HandleResults(ks.Context(), &scanInfo); err != nil {
 		return err
 	}
 
