@@ -75,7 +75,7 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 }
 
 // HandleResults handles all necessary actions for the scan results
-func (rh *ResultsHandler) HandleResults(ctx context.Context) error {
+func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
 	// Display scan results in the UI first to give immediate value.
 
 	rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
@@ -92,7 +92,7 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context) error {
 
 	// We should submit only after printing results, so a user can see
 	// results at all times, even if submission fails
-	if rh.ReporterObj != nil {
+	if rh.ReporterObj != nil && scanInfo.Submit {
 		if err := rh.ReporterObj.Submit(ctx, rh.ScanData); err != nil {
 			return err
 		}

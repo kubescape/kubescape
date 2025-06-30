@@ -207,5 +207,5 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 		},
 	}
 
-	return scanResults, resultsHandler.HandleResults(ks.Context())
+	return scanResults, resultsHandler.HandleResults(ks.Context(), scanInfo)
 }

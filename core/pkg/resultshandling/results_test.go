@@ -50,7 +50,7 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
-	err := rh.HandleResults(context.TODO())
+	err := rh.HandleResults(context.TODO(), &cautils.ScanInfo{})
 	assert.NoError(t, err)
 
 	want := 1
