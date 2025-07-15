@@ -478,8 +478,15 @@ func (k8sHandler *K8sResourceHandler) setCloudProvider() error {
 // NoSchedule taint with empty value is usually applied to controlplane
 func isMasterNodeTaints(taints []v1.Taint) bool {
 	for _, taint := range taints {
-		if taint.Effect == v1.TaintEffectNoSchedule && taint.Value == "" {
-			return true
+		if taint.Effect == v1.TaintEffectNoSchedule {
+			// NoSchedule taint with empty value is usually applied to controlplane
+			if taint.Value == "" {
+				return true
+			}
+
+			if taint.Key == "node-role.kubernetes.io/control-plane" && taint.Value == "true" {
+				return true
+			}
 		}
 	}
 	return false
