@@ -28,15 +28,15 @@ Kubescape security posture overview for cluster: minikube
 In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.
 
 Control plane
-┌────┬─────────────────────────────────────┬────────────────────────────────────┐
-│    │ Control Name                        │ Docs                               │
-├────┼─────────────────────────────────────┼────────────────────────────────────┤
-│ ✅ │ API server insecure port is enabled │ https://hub.armosec.io/docs/c-0005 │
-│ ❌ │ Anonymous access enabled            │ https://hub.armosec.io/docs/c-0262 │
-│ ❌ │ Audit logs enabled                  │ https://hub.armosec.io/docs/c-0067 │
-│ ✅ │ RBAC enabled                        │ https://hub.armosec.io/docs/c-0088 │
-│ ❌ │ Secret/etcd encryption enabled      │ https://hub.armosec.io/docs/c-0066 │
-└────┴─────────────────────────────────────┴────────────────────────────────────┘
+┌────┬─────────────────────────────────────┬──────────────────────────────────────────────┐
+│    │ Control Name                        │ Docs                                         │
+├────┼─────────────────────────────────────┼──────────────────────────────────────────────┤
+│ ✅ │ API server insecure port is enabled │ https://kubescape.io/docs/controls/c-0005/   │
+│ ❌ │ Anonymous access enabled            │ https://kubescape.io/docs/controls/c-0262/   │
+│ ❌ │ Audit logs enabled                  │ https://kubescape.io/docs/controls/c-0067/   │
+│ ✅ │ RBAC enabled                        │ https://kubescape.io/docs/controls/c-0088/   │
+│ ❌ │ Secret/etcd encryption enabled      │ https://kubescape.io/docs/controls/c-0066/   │
+└────┴─────────────────────────────────────┴──────────────────────────────────────────────┘
 
 Access control
 ┌─────────────────────────────────────────────────┬───────────┬────────────────────────────────────┐
