@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	docsPrefix        = "https://hub.armosec.io/docs"
+	docsPrefix        = "https://kubescape.io/docs/"
 	scanControlPrefix = "$ kubescape scan control"
 	controlNameHeader = "Control name"
 	statusHeader      = ""

@@ -144,7 +144,7 @@ kubescape scan framework mitre
 ```
 
 #### Scan a control
-Scan for a specific control, using the control name or control ID. [See the list of controls](https://hub.armosec.io/docs/controls?utm_source=github&utm_medium=repository).
+Scan for a specific control, using the control name or control ID. [See the list of controls](https://kubescape.io/docs/controls/).
 
 ```bash
 kubescape scan control c-0005 -v
@@ -331,7 +331,7 @@ kubescape scan image nginx:1.19.6 -v
 
 ### Scan periodically using Helm 
 
-We publish [a Helm chart](https://github.com/kubescape/helm-charts) for our in-cluster components. [Please follow the instructions here](https://hub.armosec.io/docs/installation-of-armo-in-cluster?utm_source=github&utm_medium=repository)
+We publish [a Helm chart](https://github.com/kubescape/helm-charts) for our in-cluster components. [Please follow the instructions here](https://kubescape.io/docs/install-operator/)
 
 ### VS Code Extension 
 
