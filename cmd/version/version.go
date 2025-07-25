@@ -16,14 +16,11 @@ func GetVersionCmd(ks meta.IKubescape) *cobra.Command {
 		Long:  ``,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			v := versioncheck.NewIVersionCheckHandler(ks.Context())
-			versionCheckRequest := versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "version", nil)
-			if err := v.CheckLatestVersion(ks.Context(), versionCheckRequest); err != nil {
-				return err
-			}
+			_ = v.CheckLatestVersion(ks.Context(), versioncheck.NewVersionCheckRequest("", versioncheck.BuildNumber, "", "", "version", nil))
 
-			fmt.Fprintf(cmd.OutOrStdout(),
+			_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 				"Your current version is: %s\n",
-				versionCheckRequest.ClientVersion,
+				versioncheck.BuildNumber,
 			)
 			return nil
 		},
