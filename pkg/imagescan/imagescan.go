@@ -115,7 +115,10 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 //
 // It performs image scanning and everything needed in between.
 type Service struct {
-	dbCfg db.Config
+	dbCfg    db.Config
+	dbCloser *db.Closer
+	dbStatus *db.Status
+	dbStore  *store.Store
 }
 
 func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, packages []pkg.Package, pkgContext pkg.Context) (*match.Matches, []match.IgnoredMatch, error) {
@@ -178,47 +181,51 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	return filteredMatches
 }
 
-func (s *Service) Scan(ctx context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*models.PresenterConfig, error) {
-	store, status, dbCloser, err := NewVulnerabilityDB(s.dbCfg, true)
-	if err = validateDBLoad(err, status); err != nil {
-		return nil, err
-	}
-
+func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*models.PresenterConfig, error) {
 	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds))
 	if err != nil {
 		return nil, err
 	}
 
-	if dbCloser != nil {
-		defer dbCloser.Close()
-	}
-
-	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, store, packages, pkgContext)
+	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.dbStore, packages, pkgContext)
 	if err != nil {
 		return nil, err
 	}
 
-	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, store)
+	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.dbStore)
 
 	pb := models.PresenterConfig{
 		Matches:          filteredMatches,
 		IgnoredMatches:   ignoredMatches,
 		Packages:         packages,
 		Context:          pkgContext,
-		MetadataProvider: store,
+		MetadataProvider: s.dbStore,
 		SBOM:             sbom,
 		AppConfig:        nil,
-		DBStatus:         status,
+		DBStatus:         s.dbStatus,
 	}
 	return &pb, nil
+}
+
+func (s *Service) Close() {
+	s.dbCloser.Close()
 }
 
 func NewVulnerabilityDB(cfg db.Config, update bool) (*store.Store, *db.Status, *db.Closer, error) {
 	return grype.LoadVulnerabilityDB(cfg, update)
 }
 
-func NewScanService(dbCfg db.Config) Service {
-	return Service{dbCfg: dbCfg}
+func NewScanService(dbCfg db.Config) (*Service, error) {
+	dbStore, dbStatus, dbCloser, err := NewVulnerabilityDB(dbCfg, true)
+	if err = validateDBLoad(err, dbStatus); err != nil {
+		return nil, err
+	}
+	return &Service{
+		dbCfg:    dbCfg,
+		dbCloser: dbCloser,
+		dbStatus: dbStatus,
+		dbStore:  dbStore,
+	}, nil
 }
 
 // ParseSeverity returns a Grype severity given a severity string

@@ -31,7 +31,12 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 
 	// Setup the scan service
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
-	svc := imagescan.NewScanService(dbCfg)
+	svc, err := imagescan.NewScanService(dbCfg)
+	if err != nil {
+		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
+		return nil, err
+	}
+	defer svc.Close()
 	creds := imagescan.RegistryCredentials{
 		Username: patchInfo.Username,
 		Password: patchInfo.Password,
