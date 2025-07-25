@@ -17,6 +17,7 @@ import (
 	syftPkg "github.com/anchore/syft/syft/pkg"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
@@ -27,7 +28,9 @@ func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
 		DBRootDir:  path.Join(xdg.CacheHome, "grype-light", "db"),
 		ListingURL: "http://localhost:8000/listing.json",
 	}
-	svc := NewScanService(dbCfg)
+	svc, err := NewScanService(dbCfg)
+	require.NoError(t, err)
+	defer svc.Close()
 	creds := RegistryCredentials{}
 
 	tests := []struct {
@@ -338,7 +341,9 @@ func TestGetProviderConfig(t *testing.T) {
 
 func TestNewScanService(t *testing.T) {
 	defaultConfig, _ := NewDefaultDBConfig()
-	svc := NewScanService(defaultConfig)
+	svc, err := NewScanService(defaultConfig)
+	require.NoError(t, err)
+	defer svc.Close()
 	assert.Equal(t, defaultConfig, svc.dbCfg)
 }
 
