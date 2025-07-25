@@ -53,7 +53,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:     "kubescape",
-		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://hub.armosec.io/docs",
+		Short:   "Kubescape is a tool for testing Kubernetes security posture. Docs: https://kubescape.io/docs/",
 		Example: ksExamples,
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			k8sinterface.SetClusterContextName(rootInfo.KubeContext)

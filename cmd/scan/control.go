@@ -29,7 +29,7 @@ var (
   Run '%[1]s list controls' for the list of supported controls
   
   Control documentation:
-  https://hub.armosec.io/docs/controls
+  https://kubescape.io/docs/controls/
 `, cautils.ExecName())
 )
 
