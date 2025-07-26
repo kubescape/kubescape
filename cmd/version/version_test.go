@@ -20,7 +20,7 @@ func TestGetVersionCmd(t *testing.T) {
 	}{
 		{
 			name:        "Undefined Build Number",
-			buildNumber: "",
+			buildNumber: "unknown",
 			want:        "Your current version is: unknown\n",
 		},
 		{
