@@ -232,7 +232,7 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 			if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
 				// Return error with useful info on how to configure credentials for getting cloud provider info
 				logger.L().Debug("failed to get cloud data", helpers.String("resourceKind", resourceKind), helpers.Error(err))
-				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://hub.armosec.io/docs/kubescape-integration-with-cloud-providers", strings.ToUpper(k8sHandler.cloudProvider))
+				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://kubescape.io/docs/integrations/kubescape-integration-with-cloud-providers/", strings.ToUpper(k8sHandler.cloudProvider))
 				cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			}
 
