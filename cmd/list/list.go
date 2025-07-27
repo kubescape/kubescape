@@ -26,7 +26,7 @@ var (
   %[1]s list controls
   
   Control documentation:
-  https://hub.armosec.io/docs/controls
+  https://kubescape.io/docs/controls/
 `, cautils.ExecName())
 )
 

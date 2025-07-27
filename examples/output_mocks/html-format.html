@@ -708,14 +708,14 @@
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Network mapping</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0049">C-0049</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0049/">C-0049</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Cluster internal networking</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0054">C-0054</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0054/">C-0054</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
@@ -742,77 +742,77 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Allow privilege escalation</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0016/">C-0016</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Ingress and Egress blocked</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0030/">C-0030</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">Resource limits</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0009/">C-0009</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Configured readiness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0018/">C-0018</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Non-root containers</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0013/">C-0013</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Automatic mapping of service account</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0034/">C-0034</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.automountServiceAccountToken=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Linux hardening</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0055/">C-0055</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Configured liveness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0056/">C-0056</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">K8s common labels usage</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0077/">C-0077</a></td>
           <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Pods in default namespace</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0061">C-0061</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0061/">C-0061</a></td>
           <td class="resourceRemediationCell"> <p>metadata.namespace</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Immutable container filesystem</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0017/">C-0017</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
         </tr>
         
@@ -839,7 +839,7 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Access container service account</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0053">C-0053</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0053/">C-0053</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
@@ -866,7 +866,7 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Automatic mapping of service account</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0034/">C-0034</a></td>
           <td class="resourceRemediationCell"> <p>automountServiceAccountToken=false</p> </td>
         </tr>
         
@@ -893,77 +893,77 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Allow privilege escalation</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0016/">C-0016</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Ingress and Egress blocked</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0030/">C-0030</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">Resource limits</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0009/">C-0009</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Configured readiness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0018/">C-0018</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Non-root containers</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0013/">C-0013</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Automatic mapping of service account</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0034/">C-0034</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.automountServiceAccountToken=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Linux hardening</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0055/">C-0055</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Configured liveness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0056/">C-0056</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">K8s common labels usage</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0077/">C-0077</a></td>
           <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Pods in default namespace</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0061">C-0061</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0061/">C-0061</a></td>
           <td class="resourceRemediationCell"> <p>metadata.namespace</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Immutable container filesystem</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0017/">C-0017</a></td>
           <td class="resourceRemediationCell"> <p>spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
         </tr>
         
@@ -990,21 +990,21 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Audit logs enabled</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0067">C-0067</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0067/">C-0067</a></td>
           <td class="resourceRemediationCell"> <p>spec.containers[0].command</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">PSP enabled</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0068">C-0068</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0068/">C-0068</a></td>
           <td class="resourceRemediationCell"> <p>spec.containers[0].command[5]</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Secret/ETCD encryption enabled</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0066">C-0066</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0066/">C-0066</a></td>
           <td class="resourceRemediationCell"> <p>spec.containers[0].command</p> </td>
         </tr>
         
@@ -1031,14 +1031,14 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Data Destruction</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0007">C-0007</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0007/">C-0007</a></td>
           <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[1].resources[1]</p>  <p>relatedObjects[1].rules[1].verbs[0]</p>  <p>relatedObjects[1].rules[1].apiGroups[0]</p>  <p>relatedObjects[1].rules[1].apiGroups[1]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">List Kubernetes secrets</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0015">C-0015</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0015/">C-0015</a></td>
           <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[0].resources[0]</p>  <p>relatedObjects[1].rules[0].verbs[0]</p>  <p>relatedObjects[1].rules[0].verbs[1]</p>  <p>relatedObjects[1].rules[0].verbs[3]</p>  <p>relatedObjects[1].rules[0].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
         </tr>
         
@@ -1065,7 +1065,7 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Automatic mapping of service account</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0034">C-0034</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0034/">C-0034</a></td>
           <td class="resourceRemediationCell"> <p>automountServiceAccountToken=false</p> </td>
         </tr>
         
@@ -1092,56 +1092,56 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Ingress and Egress blocked</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0030/">C-0030</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">Resource limits</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0009/">C-0009</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Configured readiness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0018/">C-0018</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Kubernetes CronJob</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0026/">C-0026</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Label usage for resources</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0076">C-0076</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0076/">C-0076</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Linux hardening</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0055/">C-0055</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Configured liveness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0056/">C-0056</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">K8s common labels usage</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0077/">C-0077</a></td>
           <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
@@ -1168,63 +1168,63 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Allow privilege escalation</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0016/">C-0016</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Ingress and Egress blocked</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0030/">C-0030</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">Resource limits</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0009/">C-0009</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Configured readiness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0018/">C-0018</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Kubernetes CronJob</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0026/">C-0026</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Non-root containers</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0013/">C-0013</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Linux hardening</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0055/">C-0055</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Configured liveness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0056/">C-0056</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Immutable container filesystem</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0017/">C-0017</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
         </tr>
         
@@ -1251,21 +1251,21 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Data Destruction</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0007">C-0007</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0007/">C-0007</a></td>
           <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[1].resources[0]</p>  <p>relatedObjects[1].rules[1].verbs[0]</p>  <p>relatedObjects[1].rules[1].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p>  <p>relatedObjects[1].rules[2].resources[1]</p>  <p>relatedObjects[1].rules[2].verbs[0]</p>  <p>relatedObjects[1].rules[2].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">CoreDNS poisoning</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0037">C-0037</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0037/">C-0037</a></td>
           <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[2].resources[0]</p>  <p>relatedObjects[1].rules[2].verbs[0]</p>  <p>relatedObjects[1].rules[2].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">List Kubernetes secrets</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0015">C-0015</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0015/">C-0015</a></td>
           <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[0].resources[0]</p>  <p>relatedObjects[1].rules[0].verbs[0]</p>  <p>relatedObjects[1].rules[0].verbs[1]</p>  <p>relatedObjects[1].rules[0].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p>  <p>relatedObjects[1].rules[2].resources[1]</p>  <p>relatedObjects[1].rules[2].verbs[0]</p>  <p>relatedObjects[1].rules[2].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
         </tr>
         
@@ -1292,56 +1292,56 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Ingress and Egress blocked</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0030/">C-0030</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">Resource limits</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0009/">C-0009</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Configured readiness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0018/">C-0018</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Kubernetes CronJob</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0026/">C-0026</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Label usage for resources</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0076">C-0076</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0076/">C-0076</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Linux hardening</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0055/">C-0055</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Configured liveness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0056/">C-0056</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">K8s common labels usage</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0077/">C-0077</a></td>
           <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
@@ -1368,56 +1368,56 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Ingress and Egress blocked</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0030/">C-0030</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">Resource limits</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0009/">C-0009</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Configured readiness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0018/">C-0018</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Kubernetes CronJob</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0026/">C-0026</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Label usage for resources</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0076">C-0076</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0076/">C-0076</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Linux hardening</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0055/">C-0055</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Configured liveness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0056/">C-0056</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">K8s common labels usage</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0077">C-0077</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0077/">C-0077</a></td>
           <td class="resourceRemediationCell"> <p>metadata.labels=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.metadata.labels=YOUR_VALUE</p> </td>
         </tr>
         
@@ -1444,7 +1444,7 @@
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">List Kubernetes secrets</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0015">C-0015</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0015/">C-0015</a></td>
           <td class="resourceRemediationCell"> <p>relatedObjects[1].rules[0].resources[0]</p>  <p>relatedObjects[1].rules[0].verbs[0]</p>  <p>relatedObjects[1].rules[0].verbs[1]</p>  <p>relatedObjects[1].rules[0].verbs[2]</p>  <p>relatedObjects[1].rules[0].apiGroups[0]</p>  <p>relatedObjects[0].subjects[0]</p>  <p>relatedObjects[0].roleRef.name</p> </td>
         </tr>
         
@@ -1471,63 +1471,63 @@
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Allow privilege escalation</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0016">C-0016</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0016/">C-0016</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Ingress and Egress blocked</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0030">C-0030</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0030/">C-0030</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">High</td>
           <td class="resourceNameCell">Resource limits</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0009">C-0009</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0009/">C-0009</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.cpu=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].resources.limits.memory=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Configured readiness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0018">C-0018</a></td>
+          <td class="resourceURLCell"><a href=" https://kubescape.io/docs/controls/c-0018/">C-0018</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].readinessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Kubernetes CronJob</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0026">C-0026</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0026/">C-0026</a></td>
           <td class="resourceRemediationCell"></td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Non-root containers</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0013">C-0013</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0013/">C-0013</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.runAsNonRoot=true</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation=false</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Linux hardening</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0055">C-0055</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0055/">C-0055</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seccompProfile=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.seLinuxOptions=YOUR_VALUE</p>  <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.capabilities.drop[0]=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Medium</td>
           <td class="resourceNameCell">Configured liveness probe</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0056">C-0056</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0056/">C-0056</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].livenessProbe=YOUR_VALUE</p> </td>
         </tr>
         
         <tr>
           <td class="resourceSeverityCell">Low</td>
           <td class="resourceNameCell">Immutable container filesystem</td>
-          <td class="resourceURLCell"><a href="https://hub.armosec.io/docs/c-0017">C-0017</a></td>
+          <td class="resourceURLCell"><a href="https://kubescape.io/docs/controls/c-0017/">C-0017</a></td>
           <td class="resourceRemediationCell"> <p>spec.jobTemplate.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem=true</p> </td>
         </tr>
         
