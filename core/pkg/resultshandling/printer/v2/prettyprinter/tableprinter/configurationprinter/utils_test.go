@@ -542,14 +542,14 @@ func TestGetDocsForControl(t *testing.T) {
 			controlSummary: &reportsummary.ControlSummary{
 				ControlID: "ctrlID1",
 			},
-			expectedDocsLink: "https://hub.armosec.io/docs/ctrlid1",
+			expectedDocsLink: "https://kubescape.io/docs/ctrlid1",
 		},
 		{
 			name: "control with lowercase ID",
 			controlSummary: &reportsummary.ControlSummary{
 				ControlID: "ctrlid1",
 			},
-			expectedDocsLink: "https://hub.armosec.io/docs/ctrlid1",
+			expectedDocsLink: "https://kubescape.io/docs/ctrlid1",
 		},
 	}
 
