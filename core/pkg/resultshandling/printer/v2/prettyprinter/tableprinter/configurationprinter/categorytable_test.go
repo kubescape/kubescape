@@ -142,7 +142,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusFailed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"❌", "test", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"❌", "test", "https://kubescape.io/docs/ctrlid"},
 		},
 		{
 			name: "skipped control",
@@ -154,7 +154,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				},
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"⚠️", "test", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"⚠️", "test", "https://kubescape.io/docs/ctrlid"},
 			infoToPrintInfo: []utils.InfoStars{
 				{
 					Info:  "testInfo",
@@ -169,7 +169,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusPassed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"✅", "test", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"✅", "test", "https://kubescape.io/docs/ctrlid"},
 		},
 		{
 			name: "big name",
@@ -178,14 +178,14 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusFailed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: []string{"❌", "testtesttesttesttesttesttesttesttesttesttesttestte...", "https://hub.armosec.io/docs/ctrlid"},
+			expectedRows: []string{"❌", "testtesttesttesttesttesttesttesttesttesttesttestte...", "https://kubescape.io/docs/ctrlid"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			row := generateCategoryStatusRow(tt.controlSummary, tt.infoToPrintInfo)
-			assert.True(t, reflect.DeepEqual(row, tt.expectedRows))
+			assert.Equal(t, tt.expectedRows, row)
 		})
 	}
 }
