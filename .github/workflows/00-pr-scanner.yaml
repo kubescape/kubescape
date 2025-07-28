@@ -55,6 +55,7 @@ jobs:
       discussions: read
       id-token: write
       issues: read
+      models: read
       packages: write
       pages: read
       pull-requests: read
