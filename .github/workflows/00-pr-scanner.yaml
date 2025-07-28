@@ -27,6 +27,7 @@ jobs:
       deployments: read
       id-token: write
       issues: read
+      models: read
       discussions: read
       packages: read
       pages: read
