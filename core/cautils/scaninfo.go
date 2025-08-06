@@ -137,6 +137,7 @@ type ScanInfo struct {
 	TriggeredByCLI        bool                         // indicates whether the scan was triggered by the CLI
 	ScanType              ScanTypes
 	ScanImages            bool
+	UseDefaultMatchers    bool
 	ChartPath             string
 	FilePath              string
 	scanningContext       *ScanningContext

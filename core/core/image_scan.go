@@ -165,7 +165,7 @@ func (ks *Kubescape) ScanImage(imgScanInfo *ksmetav1.ImageScanInfo, scanInfo *ca
 	logger.L().Start(fmt.Sprintf("Scanning image %s...", imgScanInfo.Image))
 
 	dbCfg, _ := imagescan.NewDefaultDBConfig()
-	svc, err := imagescan.NewScanService(dbCfg)
+	svc, err := imagescan.NewScanServiceWithMatchers(dbCfg, imgScanInfo.UseDefaultMatchers)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
 		return nil, err
