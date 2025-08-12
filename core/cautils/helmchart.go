@@ -1,6 +1,8 @@
 package cautils
 
 import (
+	"fmt"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,7 +26,27 @@ func IsHelmDirectory(path string) (bool, error) {
 	return helmchartutil.IsChartDir(path)
 }
 
+func buildDependenciesIfNeeded(chartPath string) error {
+	logger.L().Info("Building Helm chart dependencies...", helpers.String("chart", chartPath))
+
+	cmd := exec.Command("helm", "dependency", "build", chartPath)
+	cmd.Dir = chartPath
+
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("helm dependency build failed: %w\nOutput: %s", err, string(output))
+	}
+
+	logger.L().Success("Helm dependencies built successfully")
+	return nil
+}
+
 func NewHelmChart(path string) (*HelmChart, error) {
+	// Build dependencies first
+	if err := buildDependenciesIfNeeded(path); err != nil {
+		logger.L().Warning("Failed to build dependencies, continuing anyway", helpers.Error(err))
+		// Continue with chart loading even if dependency build fails
+	}
+
 	chart, err := helmloader.Load(path)
 	if err != nil {
 		return nil, err
