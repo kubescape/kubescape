@@ -8,7 +8,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/spf13/cobra"
 )
 
@@ -60,12 +59,12 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				Exceptions: exceptions,
 			}
 
-			results, err := ks.ScanImage(imgScanInfo, scanInfo)
+			exceedsSeverityThreshold, err := ks.ScanImage(imgScanInfo, scanInfo)
 			if err != nil {
 				return err
 			}
 
-			if imagescan.ExceedsSeverityThreshold(results, imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)) {
+			if exceedsSeverityThreshold {
 				shared.TerminateOnExceedingSeverity(scanInfo, logger.L())
 			}
 
