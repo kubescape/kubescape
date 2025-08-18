@@ -95,7 +95,7 @@ func (prettyPrinter *PrettyPrinter) printAttackTracks(opaSessionObj *cautils.OPA
 	})
 
 	for i := 0; i < topResourceCount && i < len(resources); i++ {
-		fmt.Fprintf(prettyPrinter.writer, "\n"+getSeparator("^")+"\n")
+		fmt.Fprintf(prettyPrinter.writer, "\n%s\n", getSeparator("^"))
 		resource := resources[i]
 		resourceObj := opaSessionObj.AllResources[resource.ResourceID]
 

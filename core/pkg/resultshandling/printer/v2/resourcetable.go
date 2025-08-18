@@ -43,7 +43,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		if resource.GetNamespace() != "" {
 			fmt.Fprintf(prettyPrinter.writer, "Namespace: %s\n", resource.GetNamespace())
 		}
-		fmt.Fprintf(prettyPrinter.writer, "\n"+prettyprinter.ControlCountersForResource(result.ListControlsIDs(nil))+"\n\n")
+		fmt.Fprintf(prettyPrinter.writer, "\n%s\n\n", prettyprinter.ControlCountersForResource(result.ListControlsIDs(nil)))
 
 		summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 

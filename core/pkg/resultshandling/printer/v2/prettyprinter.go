@@ -121,9 +121,8 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 	if opaSessionObj != nil {
 		// TODO line is currently printed on framework scan only
 		if isPrintSeparatorType(pp.scanType) {
-			fmt.Fprintf(pp.writer, "\n"+
-				gchalk.WithAnsi256(238).Bold(fmt.Sprintf("%s\n", strings.Repeat("─", 50)))+
-				"\n")
+			fmt.Fprintf(pp.writer, "\n%s\n\n",
+				gchalk.WithAnsi256(238).Bold(strings.Repeat("─", 50)))
 		} else {
 			fmt.Fprintf(pp.writer, "\n")
 		}
