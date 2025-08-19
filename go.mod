@@ -109,6 +109,7 @@ require (
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.25.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/exporter/metric v0.49.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/internal/resourcemapping v0.49.0 // indirect
+	github.com/MakeNowJust/heredoc v1.0.0 // indirect
 	github.com/Masterminds/goutils v1.1.1 // indirect
 	github.com/Masterminds/semver v1.5.0 // indirect
 	github.com/Masterminds/semver/v3 v3.3.1 // indirect
@@ -179,6 +180,7 @@ require (
 	github.com/buildkite/interpolate v0.0.0-20200526001904-07f35b4ae251 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
+	github.com/chai2010/gettext-go v1.0.2 // indirect
 	github.com/charmbracelet/lipgloss v1.0.0 // indirect
 	github.com/charmbracelet/x/ansi v0.4.5 // indirect
 	github.com/chrismellard/docker-credential-acr-env v0.0.0-20230304212654-82a0ddb27589 // indirect
@@ -228,6 +230,8 @@ require (
 	github.com/emirpasic/gods v1.18.1 // indirect
 	github.com/envoyproxy/go-control-plane/envoy v1.32.4 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.2.1 // indirect
+	github.com/evanphx/json-patch v5.9.11+incompatible // indirect
+	github.com/exponent-io/jsonpath v0.0.0-20210407135951-1de76d718b3f // indirect
 	github.com/f-amaral/go-async v0.3.0 // indirect
 	github.com/facebookincubator/nvdtools v0.1.5 // indirect
 	github.com/fatih/color v1.18.0 // indirect
@@ -273,6 +277,7 @@ require (
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
+	github.com/google/btree v1.1.3 // indirect
 	github.com/google/certificate-transparency-go v1.3.1 // indirect
 	github.com/google/gnostic-models v0.6.9 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
@@ -287,6 +292,7 @@ require (
 	github.com/gookit/color v1.5.4 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674 // indirect
+	github.com/gregjones/httpcache v0.0.0-20190611155906-901d90724c79 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.1 // indirect
 	github.com/hako/durafmt v0.0.0-20210608085754-5c1018a4e16b // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
@@ -322,6 +328,7 @@ require (
 	github.com/knqyf263/go-rpmdb v0.1.1 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20240620165639-de9c06129bec // indirect
+	github.com/liggitt/tabwriter v0.0.0-20181228230101-89fcab3d43de // indirect
 	github.com/lucasb-eyer/go-colorful v1.2.0 // indirect
 	github.com/mackerelio/go-osstat v0.2.5 // indirect
 	github.com/magiconair/properties v1.8.9 // indirect
@@ -337,6 +344,7 @@ require (
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/go-testing-interface v1.14.1 // indirect
+	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/mitchellh/hashstructure/v2 v2.0.2 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
@@ -377,6 +385,7 @@ require (
 	github.com/pdfcpu/pdfcpu v0.9.1 // indirect
 	github.com/pelletier/go-toml v1.9.5 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.3 // indirect
+	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/petermattis/goid v0.0.0-20241211131331-93ee7e083c43 // indirect
 	github.com/pierrec/lz4/v4 v4.1.22 // indirect
 	github.com/pjbgf/sha1cd v0.3.2 // indirect
@@ -395,6 +404,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/rs/zerolog v1.30.0 // indirect
+	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/saferwall/pe v1.5.6 // indirect
 	github.com/sagikazarmark/locafero v0.7.0 // indirect
 	github.com/sagikazarmark/slog-shim v0.1.0 // indirect
@@ -520,13 +530,16 @@ require (
 	gorm.io/gorm v1.25.12 // indirect
 	k8s.io/apiextensions-apiserver v0.33.3 // indirect
 	k8s.io/apiserver v0.33.3 // indirect
+	k8s.io/cli-runtime v0.33.3 // indirect
 	k8s.io/component-base v0.33.3 // indirect
 	k8s.io/klog/v2 v2.130.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20250318190949-c8a335a9a2ff // indirect
+	k8s.io/kubectl v0.33.3 // indirect
 	modernc.org/libc v1.61.13 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.8.2 // indirect
 	modernc.org/sqlite v1.36.2 // indirect
+	oras.land/oras-go/v2 v2.6.0 // indirect
 	sigs.k8s.io/controller-runtime v0.18.4 // indirect
 	sigs.k8s.io/json v0.0.0-20241014173422-cfa47c3a1cc8 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
