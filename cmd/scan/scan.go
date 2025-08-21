@@ -92,6 +92,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.PrintAttackTree, "print-attack-tree", "", false, "Print attack tree")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
+	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
 
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
 	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Create account is no longer supported. In case of a missing Account ID and a configured backend server, a new account id will be generated automatically by Kubescape. Feel free to contact the Kubescape maintainers for more information.")
