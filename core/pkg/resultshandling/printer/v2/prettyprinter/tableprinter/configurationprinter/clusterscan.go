@@ -38,9 +38,9 @@ func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails
 func (cp *ClusterPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
 	sortControlSummaries(controlSummaries)
 
-	headers, columnAligments := initCategoryTableData(categoryType)
+	headers := initCategoryTableData(categoryType)
 
-	table := getCategoryTableWriter(writer, headers, columnAligments)
+	table := getCategoryTableWriter(writer, headers)
 
 	var rows [][]string
 	for _, ctrls := range controlSummaries {

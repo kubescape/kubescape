@@ -9,7 +9,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/olekukonko/tablewriter"
 )
 
 const (
@@ -49,16 +48,6 @@ func GetControlTableHeaders(short bool) []string {
 		headers[summaryColumnComplianceScore] = "Compliance score"
 	}
 	return headers
-}
-
-func GetColumnsAlignments() []int {
-	alignments := make([]int, _summaryRowLen)
-	alignments[summaryColumnSeverity] = tablewriter.ALIGN_CENTER
-	alignments[summaryColumnName] = tablewriter.ALIGN_LEFT
-	alignments[summaryColumnCounterFailed] = tablewriter.ALIGN_CENTER
-	alignments[summaryColumnCounterAll] = tablewriter.ALIGN_CENTER
-	alignments[summaryColumnComplianceScore] = tablewriter.ALIGN_CENTER
-	return alignments
 }
 
 func GenerateRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars, verbose bool) []string {

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype/presenter"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/go-logger"
@@ -17,7 +16,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -65,25 +63,25 @@ func (jp *JsonPrinter) convertToImageScanSummary(imageScanData []cautils.ImageSc
 		MapsSeverityToSummary: map[string]*imageprinter.SeveritySummary{},
 	}
 
-	for i := range imageScanData {
-		if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
-			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
-		}
-
-		presenterConfig := imageScanData[i].PresenterConfig
-		doc, err := models.NewDocument(clio.Identification{}, presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
-		if err != nil {
-			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
-			continue
-		}
-
-		CVEs := extractCVEs(doc.Matches)
-		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
-
-		setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
-
-		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
-	}
+	//for i := range imageScanData {
+	//	if !slices.Contains(imageScanSummary.Images, imageScanData[i].Image) {
+	//		imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
+	//	}
+	//
+	//	presenterConfig := imageScanData[i].PresenterConfig
+	//	doc, err := models.NewDocument(clio.Identification{}, presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
+	//	if err != nil {
+	//		logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
+	//		continue
+	//	}
+	//
+	//	CVEs := extractCVEs(doc.Matches)
+	//	imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
+	//
+	//	setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
+	//
+	//	setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
+	//}
 
 	return &imageScanSummary, nil
 }

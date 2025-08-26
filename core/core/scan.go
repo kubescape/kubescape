@@ -243,8 +243,8 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		}
 	}
 
-	dbCfg, _ := imagescan.NewDefaultDBConfig()
-	svc, err := imagescan.NewScanService(dbCfg)
+	distCfg, installCfg, _ := imagescan.NewDefaultDBConfig()
+	svc, err := imagescan.NewScanService(distCfg, installCfg)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
 		return

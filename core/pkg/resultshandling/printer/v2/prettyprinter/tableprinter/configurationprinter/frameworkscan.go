@@ -6,7 +6,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -40,17 +39,13 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 
 	controlCountersTable := tablewriter.NewWriter(writer)
 
-	controlCountersTable.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
-	controlCountersTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-	controlCountersTable.AppendBulk(ControlCountersForSummary(summaryDetails.NumberOfControls()))
+	controlCountersTable.Append(ControlCountersForSummary(summaryDetails.NumberOfControls()))
 	controlCountersTable.Render()
 
 	cautils.SimpleDisplay(writer, "\nFailed resources by severity:\n\n")
 
 	severityCountersTable := tablewriter.NewWriter(writer)
-	severityCountersTable.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
-	severityCountersTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-	severityCountersTable.AppendBulk(renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters()))
+	severityCountersTable.Append(renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters()))
 	severityCountersTable.Render()
 
 	cautils.SimpleDisplay(writer, "\n")
@@ -60,13 +55,6 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	}
 
 	summaryTable := tablewriter.NewWriter(writer)
-
-	summaryTable.SetAutoWrapText(false)
-	summaryTable.SetHeaderLine(true)
-	summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	summaryTable.SetAutoFormatHeaders(false)
-	summaryTable.SetColumnAlignment(GetColumnsAlignments())
-	summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 	printAll := fp.getVerboseMode()
 	if summaryDetails.NumberOfResources().Failed() == 0 {
@@ -88,21 +76,12 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 
 	short := utils.CheckShortTerminalWidth(dataRows, GetControlTableHeaders(false))
 	if short {
-		summaryTable.SetRowLine(true)
 		dataRows = shortFormatRow(dataRows)
-	} else {
-		summaryTable.SetColumnAlignment(GetColumnsAlignments())
 	}
-	summaryTable.SetHeader(GetControlTableHeaders(short))
-	summaryTable.SetFooter(GenerateFooter(summaryDetails, short))
+	summaryTable.Header(GetControlTableHeaders(short))
+	summaryTable.Footer(GenerateFooter(summaryDetails, short))
 
-	var headerColors []tablewriter.Colors
-	for range dataRows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	summaryTable.SetHeaderColor(headerColors...)
-
-	summaryTable.AppendBulk(dataRows)
+	summaryTable.Append(dataRows)
 	summaryTable.Render()
 
 	utils.PrintInfo(writer, infoToPrintInfo)

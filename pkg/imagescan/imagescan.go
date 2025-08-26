@@ -9,7 +9,8 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
-	"github.com/anchore/grype/grype/db"
+	"github.com/anchore/grype/grype/db/v6/distribution"
+	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/grypeerr"
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/matcher"
@@ -22,14 +23,13 @@ import (
 	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
 )
 
 const (
-	defaultGrypeListingURL = "https://toolbox-data.anchore.io/grype/databases/listing.json"
+	defaultGrypeListingURL = "https://grype.anchore.io/databases"
 	defaultDBDirName       = "grypedb"
 )
 
@@ -46,25 +46,27 @@ func (c RegistryCredentials) IsEmpty() bool {
 //
 // Values equal to the threshold are considered failing, too.
 func ExceedsSeverityThreshold(scanResults *models.PresenterConfig, severity vulnerability.Severity) bool {
-	if scanResults.MetadataProvider == nil {
-		return false
-	}
-
-	return grype.HasSeverityAtOrAbove(scanResults.MetadataProvider, severity, scanResults.Matches)
+	//if scanResults.MetadataProvider == nil {
+	//	return false
+	//}
+	//
+	//return grype.HasSeverityAtOrAbove(scanResults.MetadataProvider, severity, scanResults.Matches)
+	return false
 }
 
-func NewDefaultDBConfig() (db.Config, bool) {
+func NewDefaultDBConfig() (distribution.Config, installation.Config, bool) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	url := defaultGrypeListingURL
 	shouldUpdate := true
 
-	return db.Config{
-		DBRootDir:  dir,
-		ListingURL: url,
-	}, shouldUpdate
+	return distribution.Config{
+			LatestURL: url,
+		}, installation.Config{
+			DBRootDir: dir,
+		}, shouldUpdate
 }
 
-func getMatchers() []matcher.Matcher {
+func getMatchers() []match.Matcher {
 	return matcher.NewDefaultMatchers(
 		matcher.Config{
 			Java: java.MatcherConfig{
@@ -81,15 +83,15 @@ func getMatchers() []matcher.Matcher {
 	)
 }
 
-func validateDBLoad(loadErr error, status *db.Status) error {
+func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 	if loadErr != nil {
 		return fmt.Errorf("failed to load vulnerability db: %w", loadErr)
 	}
 	if status == nil {
 		return fmt.Errorf("unable to determine the status of the vulnerability db")
 	}
-	if status.Err != nil {
-		return fmt.Errorf("db could not be loaded: %w", status.Err)
+	if status.Error != nil {
+		return fmt.Errorf("db could not be loaded: %w", status.Error)
 	}
 	return nil
 }
@@ -115,13 +117,10 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 //
 // It performs image scanning and everything needed in between.
 type Service struct {
-	dbCfg    db.Config
-	dbCloser *db.Closer
-	dbStatus *db.Status
-	dbStore  *store.Store
+	vp vulnerability.Provider
 }
 
-func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, packages []pkg.Package, pkgContext pkg.Context) (*match.Matches, []match.IgnoredMatch, error) {
+func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provider, packages []pkg.Package, pkgContext pkg.Context) (*match.Matches, []match.IgnoredMatch, error) {
 	if vulnerabilityExceptions == nil {
 		vulnerabilityExceptions = []string{}
 	}
@@ -134,13 +133,13 @@ func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, pac
 		ignoreRules = append(ignoreRules, rule)
 	}
 
-	matcher := grype.VulnerabilityMatcher{
-		Store:       *store,
-		Matchers:    getMatchers(),
-		IgnoreRules: ignoreRules,
+	vulnMatcher := grype.VulnerabilityMatcher{
+		VulnerabilityProvider: vp,
+		Matchers:              getMatchers(),
+		IgnoreRules:           ignoreRules,
 	}
 
-	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, pkgContext)
+	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		if !errors.Is(err, grypeerr.ErrAboveSeverityThreshold) {
 			return nil, nil, err
@@ -151,7 +150,7 @@ func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, pac
 }
 
 // Filter the remaing matches based on severity exceptions.
-func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, store *store.Store) match.Matches {
+func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, vp vulnerability.Provider) match.Matches {
 	if severityExceptions == nil {
 		return remainingMatches
 	}
@@ -159,7 +158,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	filteredMatches := match.NewMatches()
 
 	for m := range remainingMatches.Enumerate() {
-		metadata, err := store.GetMetadata(m.Vulnerability.ID, m.Vulnerability.Namespace)
+		metadata, err := vp.VulnerabilityMetadata(m.Vulnerability.Reference)
 		if err != nil {
 			continue
 		}
@@ -182,49 +181,53 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 }
 
 func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*models.PresenterConfig, error) {
-	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds))
+	packages, pkgContext, _, err := pkg.Provide(userInput, getProviderConfig(creds))
 	if err != nil {
 		return nil, err
 	}
 
-	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.dbStore, packages, pkgContext)
+	remainingMatches, _, err := getIgnoredMatches(vulnerabilityExceptions, s.vp, packages, pkgContext)
 	if err != nil {
 		return nil, err
 	}
 
-	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.dbStore)
+	_ = filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.vp)
 
 	pb := models.PresenterConfig{
-		Matches:          filteredMatches,
-		IgnoredMatches:   ignoredMatches,
-		Packages:         packages,
-		Context:          pkgContext,
-		MetadataProvider: s.dbStore,
-		SBOM:             sbom,
-		AppConfig:        nil,
-		DBStatus:         s.dbStatus,
+		//Document: models.Document{
+		//	Matches:        filteredMatches,
+		//	IgnoredMatches: ignoredMatches,
+		//	Source:         nil,
+		//	Distro:         ,
+		//	Descriptor:     ,
+		//},
+		//Matches:          filteredMatches,
+		//IgnoredMatches:   ignoredMatches,
+		//Packages:         packages,
+		//Context:          pkgContext,
+		//MetadataProvider: s.dbStore,
+		//SBOM:             sbom,
+		//AppConfig:        nil,
+		//DBStatus:         s.dbStatus,
 	}
 	return &pb, nil
 }
 
 func (s *Service) Close() {
-	s.dbCloser.Close()
+	_ = s.vp.Close()
 }
 
-func NewVulnerabilityDB(cfg db.Config, update bool) (*store.Store, *db.Status, *db.Closer, error) {
-	return grype.LoadVulnerabilityDB(cfg, update)
+func NewVulnerabilityDB(distCfg distribution.Config, installCfg installation.Config, update bool) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+	return grype.LoadVulnerabilityDB(distCfg, installCfg, update)
 }
 
-func NewScanService(dbCfg db.Config) (*Service, error) {
-	dbStore, dbStatus, dbCloser, err := NewVulnerabilityDB(dbCfg, true)
-	if err = validateDBLoad(err, dbStatus); err != nil {
+func NewScanService(distCfg distribution.Config, installCfg installation.Config) (*Service, error) {
+	vp, status, err := NewVulnerabilityDB(distCfg, installCfg, true)
+	if err = validateDBLoad(err, status); err != nil {
 		return nil, err
 	}
 	return &Service{
-		dbCfg:    dbCfg,
-		dbCloser: dbCloser,
-		dbStatus: dbStatus,
-		dbStore:  dbStore,
+		vp: vp,
 	}, nil
 }
 

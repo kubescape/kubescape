@@ -91,7 +91,7 @@ func TestRenderTable(t *testing.T) {
 			}()
 			os.Stderr = f
 
-			renderTable(f, headers, columnAlignments, rows)
+			renderTable(f, headers, rows)
 
 			// Read the contents of the temporary file
 			f.Seek(0, 0)

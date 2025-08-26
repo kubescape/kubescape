@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
@@ -102,28 +101,13 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 
 	policyTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
 
-	policyTable.SetAutoWrapText(true)
-	header := fmt.Sprintf("Supported %s", targetPolicy)
-	policyTable.SetHeader([]string{header})
-	policyTable.SetHeaderLine(true)
-	policyTable.SetRowLine(true)
-	policyTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	policyTable.SetAutoFormatHeaders(false)
-	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
-	policyTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 	data := v2.Matrix{}
 
 	controlRows := generatePolicyRows(policies)
 
-	var headerColors []tablewriter.Colors
-	for range controlRows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	policyTable.SetHeaderColor(headerColors...)
-
 	data = append(data, controlRows...)
 
-	policyTable.AppendBulk(data)
+	policyTable.Append(data)
 	policyTable.Render()
 }
 
@@ -136,33 +120,19 @@ func jsonListFormat(_ context.Context, _ string, policies []string) {
 func prettyPrintControls(ctx context.Context, policies []string) {
 	controlsTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
 
-	controlsTable.SetAutoWrapText(false)
-	controlsTable.SetHeaderLine(true)
-	controlsTable.SetRowLine(true)
-	controlsTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	controlsTable.SetAutoFormatHeaders(false)
-	controlsTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-
 	controlRows := generateControlRows(policies)
 
 	short := utils.CheckShortTerminalWidth(controlRows, []string{"Control ID", "Control name", "Docs", "Frameworks"})
 	if short {
-		controlsTable.SetAutoWrapText(false)
-		controlsTable.SetHeader([]string{"Controls"})
 		controlRows = shortFormatControlRows(controlRows)
 	} else {
-		controlsTable.SetHeader([]string{"Control ID", "Control name", "Docs", "Frameworks"})
+		controlsTable.Header([]string{"Control ID", "Control name", "Docs", "Frameworks"})
 	}
-	var headerColors []tablewriter.Colors
-	for range controlRows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	controlsTable.SetHeaderColor(headerColors...)
 
 	data := v2.Matrix{}
 	data = append(data, controlRows...)
 
-	controlsTable.AppendBulk(data)
+	controlsTable.Append(data)
 	controlsTable.Render()
 }
 

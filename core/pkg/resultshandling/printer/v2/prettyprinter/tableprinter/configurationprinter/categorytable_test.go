@@ -35,7 +35,7 @@ func TestInitCategoryTableData(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			headers, alignments := initCategoryTableData(tt.categoryType)
+			headers := initCategoryTableData(tt.categoryType)
 			if len(headers) != len(tt.expectedHeaders) {
 				t.Errorf("initCategoryTableData() headers = %v, want %v", headers, tt.expectedHeaders)
 			}
@@ -219,7 +219,7 @@ func TestGetCategoryTableWriter(t *testing.T) {
 			}
 			defer f.Close()
 
-			tableWriter := getCategoryTableWriter(f, tt.headers, tt.columnAligments)
+			tableWriter := getCategoryTableWriter(f, tt.headers)
 
 			// Redirect stderr to the temporary file
 			oldStderr := os.Stderr
@@ -311,7 +311,7 @@ func TestRenderSingleCategory(t *testing.T) {
 			}
 			defer f.Close()
 
-			tableWriter := getCategoryTableWriter(f, tt.headers, tt.columnAligments)
+			tableWriter := getCategoryTableWriter(f, tt.headers)
 
 			// Redirect stderr to the temporary file
 			oldStderr := os.Stderr

@@ -27,5 +27,5 @@ func (tw *TableWriter) PrintImageScanningTable(writer io.Writer, summary ImageSc
 		return
 	}
 
-	renderTable(writer, getImageScanningHeaders(), getImageScanningColumnsAlignments(), rows)
+	renderTable(writer, getImageScanningHeaders(), rows)
 }

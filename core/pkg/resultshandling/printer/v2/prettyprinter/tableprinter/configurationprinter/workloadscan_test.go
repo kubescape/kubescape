@@ -13,7 +13,7 @@ func TestWorkloadScan_InitCategoryTableData(t *testing.T) {
 
 	workloadPrinter := NewWorkloadPrinter()
 
-	headers, columnAligments := workloadPrinter.initCategoryTableData()
+	headers := workloadPrinter.initCategoryTableData()
 
 	for i := range headers {
 		if headers[i] != expectedHeader[i] {

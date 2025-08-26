@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
@@ -47,14 +46,6 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 		summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
 
-		summaryTable.SetAutoWrapText(true)
-		summaryTable.SetAutoMergeCells(true)
-		summaryTable.SetHeaderLine(true)
-		summaryTable.SetRowLine(true)
-		summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-		summaryTable.SetAutoFormatHeaders(false)
-		summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-
 		resourceRows := [][]string{}
 		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails); len(raw) > 0 {
 			resourceRows = append(resourceRows, raw...)
@@ -62,24 +53,16 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
-			summaryTable.SetAutoWrapText(false)
-			summaryTable.SetAutoMergeCells(false)
 			resourceRows = shortFormatResource(resourceRows)
 		}
-		summaryTable.SetHeader(generateResourceHeader(short))
-
-		var headerColors []tablewriter.Colors
-		for range resourceRows[0] {
-			headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-		}
-		summaryTable.SetHeaderColor(headerColors...)
+		summaryTable.Header(generateResourceHeader(short))
 
 		data := Matrix{}
 		data = append(data, resourceRows...)
 		// For control scan framework will be nil
 
 		sort.Sort(data)
-		summaryTable.AppendBulk(data)
+		summaryTable.Append(data)
 
 		summaryTable.Render()
 	}

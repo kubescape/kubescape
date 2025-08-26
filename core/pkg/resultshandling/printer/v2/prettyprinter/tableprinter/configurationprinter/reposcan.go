@@ -55,9 +55,9 @@ func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *r
 func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) bool {
 	sortControlSummaries(controlSummaries)
 
-	headers, columnAligments := initCategoryTableData(categoryType)
+	headers := initCategoryTableData(categoryType)
 
-	table := getCategoryTableWriter(writer, headers, columnAligments)
+	table := getCategoryTableWriter(writer, headers)
 
 	var rows [][]string
 	for _, ctrls := range controlSummaries {

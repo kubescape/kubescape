@@ -6,28 +6,38 @@ import (
 	"strings"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
-func renderTable(writer io.Writer, headers []string, columnAlignments []int, rows [][]string) {
-	table := tablewriter.NewWriter(writer)
-	table.SetHeader(headers)
-	table.SetHeaderLine(true)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAutoFormatHeaders(false)
-	table.SetColumnAlignment(columnAlignments)
-	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-
-	var headerColors []tablewriter.Colors
-	for range rows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	table.SetHeaderColor(headerColors...)
-
-	table.AppendBulk(rows)
-
+func renderTable(writer io.Writer, headers []string, rows [][]string) {
+	table := tablewriter.NewTable(writer,
+		tablewriter.WithHeaderAlignment(tw.AlignLeft),
+		tablewriter.WithHeaderAutoFormat(tw.Off),
+		tablewriter.WithRenderer(renderer.NewBlueprint()),
+		tablewriter.WithRendition(tw.Rendition{
+			Borders: tw.Border{ // Outer table borders
+				Left:   tw.On,
+				Right:  tw.On,
+				Top:    tw.On,
+				Bottom: tw.On,
+			},
+			Settings: tw.Settings{
+				Lines: tw.Lines{ // Major internal separator lines
+					ShowHeaderLine: tw.On, // Line after header
+					ShowFooterLine: tw.On, // Line before footer (if footer exists)
+				},
+				Separators: tw.Separators{ // General row and column separators
+					BetweenRows:    tw.On, // Horizontal lines between data rows
+					BetweenColumns: tw.On, // Vertical lines between columns
+				},
+			},
+		}),
+	)
+	table.Header(headers)
+	table.Append(rows)
 	table.Render()
 }
 
@@ -72,8 +82,4 @@ func getImageScanningHeaders() []string {
 	headers[imageColumnVersion] = "Version"
 	headers[imageColumnFixedIn] = "Fixed in"
 	return headers
-}
-
-func getImageScanningColumnsAlignments() []int {
-	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT}
 }

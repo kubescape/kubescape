@@ -37,9 +37,9 @@ func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetail
 func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
 	sortControlSummaries(controlSummaries)
 
-	headers, columnAligments := wp.initCategoryTableData()
+	headers := wp.initCategoryTableData()
 
-	table := getCategoryTableWriter(writer, headers, columnAligments)
+	table := getCategoryTableWriter(writer, headers)
 
 	var rows [][]string
 	for _, ctrls := range controlSummaries {
@@ -57,6 +57,6 @@ func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, catego
 	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
 }
 
-func (wp *WorkloadPrinter) initCategoryTableData() ([]string, []int) {
-	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
+func (wp *WorkloadPrinter) initCategoryTableData() []string {
+	return getCategoryStatusTypeHeaders()
 }

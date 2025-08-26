@@ -3,11 +3,12 @@ package configurationprinter
 import (
 	"io"
 
-	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/olekukonko/tablewriter"
+	"github.com/olekukonko/tablewriter/renderer"
+	"github.com/olekukonko/tablewriter/tw"
 )
 
 const (
@@ -21,11 +22,11 @@ const (
 )
 
 // initializes the table headers and column alignments based on the category type
-func initCategoryTableData(categoryType CategoryType) ([]string, []int) {
+func initCategoryTableData(categoryType CategoryType) []string {
 	if categoryType == TypeCounting {
-		return getCategoryCountingTypeHeaders(), getCountingTypeAlignments()
+		return getCategoryCountingTypeHeaders()
 	}
-	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
+	return getCategoryStatusTypeHeaders()
 }
 
 func getCategoryStatusTypeHeaders() []string {
@@ -44,14 +45,6 @@ func getCategoryCountingTypeHeaders() []string {
 	headers[2] = runHeader
 
 	return headers
-}
-
-func getStatusTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER}
-}
-
-func getCountingTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT}
 }
 
 // returns a row for status type table based on the control summary
@@ -80,20 +73,31 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 
 }
 
-func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments []int) *tablewriter.Table {
-	table := tablewriter.NewWriter(writer)
-	table.SetHeader(headers)
-	table.SetHeaderLine(true)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAutoFormatHeaders(false)
-	table.SetColumnAlignment(columnAligments)
-	table.SetAutoWrapText(false)
-	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-	var headerColors []tablewriter.Colors
-	for range headers {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.FgHiYellowColor})
-	}
-	table.SetHeaderColor(headerColors...)
+func getCategoryTableWriter(writer io.Writer, headers []string) *tablewriter.Table {
+	table := tablewriter.NewTable(writer,
+		tablewriter.WithHeaderAlignment(tw.AlignLeft),
+		tablewriter.WithHeaderAutoFormat(tw.Off),
+		tablewriter.WithRenderer(renderer.NewBlueprint()),
+		tablewriter.WithRendition(tw.Rendition{
+			Borders: tw.Border{ // Outer table borders
+				Left:   tw.On,
+				Right:  tw.On,
+				Top:    tw.On,
+				Bottom: tw.On,
+			},
+			Settings: tw.Settings{
+				Lines: tw.Lines{ // Major internal separator lines
+					ShowHeaderLine: tw.On, // Line after header
+					ShowFooterLine: tw.On, // Line before footer (if footer exists)
+				},
+				Separators: tw.Separators{ // General row and column separators
+					BetweenRows:    tw.On, // Horizontal lines between data rows
+					BetweenColumns: tw.On, // Vertical lines between columns
+				},
+			},
+		}),
+	)
+	table.Header(headers)
 	return table
 }
 
@@ -101,8 +105,8 @@ func renderSingleCategory(writer io.Writer, categoryName string, table *tablewri
 
 	cautils.InfoDisplay(writer, categoryName+"\n")
 
-	table.ClearRows()
-	table.AppendBulk(rows)
+	table.Reset()
+	table.Append(rows)
 
 	table.Render()
 
