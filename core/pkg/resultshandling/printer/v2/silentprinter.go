@@ -3,7 +3,6 @@ package printer
 import (
 	"context"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 )
@@ -16,9 +15,6 @@ type SilentPrinter struct {
 
 func (silentPrinter *SilentPrinter) PrintNextSteps() {
 
-}
-
-func (silentPrinter *SilentPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
 func (silentPrinter *SilentPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {

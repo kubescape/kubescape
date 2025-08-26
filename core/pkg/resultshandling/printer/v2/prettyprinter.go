@@ -7,8 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/anchore/clio"
-	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/enescakir/emoji"
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jedib0t/go-pretty/v6/text"
@@ -91,17 +89,10 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
 		}
 
-		presenterConfig := imageScanData[i].PresenterConfig
-		doc, err := models.NewDocument(clio.Identification{}, presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
-		if err != nil {
-			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
-			continue
-		}
-
-		CVEs := extractCVEs(doc.Matches)
+		CVEs := extractCVEs(imageScanData[i].Matches)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
 
-		setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
+		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
 
 		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
 	}

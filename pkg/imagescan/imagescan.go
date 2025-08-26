@@ -9,7 +9,8 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype"
-	"github.com/anchore/grype/grype/db"
+	"github.com/anchore/grype/grype/db/v6/distribution"
+	"github.com/anchore/grype/grype/db/v6/installation"
 	"github.com/anchore/grype/grype/grypeerr"
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/matcher"
@@ -21,15 +22,14 @@ import (
 	"github.com/anchore/grype/grype/matcher/ruby"
 	"github.com/anchore/grype/grype/matcher/stock"
 	"github.com/anchore/grype/grype/pkg"
-	"github.com/anchore/grype/grype/presenter/models"
-	"github.com/anchore/grype/grype/store"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
 const (
-	defaultGrypeListingURL = "https://toolbox-data.anchore.io/grype/databases/listing.json"
+	defaultGrypeListingURL = "https://grype.anchore.io/databases"
 	defaultDBDirName       = "grypedb"
 )
 
@@ -42,57 +42,66 @@ func (c RegistryCredentials) IsEmpty() bool {
 	return c.Username == "" || c.Password == ""
 }
 
-// ExceedsSeverityThreshold returns true if vulnerabilities in the scan results exceed the severity threshold, false otherwise.
-//
-// Values equal to the threshold are considered failing, too.
-func ExceedsSeverityThreshold(scanResults *models.PresenterConfig, severity vulnerability.Severity) bool {
-	if scanResults.MetadataProvider == nil {
-		return false
-	}
-
-	return grype.HasSeverityAtOrAbove(scanResults.MetadataProvider, severity, scanResults.Matches)
-}
-
-func NewDefaultDBConfig() (db.Config, bool) {
+func NewDefaultDBConfig() (distribution.Config, installation.Config, bool) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	url := defaultGrypeListingURL
 	shouldUpdate := true
 
-	return db.Config{
-		DBRootDir:  dir,
-		ListingURL: url,
-	}, shouldUpdate
+	return distribution.Config{
+			LatestURL: url,
+		}, installation.Config{
+			DBRootDir: dir,
+		}, shouldUpdate
 }
 
-func getMatchers(useDefaultMatchers bool) []matcher.Matcher {
+func getMatchers(useDefaultMatchers bool) []match.Matcher {
 	if useDefaultMatchers {
-		return matcher.NewDefaultMatchers(
-			matcher.Config{
-				Java: java.MatcherConfig{
-					ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
-					UseCPEs:              true,
-				},
-				Ruby:       ruby.MatcherConfig{UseCPEs: true},
-				Python:     python.MatcherConfig{UseCPEs: true},
-				Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
-				Javascript: javascript.MatcherConfig{UseCPEs: true},
-				Golang:     golang.MatcherConfig{UseCPEs: true},
-				Stock:      stock.MatcherConfig{UseCPEs: true},
-			},
-		)
+		return matcher.NewDefaultMatchers(defaultMatcherConfig())
 	}
-	return nil
+	return matcher.NewDefaultMatchers(
+		matcher.Config{
+			Java: java.MatcherConfig{
+				ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
+				UseCPEs:              true,
+			},
+			Ruby:       ruby.MatcherConfig{UseCPEs: true},
+			Python:     python.MatcherConfig{UseCPEs: true},
+			Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
+			Javascript: javascript.MatcherConfig{UseCPEs: true},
+			Golang:     golang.MatcherConfig{UseCPEs: true},
+			Stock:      stock.MatcherConfig{UseCPEs: true},
+		},
+	)
 }
 
-func validateDBLoad(loadErr error, status *db.Status) error {
+func defaultMatcherConfig() matcher.Config {
+	return matcher.Config{
+		Java: java.MatcherConfig{
+			ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
+			UseCPEs:              false,
+		},
+		Ruby:       ruby.MatcherConfig{UseCPEs: false},
+		Python:     python.MatcherConfig{UseCPEs: false},
+		Dotnet:     dotnet.MatcherConfig{UseCPEs: false},
+		Javascript: javascript.MatcherConfig{UseCPEs: false},
+		Golang: golang.MatcherConfig{
+			UseCPEs:                                false,
+			AlwaysUseCPEForStdlib:                  true,
+			AllowMainModulePseudoVersionComparison: false,
+		},
+		Stock: stock.MatcherConfig{UseCPEs: true},
+	}
+}
+
+func validateDBLoad(loadErr error, status *vulnerability.ProviderStatus) error {
 	if loadErr != nil {
 		return fmt.Errorf("failed to load vulnerability db: %w", loadErr)
 	}
 	if status == nil {
 		return fmt.Errorf("unable to determine the status of the vulnerability db")
 	}
-	if status.Err != nil {
-		return fmt.Errorf("db could not be loaded: %w", status.Err)
+	if status.Error != nil {
+		return fmt.Errorf("db could not be loaded: %w", status.Error)
 	}
 	return nil
 }
@@ -118,14 +127,11 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 //
 // It performs image scanning and everything needed in between.
 type Service struct {
-	dbCfg              db.Config
-	dbCloser           *db.Closer
-	dbStatus           *db.Status
-	dbStore            *store.Store
 	useDefaultMatchers bool
+	vp                 vulnerability.Provider
 }
 
-func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, packages []pkg.Package, pkgContext pkg.Context, useDefaultMatchers bool) (*match.Matches, []match.IgnoredMatch, error) {
+func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provider, packages []pkg.Package, pkgContext pkg.Context, useDefaultMatchers bool) (*match.Matches, []match.IgnoredMatch, error) {
 	if vulnerabilityExceptions == nil {
 		vulnerabilityExceptions = []string{}
 	}
@@ -138,13 +144,13 @@ func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, pac
 		ignoreRules = append(ignoreRules, rule)
 	}
 
-	matcher := grype.VulnerabilityMatcher{
-		Store:       *store,
-		Matchers:    getMatchers(useDefaultMatchers),
-		IgnoreRules: ignoreRules,
+	vulnMatcher := grype.VulnerabilityMatcher{
+		VulnerabilityProvider: vp,
+		Matchers:              getMatchers(useDefaultMatchers),
+		IgnoreRules:           ignoreRules,
 	}
 
-	remainingMatches, ignoredMatches, err := matcher.FindMatches(packages, pkgContext)
+	remainingMatches, ignoredMatches, err := vulnMatcher.FindMatches(packages, pkgContext)
 	if err != nil {
 		if !errors.Is(err, grypeerr.ErrAboveSeverityThreshold) {
 			return nil, nil, err
@@ -154,8 +160,8 @@ func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, pac
 	return remainingMatches, ignoredMatches, nil
 }
 
-// Filter the remaing matches based on severity exceptions.
-func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, store *store.Store) match.Matches {
+// Filter the remaining matches based on severity exceptions.
+func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, vp vulnerability.Provider) match.Matches {
 	if severityExceptions == nil {
 		return remainingMatches
 	}
@@ -163,7 +169,7 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	filteredMatches := match.NewMatches()
 
 	for m := range remainingMatches.Enumerate() {
-		metadata, err := store.GetMetadata(m.Vulnerability.ID, m.Vulnerability.Namespace)
+		metadata, err := vp.VulnerabilityMetadata(m.Vulnerability.Reference)
 		if err != nil {
 			continue
 		}
@@ -185,54 +191,71 @@ func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches 
 	return filteredMatches
 }
 
-func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*models.PresenterConfig, error) {
+func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCredentials, vulnerabilityExceptions, severityExceptions []string) (*cautils.ImageScanData, error) {
 	packages, pkgContext, sbom, err := pkg.Provide(userInput, getProviderConfig(creds))
 	if err != nil {
 		return nil, err
 	}
 
-	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.dbStore, packages, pkgContext, s.useDefaultMatchers)
+	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.vp, packages, pkgContext, s.useDefaultMatchers)
 	if err != nil {
 		return nil, err
 	}
 
-	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.dbStore)
+	filteredMatches := filterMatchesBasedOnSeverity(severityExceptions, *remainingMatches, s.vp)
 
-	pb := models.PresenterConfig{
-		Matches:          filteredMatches,
-		IgnoredMatches:   ignoredMatches,
-		Packages:         packages,
-		Context:          pkgContext,
-		MetadataProvider: s.dbStore,
-		SBOM:             sbom,
-		AppConfig:        nil,
-		DBStatus:         s.dbStatus,
+	pb := cautils.ImageScanData{
+		Context:               pkgContext,
+		IgnoredMatches:        ignoredMatches,
+		Image:                 userInput,
+		Matches:               filteredMatches,
+		Packages:              packages,
+		RemainingMatches:      remainingMatches,
+		SBOM:                  sbom,
+		VulnerabilityProvider: s.vp,
 	}
 	return &pb, nil
 }
 
+// ExceedsSeverityThreshold returns true if vulnerabilities in the scan results exceed the severity threshold, false otherwise.
+//
+// Values equal to the threshold are considered failing, too.
+func (s *Service) ExceedsSeverityThreshold(severity vulnerability.Severity, matches match.Matches) bool {
+	if severity == vulnerability.UnknownSeverity {
+		return false
+	}
+	for m := range matches.Enumerate() {
+		metadata, err := s.vp.VulnerabilityMetadata(m.Vulnerability.Reference)
+		if err != nil {
+			continue
+		}
+
+		if vulnerability.ParseSeverity(metadata.Severity) >= severity {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) Close() {
-	s.dbCloser.Close()
+	_ = s.vp.Close()
 }
 
-func NewVulnerabilityDB(cfg db.Config, update bool) (*store.Store, *db.Status, *db.Closer, error) {
-	return grype.LoadVulnerabilityDB(cfg, update)
+func NewVulnerabilityDB(distCfg distribution.Config, installCfg installation.Config, update bool) (vulnerability.Provider, *vulnerability.ProviderStatus, error) {
+	return grype.LoadVulnerabilityDB(distCfg, installCfg, update)
 }
 
-func NewScanService(dbCfg db.Config) (*Service, error) {
-	return NewScanServiceWithMatchers(dbCfg, true)
+func NewScanService(distCfg distribution.Config, installCfg installation.Config) (*Service, error) {
+	return NewScanServiceWithMatchers(distCfg, installCfg, true)
 }
 
-func NewScanServiceWithMatchers(dbCfg db.Config, useDefaultMatchers bool) (*Service, error) {
-	dbStore, dbStatus, dbCloser, err := NewVulnerabilityDB(dbCfg, true)
-	if err = validateDBLoad(err, dbStatus); err != nil {
+func NewScanServiceWithMatchers(distCfg distribution.Config, installCfg installation.Config, useDefaultMatchers bool) (*Service, error) {
+	vp, status, err := NewVulnerabilityDB(distCfg, installCfg, true)
+	if err = validateDBLoad(err, status); err != nil {
 		return nil, err
 	}
 	return &Service{
-		dbCfg:              dbCfg,
-		dbCloser:           dbCloser,
-		dbStatus:           dbStatus,
-		dbStore:            dbStore,
+		vp:                 vp,
 		useDefaultMatchers: useDefaultMatchers,
 	}, nil
 }

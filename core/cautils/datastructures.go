@@ -4,7 +4,10 @@ import (
 	"context"
 	"sort"
 
-	"github.com/anchore/grype/grype/presenter/models"
+	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/anchore/syft/syft/sbom"
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -20,8 +23,14 @@ type K8SResources map[string][]string
 type ExternalResources map[string][]string
 
 type ImageScanData struct {
-	PresenterConfig *models.PresenterConfig
-	Image           string
+	Context               pkg.Context
+	IgnoredMatches        []match.IgnoredMatch
+	Image                 string
+	Matches               match.Matches
+	Packages              []pkg.Package
+	RemainingMatches      *match.Matches
+	SBOM                  *sbom.SBOM
+	VulnerabilityProvider vulnerability.Provider
 }
 
 type ScanTypes string

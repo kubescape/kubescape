@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -20,20 +21,23 @@ type spyLogger struct {
 	setItems []spyLogMessage
 }
 
-func (l *spyLogger) Error(msg string, details ...helpers.IDetails)       {}
-func (l *spyLogger) Success(msg string, details ...helpers.IDetails)     {}
-func (l *spyLogger) Warning(msg string, details ...helpers.IDetails)     {}
-func (l *spyLogger) Info(msg string, details ...helpers.IDetails)        {}
-func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)       {}
-func (l *spyLogger) SetLevel(level string) error                         { return nil }
-func (l *spyLogger) GetLevel() string                                    { return "" }
-func (l *spyLogger) SetWriter(w *os.File)                                {}
-func (l *spyLogger) GetWriter() *os.File                                 { return &os.File{} }
-func (l *spyLogger) LoggerName() string                                  { return "" }
-func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger               { return l }
-func (l *spyLogger) Start(msg string, details ...helpers.IDetails)       {}
-func (l *spyLogger) StopSuccess(msg string, details ...helpers.IDetails) {}
-func (l *spyLogger) StopError(msg string, details ...helpers.IDetails)   {}
+var _ helpers.ILogger = &spyLogger{}
+
+func (l *spyLogger) Error(msg string, details ...helpers.IDetails)                    {}
+func (l *spyLogger) Success(msg string, details ...helpers.IDetails)                  {}
+func (l *spyLogger) Warning(msg string, details ...helpers.IDetails)                  {}
+func (l *spyLogger) Info(msg string, details ...helpers.IDetails)                     {}
+func (l *spyLogger) Debug(msg string, details ...helpers.IDetails)                    {}
+func (l *spyLogger) SetLevel(level string) error                                      { return nil }
+func (l *spyLogger) GetLevel() string                                                 { return "" }
+func (l *spyLogger) SetWriter(w *os.File)                                             {}
+func (l *spyLogger) GetWriter() *os.File                                              { return &os.File{} }
+func (l *spyLogger) LoggerName() string                                               { return "" }
+func (l *spyLogger) Ctx(_ context.Context) helpers.ILogger                            { return l }
+func (l *spyLogger) Start(msg string, details ...helpers.IDetails)                    {}
+func (l *spyLogger) StopSuccess(msg string, details ...helpers.IDetails)              {}
+func (l *spyLogger) StopError(msg string, details ...helpers.IDetails)                {}
+func (l *spyLogger) TimedWrapper(funcName string, timeout time.Duration, task func()) {}
 
 func (l *spyLogger) Fatal(msg string, details ...helpers.IDetails) {
 	firstDetail := details[0]

@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/anchore/clio"
-	"github.com/anchore/grype/grype/presenter"
+	grypejson "github.com/anchore/grype/grype/presenter/json"
 	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -17,7 +18,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"k8s.io/utils/strings/slices"
 )
 
 const (
@@ -70,17 +70,10 @@ func (jp *JsonPrinter) convertToImageScanSummary(imageScanData []cautils.ImageSc
 			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
 		}
 
-		presenterConfig := imageScanData[i].PresenterConfig
-		doc, err := models.NewDocument(clio.Identification{}, presenterConfig.Packages, presenterConfig.Context, presenterConfig.Matches, presenterConfig.IgnoredMatches, presenterConfig.MetadataProvider, nil, presenterConfig.DBStatus)
-		if err != nil {
-			logger.L().Error(fmt.Sprintf("failed to create document for image: %v", imageScanData[i].Image), helpers.Error(err))
-			continue
-		}
-
-		CVEs := extractCVEs(doc.Matches)
+		CVEs := extractCVEs(imageScanData[i].Matches)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
 
-		setPkgNameToScoreMap(doc.Matches, imageScanSummary.PackageScores)
+		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)
 
 		setSeverityToSummaryMap(CVEs, imageScanSummary.MapsSeverityToSummary)
 	}
@@ -92,9 +85,15 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	var err error
 
 	if opaSessionObj != nil {
-		err = printConfigurationsScanning(opaSessionObj, ctx, imageScanData, jp)
+		err = printConfigurationsScanning(opaSessionObj, imageScanData, jp)
 	} else if imageScanData != nil {
-		err = jp.PrintImageScan(ctx, imageScanData[0].PresenterConfig)
+		model, err2 := models.NewDocument(clio.Identification{}, imageScanData[0].Packages, imageScanData[0].Context,
+			*imageScanData[0].RemainingMatches, imageScanData[0].IgnoredMatches, imageScanData[0].VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+		if err2 != nil {
+			logger.L().Ctx(ctx).Error("failed to create document: %w", helpers.Error(err))
+			return
+		}
+		err = grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: imageScanData[0].SBOM}).Present(jp.writer)
 	} else {
 		err = fmt.Errorf("no data provided")
 	}
@@ -107,7 +106,7 @@ func (jp *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.O
 	printer.LogOutputFile(jp.writer.Name())
 }
 
-func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, ctx context.Context, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
+func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData, jp *JsonPrinter) error {
 
 	if imageScanData != nil {
 		imageScanSummary, err := jp.convertToImageScanSummary(imageScanData)
@@ -166,14 +165,6 @@ func convertToReportSummary(input map[string]*imageprinter.SeveritySummary) map[
 		}
 	}
 	return output
-}
-
-func (jp *JsonPrinter) PrintImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
-	if scanResults == nil {
-		return fmt.Errorf("no image vulnerability data provided")
-	}
-	pres := presenter.GetPresenter("json", "", false, *scanResults)
-	return pres.Present(jp.writer)
 }
 
 func (jp *JsonPrinter) PrintNextSteps() {

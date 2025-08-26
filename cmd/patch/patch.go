@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
-	"github.com/kubescape/kubescape/v3/pkg/imagescan"
 	"github.com/spf13/cobra"
 )
 
@@ -53,12 +52,12 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			// Set the UseDefaultMatchers field in scanInfo
 			scanInfo.UseDefaultMatchers = useDefaultMatchers
 
-			results, err := ks.Patch(&patchInfo, &scanInfo)
+			exceedsSeverityThreshold, err := ks.Patch(&patchInfo, &scanInfo)
 			if err != nil {
 				return err
 			}
 
-			if imagescan.ExceedsSeverityThreshold(results, imagescan.ParseSeverity(scanInfo.FailThresholdSeverity)) {
+			if exceedsSeverityThreshold {
 				shared.TerminateOnExceedingSeverity(&scanInfo, logger.L())
 			}
 
