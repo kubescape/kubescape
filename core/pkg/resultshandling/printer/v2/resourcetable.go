@@ -3,18 +3,17 @@ package printer
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/jwalton/gchalk"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
-	"github.com/olekukonko/tablewriter"
 )
 
 const (
@@ -48,52 +47,35 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		}
 		fmt.Fprintf(prettyPrinter.writer, "\n%s\n\n", prettyprinter.ControlCountersForResource(result.ListControlsIDs(nil)))
 
-		summaryTable := tablewriter.NewWriter(prettyPrinter.writer)
+		summaryTable := table.NewWriter()
+		summaryTable.SetOutputMirror(prettyPrinter.writer)
 
-		summaryTable.SetAutoWrapText(true)
-		summaryTable.SetAutoMergeCells(true)
-		summaryTable.SetHeaderLine(true)
-		summaryTable.SetRowLine(true)
-		summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-		summaryTable.SetAutoFormatHeaders(false)
-		summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+		summaryTable.Style().Options.SeparateHeader = true
+		summaryTable.Style().Options.SeparateRows = true
+		summaryTable.Style().Format.HeaderAlign = text.AlignLeft
+		summaryTable.Style().Format.Header = text.FormatDefault
+		summaryTable.Style().Box = table.StyleBoxRounded
 
-		resourceRows := [][]string{}
-		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource); len(raw) > 0 {
-			resourceRows = append(resourceRows, raw...)
-		}
+		resourceRows := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource)
 
 		short := utils.CheckShortTerminalWidth(resourceRows, generateResourceHeader(false))
 		if short {
-			summaryTable.SetAutoWrapText(false)
-			summaryTable.SetAutoMergeCells(false)
 			resourceRows = shortFormatResource(resourceRows)
 		}
-		summaryTable.SetHeader(generateResourceHeader(short))
+		summaryTable.AppendHeader(generateResourceHeader(short))
 
-		var headerColors []tablewriter.Colors
-		for range resourceRows[0] {
-			headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-		}
-		summaryTable.SetHeaderColor(headerColors...)
-
-		data := Matrix{}
-		data = append(data, resourceRows...)
-		// For control scan framework will be nil
-
-		sort.Sort(data)
-		summaryTable.AppendBulk(data)
+		summaryTable.AppendRows(resourceRows)
 
 		summaryTable.Render()
 	}
 
 }
 
-func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) [][]string {
-	rows := [][]string{}
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) []table.Row {
+	var rows []table.Row
 
 	for i := range controls {
-		row := make([]string, _resourceRowLen)
+		row := make(table.Row, _resourceRowLen)
 
 		if !controls[i].GetStatus(nil).IsFailed() {
 			continue
@@ -111,12 +93,13 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 
 		rows = append(rows, row)
 	}
+
 	return rows
 }
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
 	for i := range *paths {
-		re := regexp.MustCompile(`spec\.containers\[(\d+)\]`)
+		re := regexp.MustCompile(`spec\.containers\[(\d+)]`)
 		match := re.FindStringSubmatch((*paths)[i])
 		if len(match) == 2 {
 			index, _ := strconv.Atoi(match[1])
@@ -128,22 +111,18 @@ func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata,
 	}
 }
 
-func generateResourceHeader(short bool) []string {
-	headers := make([]string, 0)
-
+func generateResourceHeader(short bool) table.Row {
 	if short {
-		headers = append(headers, "Resources")
+		return table.Row{"Resources"}
 	} else {
-		headers = append(headers, []string{"Severity", "Control name", "Docs", "Assisted remediation"}...)
+		return table.Row{"Severity", "Control name", "Docs", "Assisted remediation"}
 	}
-
-	return headers
 }
 
-func shortFormatResource(resourceRows [][]string) [][]string {
-	rows := [][]string{}
-	for _, resourceRow := range resourceRows {
-		rows = append(rows, []string{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.Replace(resourceRow[resourceColumnPath], "\n", "\n"+strings.Repeat(" ", 23), -1))})
+func shortFormatResource(resourceRows []table.Row) []table.Row {
+	rows := make([]table.Row, len(resourceRows))
+	for i, resourceRow := range resourceRows {
+		rows[i] = table.Row{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.Replace(resourceRow[resourceColumnPath].(string), "\n", "\n"+strings.Repeat(" ", 23), -1))}
 	}
 	return rows
 }

@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/olekukonko/tablewriter"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -46,7 +45,7 @@ func TestRenderTable(t *testing.T) {
 					},
 				},
 			},
-			want: "┌──────────┬───────────────┬───────────┬─────────┬──────────┐\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │\n│   Low    │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n└──────────┴───────────────┴───────────┴─────────┴──────────┘\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
 		},
 		{
 			name: "check fixed CVEs show versions",
@@ -69,7 +68,7 @@ func TestRenderTable(t *testing.T) {
 					},
 				},
 			},
-			want: "┌──────────┬───────────────┬───────────┬─────────┬──────────┐\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │\n│   Low    │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n└──────────┴───────────────┴───────────┴─────────┴──────────┘\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
 		},
 	}
 
@@ -244,18 +243,6 @@ func TestGetImageScanningHeaders(t *testing.T) {
 	for i := range headers {
 		if headers[i] != expectedHeaders[i] {
 			t.Errorf("expected %s, got %s", expectedHeaders[i], headers[i])
-		}
-	}
-}
-
-func TestGetImageScanningColumnsAlignments(t *testing.T) {
-	alignments := getImageScanningColumnsAlignments()
-
-	expectedAlignments := []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT}
-
-	for i := range alignments {
-		if alignments[i] != expectedAlignments[i] {
-			t.Errorf("expected %d, got %d", expectedAlignments[i], alignments[i])
 		}
 	}
 }

@@ -42,7 +42,7 @@ func TestPrintImageScanningTable(t *testing.T) {
 					},
 				},
 			},
-			want: "┌──────────┬───────────────┬───────────┬─────────┬──────────┐\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │\n│   Low    │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n└──────────┴───────────────┴───────────┴─────────┴──────────┘\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
 		},
 		{
 			name: "check fixed CVEs show versions",
@@ -65,7 +65,7 @@ func TestPrintImageScanningTable(t *testing.T) {
 					},
 				},
 			},
-			want: "┌──────────┬───────────────┬───────────┬─────────┬──────────┐\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │\n│   Low    │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n└──────────┴───────────────┴───────────┴─────────┴──────────┘\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
 		},
 	}
 

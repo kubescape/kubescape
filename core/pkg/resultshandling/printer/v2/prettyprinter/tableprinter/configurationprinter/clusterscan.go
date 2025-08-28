@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -17,11 +18,11 @@ func NewClusterPrinter() *ClusterPrinter {
 
 var _ TablePrinter = &ClusterPrinter{}
 
-func (cp *ClusterPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (cp *ClusterPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.SummaryDetails, _ [][]string) {
 
 }
 
-func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
 
 	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
 
@@ -38,17 +39,17 @@ func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails
 func (cp *ClusterPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
 	sortControlSummaries(controlSummaries)
 
-	headers, columnAligments := initCategoryTableData(categoryType)
+	headers, columnAlignments := initCategoryTableData(categoryType)
 
-	table := getCategoryTableWriter(writer, headers, columnAligments)
+	tableWriter := getCategoryTableWriter(writer, headers, columnAlignments)
 
-	var rows [][]string
+	var rows []table.Row
 	for _, ctrls := range controlSummaries {
-		var row []string
+		var row table.Row
 		if categoryType == TypeCounting {
 			row = cp.generateCountingCategoryRow(ctrls)
 		} else {
-			row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
+			row = generateCategoryStatusRow(ctrls)
 		}
 		if len(row) > 0 {
 			rows = append(rows, row)
@@ -59,19 +60,19 @@ func (cp *ClusterPrinter) renderSingleCategoryTable(categoryName string, categor
 		return
 	}
 
-	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
+	renderSingleCategory(writer, categoryName, tableWriter, rows, infoToPrintInfo)
 
 }
 
-func (cp *ClusterPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary) []string {
+func (cp *ClusterPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary) table.Row {
 
-	row := make([]string, 3)
+	row := make(table.Row, 3)
 
 	row[0] = controlSummary.GetName()
 
 	failedResources := controlSummary.NumberOfResources().Failed()
 	if failedResources > 0 {
-		row[1] = string(gchalk.WithYellow().Bold(fmt.Sprintf("%d", failedResources)))
+		row[1] = gchalk.WithYellow().Bold(fmt.Sprintf("%d", failedResources))
 	} else {
 		row[1] = fmt.Sprintf("%d", failedResources)
 	}
