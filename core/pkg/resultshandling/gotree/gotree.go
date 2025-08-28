@@ -9,7 +9,7 @@ const (
 	emptySpace   = "    "
 	middleItem   = "├── "
 	continueItem = "│   "
-	lastItem     = "└── "
+	lastItem     = "╰── "
 )
 
 type (
@@ -66,7 +66,7 @@ func (t *tree) Items() []Tree {
 	return t.items
 }
 
-// Print returns an visual representation of the tree
+// Print returns a visual representation of the tree
 func (t *tree) Print() string {
 	return newPrinter().Print(t)
 }

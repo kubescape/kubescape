@@ -3,11 +3,11 @@ package configurationprinter
 import (
 	"io"
 
-	"github.com/jwalton/gchalk"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/olekukonko/tablewriter"
 )
 
 const (
@@ -21,15 +21,15 @@ const (
 )
 
 // initializes the table headers and column alignments based on the category type
-func initCategoryTableData(categoryType CategoryType) ([]string, []int) {
+func initCategoryTableData(categoryType CategoryType) (table.Row, []table.ColumnConfig) {
 	if categoryType == TypeCounting {
 		return getCategoryCountingTypeHeaders(), getCountingTypeAlignments()
 	}
 	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
 }
 
-func getCategoryStatusTypeHeaders() []string {
-	headers := make([]string, 3)
+func getCategoryStatusTypeHeaders() table.Row {
+	headers := make(table.Row, 3)
 	headers[0] = statusHeader
 	headers[1] = controlNameHeader
 	headers[2] = docsHeader
@@ -37,8 +37,8 @@ func getCategoryStatusTypeHeaders() []string {
 	return headers
 }
 
-func getCategoryCountingTypeHeaders() []string {
-	headers := make([]string, 3)
+func getCategoryCountingTypeHeaders() table.Row {
+	headers := make(table.Row, 3)
 	headers[0] = controlNameHeader
 	headers[1] = resourcesHeader
 	headers[2] = runHeader
@@ -46,16 +46,16 @@ func getCategoryCountingTypeHeaders() []string {
 	return headers
 }
 
-func getStatusTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER}
+func getStatusTypeAlignments() []table.ColumnConfig {
+	return []table.ColumnConfig{{Number: 1, Align: text.AlignCenter}, {Number: 2, Align: text.AlignLeft}, {Number: 3, Align: text.AlignCenter}}
 }
 
-func getCountingTypeAlignments() []int {
-	return []int{tablewriter.ALIGN_LEFT, tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT}
+func getCountingTypeAlignments() []table.ColumnConfig {
+	return []table.ColumnConfig{{Number: 1, Align: text.AlignLeft}, {Number: 2, Align: text.AlignCenter}, {Number: 3, Align: text.AlignLeft}}
 }
 
 // returns a row for status type table based on the control summary
-func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) []string {
+func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary) table.Row {
 
 	// show only passed, failed and action required controls
 	status := controlSummary.GetStatus()
@@ -63,7 +63,7 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 		return nil
 	}
 
-	rows := make([]string, 3)
+	rows := make(table.Row, 3)
 
 	rows[0] = utils.GetStatusIcon(controlSummary.GetStatus().Status())
 
@@ -80,31 +80,26 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary, inf
 
 }
 
-func getCategoryTableWriter(writer io.Writer, headers []string, columnAligments []int) *tablewriter.Table {
-	table := tablewriter.NewWriter(writer)
-	table.SetHeader(headers)
-	table.SetHeaderLine(true)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAutoFormatHeaders(false)
-	table.SetColumnAlignment(columnAligments)
-	table.SetAutoWrapText(false)
-	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-	var headerColors []tablewriter.Colors
-	for range headers {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.FgHiYellowColor})
-	}
-	table.SetHeaderColor(headerColors...)
-	return table
+func getCategoryTableWriter(writer io.Writer, headers table.Row, columnAlignments []table.ColumnConfig) table.Writer {
+	tableWriter := table.NewWriter()
+	tableWriter.SetOutputMirror(writer)
+	tableWriter.AppendHeader(headers)
+	tableWriter.Style().Options.SeparateHeader = true
+	tableWriter.Style().Format.HeaderAlign = text.AlignLeft
+	tableWriter.Style().Format.Header = text.FormatDefault
+	tableWriter.SetColumnConfigs(columnAlignments)
+	tableWriter.Style().Box = table.StyleBoxRounded
+	return tableWriter
 }
 
-func renderSingleCategory(writer io.Writer, categoryName string, table *tablewriter.Table, rows [][]string, infoToPrintInfo []utils.InfoStars) {
+func renderSingleCategory(writer io.Writer, categoryName string, tableWriter table.Writer, rows []table.Row, infoToPrintInfo []utils.InfoStars) {
 
 	cautils.InfoDisplay(writer, categoryName+"\n")
 
-	table.ClearRows()
-	table.AppendBulk(rows)
+	tableWriter.ResetRows()
+	tableWriter.AppendRows(rows)
 
-	table.Render()
+	tableWriter.Render()
 
 	if len(infoToPrintInfo) > 0 {
 		printCategoryInfo(writer, infoToPrintInfo)

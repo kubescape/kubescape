@@ -9,6 +9,7 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 )
@@ -105,7 +106,7 @@ func TestGeneratePolicyRows_NonEmptyPolicyList(t *testing.T) {
 	result := generatePolicyRows(policies)
 
 	// Assert
-	assert.Equal(t, [][]string{{"policy1"}, {"policy2"}, {"policy3"}}, result)
+	assert.Equal(t, []table.Row{{"policy1"}, {"policy2"}, {"policy3"}}, result)
 }
 
 // Returns an empty 2D slice for an empty list of policies.
@@ -122,12 +123,12 @@ func TestGeneratePolicyRows_EmptyPolicyList(t *testing.T) {
 
 // The function returns a list of rows, each containing a formatted string with control ID, control name, docs, and frameworks.
 func TestShortFormatControlRows_ReturnsListOfRowsWithFormattedString(t *testing.T) {
-	controlRows := [][]string{
+	controlRows := []table.Row{
 		{"ID1", "Control 1", "Docs 1", "Framework 1"},
 		{"ID2", "Control 2", "Docs 2", "Framework 2"},
 	}
 
-	want := [][]string{
+	want := []table.Row{
 		{"Control ID   : ID1\nControl Name : Control 1\nDocs         : Docs 1\nFrameworks   : Framework 1"},
 		{"Control ID   : ID2\nControl Name : Control 2\nDocs         : Docs 2\nFrameworks   : Framework 2"},
 	}
@@ -139,12 +140,12 @@ func TestShortFormatControlRows_ReturnsListOfRowsWithFormattedString(t *testing.
 
 // The function formats the control rows correctly, replacing newlines in the frameworks column with line breaks.
 func TestShortFormatControlRows_FormatsControlRowsCorrectly(t *testing.T) {
-	controlRows := [][]string{
+	controlRows := []table.Row{
 		{"ID1", "Control 1", "Docs 1", "Framework\n1"},
 		{"ID2", "Control 2", "Docs 2", "Framework\n2"},
 	}
 
-	want := [][]string{
+	want := []table.Row{
 		{"Control ID   : ID1\nControl Name : Control 1\nDocs         : Docs 1\nFrameworks   : Framework 1"},
 		{"Control ID   : ID2\nControl Name : Control 2\nDocs         : Docs 2\nFrameworks   : Framework 2"},
 	}
@@ -156,11 +157,11 @@ func TestShortFormatControlRows_FormatsControlRowsCorrectly(t *testing.T) {
 
 // The function handles a control row with an empty control ID.
 func TestShortFormatControlRows_HandlesControlRowWithEmptyControlID(t *testing.T) {
-	controlRows := [][]string{
+	controlRows := []table.Row{
 		{"", "Control 1", "Docs 1", "Framework 1"},
 	}
 
-	want := [][]string{
+	want := []table.Row{
 		{"Control ID   : \nControl Name : Control 1\nDocs         : Docs 1\nFrameworks   : Framework 1"},
 	}
 
@@ -171,11 +172,11 @@ func TestShortFormatControlRows_HandlesControlRowWithEmptyControlID(t *testing.T
 
 // The function handles a control row with an empty control name.
 func TestShortFormatControlRows_HandlesControlRowWithEmptyControlName(t *testing.T) {
-	controlRows := [][]string{
+	controlRows := []table.Row{
 		{"ID1", "", "Docs 1", "Framework 1"},
 	}
 
-	want := [][]string{
+	want := []table.Row{
 		{"Control ID   : ID1\nControl Name : \nDocs         : Docs 1\nFrameworks   : Framework 1"},
 	}
 
@@ -192,7 +193,7 @@ func TestGenerateControlRowsWithAllFields(t *testing.T) {
 		"3|Control 3|Framework 3",
 	}
 
-	want := [][]string{
+	want := []table.Row{
 		{"1", "Control 1", "https://hub.armosec.io/docs/1", "Framework\n1"},
 		{"2", "Control 2", "https://hub.armosec.io/docs/2", "Framework\n2"},
 		{"3", "Control 3", "https://hub.armosec.io/docs/3", "Framework\n3"},
@@ -215,7 +216,7 @@ func TestGenerateControlRowsHandlesPoliciesWithEmptyStringOrNoPipesOrOnePipeMiss
 		"5|Control 5||Extra 5",
 	}
 
-	expectedRows := [][]string{
+	expectedRows := []table.Row{
 		{"", "", "https://hub.armosec.io/docs/", ""},
 		{"1", "", "https://hub.armosec.io/docs/1", ""},
 		{"2", "Control 2", "https://hub.armosec.io/docs/2", "Framework\n2"},
@@ -252,18 +253,18 @@ func TestGenerateTableWithCorrectHeadersAndRows(t *testing.T) {
 	os.Stdout = rescueStdout
 
 	// got := buf.String()
-	want := `┌────────────┬──────────────┬───────────────────────────────┬────────────┐
+	want := `╭────────────┬──────────────┬───────────────────────────────┬────────────╮
 │ Control ID │ Control name │ Docs                          │ Frameworks │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          1 │ Control 1    │ https://hub.armosec.io/docs/1 │ Framework  │
-│            │              │                               │          1 │
+│            │              │                               │ 1          │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          2 │ Control 2    │ https://hub.armosec.io/docs/2 │ Framework  │
-│            │              │                               │          2 │
+│            │              │                               │ 2          │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ Framework  │
-│            │              │                               │          3 │
-└────────────┴──────────────┴───────────────────────────────┴────────────┘
+│            │              │                               │ 3          │
+╰────────────┴──────────────┴───────────────────────────────┴────────────╯
 `
 
 	assert.Equal(t, want, string(got))
@@ -294,7 +295,7 @@ func TestGenerateTableWithMalformedPoliciesAndPrettyPrintHeadersAndRows(t *testi
 
 	os.Stdout = rescueStdout
 
-	want := `┌────────────┬──────────────┬───────────────────────────────┬────────────┐
+	want := `╭────────────┬──────────────┬───────────────────────────────┬────────────╮
 │ Control ID │ Control name │ Docs                          │ Frameworks │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │            │              │ https://hub.armosec.io/docs/  │            │
@@ -302,18 +303,18 @@ func TestGenerateTableWithMalformedPoliciesAndPrettyPrintHeadersAndRows(t *testi
 │          1 │              │ https://hub.armosec.io/docs/1 │            │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          2 │ Control 2    │ https://hub.armosec.io/docs/2 │ Framework  │
-│            │              │                               │          2 │
+│            │              │                               │ 2          │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ Framework  │
-│            │              │                               │          3 │
+│            │              │                               │ 3          │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          4 │              │ https://hub.armosec.io/docs/4 │ Framework  │
-│            │              │                               │          4 │
+│            │              │                               │ 4          │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │            │              │ https://hub.armosec.io/docs/  │            │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          5 │ Control 5    │ https://hub.armosec.io/docs/5 │            │
-└────────────┴──────────────┴───────────────────────────────┴────────────┘
+╰────────────┴──────────────┴───────────────────────────────┴────────────╯
 `
 
 	assert.Equal(t, want, string(got))

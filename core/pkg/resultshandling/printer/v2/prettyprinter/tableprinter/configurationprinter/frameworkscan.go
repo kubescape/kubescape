@@ -6,11 +6,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jwalton/gchalk"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"github.com/olekukonko/tablewriter"
 )
 
 type FrameworkPrinter struct {
@@ -38,19 +38,21 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	// When scanning controls the framework list will be empty
 	cautils.SimpleDisplay(writer, utils.FrameworksScoresToString(summaryDetails.ListFrameworks())+"\n")
 
-	controlCountersTable := tablewriter.NewWriter(writer)
+	controlCountersTable := table.NewWriter()
+	controlCountersTable.SetOutputMirror(writer)
 
-	controlCountersTable.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
-	controlCountersTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-	controlCountersTable.AppendBulk(ControlCountersForSummary(summaryDetails.NumberOfControls()))
+	controlCountersTable.SetColumnConfigs([]table.ColumnConfig{{Number: 1, Align: text.AlignRight}, {Number: 2, Align: text.AlignLeft}})
+	controlCountersTable.Style().Box = table.StyleBoxRounded
+	controlCountersTable.AppendRows(ControlCountersForSummary(summaryDetails.NumberOfControls()))
 	controlCountersTable.Render()
 
 	cautils.SimpleDisplay(writer, "\nFailed resources by severity:\n\n")
 
-	severityCountersTable := tablewriter.NewWriter(writer)
-	severityCountersTable.SetColumnAlignment([]int{tablewriter.ALIGN_RIGHT, tablewriter.ALIGN_LEFT})
-	severityCountersTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-	severityCountersTable.AppendBulk(renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters()))
+	severityCountersTable := table.NewWriter()
+	severityCountersTable.SetOutputMirror(writer)
+	severityCountersTable.SetColumnConfigs([]table.ColumnConfig{{Number: 1, Align: text.AlignRight}, {Number: 2, Align: text.AlignLeft}})
+	severityCountersTable.Style().Box = table.StyleBoxRounded
+	severityCountersTable.AppendRows(renderSeverityCountersSummary(summaryDetails.GetResourcesSeverityCounters()))
 	severityCountersTable.Render()
 
 	cautils.SimpleDisplay(writer, "\n")
@@ -59,14 +61,15 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 		cautils.SimpleDisplay(writer, "Run with '--verbose'/'-v' to see control failures for each resource.\n\n")
 	}
 
-	summaryTable := tablewriter.NewWriter(writer)
+	summaryTable := table.NewWriter()
+	summaryTable.SetOutputMirror(writer)
 
-	summaryTable.SetAutoWrapText(false)
-	summaryTable.SetHeaderLine(true)
-	summaryTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	summaryTable.SetAutoFormatHeaders(false)
-	summaryTable.SetColumnAlignment(GetColumnsAlignments())
-	summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+	summaryTable.Style().Options.SeparateHeader = true
+	summaryTable.Style().Format.HeaderAlign = text.AlignLeft
+	summaryTable.Style().Format.Header = text.FormatDefault
+	summaryTable.Style().Format.Footer = text.FormatDefault
+	summaryTable.SetColumnConfigs(GetColumnsAlignments())
+	summaryTable.Style().Box = table.StyleBoxRounded
 
 	printAll := fp.getVerboseMode()
 	if summaryDetails.NumberOfResources().Failed() == 0 {
@@ -74,7 +77,7 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 		printAll = true
 	}
 
-	dataRows := [][]string{}
+	var dataRows []table.Row
 
 	infoToPrintInfo := utils.MapInfoToPrintInfo(summaryDetails.Controls)
 	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
@@ -88,28 +91,23 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 
 	short := utils.CheckShortTerminalWidth(dataRows, GetControlTableHeaders(false))
 	if short {
-		summaryTable.SetRowLine(true)
+		summaryTable.Style().Options.SeparateRows = true
 		dataRows = shortFormatRow(dataRows)
 	} else {
-		summaryTable.SetColumnAlignment(GetColumnsAlignments())
+		summaryTable.SetColumnConfigs(GetColumnsAlignments())
+		summaryTable.Style().Format.FooterAlign = text.AlignCenter
 	}
-	summaryTable.SetHeader(GetControlTableHeaders(short))
-	summaryTable.SetFooter(GenerateFooter(summaryDetails, short))
+	summaryTable.AppendHeader(GetControlTableHeaders(short))
+	summaryTable.AppendFooter(GenerateFooter(summaryDetails, short))
 
-	var headerColors []tablewriter.Colors
-	for range dataRows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	summaryTable.SetHeaderColor(headerColors...)
-
-	summaryTable.AppendBulk(dataRows)
+	summaryTable.AppendRows(dataRows)
 	summaryTable.Render()
 
 	utils.PrintInfo(writer, infoToPrintInfo)
 }
 
-func shortFormatRow(dataRows [][]string) [][]string {
-	rows := [][]string{}
+func shortFormatRow(dataRows []table.Row) []table.Row {
+	rows := make([]table.Row, 0, len(dataRows))
 	for _, dataRow := range dataRows {
 		// Define the row content using a formatted string
 		rowContent := fmt.Sprintf("Severity%s: %+v\nControl Name%s: %+v\nFailed Resources%s: %+v\nAll Resources%s: %+v\n%% Compliance-Score%s: %+v",
@@ -125,22 +123,22 @@ func shortFormatRow(dataRows [][]string) [][]string {
 			dataRow[summaryColumnComplianceScore])
 
 		// Append the formatted row content to the rows slice
-		rows = append(rows, []string{rowContent})
+		rows = append(rows, table.Row{rowContent})
 	}
 	return rows
 }
 
-func (fp *FrameworkPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (fp *FrameworkPrinter) PrintCategoriesTables(_ io.Writer, _ *reportsummary.SummaryDetails, _ [][]string) {
 
 }
 
-func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) [][]string {
+func renderSeverityCountersSummary(counters reportsummary.ISeverityCounters) []table.Row {
 
-	rows := [][]string{}
-	rows = append(rows, []string{"Critical", utils.GetColorForVulnerabilitySeverity("Critical")(strconv.Itoa(counters.NumberOfCriticalSeverity()))})
-	rows = append(rows, []string{"High", utils.GetColorForVulnerabilitySeverity("High")(strconv.Itoa(counters.NumberOfHighSeverity()))})
-	rows = append(rows, []string{"Medium", utils.GetColorForVulnerabilitySeverity("Medium")(strconv.Itoa(counters.NumberOfMediumSeverity()))})
-	rows = append(rows, []string{"Low", utils.GetColorForVulnerabilitySeverity("Low")(strconv.Itoa(counters.NumberOfLowSeverity()))})
+	rows := make([]table.Row, 0, 4)
+	rows = append(rows, table.Row{"Critical", utils.GetColorForVulnerabilitySeverity("Critical")(strconv.Itoa(counters.NumberOfCriticalSeverity()))})
+	rows = append(rows, table.Row{"High", utils.GetColorForVulnerabilitySeverity("High")(strconv.Itoa(counters.NumberOfHighSeverity()))})
+	rows = append(rows, table.Row{"Medium", utils.GetColorForVulnerabilitySeverity("Medium")(strconv.Itoa(counters.NumberOfMediumSeverity()))})
+	rows = append(rows, table.Row{"Low", utils.GetColorForVulnerabilitySeverity("Low")(strconv.Itoa(counters.NumberOfLowSeverity()))})
 
 	return rows
 }

@@ -25,6 +25,7 @@ require (
 	github.com/go-git/go-git/v5 v5.13.2
 	github.com/google/go-containerregistry v0.20.3
 	github.com/google/uuid v1.6.0
+	github.com/jedib0t/go-pretty/v6 v6.6.4
 	github.com/johnfercher/go-tree v1.1.0
 	github.com/johnfercher/maroto/v2 v2.2.2
 	github.com/json-iterator/go v1.1.12
@@ -44,7 +45,6 @@ require (
 	github.com/mattn/go-isatty v0.0.20
 	github.com/mikefarah/yq/v4 v4.29.1
 	github.com/moby/buildkit v0.21.0
-	github.com/olekukonko/tablewriter v0.0.6-0.20230417144759-edd1a71a5576
 	github.com/open-policy-agent/opa v1.4.0
 	github.com/owenrumney/go-sarif/v2 v2.2.0
 	github.com/project-copacetic/copacetic v0.10.0
@@ -370,6 +370,7 @@ require (
 	github.com/nwaples/rardecode v1.1.3 // indirect
 	github.com/oklog/ulid v1.3.1 // indirect
 	github.com/oleiade/reflections v1.0.1 // indirect
+	github.com/olekukonko/tablewriter v0.0.6-0.20230417144759-edd1a71a5576 // indirect
 	github.com/olvrng/ujson v1.1.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
 	github.com/opencontainers/image-spec v1.1.1 // indirect
@@ -545,9 +546,6 @@ require (
 	sigs.k8s.io/release-utils v0.9.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 )
-
-// Using the forked version of tablewriter
-replace github.com/olekukonko/tablewriter => github.com/kubescape/tablewriter v0.0.6-0.20231106230230-aac7d2659c94
 
 replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-20250211130420-468901f0e973
 

@@ -3,6 +3,7 @@ package configurationprinter
 import (
 	"io"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -16,11 +17,11 @@ func NewWorkloadPrinter() *WorkloadPrinter {
 	return &WorkloadPrinter{}
 }
 
-func (wp *WorkloadPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (wp *WorkloadPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.SummaryDetails, _ [][]string) {
 
 }
 
-func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
 
 	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapWorkloadControlsToCategories)
 
@@ -30,21 +31,20 @@ func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetail
 			continue
 		}
 
-		wp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
+		wp.renderSingleCategoryTable(categoryControl.CategoryName, writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
 	}
 }
 
-func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
+func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) {
 	sortControlSummaries(controlSummaries)
 
-	headers, columnAligments := wp.initCategoryTableData()
+	headers, columnAlignments := wp.initCategoryTableData()
 
-	table := getCategoryTableWriter(writer, headers, columnAligments)
+	tableWriter := getCategoryTableWriter(writer, headers, columnAlignments)
 
-	var rows [][]string
+	var rows []table.Row
 	for _, ctrls := range controlSummaries {
-		var row []string
-		row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
+		row := generateCategoryStatusRow(ctrls)
 		if len(row) > 0 {
 			rows = append(rows, row)
 		}
@@ -54,9 +54,9 @@ func (wp *WorkloadPrinter) renderSingleCategoryTable(categoryName string, catego
 		return
 	}
 
-	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
+	renderSingleCategory(writer, categoryName, tableWriter, rows, infoToPrintInfo)
 }
 
-func (wp *WorkloadPrinter) initCategoryTableData() ([]string, []int) {
+func (wp *WorkloadPrinter) initCategoryTableData() (table.Row, []table.ColumnConfig) {
 	return getCategoryStatusTypeHeaders(), getStatusTypeAlignments()
 }

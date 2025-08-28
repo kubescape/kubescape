@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 )
@@ -32,7 +33,7 @@ func (m *MockISeverityCounters) NumberOfLowSeverity() int {
 	return m.LowCount
 }
 
-func (m *MockISeverityCounters) Increase(severity string, amount int) {
+func (m *MockISeverityCounters) Increase(_ string, _ int) {
 }
 
 func TestNewFrameworkPrinter(t *testing.T) {
@@ -60,28 +61,28 @@ func TestGetVerboseMode(t *testing.T) {
 func TestShortRowFormat(t *testing.T) {
 	tests := []struct {
 		name         string
-		rows         [][]string
-		expectedRows [][]string
+		rows         []table.Row
+		expectedRows []table.Row
 	}{
 		{
 			name:         "Test Empty rows",
-			rows:         [][]string{},
-			expectedRows: [][]string{},
+			rows:         []table.Row{},
+			expectedRows: []table.Row{},
 		},
 		{
 			name: "Test Non empty row",
-			rows: [][]string{
+			rows: []table.Row{
 				{"Medium", "Control 1", "2", "20", "0.8"},
 			},
-			expectedRows: [][]string{[]string{"Severity           : Medium\nControl Name       : Control 1\nFailed Resources   : 2\nAll Resources      : 20\n% Compliance-Score : 0.8"}},
+			expectedRows: []table.Row{{"Severity           : Medium\nControl Name       : Control 1\nFailed Resources   : 2\nAll Resources      : 20\n% Compliance-Score : 0.8"}},
 		},
 		{
 			name: "Test Non empty rows",
-			rows: [][]string{
+			rows: []table.Row{
 				{"Medium", "Control 1", "2", "20", "0.8"},
 				{"Low", "Control 2", "0", "30", "1.0"},
 			},
-			expectedRows: [][]string{[]string{"Severity           : Medium\nControl Name       : Control 1\nFailed Resources   : 2\nAll Resources      : 20\n% Compliance-Score : 0.8"}, []string{"Severity           : Low\nControl Name       : Control 2\nFailed Resources   : 0\nAll Resources      : 30\n% Compliance-Score : 1.0"}},
+			expectedRows: []table.Row{{"Severity           : Medium\nControl Name       : Control 1\nFailed Resources   : 2\nAll Resources      : 20\n% Compliance-Score : 0.8"}, {"Severity           : Low\nControl Name       : Control 2\nFailed Resources   : 0\nAll Resources      : 30\n% Compliance-Score : 1.0"}},
 		},
 	}
 
@@ -96,12 +97,12 @@ func TestRenderSeverityCountersSummary(t *testing.T) {
 	tests := []struct {
 		name     string
 		counters MockISeverityCounters
-		expected [][]string
+		expected []table.Row
 	}{
 		{
 			name:     "All empty",
 			counters: MockISeverityCounters{},
-			expected: [][]string{[]string{"Critical", "0"}, []string{"High", "0"}, []string{"Medium", "0"}, []string{"Low", "0"}},
+			expected: []table.Row{{"Critical", "0"}, {"High", "0"}, {"Medium", "0"}, {"Low", "0"}},
 		},
 		{
 			name: "All different",
@@ -111,7 +112,7 @@ func TestRenderSeverityCountersSummary(t *testing.T) {
 				MediumCount:   27,
 				LowCount:      37,
 			},
-			expected: [][]string{[]string{"Critical", "7"}, []string{"High", "17"}, []string{"Medium", "27"}, []string{"Low", "37"}},
+			expected: []table.Row{{"Critical", "7"}, {"High", "17"}, {"Medium", "27"}, {"Low", "37"}},
 		},
 		{
 			name: "All equal",
@@ -121,7 +122,7 @@ func TestRenderSeverityCountersSummary(t *testing.T) {
 				MediumCount:   7,
 				LowCount:      7,
 			},
-			expected: [][]string{[]string{"Critical", "7"}, []string{"High", "7"}, []string{"Medium", "7"}, []string{"Low", "7"}},
+			expected: []table.Row{{"Critical", "7"}, {"High", "7"}, {"Medium", "7"}, {"Low", "7"}},
 		},
 	}
 
