@@ -111,7 +111,6 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 
 		rows = append(rows, row)
 	}
-
 	return rows
 }
 
