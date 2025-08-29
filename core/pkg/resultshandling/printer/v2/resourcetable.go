@@ -24,7 +24,6 @@ const (
 	resourceColumnPath     = iota
 	_resourceRowLen        = iota
 )
-const regex = `spec\\.containers\\[(\\d+)\\]`
 
 func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASessionObj) {
 
