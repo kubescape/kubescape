@@ -2,7 +2,10 @@ package printer
 
 import (
 	"fmt"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/jwalton/gchalk"
@@ -21,6 +24,7 @@ const (
 	resourceColumnPath     = iota
 	_resourceRowLen        = iota
 )
+const regex = `spec\\.containers\\[(\\d+)\\]`
 
 func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASessionObj) {
 
@@ -56,7 +60,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 		summaryTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
 
 		resourceRows := [][]string{}
-		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails); len(raw) > 0 {
+		if raw := generateResourceRows(result.ListControls(), &opaSessionObj.Report.SummaryDetails, resource); len(raw) > 0 {
 			resourceRows = append(resourceRows, raw...)
 		}
 
@@ -86,7 +90,7 @@ func (prettyPrinter *PrettyPrinter) resourceTable(opaSessionObj *cautils.OPASess
 
 }
 
-func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails) [][]string {
+func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl, summaryDetails *reportsummary.SummaryDetails, resource workloadinterface.IMetadata) [][]string {
 	rows := [][]string{}
 
 	for i := range controls {
@@ -97,7 +101,9 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 		}
 
 		row[resourceColumnURL] = cautils.GetControlLink(controls[i].GetID())
-		row[resourceColumnPath] = strings.Join(AssistedRemediationPathsToString(&controls[i]), "\n")
+		paths := AssistedRemediationPathsToString(&controls[i])
+		addContainerNameToAssistedRemediation(resource, &paths)
+		row[resourceColumnPath] = strings.Join(paths, "\n")
 		row[resourceColumnName] = controls[i].GetName()
 
 		if c := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, controls[i].GetID()); c != nil {
@@ -108,6 +114,20 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 	}
 
 	return rows
+}
+
+func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
+	for i := range *paths {
+		re := regexp.MustCompile(`spec\.containers\[(\d+)\]`)
+		match := re.FindStringSubmatch((*paths)[i])
+		if len(match) == 2 {
+			index, _ := strconv.Atoi(match[1])
+			wl := workloadinterface.NewWorkloadObj(resource.GetObject())
+			containers, _ := wl.GetContainers()
+			containerName := containers[index].Name
+			(*paths)[i] = (*paths)[i] + " (" + containerName + ")"
+		}
+	}
 }
 
 func generateResourceHeader(short bool) []string {
