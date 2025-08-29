@@ -24,8 +24,7 @@ const (
 	configFileName     string = "config"
 	kubescapeNamespace string = "kubescape"
 
-	kubescapeConfigMapName      string = "kubescape-config" // deprecated - for backward compatibility
-	kubescapeCloudConfigMapName string = "ks-cloud-config"  // deprecated - for backward compatibility
+	kubescapeConfigMapName string = "kubescape-config" // deprecated - for backward compatibility
 
 	cloudConfigMapLabelSelector string = "kubescape.io/infra=config"
 	credsLabelSelectors         string = "kubescape.io/infra=credentials" //nolint:gosec
@@ -207,6 +206,8 @@ func NewClusterConfig(k8s *k8sinterface.KubernetesApi, accountID, accessKey, clu
 		loadConfigFromFile(c.configObj)
 	}
 
+	loadUrlsFromFile(c.configObj)
+
 	// second, load urls from config map
 	c.updateConfigEmptyFieldsFromKubescapeConfigMap()
 
@@ -270,15 +271,12 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
 		return err
 	}
 	var ksConfigMap *corev1.ConfigMap
-	var urlsConfigMap *corev1.ConfigMap
 	if len(configMaps.Items) == 0 {
 		// try to find configmaps by name (for backward compatibility)
 		ksConfigMap, _ = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), kubescapeConfigMapName, metav1.GetOptions{})
-		urlsConfigMap, _ = c.k8s.KubernetesClient.CoreV1().ConfigMaps(c.configMapNamespace).Get(context.Background(), kubescapeCloudConfigMapName, metav1.GetOptions{})
 	} else {
 		// use the first configmap with the label
 		ksConfigMap = &configMaps.Items[0]
-		urlsConfigMap = &configMaps.Items[0]
 	}
 
 	if ksConfigMap != nil {
@@ -288,30 +286,6 @@ func (c *ClusterConfig) updateConfigEmptyFieldsFromKubescapeConfigMap() error {
 				return err
 			}
 			c.configObj.updateEmptyFields(&tempCO)
-		}
-	}
-
-	if urlsConfigMap != nil {
-		if jsonConf, ok := urlsConfigMap.Data["services"]; ok {
-			services, err := servicediscovery.GetServices(
-				servicediscoveryv2.NewServiceDiscoveryStreamV2([]byte(jsonConf)),
-			)
-			if err != nil {
-				// try to parse as v1
-				services, err = servicediscovery.GetServices(
-					servicediscoveryv1.NewServiceDiscoveryStreamV1([]byte(jsonConf)),
-				)
-				if err != nil {
-					return err
-				}
-			}
-
-			if services.GetApiServerUrl() != "" {
-				c.configObj.CloudAPIURL = services.GetApiServerUrl()
-			}
-			if services.GetReportReceiverHttpUrl() != "" {
-				c.configObj.CloudReportURL = services.GetReportReceiverHttpUrl()
-			}
 		}
 	}
 
@@ -397,7 +371,7 @@ func (c *ClusterConfig) updateConfigData(configMap *corev1.ConfigMap) {
 func loadConfigFromFile(configObj *ConfigObj) error {
 	dat, err := os.ReadFile(ConfigFileFullPath())
 	if err != nil {
-		return err
+		return nil // no config file
 	}
 	return readConfig(dat, configObj)
 }
@@ -409,6 +383,32 @@ func readConfig(dat []byte, configObj *ConfigObj) error {
 
 	if err := json.Unmarshal(dat, configObj); err != nil {
 		return err
+	}
+	return nil
+}
+
+func loadUrlsFromFile(obj *ConfigObj) error {
+	dat, err := os.ReadFile("/etc/config/services.json")
+	if err != nil {
+		return nil // no config file
+	}
+	services, err := servicediscovery.GetServices(
+		servicediscoveryv2.NewServiceDiscoveryStreamV2(dat),
+	)
+	if err != nil {
+		// try to parse as v1
+		services, err = servicediscovery.GetServices(
+			servicediscoveryv1.NewServiceDiscoveryStreamV1(dat),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	if services.GetApiServerUrl() != "" {
+		obj.CloudAPIURL = services.GetApiServerUrl()
+	}
+	if services.GetReportReceiverHttpUrl() != "" {
+		obj.CloudReportURL = services.GetReportReceiverHttpUrl()
 	}
 	return nil
 }
