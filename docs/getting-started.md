@@ -28,7 +28,7 @@ Kubescape security posture overview for cluster: minikube
 In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.
 
 Control plane
-┌────┬─────────────────────────────────────┬──────────────────────────────────────────────┐
+╭────┬─────────────────────────────────────┬──────────────────────────────────────────────╮
 │    │ Control Name                        │ Docs                                         │
 ├────┼─────────────────────────────────────┼──────────────────────────────────────────────┤
 │ ✅ │ API server insecure port is enabled │ https://kubescape.io/docs/controls/c-0005/   │
@@ -36,10 +36,10 @@ Control plane
 │ ❌ │ Audit logs enabled                  │ https://kubescape.io/docs/controls/c-0067/   │
 │ ✅ │ RBAC enabled                        │ https://kubescape.io/docs/controls/c-0088/   │
 │ ❌ │ Secret/etcd encryption enabled      │ https://kubescape.io/docs/controls/c-0066/   │
-└────┴─────────────────────────────────────┴──────────────────────────────────────────────┘
+╰────┴─────────────────────────────────────┴──────────────────────────────────────────────╯
 
 Access control
-┌─────────────────────────────────────────────────┬───────────┬────────────────────────────────────┐
+╭─────────────────────────────────────────────────┬───────────┬────────────────────────────────────╮
 │ Control Name                                    │ Resources │ View Details                       │
 ├─────────────────────────────────────────────────┼───────────┼────────────────────────────────────┤
 │ Cluster-admin binding                           │     1     │ $ kubescape scan control C-0035 -v │
@@ -51,24 +51,24 @@ Access control
 │ Portforwarding privileges                       │     1     │ $ kubescape scan control C-0063 -v │
 │ Validate admission controller (mutating)        │     0     │ $ kubescape scan control C-0039 -v │
 │ Validate admission controller (validating)      │     0     │ $ kubescape scan control C-0036 -v │
-└─────────────────────────────────────────────────┴───────────┴────────────────────────────────────┘
+╰─────────────────────────────────────────────────┴───────────┴────────────────────────────────────╯
 
 Secrets
-┌─────────────────────────────────────────────────┬───────────┬────────────────────────────────────┐
+╭─────────────────────────────────────────────────┬───────────┬────────────────────────────────────╮
 │ Control Name                                    │ Resources │ View Details                       │
 ├─────────────────────────────────────────────────┼───────────┼────────────────────────────────────┤
 │ Applications credentials in configuration files │     1     │ $ kubescape scan control C-0012 -v │
-└─────────────────────────────────────────────────┴───────────┴────────────────────────────────────┘
+╰─────────────────────────────────────────────────┴───────────┴────────────────────────────────────╯
 
 Network
-┌────────────────────────┬───────────┬────────────────────────────────────┐
+╭────────────────────────┬───────────┬────────────────────────────────────╮
 │ Control Name           │ Resources │ View Details                       │
 ├────────────────────────┼───────────┼────────────────────────────────────┤
 │ Missing network policy │    13     │ $ kubescape scan control C-0260 -v │
-└────────────────────────┴───────────┴────────────────────────────────────┘
+╰────────────────────────┴───────────┴────────────────────────────────────╯
 
 Workload
-┌─────────────────────────┬───────────┬────────────────────────────────────┐
+╭─────────────────────────┬───────────┬────────────────────────────────────╮
 │ Control Name            │ Resources │ View Details                       │
 ├─────────────────────────┼───────────┼────────────────────────────────────┤
 │ Host PID/IPC privileges │     2     │ $ kubescape scan control C-0038 -v │
@@ -76,7 +76,7 @@ Workload
 │ HostPath mount          │     1     │ $ kubescape scan control C-0048 -v │
 │ Non-root containers     │     6     │ $ kubescape scan control C-0013 -v │
 │ Privileged container    │     1     │ $ kubescape scan control C-0057 -v │
-└─────────────────────────┴───────────┴────────────────────────────────────┘
+╰─────────────────────────┴───────────┴────────────────────────────────────╯
 
 Highest-stake workloads
 ────────────────────────

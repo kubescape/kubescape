@@ -6,33 +6,28 @@ import (
 	"strings"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/jwalton/gchalk"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
-	"github.com/olekukonko/tablewriter"
 )
 
-func renderTable(writer io.Writer, headers []string, columnAlignments []int, rows [][]string) {
-	table := tablewriter.NewWriter(writer)
-	table.SetHeader(headers)
-	table.SetHeaderLine(true)
-	table.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	table.SetAutoFormatHeaders(false)
-	table.SetColumnAlignment(columnAlignments)
-	table.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+func renderTable(writer io.Writer, headers table.Row, columnAlignments []table.ColumnConfig, rows []table.Row) {
+	tableWriter := table.NewWriter()
+	tableWriter.SetOutputMirror(writer)
+	tableWriter.AppendHeader(headers)
+	tableWriter.Style().Options.SeparateHeader = true
+	tableWriter.Style().Format.HeaderAlign = text.AlignLeft
+	tableWriter.Style().Format.Header = text.FormatDefault
+	tableWriter.SetColumnConfigs(columnAlignments)
+	tableWriter.Style().Box = table.StyleBoxRounded
 
-	var headerColors []tablewriter.Colors
-	for range rows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	table.SetHeaderColor(headerColors...)
+	tableWriter.AppendRows(rows)
 
-	table.AppendBulk(rows)
-
-	table.Render()
+	tableWriter.Render()
 }
 
-func generateRows(summary ImageScanSummary) [][]string {
-	rows := make([][]string, 0, len(summary.CVEs))
+func generateRows(summary ImageScanSummary) []table.Row {
+	rows := make([]table.Row, 0, len(summary.CVEs))
 
 	// sort CVEs by severity
 	sort.Slice(summary.CVEs, func(i, j int) bool {
@@ -46,8 +41,8 @@ func generateRows(summary ImageScanSummary) [][]string {
 	return rows
 }
 
-func generateRow(cve CVE) []string {
-	row := make([]string, 5)
+func generateRow(cve CVE) table.Row {
+	row := make(table.Row, 5)
 	row[imageColumnSeverity] = utils.GetColorForVulnerabilitySeverity(cve.Severity)(cve.Severity)
 	row[imageColumnName] = cve.ID
 	row[imageColumnComponent] = cve.Package
@@ -59,13 +54,15 @@ func generateRow(cve CVE) []string {
 		// if the CVE is not fixed, show the state
 	} else if cve.FixedState == string(v5.WontFixState) {
 		row[imageColumnFixedIn] = cve.FixedState
+	} else {
+		row[imageColumnFixedIn] = ""
 	}
 
 	return row
 }
 
-func getImageScanningHeaders() []string {
-	headers := make([]string, 5)
+func getImageScanningHeaders() table.Row {
+	headers := make(table.Row, 5)
 	headers[imageColumnSeverity] = "Severity"
 	headers[imageColumnName] = "Vulnerability"
 	headers[imageColumnComponent] = "Component"
@@ -74,6 +71,12 @@ func getImageScanningHeaders() []string {
 	return headers
 }
 
-func getImageScanningColumnsAlignments() []int {
-	return []int{tablewriter.ALIGN_CENTER, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT, tablewriter.ALIGN_LEFT}
+func getImageScanningColumnsAlignments() []table.ColumnConfig {
+	return []table.ColumnConfig{
+		{Number: 1, Align: text.AlignCenter},
+		{Number: 2, Align: text.AlignLeft},
+		{Number: 3, Align: text.AlignLeft},
+		{Number: 4, Align: text.AlignLeft},
+		{Number: 5, Align: text.AlignLeft},
+	}
 }

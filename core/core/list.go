@@ -7,14 +7,13 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/jwalton/gchalk"
+	"github.com/jedib0t/go-pretty/v6/table"
+	"github.com/jedib0t/go-pretty/v6/text"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
-	v2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/maruel/natural"
-	"github.com/olekukonko/tablewriter"
 )
 
 var listFunc = map[string]func(context.Context, *metav1.ListPolicies) ([]string, error){
@@ -100,30 +99,19 @@ func prettyPrintListFormat(ctx context.Context, targetPolicy string, policies []
 		return
 	}
 
-	policyTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
+	policyTable := table.NewWriter()
+	policyTable.SetOutputMirror(printer.GetWriter(ctx, ""))
 
-	policyTable.SetAutoWrapText(true)
 	header := fmt.Sprintf("Supported %s", targetPolicy)
-	policyTable.SetHeader([]string{header})
-	policyTable.SetHeaderLine(true)
-	policyTable.SetRowLine(true)
-	policyTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	policyTable.SetAutoFormatHeaders(false)
-	policyTable.SetAlignment(tablewriter.ALIGN_CENTER)
-	policyTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
-	data := v2.Matrix{}
+	policyTable.AppendHeader(table.Row{header})
+	policyTable.Style().Options.SeparateHeader = true
+	policyTable.Style().Options.SeparateRows = true
+	policyTable.Style().Format.HeaderAlign = text.AlignLeft
+	policyTable.Style().Format.Header = text.FormatDefault
+	policyTable.Style().Format.RowAlign = text.AlignCenter
+	policyTable.Style().Box = table.StyleBoxRounded
 
-	controlRows := generatePolicyRows(policies)
-
-	var headerColors []tablewriter.Colors
-	for range controlRows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	policyTable.SetHeaderColor(headerColors...)
-
-	data = append(data, controlRows...)
-
-	policyTable.AppendBulk(data)
+	policyTable.AppendRows(generatePolicyRows(policies))
 	policyTable.Render()
 }
 
@@ -134,40 +122,32 @@ func jsonListFormat(_ context.Context, _ string, policies []string) {
 }
 
 func prettyPrintControls(ctx context.Context, policies []string) {
-	controlsTable := tablewriter.NewWriter(printer.GetWriter(ctx, ""))
+	controlsTable := table.NewWriter()
+	controlsTable.SetOutputMirror(printer.GetWriter(ctx, ""))
 
-	controlsTable.SetAutoWrapText(false)
-	controlsTable.SetHeaderLine(true)
-	controlsTable.SetRowLine(true)
-	controlsTable.SetHeaderAlignment(tablewriter.ALIGN_LEFT)
-	controlsTable.SetAutoFormatHeaders(false)
-	controlsTable.SetUnicodeHVC(tablewriter.Regular, tablewriter.Regular, gchalk.Ansi256(238))
+	controlsTable.Style().Options.SeparateHeader = true
+	controlsTable.Style().Options.SeparateRows = true
+	controlsTable.Style().Format.HeaderAlign = text.AlignLeft
+	controlsTable.Style().Format.Header = text.FormatDefault
+	controlsTable.Style().Box = table.StyleBoxRounded
+	controlsTable.SetColumnConfigs([]table.ColumnConfig{{Number: 1, Align: text.AlignRight}})
 
 	controlRows := generateControlRows(policies)
 
-	short := utils.CheckShortTerminalWidth(controlRows, []string{"Control ID", "Control name", "Docs", "Frameworks"})
+	short := utils.CheckShortTerminalWidth(controlRows, table.Row{"Control ID", "Control name", "Docs", "Frameworks"})
 	if short {
-		controlsTable.SetAutoWrapText(false)
-		controlsTable.SetHeader([]string{"Controls"})
+		controlsTable.AppendHeader(table.Row{"Controls"})
 		controlRows = shortFormatControlRows(controlRows)
 	} else {
-		controlsTable.SetHeader([]string{"Control ID", "Control name", "Docs", "Frameworks"})
+		controlsTable.AppendHeader(table.Row{"Control ID", "Control name", "Docs", "Frameworks"})
 	}
-	var headerColors []tablewriter.Colors
-	for range controlRows[0] {
-		headerColors = append(headerColors, tablewriter.Colors{tablewriter.Bold, tablewriter.FgHiYellowColor})
-	}
-	controlsTable.SetHeaderColor(headerColors...)
 
-	data := v2.Matrix{}
-	data = append(data, controlRows...)
-
-	controlsTable.AppendBulk(data)
+	controlsTable.AppendRows(controlRows)
 	controlsTable.Render()
 }
 
-func generateControlRows(policies []string) [][]string {
-	rows := [][]string{}
+func generateControlRows(policies []string) []table.Row {
+	rows := make([]table.Row, 0, len(policies))
 
 	for _, control := range policies {
 
@@ -188,7 +168,7 @@ func generateControlRows(policies []string) [][]string {
 
 		docs := cautils.GetControlLink(id)
 
-		currentRow := []string{id, control, docs, strings.Replace(framework, " ", "\n", -1)}
+		currentRow := table.Row{id, control, docs, strings.Replace(framework, " ", "\n", -1)}
 
 		rows = append(rows, currentRow)
 	}
@@ -196,20 +176,19 @@ func generateControlRows(policies []string) [][]string {
 	return rows
 }
 
-func generatePolicyRows(policies []string) [][]string {
-	rows := [][]string{}
+func generatePolicyRows(policies []string) []table.Row {
+	rows := make([]table.Row, 0, len(policies))
 
 	for _, policy := range policies {
-		currentRow := []string{policy}
-		rows = append(rows, currentRow)
+		rows = append(rows, table.Row{policy})
 	}
 	return rows
 }
 
-func shortFormatControlRows(controlRows [][]string) [][]string {
-	rows := [][]string{}
+func shortFormatControlRows(controlRows []table.Row) []table.Row {
+	rows := make([]table.Row, 0, len(controlRows))
 	for _, controlRow := range controlRows {
-		rows = append(rows, []string{fmt.Sprintf("Control ID"+strings.Repeat(" ", 3)+": %+v\nControl Name"+strings.Repeat(" ", 1)+": %+v\nDocs"+strings.Repeat(" ", 9)+": %+v\nFrameworks"+strings.Repeat(" ", 3)+": %+v", controlRow[0], controlRow[1], controlRow[2], strings.Replace(controlRow[3], "\n", " ", -1))})
+		rows = append(rows, table.Row{fmt.Sprintf("Control ID"+strings.Repeat(" ", 3)+": %+v\nControl Name"+strings.Repeat(" ", 1)+": %+v\nDocs"+strings.Repeat(" ", 9)+": %+v\nFrameworks"+strings.Repeat(" ", 3)+": %+v", controlRow[0], controlRow[1], controlRow[2], strings.Replace(controlRow[3].(string), "\n", " ", -1))})
 	}
 	return rows
 }

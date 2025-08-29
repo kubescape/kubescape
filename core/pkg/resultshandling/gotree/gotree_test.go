@@ -31,7 +31,7 @@ func TestTreePrint(t *testing.T) {
 			tree: SimpleTreeMock(),
 			want: "root\n" +
 				"├── child1\n" +
-				"└── child2\n",
+				"╰── child2\n",
 		},
 		{
 			name: "SimpleTreeWithLinesMock",
@@ -42,36 +42,36 @@ func TestTreePrint(t *testing.T) {
 				"├── child3\n" +
 				"│   Line2\n" +
 				"│   Line3\n" +
-				"└── child4\n",
+				"╰── child4\n",
 		},
 		{
 			name: "SubTreeMock1",
 			tree: SubTreeMock1(),
 			want: "root\n" +
-				"└── child1\n" +
-				"    └── child1.1\n",
+				"╰── child1\n" +
+				"    ╰── child1.1\n",
 		},
 		{
 			name: "SubTreeMock2",
 			tree: SubTreeMock2(),
 			want: "root\n" +
 				"├── child1\n" +
-				"│   └── child1.1\n" +
+				"│   ╰── child1.1\n" +
 				"├── child2\n" +
-				"└── child3\n" +
-				"    └── child3.1\n",
+				"╰── child3\n" +
+				"    ╰── child3.1\n",
 		},
 		{
 			name: "SubTreeWithLinesMock",
 			tree: SubTreeWithLinesMock(),
 			want: "root\n" +
 				"├── child1\n" +
-				"│   └── child1.1\n" +
+				"│   ╰── child1.1\n" +
 				"│       Line2\n" +
 				"│       Line3\n" +
 				"├── child2\n" +
-				"└── child3\n" +
-				"    └── child3.1\n" +
+				"╰── child3\n" +
+				"    ╰── child3.1\n" +
 				"        Line2\n" +
 				"        Line3\n",
 		},
@@ -85,8 +85,8 @@ func TestTreePrint(t *testing.T) {
 }
 
 func TestPrintText_LastTree(t *testing.T) {
-	inputText := "Root\n├── Child1\n└── Child2"
-	expectedOutput := "└── Root\n    ├── Child1\n    └── Child2\n"
+	inputText := "Root\n├── Child1\n╰── Child2"
+	expectedOutput := "╰── Root\n    ├── Child1\n    ╰── Child2\n"
 
 	result := p.printText(inputText, []bool{}, true)
 
@@ -94,8 +94,8 @@ func TestPrintText_LastTree(t *testing.T) {
 }
 
 func TestPrintText_NotLastTree(t *testing.T) {
-	inputText := "Root\n├── Child1\n└── Child2"
-	expectedOutput := "├── Root\n│   ├── Child1\n│   └── Child2\n"
+	inputText := "Root\n├── Child1\n╰── Child2"
+	expectedOutput := "├── Root\n│   ├── Child1\n│   ╰── Child2\n"
 
 	result := p.printText(inputText, []bool{}, false)
 
@@ -122,7 +122,7 @@ func Test_printer_printItems(t *testing.T) {
 			name: "SimpleTreeMock",
 			tree: SimpleTreeMock(),
 			want: "├── child1\n" +
-				"└── child2\n",
+				"╰── child2\n",
 		},
 		{
 			name: "SimpleTreeWithLinesMock",
@@ -132,33 +132,33 @@ func Test_printer_printItems(t *testing.T) {
 				"├── child3\n" +
 				"│   Line2\n" +
 				"│   Line3\n" +
-				"└── child4\n",
+				"╰── child4\n",
 		},
 		{
 			name: "SubTreeMock1",
 			tree: SubTreeMock1(),
-			want: "└── child1\n" +
-				"    └── child1.1\n",
+			want: "╰── child1\n" +
+				"    ╰── child1.1\n",
 		},
 		{
 			name: "SubTreeMock2",
 			tree: SubTreeMock2(),
 			want: "├── child1\n" +
-				"│   └── child1.1\n" +
+				"│   ╰── child1.1\n" +
 				"├── child2\n" +
-				"└── child3\n" +
-				"    └── child3.1\n",
+				"╰── child3\n" +
+				"    ╰── child3.1\n",
 		},
 		{
 			name: "SubTreeWithLinesMock",
 			tree: SubTreeWithLinesMock(),
 			want: "├── child1\n" +
-				"│   └── child1.1\n" +
+				"│   ╰── child1.1\n" +
 				"│       Line2\n" +
 				"│       Line3\n" +
 				"├── child2\n" +
-				"└── child3\n" +
-				"    └── child3.1\n" +
+				"╰── child3\n" +
+				"    ╰── child3.1\n" +
 				"        Line2\n" +
 				"        Line3\n",
 		},

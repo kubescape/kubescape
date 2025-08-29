@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/enescakir/emoji"
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
@@ -138,19 +139,19 @@ func GetStatusIcon(status apis.ScanningStatus) string {
 	}
 }
 
-func CheckShortTerminalWidth(rows [][]string, headers []string) bool {
+func CheckShortTerminalWidth(rows []table.Row, headers table.Row) bool {
 	maxWidth := 0
 	for _, row := range rows {
 		rowWidth := 0
 		for idx, cell := range row {
-			cellLen := len(cell)
+			cellLen := len(cell.(string))
 			if cellLen > 50 { // Take only 50 characters of each sentence for counting size
 				cellLen = 50
 			}
-			if cellLen > len(headers[idx]) {
+			if cellLen > len(headers[idx].(string)) {
 				rowWidth += cellLen
 			} else {
-				rowWidth += len(headers[idx])
+				rowWidth += len(headers[idx].(string))
 			}
 			rowWidth += 2
 		}
