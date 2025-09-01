@@ -2,13 +2,13 @@ package printer
 
 import (
 	"fmt"
-	"github.com/kubescape/k8s-interface/workloadinterface"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/jwalton/gchalk"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
