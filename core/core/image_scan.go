@@ -110,7 +110,9 @@ func regexStringMatch(pattern, target string) bool {
 // exception policy.
 func isTargetImage(targets []Target, attributes Attributes) bool {
 	for _, target := range targets {
-		return regexStringMatch(target.Attributes.Registry, attributes.Registry) && regexStringMatch(target.Attributes.Organization, attributes.Organization) && regexStringMatch(target.Attributes.ImageName, attributes.ImageName) && regexStringMatch(target.Attributes.ImageTag, attributes.ImageTag)
+		if regexStringMatch(target.Attributes.Registry, attributes.Registry) && regexStringMatch(target.Attributes.Organization, attributes.Organization) && regexStringMatch(target.Attributes.ImageName, attributes.ImageName) && regexStringMatch(target.Attributes.ImageTag, attributes.ImageTag) {
+			return true
+		}
 	}
 
 	return false

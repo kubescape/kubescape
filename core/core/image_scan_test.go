@@ -241,6 +241,33 @@ func TestIsTargetImage(t *testing.T) {
 			},
 			expected: true,
 		},
+		{
+			targets: []Target{
+				{
+					Attributes: Attributes{
+						Registry:     "quay.io",
+						Organization: "kubescape",
+						ImageName:    "kubescape*",
+						ImageTag:     "",
+					},
+				},
+				{
+					Attributes: Attributes{
+						Registry:     "docker.io",
+						Organization: "library",
+						ImageName:    "alpine",
+						ImageTag:     "",
+					},
+				},
+			},
+			attributes: Attributes{
+				Registry:     "docker.io",
+				Organization: "library",
+				ImageName:    "alpine",
+				ImageTag:     "latest",
+			},
+			expected: true,
+		},
 	}
 
 	for _, tt := range tests {
