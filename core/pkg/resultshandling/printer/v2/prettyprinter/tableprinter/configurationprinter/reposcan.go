@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -24,15 +25,15 @@ func NewRepoPrinter(inputPatterns []string) *RepoPrinter {
 
 var _ TablePrinter = &RepoPrinter{}
 
-func (rp *RepoPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (rp *RepoPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.SummaryDetails, _ [][]string) {
 
 }
 
-func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string) {
+func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
 
 	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapRepoControlsToCategories)
 
-	tableRended := false
+	tableRendered := false
 	for _, id := range repoCategoriesDisplayOrder {
 		categoryControl, ok := categoriesToCategoryControls[id]
 		if !ok {
@@ -43,10 +44,10 @@ func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *r
 			continue
 		}
 
-		tableRended = tableRended || rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
+		tableRendered = tableRendered || rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
 	}
 
-	if !tableRended {
+	if !tableRendered {
 		fmt.Fprintln(writer, gchalk.WithGreen().Bold("All controls passed. No issues found"))
 	}
 
@@ -55,21 +56,21 @@ func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *r
 func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryType CategoryType, writer io.Writer, controlSummaries []reportsummary.IControlSummary, infoToPrintInfo []utils.InfoStars) bool {
 	sortControlSummaries(controlSummaries)
 
-	headers, columnAligments := initCategoryTableData(categoryType)
+	headers, columnAlignments := initCategoryTableData(categoryType)
 
-	table := getCategoryTableWriter(writer, headers, columnAligments)
+	tableWriter := getCategoryTableWriter(writer, headers, columnAlignments)
 
-	var rows [][]string
+	var rows []table.Row
 	for _, ctrls := range controlSummaries {
 		if ctrls.NumberOfResources().Failed() == 0 {
 			continue
 		}
 
-		var row []string
+		var row table.Row
 		if categoryType == TypeCounting {
 			row = rp.generateCountingCategoryRow(ctrls, rp.inputPatterns)
 		} else {
-			row = generateCategoryStatusRow(ctrls, infoToPrintInfo)
+			row = generateCategoryStatusRow(ctrls)
 		}
 		if len(row) > 0 {
 			rows = append(rows, row)
@@ -80,18 +81,18 @@ func (rp *RepoPrinter) renderSingleCategoryTable(categoryName string, categoryTy
 		return false
 	}
 
-	renderSingleCategory(writer, categoryName, table, rows, infoToPrintInfo)
+	renderSingleCategory(writer, categoryName, tableWriter, rows, infoToPrintInfo)
 	return true
 }
 
-func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary, inputPatterns []string) []string {
-	rows := make([]string, 3)
+func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.IControlSummary, inputPatterns []string) table.Row {
+	rows := make(table.Row, 3)
 
 	rows[0] = controlSummary.GetName()
 
 	failedResources := controlSummary.NumberOfResources().Failed()
 	if failedResources > 0 {
-		rows[1] = string(gchalk.WithYellow().Bold(fmt.Sprintf("%d", failedResources)))
+		rows[1] = gchalk.WithYellow().Bold(fmt.Sprintf("%d", failedResources))
 	} else {
 		rows[1] = fmt.Sprintf("%d", failedResources)
 	}
