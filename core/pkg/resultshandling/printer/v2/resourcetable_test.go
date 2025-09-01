@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -366,16 +367,30 @@ func TestGenerateResourceHeader(t *testing.T) {
 
 func TestGenerateResourceRows_Loop(t *testing.T) {
 	tests := []struct {
-		name           string
-		summaryDetails reportsummary.SummaryDetails
-		controls       []resourcesresults.ResourceAssociatedControl
-		expectedLen    int
+		name                  string
+		summaryDetails        reportsummary.SummaryDetails
+		controls              []resourcesresults.ResourceAssociatedControl
+		resource              workloadinterface.IMetadata
+		expectedLen           int
+		expectedContainerName string
 	}{
 		{
 			name:           "Empty controls",
 			summaryDetails: reportsummary.SummaryDetails{},
 			controls:       []resourcesresults.ResourceAssociatedControl{},
-			expectedLen:    0,
+			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "alpine-container",
+							"image": "alpine:latest",
+						},
+					},
+				},
+			}),
+			expectedLen:           0,
+			expectedContainerName: "",
 		},
 		{
 			name:           "2 Failed Controls",
@@ -393,10 +408,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "some-path1",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "random-path1",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=1000",
 								},
 							},
 						},
@@ -413,17 +428,29 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 							SubStatus: "configuration",
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "some-path2",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "random-path2",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
 					},
 				},
 			},
-			expectedLen: 2,
+			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "alpine-container",
+							"image": "alpine:latest",
+						},
+					},
+				},
+			}),
+			expectedLen:           2,
+			expectedContainerName: "alpine-container",
 		},
 		{
 			name:           "One failed control",
@@ -441,10 +468,10 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "some-path1",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "random-path1",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
@@ -461,24 +488,42 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 							SubStatus: "configuration",
 							Paths: []armotypes.PosturePaths{
 								{
-									FailedPath: "some-path2",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsNonRoot=true",
 								},
 								{
-									FailedPath: "random-path2",
+									FailedPath: "spec.template.spec.containers[0].securityContext.runAsGroup=true",
 								},
 							},
 						},
 					},
 				},
 			},
-			expectedLen: 1,
+			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "nginx-container",
+							"image": "nginx:latest",
+						},
+					},
+				},
+			}),
+			expectedLen:           1,
+			expectedContainerName: "nginx-container",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rows := generateResourceRows(tt.controls, &tt.summaryDetails)
+			rows := generateResourceRows(tt.controls, &tt.summaryDetails, tt.resource)
 			assert.Equal(t, tt.expectedLen, len(rows))
+			//remediation is the last column of the first row
+			if len(rows) != 0 {
+				remediation := rows[0][3]
+				assert.Contains(t, remediation, tt.expectedContainerName)
+			}
+
 		})
 	}
 }
