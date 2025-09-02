@@ -55,10 +55,10 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			imgScanInfo := &metav1.ImageScanInfo{
-				Image:             args[0],
-				Username:          imgCredentials.Username,
-				Password:          imgCredentials.Password,
-				Exceptions:        exceptions,
+				Image:              args[0],
+				Username:           imgCredentials.Username,
+				Password:           imgCredentials.Password,
+				Exceptions:         exceptions,
 				UseDefaultMatchers: useDefaultMatchers,
 			}
 

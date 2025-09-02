@@ -350,7 +350,7 @@ func TestNewScanService(t *testing.T) {
 func TestNewScanServiceWithDefaultMatchers(t *testing.T) {
 	// Test the Service struct creation with different useDefaultMatchers values
 	// This test doesn't require a real database
-	
+
 	// Test with default matchers enabled
 	svcWithDefault := &Service{
 		useDefaultMatchers: true,
@@ -475,7 +475,7 @@ func TestGetMatchers(t *testing.T) {
 func TestNewScanServiceWithMatchers(t *testing.T) {
 	// Test the Service struct creation with different useDefaultMatchers values
 	// This test doesn't require a real database
-	
+
 	// Test with default matchers enabled
 	svcWithDefault := &Service{
 		useDefaultMatchers: true,
@@ -492,13 +492,13 @@ func TestNewScanServiceWithMatchers(t *testing.T) {
 func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	// Test the actual NewScanServiceWithMatchers function
 	defaultConfig, _ := NewDefaultDBConfig()
-	
+
 	// Test with default matchers enabled
 	svcWithDefault, err := NewScanServiceWithMatchers(defaultConfig, true)
 	require.NoError(t, err)
 	defer svcWithDefault.Close()
 	assert.True(t, svcWithDefault.useDefaultMatchers)
-	
+
 	// Test with default matchers disabled
 	svcWithoutDefault, err := NewScanServiceWithMatchers(defaultConfig, false)
 	require.NoError(t, err)
