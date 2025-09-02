@@ -110,7 +110,7 @@ jobs:
       attestations: read
       contents: write
     uses: ./.github/workflows/e-post-release.yaml
-    needs: [publish-image]
+    needs: [retag, publish-image]
     with:
       TAG: ${{ needs.retag.outputs.NEW_TAG }}
     secrets: inherit
