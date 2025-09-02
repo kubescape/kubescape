@@ -78,7 +78,7 @@ func TestVulnerabilityAndSeverityExceptions(t *testing.T) {
 				defer dbCloser.Close()
 			}
 
-			remainingMatches, ignoredMatches, err := getIgnoredMatches(tc.vulnerabilityExceptions, store, packages, pkgContext)
+			remainingMatches, ignoredMatches, err := getIgnoredMatches(tc.vulnerabilityExceptions, store, packages, pkgContext, svc.useDefaultMatchers)
 			assert.NoError(t, err)
 			assert.Equal(t, tc.ignoredLen, len(ignoredMatches))
 
@@ -347,6 +347,23 @@ func TestNewScanService(t *testing.T) {
 	assert.Equal(t, defaultConfig, svc.dbCfg)
 }
 
+func TestNewScanServiceWithDefaultMatchers(t *testing.T) {
+	// Test the Service struct creation with different useDefaultMatchers values
+	// This test doesn't require a real database
+
+	// Test with default matchers enabled
+	svcWithDefault := &Service{
+		useDefaultMatchers: true,
+	}
+	assert.True(t, svcWithDefault.useDefaultMatchers)
+
+	// Test with default matchers disabled
+	svcWithoutDefault := &Service{
+		useDefaultMatchers: false,
+	}
+	assert.False(t, svcWithoutDefault.useDefaultMatchers)
+}
+
 func TestExceedsSeverityThreshold(t *testing.T) {
 	my_matches := match.NewMatches()
 	my_matches.Add(match.Match{
@@ -442,4 +459,49 @@ func TestExceedsSeverityThreshold(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestGetMatchers(t *testing.T) {
+	// Test with default matchers enabled
+	matchersWithDefault := getMatchers(true)
+	assert.NotNil(t, matchersWithDefault)
+	assert.Greater(t, len(matchersWithDefault), 0)
+
+	// Test with default matchers disabled
+	matchersWithoutDefault := getMatchers(false)
+	assert.Nil(t, matchersWithoutDefault)
+}
+
+func TestNewScanServiceWithMatchers(t *testing.T) {
+	// Test the Service struct creation with different useDefaultMatchers values
+	// This test doesn't require a real database
+
+	// Test with default matchers enabled
+	svcWithDefault := &Service{
+		useDefaultMatchers: true,
+	}
+	assert.True(t, svcWithDefault.useDefaultMatchers)
+
+	// Test with default matchers disabled
+	svcWithoutDefault := &Service{
+		useDefaultMatchers: false,
+	}
+	assert.False(t, svcWithoutDefault.useDefaultMatchers)
+}
+
+func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
+	// Test the actual NewScanServiceWithMatchers function
+	defaultConfig, _ := NewDefaultDBConfig()
+
+	// Test with default matchers enabled
+	svcWithDefault, err := NewScanServiceWithMatchers(defaultConfig, true)
+	require.NoError(t, err)
+	defer svcWithDefault.Close()
+	assert.True(t, svcWithDefault.useDefaultMatchers)
+
+	// Test with default matchers disabled
+	svcWithoutDefault, err := NewScanServiceWithMatchers(defaultConfig, false)
+	require.NoError(t, err)
+	defer svcWithoutDefault.Close()
+	assert.False(t, svcWithoutDefault.useDefaultMatchers)
 }

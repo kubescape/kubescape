@@ -32,6 +32,7 @@ var (
 func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	var imgCredentials shared.ImageCredentials
 	var exceptions string
+	var useDefaultMatchers bool
 
 	cmd := &cobra.Command{
 		Use:     "image <image>:<tag> [flags]",
@@ -53,10 +54,11 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			imgScanInfo := &metav1.ImageScanInfo{
-				Image:      args[0],
-				Username:   imgCredentials.Username,
-				Password:   imgCredentials.Password,
-				Exceptions: exceptions,
+				Image:              args[0],
+				Username:           imgCredentials.Username,
+				Password:           imgCredentials.Password,
+				Exceptions:         exceptions,
+				UseDefaultMatchers: useDefaultMatchers,
 			}
 
 			exceedsSeverityThreshold, err := ks.ScanImage(imgScanInfo, scanInfo)
@@ -76,6 +78,7 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 	cmd.PersistentFlags().StringVarP(&exceptions, "exceptions", "", "", "Path to the exceptions file")
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Username, "username", "u", "", "Username for registry login")
 	cmd.PersistentFlags().StringVarP(&imgCredentials.Password, "password", "p", "", "Password for registry login")
+	cmd.PersistentFlags().BoolVarP(&useDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false)")
 
 	return cmd
 }

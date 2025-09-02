@@ -64,21 +64,24 @@ func NewDefaultDBConfig() (db.Config, bool) {
 	}, shouldUpdate
 }
 
-func getMatchers() []matcher.Matcher {
-	return matcher.NewDefaultMatchers(
-		matcher.Config{
-			Java: java.MatcherConfig{
-				ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
-				UseCPEs:              true,
+func getMatchers(useDefaultMatchers bool) []matcher.Matcher {
+	if useDefaultMatchers {
+		return matcher.NewDefaultMatchers(
+			matcher.Config{
+				Java: java.MatcherConfig{
+					ExternalSearchConfig: java.ExternalSearchConfig{MavenBaseURL: "https://search.maven.org/solrsearch/select"},
+					UseCPEs:              true,
+				},
+				Ruby:       ruby.MatcherConfig{UseCPEs: true},
+				Python:     python.MatcherConfig{UseCPEs: true},
+				Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
+				Javascript: javascript.MatcherConfig{UseCPEs: true},
+				Golang:     golang.MatcherConfig{UseCPEs: true},
+				Stock:      stock.MatcherConfig{UseCPEs: true},
 			},
-			Ruby:       ruby.MatcherConfig{UseCPEs: true},
-			Python:     python.MatcherConfig{UseCPEs: true},
-			Dotnet:     dotnet.MatcherConfig{UseCPEs: true},
-			Javascript: javascript.MatcherConfig{UseCPEs: true},
-			Golang:     golang.MatcherConfig{UseCPEs: true},
-			Stock:      stock.MatcherConfig{UseCPEs: true},
-		},
-	)
+		)
+	}
+	return nil
 }
 
 func validateDBLoad(loadErr error, status *db.Status) error {
@@ -115,13 +118,14 @@ func getProviderConfig(creds RegistryCredentials) pkg.ProviderConfig {
 //
 // It performs image scanning and everything needed in between.
 type Service struct {
-	dbCfg    db.Config
-	dbCloser *db.Closer
-	dbStatus *db.Status
-	dbStore  *store.Store
+	dbCfg              db.Config
+	dbCloser           *db.Closer
+	dbStatus           *db.Status
+	dbStore            *store.Store
+	useDefaultMatchers bool
 }
 
-func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, packages []pkg.Package, pkgContext pkg.Context) (*match.Matches, []match.IgnoredMatch, error) {
+func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, packages []pkg.Package, pkgContext pkg.Context, useDefaultMatchers bool) (*match.Matches, []match.IgnoredMatch, error) {
 	if vulnerabilityExceptions == nil {
 		vulnerabilityExceptions = []string{}
 	}
@@ -136,7 +140,7 @@ func getIgnoredMatches(vulnerabilityExceptions []string, store *store.Store, pac
 
 	matcher := grype.VulnerabilityMatcher{
 		Store:       *store,
-		Matchers:    getMatchers(),
+		Matchers:    getMatchers(useDefaultMatchers),
 		IgnoreRules: ignoreRules,
 	}
 
@@ -187,7 +191,7 @@ func (s *Service) Scan(_ context.Context, userInput string, creds RegistryCreden
 		return nil, err
 	}
 
-	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.dbStore, packages, pkgContext)
+	remainingMatches, ignoredMatches, err := getIgnoredMatches(vulnerabilityExceptions, s.dbStore, packages, pkgContext, s.useDefaultMatchers)
 	if err != nil {
 		return nil, err
 	}
@@ -216,15 +220,20 @@ func NewVulnerabilityDB(cfg db.Config, update bool) (*store.Store, *db.Status, *
 }
 
 func NewScanService(dbCfg db.Config) (*Service, error) {
+	return NewScanServiceWithMatchers(dbCfg, true)
+}
+
+func NewScanServiceWithMatchers(dbCfg db.Config, useDefaultMatchers bool) (*Service, error) {
 	dbStore, dbStatus, dbCloser, err := NewVulnerabilityDB(dbCfg, true)
 	if err = validateDBLoad(err, dbStatus); err != nil {
 		return nil, err
 	}
 	return &Service{
-		dbCfg:    dbCfg,
-		dbCloser: dbCloser,
-		dbStatus: dbStatus,
-		dbStore:  dbStore,
+		dbCfg:              dbCfg,
+		dbCloser:           dbCloser,
+		dbStatus:           dbStatus,
+		dbStore:            dbStore,
+		useDefaultMatchers: useDefaultMatchers,
 	}, nil
 }
 
