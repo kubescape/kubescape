@@ -220,9 +220,11 @@ func createPolicyBinding(bindingName string, policyName string, action string, p
 	}
 
 	policyBinding.Spec.ValidationActions = []admissionv1.ValidationAction{admissionv1.ValidationAction(action)}
+	paramAction := admissionv1.DenyAction
 	if paramRefName != "" {
 		policyBinding.Spec.ParamRef = &admissionv1.ParamRef{
-			Name: paramRefName,
+			Name:                    paramRefName,
+			ParameterNotFoundAction: &paramAction,
 		}
 	}
 	// Marshal the policy binding to YAML
