@@ -1,51 +1,57 @@
-linters-settings:
-  govet:
-    shadow: true
-  dupl:
-    threshold: 200
-  goconst:
-    min-len: 3
-    min-occurrences: 2
-  gocognit:
-    min-complexity: 65
-
+version: "2"
 linters:
   enable:
-    - gosec
-    - staticcheck
-    - nolintlint
-    - gofmt
-    - unused
-    - govet
     - bodyclose
-    - typecheck
-    - goimports
-    - ineffassign
-    - gosimple
+    - gosec
+    - nolintlint
   disable:
-    # temporarily disabled
-    - errcheck
     - dupl
-    - gocritic
+    - errcheck
+    - gochecknoglobals
+    - gochecknoinits
     - gocognit
+    - gocritic
+    - lll
     - nakedret
     - revive
-    - stylecheck
     - unconvert
     - unparam
-    #- forbidigo # <- see later
-    # should remain disabled
-    - lll
-    - gochecknoinits
-    - gochecknoglobals
-issues:
-  exclude-rules:
-    - linters:
-      - revive
-      text: "var-naming"
-    - linters:
-      - revive
-      text: "type name will be used as (.+?) by other packages, and that stutters"
-    - linters:
-      - stylecheck
-      text: "ST1003"
+  settings:
+    dupl:
+      threshold: 200
+    gocognit:
+      min-complexity: 65
+    goconst:
+      min-len: 3
+      min-occurrences: 2
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - revive
+        text: var-naming
+      - linters:
+          - revive
+        text: type name will be used as (.+?) by other packages, and that stutters
+      - linters:
+          - staticcheck
+        text: ST1003
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
