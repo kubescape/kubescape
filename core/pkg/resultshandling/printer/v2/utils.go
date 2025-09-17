@@ -2,7 +2,7 @@ package printer
 
 import (
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/anchore/grype/grype/presenter/models"
+	"github.com/anchore/grype/grype/match"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
@@ -103,39 +103,39 @@ func setSeverityToSummaryMap(cves []imageprinter.CVE, mapSeverityToSummary map[s
 	}
 }
 
-func setPkgNameToScoreMap(matches []models.Match, pkgScores map[string]*imageprinter.PackageScore) {
-	for i := range matches {
+func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprinter.PackageScore) {
+	for _, m := range matches.Sorted() {
 		// key is pkg name + version to avoid version conflicts
-		key := matches[i].Artifact.Name + matches[i].Artifact.Version
+		key := m.Package.Name + m.Package.Version
 
 		if _, ok := pkgScores[key]; !ok {
 			pkgScores[key] = &imageprinter.PackageScore{
-				Version:                 matches[i].Artifact.Version,
-				Name:                    matches[i].Artifact.Name,
+				Version:                 m.Package.Version,
+				Name:                    m.Package.Name,
 				MapSeverityToCVEsNumber: make(map[string]int, 0),
 			}
 		}
 
-		if _, ok := pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity]; !ok {
-			pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] = 1
+		if _, ok := pkgScores[key].MapSeverityToCVEsNumber[m.Vulnerability.Metadata.Severity]; !ok {
+			pkgScores[key].MapSeverityToCVEsNumber[m.Vulnerability.Metadata.Severity] = 1
 		} else {
-			pkgScores[key].MapSeverityToCVEsNumber[matches[i].Vulnerability.Severity] += 1
+			pkgScores[key].MapSeverityToCVEsNumber[m.Vulnerability.Metadata.Severity] += 1
 		}
 
-		pkgScores[key].Score += utils.ImageSeverityToInt(matches[i].Vulnerability.Severity)
+		pkgScores[key].Score += utils.ImageSeverityToInt(m.Vulnerability.Metadata.Severity)
 	}
 }
 
-func extractCVEs(matches []models.Match) []imageprinter.CVE {
-	CVEs := []imageprinter.CVE{}
-	for i := range matches {
+func extractCVEs(matches match.Matches) []imageprinter.CVE {
+	var CVEs []imageprinter.CVE
+	for _, m := range matches.Sorted() {
 		cve := imageprinter.CVE{
-			ID:          matches[i].Vulnerability.ID,
-			Severity:    matches[i].Vulnerability.Severity,
-			Package:     matches[i].Artifact.Name,
-			Version:     matches[i].Artifact.Version,
-			FixVersions: matches[i].Vulnerability.Fix.Versions,
-			FixedState:  matches[i].Vulnerability.Fix.State,
+			ID:          m.Vulnerability.Metadata.ID,
+			Severity:    m.Vulnerability.Metadata.Severity,
+			Package:     m.Package.Name,
+			Version:     m.Package.Version,
+			FixVersions: m.Vulnerability.Fix.Versions,
+			FixedState:  m.Vulnerability.Fix.State.String(),
 		}
 		CVEs = append(CVEs, cve)
 	}

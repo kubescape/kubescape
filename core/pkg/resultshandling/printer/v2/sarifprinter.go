@@ -12,8 +12,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/anchore/grype/grype/presenter"
+	"github.com/anchore/clio"
 	"github.com/anchore/grype/grype/presenter/models"
+	grypesarif "github.com/anchore/grype/grype/presenter/sarif"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -115,12 +116,14 @@ func (sp *SARIFPrinter) addResult(scanRun *sarif.Run, ctl reportsummary.IControl
 		})
 }
 
-func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults *models.PresenterConfig) error {
-	if scanResults == nil {
-		return fmt.Errorf("no no image vulnerability data provided")
+func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.ImageScanData) error {
+	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
+		*scanResults.RemainingMatches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+	if err != nil {
+		return fmt.Errorf("failed to create document: %w", err)
 	}
 
-	pres := presenter.GetPresenter(printer.SARIFFormat, "", false, *scanResults)
+	pres := grypesarif.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
 	if err := pres.Present(sp.writer); err != nil {
 		return err
 	}
@@ -164,7 +167,7 @@ func (sp *SARIFPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.
 		}
 
 		// image scan
-		if err := sp.printImageScan(ctx, imageScanData[0].PresenterConfig); err != nil {
+		if err := sp.printImageScan(ctx, imageScanData[0]); err != nil {
 			logger.L().Ctx(ctx).Error("failed to write results in sarif format", helpers.Error(err))
 			return
 		}

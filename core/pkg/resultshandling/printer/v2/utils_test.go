@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
-	"github.com/anchore/grype/grype/presenter/models"
+	"github.com/anchore/grype/grype/match"
+	"github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/stretchr/testify/assert"
 )
@@ -12,29 +14,30 @@ import (
 func TestExtractCVEs(t *testing.T) {
 	tests := []struct {
 		name    string
-		matches []models.Match
+		matches match.Matches
 		want    []imageprinter.CVE
 	}{
 		{
 			name: "single vuln",
-			matches: []models.Match{
+			matches: match.NewMatches([]match.Match{
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "1",
 						Name:    "foo",
 						Version: "1.2.3",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							ID:       "CVE-2020-1234",
 							Severity: "High",
 						},
-						Fix: models.Fix{
+						Fix: vulnerability.Fix{
 							Versions: []string{"1.2.3"},
 							State:    "Fixed",
 						},
 					},
 				},
-			},
+			}...),
 			want: []imageprinter.CVE{
 				{
 					ID:          "CVE-2020-1234",
@@ -48,56 +51,59 @@ func TestExtractCVEs(t *testing.T) {
 		},
 		{
 			name: "multiple vulns",
-			matches: []models.Match{
+			matches: match.NewMatches([]match.Match{
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "1",
 						Name:    "foo",
 						Version: "1.2.3",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							ID:       "CVE-2020-1234",
 							Severity: "High",
 						},
-						Fix: models.Fix{
+						Fix: vulnerability.Fix{
 							Versions: []string{"1.2.3"},
 							State:    "Fixed",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "2",
 						Name:    "test",
 						Version: "1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							ID:       "CVE-2020-1235",
 							Severity: "Critical",
 						},
-						Fix: models.Fix{
+						Fix: vulnerability.Fix{
 							Versions: []string{"1"},
 							State:    "Fixed",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "3",
 						Name:    "test2",
 						Version: "3",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							ID:       "CVE-2020-1236",
 							Severity: "Low",
 						},
-						Fix: models.Fix{
+						Fix: vulnerability.Fix{
 							Versions: []string{"2", "3", "4"},
 							State:    "Not fixed",
 						},
 					},
 				},
-			},
+			}...),
 			want: []imageprinter.CVE{
 				{
 					ID:          "CVE-2020-1234",
@@ -127,7 +133,7 @@ func TestExtractCVEs(t *testing.T) {
 		},
 		{
 			name:    "empty vulns",
-			matches: []models.Match{},
+			matches: match.NewMatches([]match.Match{}...),
 			want:    []imageprinter.CVE{},
 		},
 	}
@@ -171,25 +177,26 @@ func TestExtractCVEs(t *testing.T) {
 func TestSetPkgNameToScoreMap(t *testing.T) {
 	tests := []struct {
 		name        string
-		matches     []models.Match
+		matches     match.Matches
 		originalMap map[string]*imageprinter.PackageScore
 		want        map[string]*imageprinter.PackageScore
 	}{
 		{
 			name: "single package",
-			matches: []models.Match{
+			matches: match.NewMatches([]match.Match{
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "1",
 						Name:    "foo",
 						Version: "1.2.3",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
-			},
+			}...),
 			want: map[string]*imageprinter.PackageScore{
 				"foo1.2.3": {
 					Name:    "foo",
@@ -203,41 +210,44 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 		},
 		{
 			name: "multiple packages - different versions",
-			matches: []models.Match{
+			matches: match.NewMatches([]match.Match{
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "1",
 						Name:    "pkg1",
 						Version: "version1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "Critical",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "2",
 						Name:    "pkg2",
 						Version: "1.2",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "Low",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "3",
 						Name:    "pkg3",
 						Version: "1.2.3",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
-			},
+			}...),
 			want: map[string]*imageprinter.PackageScore{
 				"pkg1version1": {
 					Name:    "pkg1",
@@ -267,74 +277,80 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 		},
 		{
 			name: "multiple packages - mixed versions",
-			matches: []models.Match{
+			matches: match.NewMatches([]match.Match{
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "1",
 						Name:    "pkg1",
 						Version: "version1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "2",
 						Name:    "pkg1",
 						Version: "version1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "3",
 						Name:    "pkg1",
 						Version: "version2",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "Critical",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "4",
 						Name:    "pkg3",
 						Version: "1.2",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "Medium",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "5",
 						Name:    "pkg3",
 						Version: "1.2",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "Low",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "6",
 						Name:    "pkg4",
 						Version: "1.2.3",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
-			},
+			}...),
 			want: map[string]*imageprinter.PackageScore{
 				"pkg1version1": {
 					Name:    "pkg1",
@@ -373,46 +389,49 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 		},
 		{
 			name:    "empty packages",
-			matches: []models.Match{},
+			matches: match.NewMatches(),
 			want:    map[string]*imageprinter.PackageScore{},
 		},
 		{
 			name: "original map not empty",
-			matches: []models.Match{
+			matches: match.NewMatches([]match.Match{
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "1",
 						Name:    "pkg1",
 						Version: "version2",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "Critical",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "2",
 						Name:    "pkg1",
 						Version: "version1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "3",
 						Name:    "pkg1",
 						Version: "version1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
-			},
+			}...),
 			originalMap: map[string]*imageprinter.PackageScore{
 				"pkg41.2.3": {
 					Name:    "pkg4",
@@ -452,41 +471,44 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 		},
 		{
 			name: "original map with same package",
-			matches: []models.Match{
+			matches: match.NewMatches([]match.Match{
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "1",
 						Name:    "pkg1",
 						Version: "version2",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "Critical",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "2",
 						Name:    "pkg1",
 						Version: "version1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
 				{
-					Artifact: models.Package{
+					Package: pkg.Package{
+						ID:      "3",
 						Name:    "pkg1",
 						Version: "version1",
 					},
-					Vulnerability: models.Vulnerability{
-						VulnerabilityMetadata: models.VulnerabilityMetadata{
+					Vulnerability: vulnerability.Vulnerability{
+						Metadata: &vulnerability.Metadata{
 							Severity: "High",
 						},
 					},
 				},
-			},
+			}...),
 			originalMap: map[string]*imageprinter.PackageScore{
 				"pkg1version1": {
 					Name:    "pkg1",
@@ -518,37 +540,37 @@ func TestSetPkgNameToScoreMap(t *testing.T) {
 		},
 	}
 
-	for i := range tests {
-		t.Run(tests[i].name, func(t *testing.T) {
-			if tests[i].originalMap == nil {
-				tests[i].originalMap = make(map[string]*imageprinter.PackageScore)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.originalMap == nil {
+				tt.originalMap = make(map[string]*imageprinter.PackageScore)
 			}
 
-			setPkgNameToScoreMap(tests[i].matches, tests[i].originalMap)
-			if len(tests[i].originalMap) == 0 {
-				assert.Equal(t, tests[i].want, tests[i].originalMap)
+			setPkgNameToScoreMap(tt.matches, tt.originalMap)
+			if len(tt.originalMap) == 0 {
+				assert.Equal(t, tt.want, tt.originalMap)
 				return
 			}
 
-			if len(tests[i].originalMap) != len(tests[i].want) {
-				t.Errorf("%s failed for length, got = %v, want %v", tests[i].name, len(tests[i].originalMap), len(tests[i].want))
+			if len(tt.originalMap) != len(tt.want) {
+				t.Errorf("%s failed for length, got = %v, want %v", tt.name, len(tt.originalMap), len(tt.want))
 			}
 
-			for k := range tests[i].originalMap {
-				if tests[i].originalMap[k].Score != tests[i].want[k].Score {
-					t.Errorf("%s failed for score, got = %v, want %v", tests[i].name, tests[i].want[k].Score, tests[i].originalMap[k].Score)
+			for k := range tt.originalMap {
+				if tt.originalMap[k].Score != tt.want[k].Score {
+					t.Errorf("%s failed for score, got = %v, want %v", tt.name, tt.want[k].Score, tt.originalMap[k].Score)
 				}
-				if tests[i].originalMap[k].Version != tests[i].want[k].Version {
-					t.Errorf("%s failed for version, got = %v, want %v", tests[i].name, tests[i].want[k].Version, tests[i].originalMap[k].Version)
+				if tt.originalMap[k].Version != tt.want[k].Version {
+					t.Errorf("%s failed for version, got = %v, want %v", tt.name, tt.want[k].Version, tt.originalMap[k].Version)
 
 				}
-				if tests[i].originalMap[k].Name != tests[i].want[k].Name {
-					t.Errorf("%s failed for name, got = %v, want %v", tests[i].name, tests[i].want[k].Name, tests[i].originalMap[k].Name)
+				if tt.originalMap[k].Name != tt.want[k].Name {
+					t.Errorf("%s failed for name, got = %v, want %v", tt.name, tt.want[k].Name, tt.originalMap[k].Name)
 				}
 
-				for s := range tests[i].originalMap[k].MapSeverityToCVEsNumber {
-					if tests[i].originalMap[k].MapSeverityToCVEsNumber[s] != tests[i].want[k].MapSeverityToCVEsNumber[s] {
-						t.Errorf("%s failed for severity %s, got = %v, want %v", tests[i].name, s, tests[i].want[k].MapSeverityToCVEsNumber[s], tests[i].originalMap[k].MapSeverityToCVEsNumber[s])
+				for s := range tt.originalMap[k].MapSeverityToCVEsNumber {
+					if tt.originalMap[k].MapSeverityToCVEsNumber[s] != tt.want[k].MapSeverityToCVEsNumber[s] {
+						t.Errorf("%s failed for severity %s, got = %v, want %v", tt.name, s, tt.want[k].MapSeverityToCVEsNumber[s], tt.originalMap[k].MapSeverityToCVEsNumber[s])
 					}
 				}
 			}

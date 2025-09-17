@@ -10,7 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anchore/grype/grype/presenter"
+	"github.com/anchore/clio"
+	grypejson "github.com/anchore/grype/grype/presenter/json"
 	"github.com/anchore/grype/grype/presenter/models"
 	copaGrype "github.com/anubhav06/copa-grype/grype"
 	"github.com/containerd/platforms"
@@ -41,17 +42,17 @@ const (
 	copaProduct = "copa"
 )
 
-func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) (*models.PresenterConfig, error) {
+func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.ScanInfo) (bool, error) {
 
 	// ===================== Scan the image =====================
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
 
 	// Setup the scan service
-	dbCfg, _ := imagescan.NewDefaultDBConfig()
-	svc, err := imagescan.NewScanServiceWithMatchers(dbCfg, scanInfo.UseDefaultMatchers)
+	distCfg, installCfg, _ := imagescan.NewDefaultDBConfig()
+	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, scanInfo.UseDefaultMatchers)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
-		return nil, err
+		return false, err
 	}
 	defer svc.Close()
 	creds := imagescan.RegistryCredentials{
@@ -61,15 +62,21 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	// Scan the image
 	scanResults, err := svc.Scan(ks.Context(), patchInfo.Image, creds, nil, nil)
 	if err != nil {
-		return nil, err
+		return false, err
+	}
+
+	model, err := models.NewDocument(clio.Identification{}, scanResults.Packages, scanResults.Context,
+		*scanResults.RemainingMatches, scanResults.IgnoredMatches, scanResults.VulnerabilityProvider, nil, nil, models.DefaultSortStrategy, false)
+	if err != nil {
+		return false, fmt.Errorf("failed to create document: %w", err)
 	}
 
 	// If the scan results ID is empty, set it to "grype"
-	if scanResults.ID.Name == "" {
-		scanResults.ID.Name = "grype"
+	if model.Descriptor.Name == "" {
+		model.Descriptor.Name = "grype"
 	}
 	// Save the scan results to a file in json format
-	pres := presenter.GetPresenter("json", "", false, *scanResults)
+	pres := grypejson.NewPresenter(models.PresenterConfig{Document: model, SBOM: scanResults.SBOM})
 
 	fileName := fmt.Sprintf("%s:%s.json", patchInfo.ImageName, patchInfo.ImageTag)
 	fileName = strings.ReplaceAll(fileName, "/", "-")
@@ -77,7 +84,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	writer := printer.GetWriter(ks.Context(), fileName)
 
 	if err = pres.Present(writer); err != nil {
-		return nil, err
+		return false, err
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully scanned image: %s", patchInfo.Image))
 
@@ -91,7 +98,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	}
 
 	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.BuildKitOpts); err != nil {
-		return nil, err
+		return false, err
 	}
 
 	// Restore the output streams
@@ -105,7 +112,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 
 	scanResultsPatched, err := svc.Scan(ks.Context(), patchedImageName, creds, nil, nil)
 	if err != nil {
-		return nil, err
+		return false, err
 	}
 	logger.L().StopSuccess(fmt.Sprintf("Successfully re-scanned image: %s", patchedImageName))
 
@@ -121,14 +128,9 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	outputPrinters := GetOutputPrinters(scanInfo, ks.Context(), "")
 	uiPrinter := GetUIPrinter(ks.Context(), scanInfo, "")
 	resultsHandler := resultshandling.NewResultsHandler(nil, outputPrinters, uiPrinter)
-	resultsHandler.ImageScanData = []cautils.ImageScanData{
-		{
-			PresenterConfig: scanResultsPatched,
-			Image:           patchedImageName,
-		},
-	}
+	resultsHandler.ImageScanData = []cautils.ImageScanData{*scanResultsPatched}
 
-	return scanResultsPatched, resultsHandler.HandleResults(ks.Context(), scanInfo)
+	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), scanResultsPatched.Matches), resultsHandler.HandleResults(ks.Context(), scanInfo)
 }
 
 func disableCopaLogger() {

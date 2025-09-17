@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -57,9 +56,6 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 	// m.setResourcesCounters(resources, results)
 
 	return m
-}
-
-func (pp *PrometheusPrinter) PrintImageScan(context.Context, *models.PresenterConfig) {
 }
 
 func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cautils.OPASessionObj, imageScanData []cautils.ImageScanData) {

@@ -3,7 +3,6 @@ package mocks
 import (
 	"context"
 
-	"github.com/anchore/grype/grype/presenter/models"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
@@ -43,8 +42,8 @@ func (m *MockIKubescape) Fix(_ *metav1.FixInfo) error {
 	return nil
 }
 
-func (m *MockIKubescape) Patch(_ *metav1.PatchInfo, _ *cautils.ScanInfo) (*models.PresenterConfig, error) {
-	return nil, nil
+func (m *MockIKubescape) Patch(_ *metav1.PatchInfo, _ *cautils.ScanInfo) (bool, error) {
+	return false, nil
 }
 
 func (m *MockIKubescape) ScanImage(_ *metav1.ImageScanInfo, _ *cautils.ScanInfo) (bool, error) {
