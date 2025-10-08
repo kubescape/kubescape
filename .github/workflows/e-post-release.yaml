@@ -19,7 +19,7 @@ jobs:
         uses: rajatjindal/krew-release-bot@v0.0.47
         if: github.repository_owner == 'kubescape'
         env:
-          GITHUB_REF: ${{ inputs.TAG }}
+          GITHUB_REF: refs/tags/${{ inputs.TAG }}
       - name: Invoke workflow to update packaging
         uses: benc-uk/workflow-dispatch@v1
         if: github.repository_owner == 'kubescape'
