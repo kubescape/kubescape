@@ -48,7 +48,7 @@ jobs:
         run: ${{ env.DOCKER_CMD }} sh -c 'cd httphandler && go test -v ./...'
         if: startsWith(github.ref, 'refs/tags')
 
-      - uses: anchore/sbom-action/download-syft@v0.15.2
+      - uses: anchore/sbom-action/download-syft@v0
         name: Setup Syft
 
       - uses: goreleaser/goreleaser-action@v6
