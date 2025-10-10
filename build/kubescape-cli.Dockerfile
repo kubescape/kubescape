@@ -6,7 +6,8 @@ WORKDIR /home/nonroot/
 ARG image_version client TARGETARCH
 ENV RELEASE=$image_version CLIENT=$client
 
-COPY kubescape-${TARGETARCH}-ubuntu-latest /usr/bin/kubescape
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/kubescape /usr/bin/kubescape
 RUN ["kubescape", "download", "artifacts"]
 
 ENTRYPOINT ["kubescape"]
