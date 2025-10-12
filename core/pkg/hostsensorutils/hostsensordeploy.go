@@ -96,7 +96,7 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 
 	hsh.populatePodNamesToNodeNames(ctx, log)
 	if err := hsh.checkPodForEachNode(); err != nil {
-		logger.L().Ctx(ctx).Warning(failedToValidateHostSensorPodStatus, helpers.Error(err))
+		return fmt.Errorf("%s: %v", failedToValidateHostSensorPodStatus, err)
 	}
 
 	return nil
