@@ -102,7 +102,7 @@ on:
 jobs:
   wf-preparation:
     name: secret-validator
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-latest
     outputs:
       TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
@@ -129,7 +129,7 @@ jobs:
 
   check-secret:
     name: check if QUAYIO_REGISTRY_USERNAME & QUAYIO_REGISTRY_PASSWORD is set in github secrets
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-latest
     outputs:
       is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
     steps:
@@ -146,7 +146,7 @@ jobs:
     needs: wf-preparation
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-large
     steps:
       - name: (debug) Step 1 - Check disk space before checkout
         run: df -h
@@ -287,7 +287,7 @@ jobs:
         TEST: ${{ fromJson(needs.wf-preparation.outputs.TEST_NAMES) }}
     needs: [wf-preparation, binary-build]
     if: ${{ (needs.wf-preparation.outputs.is-secret-set == 'true') && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
-    runs-on: ubuntu-latest-16-cores
+    runs-on: ubuntu-latest # This cannot change
     steps:
       - uses: actions/download-artifact@v4
         id: download-artifact
