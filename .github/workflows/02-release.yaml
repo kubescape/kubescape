@@ -8,7 +8,7 @@ jobs:
   retag:
     outputs:
       NEW_TAG: ${{ steps.tag-calculator.outputs.NEW_TAG }}
-    runs-on: ubuntu22-core4-mem16-ssd150
+    runs-on: ubuntu-large
     steps:
       - uses: actions/checkout@v4
       - id: tag-calculator
