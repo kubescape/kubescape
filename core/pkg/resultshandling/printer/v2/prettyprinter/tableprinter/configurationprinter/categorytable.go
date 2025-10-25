@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	docsPrefix        = "https://kubescape.io/docs"
+	docsPrefix        = "https://kubescape.io/docs/controls"
 	scanControlPrefix = "$ kubescape scan control"
 	controlNameHeader = "Control name"
 	statusHeader      = ""
