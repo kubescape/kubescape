@@ -102,7 +102,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusFailed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: table.Row{"❌", "test", "https://kubescape.io/docs/ctrlid"},
+			expectedRows: table.Row{"❌", "test", "https://kubescape.io/docs/controls/ctrlid"},
 		},
 		{
 			name: "skipped control",
@@ -114,7 +114,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				},
 				ControlID: "ctrlID",
 			},
-			expectedRows: table.Row{"⚠️", "test", "https://kubescape.io/docs/ctrlid"},
+			expectedRows: table.Row{"⚠️", "test", "https://kubescape.io/docs/controls/ctrlid"},
 			infoToPrintInfo: []utils.InfoStars{
 				{
 					Info:  "testInfo",
@@ -129,7 +129,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusPassed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: table.Row{"✅", "test", "https://kubescape.io/docs/ctrlid"},
+			expectedRows: table.Row{"✅", "test", "https://kubescape.io/docs/controls/ctrlid"},
 		},
 		{
 			name: "big name",
@@ -138,7 +138,7 @@ func TestGenerateCategoryStatusRow(t *testing.T) {
 				Status:    apis.StatusFailed,
 				ControlID: "ctrlID",
 			},
-			expectedRows: table.Row{"❌", "testtesttesttesttesttesttesttesttesttesttesttestte...", "https://kubescape.io/docs/ctrlid"},
+			expectedRows: table.Row{"❌", "testtesttesttesttesttesttesttesttesttesttesttestte...", "https://kubescape.io/docs/controls/ctrlid"},
 		},
 	}
 
