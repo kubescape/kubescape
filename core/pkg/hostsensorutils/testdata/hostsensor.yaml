@@ -37,7 +37,6 @@ spec:
           allowPrivilegeEscalation: true
           privileged: true
           readOnlyRootFilesystem: true
-          procMount: Unmasked
         ports:
           - name: scanner # Do not change port name
             containerPort: 7888
