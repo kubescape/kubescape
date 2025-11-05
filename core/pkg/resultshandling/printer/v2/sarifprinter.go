@@ -199,7 +199,7 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 			filepath := resourceSource.RelativePath
 
 			// Github Code Scanning considers results not associated to a file path meaningless and invalid when uploading
-			if filepath == "" || basePath == "" {
+			if filepath == "" && basePath == "" {
 				continue
 			}
 
