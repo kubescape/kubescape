@@ -3,7 +3,7 @@ permissions: read-all
 on:
   push:
     tags:
-      - 'v*.*.*-rc.*'
+      - "v*.*.*-rc.*"
 jobs:
   retag:
     outputs:
@@ -32,6 +32,7 @@ jobs:
       statuses: read
       contents: write
       attestations: write
+      artifact-metadata: read
     needs: [retag]
     uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
     with:
