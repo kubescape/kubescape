@@ -111,6 +111,7 @@ jobs:
       statuses: read
       attestations: read
       contents: write
+      artifact-metadata: read
     uses: ./.github/workflows/e-post-release.yaml
     needs: [retag, publish-image]
     with:
