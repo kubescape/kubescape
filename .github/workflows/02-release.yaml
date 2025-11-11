@@ -60,6 +60,7 @@ jobs:
       statuses: read
       security-events: read
       attestations: read
+      artifact-metadata: read
     needs: [retag, binary-build]
     uses: ./.github/workflows/c-create-release.yaml
     with:
