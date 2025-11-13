@@ -6,6 +6,7 @@ import (
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 )
 
@@ -27,18 +28,19 @@ type workerPool struct {
 
 func newWorkerPool() workerPool {
 	wp := workerPool{}
-	wp.noOfWorkers = noOfWorkers
+	wp.noOfWorkers, _ = cautils.ParseIntEnvVar("KUBESCAPE_WORKERS", noOfWorkers)
 	wp.init()
 	return wp
 }
 
 func (wp *workerPool) init(noOfPods ...int) {
-	if len(noOfPods) > 0 && noOfPods[0] < noOfWorkers {
+	if len(noOfPods) > 0 && noOfPods[0] < wp.noOfWorkers {
 		wp.noOfWorkers = noOfPods[0]
 	}
+	logger.L().Debug("Initializing worker pool", helpers.Int("noOfWorkers", wp.noOfWorkers))
 	// init the channels
-	wp.jobs = make(chan job, noOfWorkers)
-	wp.results = make(chan hostsensor.HostSensorDataEnvelope, noOfWorkers)
+	wp.jobs = make(chan job, wp.noOfWorkers)
+	wp.results = make(chan hostsensor.HostSensorDataEnvelope, wp.noOfWorkers)
 	wp.done = make(chan bool)
 }
 
@@ -57,7 +59,7 @@ func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandl
 }
 
 func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup, log *LogsMap) {
-	for i := 0; i < noOfWorkers; i++ {
+	for i := 0; i < wp.noOfWorkers; i++ {
 		wg.Add(1)
 		go wp.hostSensorWorker(ctx, hsh, wg, log)
 	}
