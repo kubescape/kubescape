@@ -93,6 +93,20 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 		if err := storage.StorePostureReportResults(ctx, pr); err != nil {
 			return nil, err
 		}
+
+		// Store vulnerability manifests for image scan data
+		// This addresses GitHub issue #1731
+		imageScanData := result.GetData().ImageScanData
+		if len(imageScanData) > 0 {
+			if vulnStorage, ok := storage.(interface {
+				StoreImageScanResults(ctx context.Context, imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error
+			}); ok {
+				if err := vulnStorage.StoreImageScanResults(ctx, imageScanData, scanInfo); err != nil {
+					logger.L().Ctx(ctx).Warning("failed to store vulnerability manifests", helpers.Error(err))
+					// Don't fail the scan if vulnerability storage fails
+				}
+			}
+		}
 	} else {
 		logger.L().Debug("storage is not initialized - skipping storing results")
 	}

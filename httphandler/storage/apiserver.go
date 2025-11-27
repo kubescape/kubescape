@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/armosec/utils-k8s-go/wlid"
 	"github.com/kubescape/go-logger"
@@ -18,6 +19,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	spdxv1beta1 "github.com/kubescape/storage/pkg/generated/clientset/versioned/typed/softwarecomposition/v1beta1"
 	"go.opentelemetry.io/otel"
@@ -34,7 +36,13 @@ type PostureRepository interface {
 	StoreWorkloadConfigurationScanResultSummary(ctx context.Context, workloadScan *v1beta1.WorkloadConfigurationScan) (*v1beta1.WorkloadConfigurationScanSummary, error)
 }
 
-// APIServerStore implements both PostureRepository with in-cluster storage (apiserver) to be used for production
+// VulnerabilityRepository interface for vulnerability manifest operations
+type VulnerabilityRepository interface {
+	StoreVulnerabilityManifest(ctx context.Context, imageScanData *cautils.ImageScanData, workloadNamespace string) error
+	GetVulnerabilityManifest(ctx context.Context, name, namespace string) (*v1beta1.VulnerabilityManifest, error)
+}
+
+// APIServerStore implements both PostureRepository and VulnerabilityRepository with in-cluster storage (apiserver) to be used for production
 type APIServerStore struct {
 	StorageClient spdxv1beta1.SpdxV1beta1Interface
 	clusterName   string
@@ -42,6 +50,7 @@ type APIServerStore struct {
 }
 
 var _ PostureRepository = (*APIServerStore)(nil)
+var _ VulnerabilityRepository = (*APIServerStore)(nil)
 
 func SetStorage(s *APIServerStore) {
 	storageInstance = s
@@ -73,6 +82,40 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 
 	}
 	return nil
+}
+
+// StoreImageScanResults stores vulnerability manifests for image scan results
+// This addresses GitHub issue #1731 by making VulnerabilityManifest available in workload namespace
+func (a *APIServerStore) StoreImageScanResults(ctx context.Context, imageScanData []cautils.ImageScanData, scanInfo *cautils.ScanInfo) error {
+	for _, scanData := range imageScanData {
+		// Determine workload namespace for storing vulnerability manifest
+		workloadNamespace := a.determineWorkloadNamespace(scanInfo)
+
+		// Store vulnerability manifest in both namespaces
+		if err := a.StoreVulnerabilityManifest(ctx, &scanData, workloadNamespace); err != nil {
+			logger.L().Ctx(ctx).Warning("failed to store vulnerability manifest", helpers.Error(err),
+				helpers.String("image", scanData.Image),
+				helpers.String("workloadNamespace", workloadNamespace))
+			// Don't fail the entire operation if vulnerability storage fails
+		}
+	}
+	return nil
+}
+
+// determineWorkloadNamespace determines the appropriate namespace for storing vulnerability manifests
+func (a *APIServerStore) determineWorkloadNamespace(scanInfo *cautils.ScanInfo) string {
+	// For image scans, use the included namespaces if available
+	// IncludeNamespaces is a comma-separated string
+	if scanInfo.IncludeNamespaces != "" {
+		// Split by comma and take the first namespace
+		namespaces := strings.Split(scanInfo.IncludeNamespaces, ",")
+		if len(namespaces) > 0 && namespaces[0] != "" {
+			return strings.TrimSpace(namespaces[0])
+		}
+	}
+
+	// Default to "default" namespace
+	return "default"
 }
 
 func getControlsMapFromResult(ctx context.Context, result *resourcesresults.Result, controlSummaries reportsummary.ControlSummaries) map[string]v1beta1.ScannedControl {
