@@ -1,111 +1,129 @@
 # Kubescape Exceptions
 
-Kubescape Exceptions is the proper way of excluding failed resources from affecting the risk score.
+Kubescape Exceptions allow you to exclude specific resources from affecting your security risk score. This is useful when certain resources intentionally deviate from security best practices and you want to acknowledge this without impacting your overall compliance metrics.
 
-e.g. When a `kube-system` resource fails and it is ok, simply add the resource to the exceptions configurations.
+## Table of Contents
 
-## Definitions
+- [Use Cases](#use-cases)
+- [Exception Structure](#exception-structure)
+- [Usage](#usage)
+- [Examples](#examples)
+- [Related Documentation](#related-documentation)
 
+---
 
-* `name`- Exception name - unique name representing the exception
-* `policyType`- Do not change
-* `actions`- List of available actions. Currently, alertOnly is supported
-* `resources`- List of resources to apply this exception on
-    * `designatorType: Attributes`- An attribute-based declaration {key: value}
-    Supported keys:
-    * `name`: k8s resource name (case-sensitive, regex supported)
-    * `kind`: k8s resource kind (case-sensitive, regex supported)
-    * `namespace`: k8s resource namespace (case-sensitive, regex supported)
-    * `cluster`: k8s cluster name (usually it is the `current-context`) (case-sensitive, regex supported)
-    * resource labels as key value (case-sensitive, regex NOT supported)
-* `posturePolicies`- An attribute-based declaration {key: value}
-    * `frameworkName` - Framework names can be found [here](https://github.com/armosec/regolibrary/tree/master/frameworks) (regex supported)
-    * `controlName` - Control names can be found [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
-    * `controlID` - Control ID can be found [here](https://github.com/armosec/regolibrary/tree/master/controls) (regex supported)
- 
-You can find [here](https://github.com/kubescape/kubescape/tree/master/examples/exceptions) some examples of exceptions files
+## Use Cases
+
+- Exclude `kube-system` resources that are expected to have elevated privileges
+- Ignore development/test namespaces from production compliance reports
+- Accept known risks for specific workloads after security review
+- Temporarily exclude resources while fixes are being implemented
+
+---
+
+## Exception Structure
+
+An exception file is a JSON array containing one or more exception objects:
+
+```json
+[
+    {
+        "name": "exception-name",
+        "policyType": "postureExceptionPolicy",
+        "actions": ["alertOnly"],
+        "resources": [...],
+        "posturePolicies": [...]
+    }
+]
+```
+
+### Fields
+
+| Field | Description |
+|-------|-------------|
+| `name` | Unique name for this exception |
+| `policyType` | Must be `"postureExceptionPolicy"` |
+| `actions` | List of actions. Currently only `"alertOnly"` is supported |
+| `resources` | List of resources to apply this exception to |
+| `posturePolicies` | List of policies/controls to exclude |
+
+### Resource Attributes
+
+Resources are defined using attribute-based selectors. Supported attributes:
+
+| Attribute | Description | Regex Support |
+|-----------|-------------|---------------|
+| `name` | Kubernetes resource name | ✅ Yes |
+| `kind` | Kubernetes resource kind (e.g., `Deployment`, `Pod`) | ✅ Yes |
+| `namespace` | Kubernetes namespace | ✅ Yes |
+| `cluster` | Cluster name (usually the `current-context`) | ✅ Yes |
+| `<label-key>` | Any resource label (e.g., `app`, `environment`) | ❌ No |
+
+### Policy Attributes
+
+Policies can be specified by:
+
+| Attribute | Description | Regex Support |
+|-----------|-------------|---------------|
+| `frameworkName` | Framework name (e.g., `NSA`, `MITRE`) | ✅ Yes |
+| `controlName` | Control name (e.g., `HostPath mount`) | ✅ Yes |
+| `controlID` | Control ID (e.g., `C-0048`) | ✅ Yes |
+
+Find framework names in the [frameworks directory](https://github.com/kubescape/regolibrary/tree/master/frameworks) and control information in the [controls directory](https://github.com/kubescape/regolibrary/tree/master/controls).
+
+---
 
 ## Usage
 
-The `resources` list and `posturePolicies` list are designed to be a combination of the resources and policies to exclude.
+### Running a Scan with Exceptions
 
-> **Warning** 
-> You must declare at least one resource and one policy.
-
-e.g. If you wish to exclude all namespaces with the label `"environment": "dev"`, the resource list should look as follows:
+```bash
+kubescape scan --exceptions /path/to/exceptions.json
 ```
+
+Resources matching exceptions will be marked as `excluded` rather than `failed` in the results.
+
+### Logic Rules
+
+> ⚠️ **Important**: You must declare at least one resource AND one policy in each exception.
+
+#### Within a list: OR logic
+
+Multiple items in the `resources` list are evaluated with **OR** logic:
+
+```json
 "resources": [
-    {
-        "designatorType": "Attributes",
-        "attributes": {
-            "namespace": ".*",
-            "environment": "dev"
-        }
-    }
+    { "attributes": { "namespace": "dev" } },
+    { "attributes": { "namespace": "test" } }
 ]
 ```
+This matches resources in the `dev` namespace **OR** the `test` namespace.
 
-But if you wish to exclude all namespaces **OR** any resource with the label `"environment": "dev"`, the resource list should look as follows:
-```
+#### Within an object: AND logic
+
+Multiple attributes in a single object are evaluated with **AND** logic:
+
+```json
 "resources": [
-    {
-        "designatorType": "Attributes",
-        "attributes": {
-            "namespace": ".*"
-        }
-    },
-    {
-        "designatorType": "Attributes",
-        "attributes": {
-            "environment": "dev"
-        }
-    }
+    { "attributes": { "namespace": "production", "kind": "Deployment" } }
 ]
 ```
+This matches only `Deployment` resources **AND** in the `production` namespace.
 
-Same works with the `posturePolicies` list ->
-
-e.g. If you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **AND** failed the `HostPath mount` control, the `posturePolicies` list should look as follows:
-```
-"posturePolicies": [
-    {
-        "frameworkName": "NSA",
-        "controlName": "HostPath mount" 
-    }
-]
-```
-
-But if you wish to exclude the resources declared in the `resources` list that failed when scanning the `NSA` framework **OR** failed the `HostPath mount` control, the `posturePolicies` list should look as follows:
-```
-"posturePolicies": [
-    {
-        "frameworkName": "NSA" 
-    },
-    {
-        "controlName": "HostPath mount" 
-    }
-]
-```
+---
 
 ## Examples
 
-Here are some examples demonstrating the different ways the exceptions file can be configured
+### Exclude a Specific Control Everywhere
 
+Exclude control [C-0048 (HostPath mount)](https://kubescape.io/docs/controls/c-0048/) for all resources:
 
-### Exclude  control
-
-Exclude the [C-0060 control](https://github.com/armosec/regolibrary/blob/master/controls/allowedhostpath.json#L2) by declaring the control ID in the `"posturePolicies"` section.
-
-The resources
-
-```
+```json
 [
     {
-        "name": "exclude-allowed-hostPath-control",
+        "name": "exclude-hostpath-control",
         "policyType": "postureExceptionPolicy",
-        "actions": [
-            "alertOnly"
-        ],
+        "actions": ["alertOnly"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -116,22 +134,48 @@ The resources
         ],
         "posturePolicies": [
             {
-                "controlID": "C-0060" 
+                "controlID": "C-0048"
             }
         ]
     }
 ]
 ```
 
-### Exclude deployments in the default namespace that failed the "HostPath mount" control 
-```
+### Exclude All kube-system Resources
+
+Exclude all resources in the `kube-system` namespace from all frameworks:
+
+```json
 [
     {
-        "name": "exclude-deployments-in-ns-default",
+        "name": "exclude-kube-system",
         "policyType": "postureExceptionPolicy",
-        "actions": [
-            "alertOnly"
+        "actions": ["alertOnly"],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "namespace": "kube-system"
+                }
+            }
         ],
+        "posturePolicies": [
+            {
+                "frameworkName": ".*"
+            }
+        ]
+    }
+]
+```
+
+### Exclude Deployments in Default Namespace for a Specific Control
+
+```json
+[
+    {
+        "name": "exclude-deployments-in-default",
+        "policyType": "postureExceptionPolicy",
+        "actions": ["alertOnly"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -143,22 +187,53 @@ The resources
         ],
         "posturePolicies": [
             {
-                "controlName": "HostPath mount" 
+                "controlName": "HostPath mount"
             }
         ]
     }
 ]
 ```
 
-### Exclude resources with label "app=nginx" running in a minikube cluster that failed the "NSA" or "MITRE" framework 
+### Exclude Resources by Label
+
+Exclude resources with label `environment=dev` from NSA and MITRE frameworks:
+
+```json
+[
+    {
+        "name": "exclude-dev-environment",
+        "policyType": "postureExceptionPolicy",
+        "actions": ["alertOnly"],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "environment": "dev"
+                }
+            }
+        ],
+        "posturePolicies": [
+            {
+                "frameworkName": "NSA"
+            },
+            {
+                "frameworkName": "MITRE"
+            }
+        ]
+    }
+]
 ```
+
+### Exclude Specific Workload in Specific Cluster
+
+Exclude nginx resources in a minikube cluster:
+
+```json
 [
     {
         "name": "exclude-nginx-minikube",
         "policyType": "postureExceptionPolicy",
-        "actions": [
-            "alertOnly"
-        ],
+        "actions": ["alertOnly"],
         "resources": [
             {
                 "designatorType": "Attributes",
@@ -170,12 +245,71 @@ The resources
         ],
         "posturePolicies": [
             {
-                "frameworkName": "NSA" 
-            },
-            {
-                "frameworkName": "MITRE" 
+                "frameworkName": ".*"
             }
         ]
     }
 ]
 ```
+
+### Multiple Exceptions in One File
+
+You can combine multiple exceptions in a single file:
+
+```json
+[
+    {
+        "name": "exclude-kube-namespaces",
+        "policyType": "postureExceptionPolicy",
+        "actions": ["alertOnly"],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "namespace": "kube-system"
+                }
+            },
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "namespace": "kube-public"
+                }
+            }
+        ],
+        "posturePolicies": [
+            {
+                "frameworkName": ".*"
+            }
+        ]
+    },
+    {
+        "name": "exclude-privileged-control-for-monitoring",
+        "policyType": "postureExceptionPolicy",
+        "actions": ["alertOnly"],
+        "resources": [
+            {
+                "designatorType": "Attributes",
+                "attributes": {
+                    "namespace": "monitoring"
+                }
+            }
+        ],
+        "posturePolicies": [
+            {
+                "controlID": "C-0057"
+            }
+        ]
+    }
+]
+```
+
+---
+
+## Related Documentation
+
+- [Getting Started Guide](../../docs/getting-started.md)
+- [CLI Reference](../../docs/cli-reference.md)
+- [Controls Reference](https://kubescape.io/docs/controls/)
+- [Regolibrary - Frameworks](https://github.com/kubescape/regolibrary/tree/master/frameworks)
+- [Regolibrary - Controls](https://github.com/kubescape/regolibrary/tree/master/controls)
+- [Accepting Risk Documentation](https://kubescape.io/docs/accepting-risk/)
