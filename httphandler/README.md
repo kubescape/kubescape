@@ -1,174 +1,340 @@
-# Kubescape HTTP Handler Package
+# Kubescape HTTP Handler
 
-Running `kubescape` will start up a web-server on port `8080` which will serve the following API's: 
+The HTTP Handler provides a REST API for running Kubescape scans programmatically. This enables integration with CI/CD pipelines, custom dashboards, and automation workflows.
 
-### Trigger scan
+## Table of Contents
 
-* POST `/v1/scan` - triggers a Kubescape scan. The server will return an ID and will execute the scanning asynchronously. The request body should look [as follows](#trigger-scan-object).
-* * `wait=true`: scan synchronously (return results and not ID). Use only in small clusters or with an increased timeout. Default is `wait=false`
-* * `keep=true`: do not delete results from local storage after returning. Default is `keep=false`
+- [Overview](#overview)
+- [API Reference](#api-reference)
+  - [Trigger Scan](#trigger-scan)
+  - [Get Results](#get-results)
+  - [Check Status](#check-status)
+  - [Delete Results](#delete-results)
+- [Request/Response Objects](#requestresponse-objects)
+- [API Examples](#api-examples)
+- [Environment Variables](#environment-variables)
+- [Deployment Examples](#deployment-examples)
+- [Debugging](#debugging)
 
-[Response](#response-object):
+---
 
-```
+## Overview
+
+When running Kubescape as a service, it starts a web server on port `8080` that exposes REST APIs for:
+
+- Triggering security scans (async or sync)
+- Retrieving scan results
+- Checking scan status
+- Managing cached results
+
+---
+
+## API Reference
+
+### Trigger Scan
+
+**Endpoint:** `POST /v1/scan`
+
+Triggers a Kubescape scan. By default, scans run asynchronously and return a scan ID immediately.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `wait` | bool | `false` | Wait for scan to complete (synchronous mode) |
+| `keep` | bool | `false` | Keep results in cache after returning |
+
+**Request Body:** See [Trigger Scan Object](#trigger-scan-object)
+
+**Response (async):**
+
+```json
 {
-  "id": <str>,                      // scan ID
-  "type": "busy",                   // response object type
-  "response": <message:string>      // message indicating scanning is still in progress
+  "id": "scan-12345",
+  "type": "busy",
+  "response": "scanning in progress"
 }
 ```
 
-> When scanning was triggered with the `wait=true` query param, the response is like the [`/v1/results` API](#get-results) response
+**Response (sync with `wait=true`):** Same as [Get Results](#get-results) response.
 
-### Get results
-* GET `/v1/results` -  request kubescape scan results
-* * query `id=<string>` -> request results of a specific scan ID. If empty will return the latest results
-* * query `keep=true` -> keep the results in the local storage after returning. default is `keep=false` - the results will be deleted from local storage after they are returned
+---
 
-[Response](#response-object):
+### Get Results
 
-When scanning was done successfully
-```
+**Endpoint:** `GET /v1/results`
+
+Retrieve scan results.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `id` | string | - | Scan ID. If empty, returns latest results |
+| `keep` | bool | `false` | Keep results in cache after returning |
+
+**Response (success):**
+
+```json
 {
-  "id": <str>,                      // scan ID
-  "type": "v1results",              // response object type
-  "response": <object:v1results>    // v1 results payload
+  "id": "scan-12345",
+  "type": "v1results",
+  "response": { /* scan results object */ }
 }
 ```
 
-When scanning failed
-```
+**Response (error):**
+
+```json
 {
-  "id": <str>,                  // scan ID
-  "type": "error",              // response object type
-  "response": <error:string>    // error string
+  "id": "scan-12345",
+  "type": "error",
+  "response": "error message"
 }
 ```
 
-When scanning is in progress
-```
+**Response (in progress):**
+
+```json
 {
-  "id": <str>,                    // scan ID
-  "type": "busy",                 // response object type
-  "response": <message:string>    // message indicating scanning is still in progress
-}
-```
-### Check scanning progress status
-Check the scanning status - is the scanning in progress or done. This is meant for a waiting mechanize since the API does not return the entire results object when the scanning is done
-
-* GET `/v1/status` -  Request kubescape scan status
-* * query `id=<string>` -> Check status of a specific scan. If empty, it will check if any scan is still in progress
-
-[Response](#response-object):
-
-When scanning is in progress
-```
-{
-  "id": <str>,                    // scan ID
-  "type": "busy",                 // response object type
-  "response": <message:string>    // message indicating scanning is still in process
+  "id": "scan-12345",
+  "type": "busy",
+  "response": "scanning in progress"
 }
 ```
 
-When scanning is not in progress
-```
+---
+
+### Check Status
+
+**Endpoint:** `GET /v1/status`
+
+Check if a scan is still in progress. Useful for polling without retrieving full results.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `id` | string | - | Scan ID. If empty, checks if any scan is in progress |
+
+**Response (in progress):**
+
+```json
 {
-  "id": <str>,                    // scan ID
-  "type": "notBusy",              // response object type
-  "response": <message:string>    // message indicating scanning is successfully done
+  "id": "scan-12345",
+  "type": "busy",
+  "response": "scanning in progress"
 }
 ```
 
-### Delete cached results
-* DELETE `/v1/results` - Delete kubescape scan results from storage. If empty will delete the latest results
-* * query `id=<string>`: Delete ID of specific results 
-* * query `all`: Delete all cached results
+**Response (complete):**
 
-## Objects
-
-### Trigger scan object
-
-```
+```json
 {
-  "format": <str>,               // results format [default: json] (same as 'kubescape scan --format')
-  "excludedNamespaces": [<str>], // list of namespaces to exclude (same as 'kubescape scan --excluded-namespaces')
-  "includeNamespaces": [<str>],  // list of namespaces to include (same as 'kubescape scan --include-namespaces')
-  "useCachedArtifacts"`: <bool>, // use the cached artifacts instead of downloading (offline support)
-  "hostScanner": <bool>,         // deploy Kubescape host-sensor daemonset in the scanned cluster. Deleting it right after we collecting the data. Required to collect valuable data from cluster nodes for certain controls
-  "keepLocal": <bool>,           // do not submit results to Kubescape cloud (same as 'kubescape scan --keep-local')
-  "account": <str>,              // account ID (same as 'kubescape scan --account')
-  "access-key": <str>,            // account ID (same as 'kubescape scan --accessKey')
-  "targetType": <str>,           // framework/control
-  "targetNames": [<str>]         // names. e.g. when targetType==framework, targetNames=["nsa", "mitre"]
+  "id": "scan-12345",
+  "type": "notBusy",
+  "response": "scanning completed"
 }
 ```
 
-### Response object
+---
 
-```
+### Delete Results
+
+**Endpoint:** `DELETE /v1/results`
+
+Delete cached scan results.
+
+**Query Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `id` | string | - | Scan ID to delete. If empty, deletes latest |
+| `all` | bool | `false` | Delete all cached results |
+
+---
+
+## Request/Response Objects
+
+### Trigger Scan Object
+
+```json
 {
-  "id": <str>,                      // scan ID
-  "type": <responseType:str>,       // response object type
-  "response": <object:interface>    // response payload as list of bytes
+  "format": "json",
+  "excludedNamespaces": ["kube-system", "kube-public"],
+  "includeNamespaces": ["production", "staging"],
+  "useCachedArtifacts": false,
+  "keepLocal": true,
+  "account": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
+  "accessKey": "your-access-key",
+  "targetType": "framework",
+  "targetNames": ["nsa", "mitre"]
 }
 ```
-#### Response object types
 
-*  "v1results" - v1 results object
-*  "busy" - server is busy processing previous requests 
-*  "notBusy" - server is not busy processing previous requests
-*  "ready" - server is done processing request and results are ready  
-*  "error" - error object
+| Field | Type | Description |
+|-------|------|-------------|
+| `format` | string | Output format (default: `json`) |
+| `excludedNamespaces` | []string | Namespaces to exclude from scan |
+| `includeNamespaces` | []string | Namespaces to include in scan |
+| `useCachedArtifacts` | bool | Use cached artifacts (offline mode) |
+| `keepLocal` | bool | Don't submit results to backend |
+| `account` | string | Kubescape SaaS account ID |
+| `accessKey` | string | Kubescape SaaS access key |
+| `targetType` | string | `"framework"` or `"control"` |
+| `targetNames` | []string | Frameworks/controls to scan |
+
+### Response Object
+
+```json
+{
+  "id": "scan-12345",
+  "type": "v1results",
+  "response": { /* payload */ }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | string | Scan identifier |
+| `type` | string | Response type (see below) |
+| `response` | any | Response payload |
+
+**Response Types:**
+
+| Type | Description |
+|------|-------------|
+| `v1results` | Scan results object |
+| `busy` | Scan in progress |
+| `notBusy` | No scan in progress |
+| `ready` | Scan complete, results ready |
+| `error` | Error occurred |
+
+---
 
 ## API Examples
-#### Default scan  
 
-1. Trigger kubescape scan
-  ```bash
-  curl --header "Content-Type: application/json" --request POST --data '{"hostScanner":true}' http://127.0.0.1:8080/v1/scan
-  ```
-
-2. Get kubescape scan results
-  ```bash
-  curl --request GET http://127.0.0.1:8080/v1/results -o response.json
-  ```
-
-#### Trigger scan and wait for the scan to end  
+### Basic Scan (Async)
 
 ```bash
-curl --header "Content-Type: application/json" --request POST --data '{"hostScanner":true}' http://127.0.0.1:8080/v1/scan?wait -o scan_results.json
-```
-#### Scan single namespace with a specific framework
-```bash
-curl --header "Content-Type: application/json" \
-  --request POST \
-  --data '{"hostScanner":true, "includeNamespaces": ["kubescape"], "targetType": "framework", "targetNames": ["nsa"] }' \
-  http://127.0.0.1:8080/v1/scan
+# 1. Trigger scan
+curl -X POST http://127.0.0.1:8080/v1/scan \
+  -H "Content-Type: application/json" \
+  -d '{"targetType": "framework", "targetNames": ["nsa"]}'
+
+# 2. Check status
+curl http://127.0.0.1:8080/v1/status
+
+# 3. Get results
+curl http://127.0.0.1:8080/v1/results -o results.json
 ```
 
-#### Data profiling
-Analyze profiled data using [pprof](https://github.com/google/pprof/blob/main/doc/README.md).
-[How to use](https://pkg.go.dev/net/http/pprof)
+### Synchronous Scan
 
-example:
 ```bash
+curl -X POST "http://127.0.0.1:8080/v1/scan?wait=true" \
+  -H "Content-Type: application/json" \
+  -d '{"targetType": "framework", "targetNames": ["nsa"]}' \
+  -o results.json
+```
+
+### Scan Specific Namespaces
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/scan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "includeNamespaces": ["production"],
+    "targetType": "framework",
+    "targetNames": ["nsa", "mitre"]
+  }'
+```
+
+### Scan with Account Integration
+
+```bash
+curl -X POST http://127.0.0.1:8080/v1/scan \
+  -H "Content-Type: application/json" \
+  -d '{
+    "account": "YOUR-ACCOUNT-ID",
+    "accessKey": "YOUR-ACCESS-KEY",
+    "targetType": "framework",
+    "targetNames": ["nsa"]
+  }'
+```
+
+### Delete All Cached Results
+
+```bash
+curl -X DELETE "http://127.0.0.1:8080/v1/results?all=true"
+```
+
+---
+
+## Environment Variables
+
+Configure the HTTP handler using environment variables:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `KS_ACCOUNT` | Default account ID | `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` |
+| `KS_EXCLUDE_NAMESPACES` | Default namespaces to exclude | `kube-system,kube-public` |
+| `KS_INCLUDE_NAMESPACES` | Default namespaces to include | `production,staging` |
+| `KS_FORMAT` | Default output format | `json` |
+| `KS_LOGGER_NAME` | Logger name | `kubescape` |
+| `KS_LOGGER_LEVEL` | Log level | `info`, `debug`, `warning`, `error` |
+| `KS_DOWNLOAD_ARTIFACTS` | Download artifacts on each scan | `true`, `false` |
+
+---
+
+## Deployment Examples
+
+### Microservice Deployment
+
+Deploy Kubescape as a microservice in your cluster for API-driven scanning.
+
+📖 **[Microservice Deployment Guide →](examples/microservice/README.md)**
+
+### Prometheus Integration
+
+Expose Kubescape metrics for Prometheus scraping.
+
+📖 **[Prometheus Integration Guide →](examples/prometheus/README.md)**
+
+---
+
+## Debugging
+
+### Enable Debug Logging
+
+Set the log level to debug for more verbose output:
+
+```bash
+export KS_LOGGER_LEVEL=debug
+```
+
+### Performance Profiling
+
+The HTTP handler exposes pprof endpoints for performance analysis:
+
+```bash
+# Heap profile
 go tool pprof http://localhost:6060/debug/pprof/heap
+
+# CPU profile
+go tool pprof http://localhost:6060/debug/pprof/profile?seconds=30
+
+# Goroutine profile
+go tool pprof http://localhost:6060/debug/pprof/goroutine
 ```
 
-## Examples
+For more information on pprof, see the [pprof documentation](https://pkg.go.dev/net/http/pprof).
 
-* [Prometheus](examples/prometheus/README.md)
-* [Microservice](examples/microservice/README.md)
+---
 
+## Related Documentation
 
-## Supported environment variables
-
-* `KS_ACCOUNT`: Account ID
-* `KS_EXCLUDE_NAMESPACES`: List of namespaces to exclude, e.g. `KS_EXCLUDE_NAMESPACES=kube-system,kube-public`
-* `KS_INCLUDE_NAMESPACES`: List of namespaces to include, rest of the namespaces will be ignored. e.g. `KS_INCLUDE_NAMESPACES=dev,prod`
-* `KS_HOST_SCAN_YAML`: Full path to the host scanner YAML
-* `KS_FORMAT`: Output file format. default is json
-* `KS_ENABLE_HOST_SCANNER`: Enable the host scanner feature
-* `KS_DOWNLOAD_ARTIFACTS`: Download the artifacts every scan
-* `KS_LOGGER_NAME`: Set logger name
-* `KS_LOGGER_LEVEL`: Set logger level
+- [CLI Reference](../docs/cli-reference.md)
+- [Architecture](../docs/architecture.md)
+- [Getting Started Guide](../docs/getting-started.md)
+- [Troubleshooting](../docs/troubleshooting.md)
