@@ -30,15 +30,17 @@ var storageInstance *APIServerStore
 
 type PostureRepository interface {
 	GetWorkloadConfigurationScanResult(ctx context.Context, name, namespace string) (*v1beta1.WorkloadConfigurationScan, error)
-	StoreWorkloadConfigurationScanResult(ctx context.Context, report *v2.PostureReport, result *resourcesresults.Result) (*v1beta1.WorkloadConfigurationScan, error)
+	BuildWorkloadConfigurationScan(ctx context.Context, report *v2.PostureReport, result *resourcesresults.Result) (*v1beta1.WorkloadConfigurationScan, error)
+	StoreWorkloadConfigurationScanResult(ctx context.Context, manifest *v1beta1.WorkloadConfigurationScan) error
 	StoreWorkloadConfigurationScanResultSummary(ctx context.Context, workloadScan *v1beta1.WorkloadConfigurationScan) (*v1beta1.WorkloadConfigurationScanSummary, error)
 }
 
 // APIServerStore implements both PostureRepository with in-cluster storage (apiserver) to be used for production
 type APIServerStore struct {
-	StorageClient spdxv1beta1.SpdxV1beta1Interface
-	clusterName   string
-	namespace     string
+	StorageClient         spdxv1beta1.SpdxV1beta1Interface
+	clusterName           string
+	namespace             string
+	continuousPostureScan bool
 }
 
 var _ PostureRepository = (*APIServerStore)(nil)
@@ -52,22 +54,31 @@ func GetStorage() *APIServerStore {
 }
 
 // NewAPIServerStorage initializes the APIServerStore struct
-func NewAPIServerStorage(clusterName string, namespace string, ksClient spdxv1beta1.SpdxV1beta1Interface) (*APIServerStore, error) {
+func NewAPIServerStorage(clusterName string, namespace string, ksClient spdxv1beta1.SpdxV1beta1Interface, continuousPostureScan bool) (*APIServerStore, error) {
 	return &APIServerStore{
-		StorageClient: ksClient,
-		clusterName:   clusterName,
-		namespace:     namespace,
+		StorageClient:         ksClient,
+		clusterName:           clusterName,
+		namespace:             namespace,
+		continuousPostureScan: continuousPostureScan,
 	}, nil
 }
 
 func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.PostureReport) error {
 	for i := range pr.Results {
-		detailedObj, err := a.StoreWorkloadConfigurationScanResult(ctx, pr, &pr.Results[i])
+		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
 			return err
 		}
 
-		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, detailedObj); err != nil {
+		// Only store full WorkloadConfigurationScan when continuousPostureScan is enabled
+		if a.continuousPostureScan {
+			if err := a.StoreWorkloadConfigurationScanResult(ctx, workloadScan); err != nil {
+				return err
+			}
+		}
+
+		// Always store summaries for headlamp plugin
+		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
 			return err
 		}
 
@@ -135,7 +146,8 @@ func (a *APIServerStore) getResourceNamespace(resource workloadinterface.IMetada
 	return resource.GetNamespace()
 }
 
-func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Context, report *v2.PostureReport, result *resourcesresults.Result) (*v1beta1.WorkloadConfigurationScan, error) {
+// BuildWorkloadConfigurationScan builds a WorkloadConfigurationScan manifest without storing it
+func (a *APIServerStore) BuildWorkloadConfigurationScan(ctx context.Context, report *v2.PostureReport, result *resourcesresults.Result) (*v1beta1.WorkloadConfigurationScan, error) {
 	resource, err := findResourceInReport(result.ResourceID, report)
 	if err != nil {
 		return nil, err
@@ -166,7 +178,13 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 		},
 	}
 
-	_, err = a.StorageClient.WorkloadConfigurationScans(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	return &manifest, nil
+}
+
+// StoreWorkloadConfigurationScanResult stores a WorkloadConfigurationScan manifest
+func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Context, manifest *v1beta1.WorkloadConfigurationScan) error {
+	namespace := manifest.GetNamespace()
+	_, err := a.StorageClient.WorkloadConfigurationScans(namespace).Create(context.Background(), manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
@@ -192,11 +210,11 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 		}
 	case err != nil:
 		logger.L().Ctx(ctx).Warning("failed to store WorkloadConfigurationScan manifest in storage", helpers.Error(err), helpers.String("name", manifest.Name))
-		return nil, err
+		return err
 	default:
 		logger.L().Debug("stored WorkloadConfigurationScan manifest in storage", helpers.String("name", manifest.Name))
 	}
-	return &manifest, nil
+	return nil
 }
 
 func mergeWorkloadConfigurationScanSpec(existingSpec v1beta1.WorkloadConfigurationScanSpec, newSpec v1beta1.WorkloadConfigurationScanSpec) v1beta1.WorkloadConfigurationScanSpec {

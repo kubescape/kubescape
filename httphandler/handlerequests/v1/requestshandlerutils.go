@@ -86,11 +86,12 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
 		return nil, err
 	}
-	storage := storage.GetStorage()
-	if storage != nil {
+	store := storage.GetStorage()
+	// do not store results locally when we are sending them
+	if store != nil && config.GetAccount() == "" {
 		pr := result.GetResults()
 
-		if err := storage.StorePostureReportResults(ctx, pr); err != nil {
+		if err := store.StorePostureReportResults(ctx, pr); err != nil {
 			return nil, err
 		}
 	} else {

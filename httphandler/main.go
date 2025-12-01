@@ -61,10 +61,6 @@ func main() {
 }
 
 func initializeStorage(clusterName string, cfg config.Config) {
-	if !cfg.ContinuousPostureScan {
-		logger.L().Debug("continuous posture scan - skipping storage initialization")
-		return
-	}
 	namespace := getNamespace(cfg)
 	logger.L().Debug("initializing storage", helpers.String("namespace", namespace))
 
@@ -74,7 +70,7 @@ func initializeStorage(clusterName string, cfg config.Config) {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}
 
-	s, err := storage.NewAPIServerStorage(clusterName, namespace, ksClient)
+	s, err := storage.NewAPIServerStorage(clusterName, namespace, ksClient, cfg.ContinuousPostureScan)
 	if err != nil {
 		logger.L().Fatal("storage initialization error", helpers.Error(err))
 	}
