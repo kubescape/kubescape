@@ -12,7 +12,6 @@ import (
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
-	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
 	"go.opentelemetry.io/otel/trace"
@@ -76,12 +75,12 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanIn
 	scanInfo.Local = true                                // do not submit results every scan
 	scanInfo.FrameworkScan = true
 	scanInfo.HostSensorEnabled.SetBool(false)                // disable host scanner
-	scanInfo.ScanAll = false                                 // do not scan all frameworks
+	scanInfo.ScanAll = true                                  // scan all available frameworks (including CIS)
 	scanInfo.ScanID = scanID                                 // scan ID
 	scanInfo.FailThreshold = 100                             // Do not fail scanning
 	scanInfo.ComplianceThreshold = 0                         // Do not fail scanning
 	scanInfo.Output = resultsFile                            // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output should be json
-	scanInfo.SetPolicyIdentifiers(getter.NativeFrameworks, apisv1.KindFramework)
+	// Framework identifiers will be set dynamically by the scan process when ScanAll is true
 	return scanInfo
 }

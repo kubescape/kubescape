@@ -19,7 +19,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 	assert.False(t, scanInfo.Submit)
 	assert.True(t, scanInfo.Local)
 	assert.True(t, scanInfo.FrameworkScan)
-	assert.False(t, scanInfo.ScanAll)
+	assert.True(t, scanInfo.ScanAll) // Changed to true to scan all available frameworks
 	assert.False(t, scanInfo.HostSensorEnabled.GetBool())
 	assert.Equal(t, getter.DefaultLocalStore, scanInfo.UseArtifactsFrom)
 }
