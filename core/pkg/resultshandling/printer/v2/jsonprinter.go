@@ -120,7 +120,11 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 		opaSessionObj.Report.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
 	}
 
-	r, err := json.Marshal(FinalizeResults(opaSessionObj))
+	// Convert to PostureReportWithSeverity to add severity field to controls
+	finalizedReport := FinalizeResults(opaSessionObj)
+	reportWithSeverity := ConvertToPostureReportWithSeverity(finalizedReport)
+
+	r, err := json.Marshal(reportWithSeverity)
 	_, err = jp.writer.Write(r)
 
 	return err
