@@ -123,7 +123,7 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	// Convert to PostureReportWithSeverity to add severity field to controls
 	finalizedReport := FinalizeResults(opaSessionObj)
 	reportWithSeverity := ConvertToPostureReportWithSeverity(finalizedReport)
-	
+
 	r, err := json.Marshal(reportWithSeverity)
 	_, err = jp.writer.Write(r)
 

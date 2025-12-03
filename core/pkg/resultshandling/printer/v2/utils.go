@@ -103,9 +103,12 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 
 // ConvertToPostureReportWithSeverity converts PostureReport to PostureReportWithSeverity
 func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) *PostureReportWithSeverity {
+	if report == nil {
+		return nil
+	}
 	enrichedControls := enrichControlsWithSeverity(report.SummaryDetails.Controls)
 	enrichedResults := enrichResultsWithSeverity(report.Results, report.SummaryDetails.Controls)
-	
+
 	return &PostureReportWithSeverity{
 		ReportGenerationTime: report.ReportGenerationTime.Format("2006-01-02T15:04:05Z07:00"),
 		ClusterAPIServerInfo: report.ClusterAPIServerInfo,

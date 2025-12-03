@@ -251,22 +251,22 @@ func TestEnrichControlsWithSeverity(t *testing.T) {
 func TestConvertToPostureReportWithSeverity(t *testing.T) {
 	// Create a mock PostureReport with controls having different severity levels
 	mockReport := reportsummary.MockSummaryDetails()
-	
+
 	// Get the controls from mock data
 	controls := mockReport.Controls
-	
+
 	// Create a minimal PostureReport
 	report := &reporthandlingv2.PostureReport{
 		SummaryDetails: *mockReport,
 	}
-	
+
 	// Convert to PostureReportWithSeverity
 	reportWithSeverity := ConvertToPostureReportWithSeverity(report)
-	
+
 	// Verify controls have severity field
 	assert.NotNil(t, reportWithSeverity)
 	assert.NotNil(t, reportWithSeverity.SummaryDetails.Controls)
-	
+
 	// Verify each control in the original report has a corresponding enriched control with severity
 	for controlID, control := range controls {
 		enrichedControl, exists := reportWithSeverity.SummaryDetails.Controls[controlID]
@@ -275,6 +275,12 @@ func TestConvertToPostureReportWithSeverity(t *testing.T) {
 		assert.Equal(t, control.ControlID, enrichedControl.ControlID, "Control ID should match")
 		assert.Equal(t, control.ScoreFactor, enrichedControl.ScoreFactor, "ScoreFactor should match")
 	}
+}
+
+func TestConvertToPostureReportWithSeverityNilCheck(t *testing.T) {
+	// Test that nil report returns nil
+	result := ConvertToPostureReportWithSeverity(nil)
+	assert.Nil(t, result, "Converting nil report should return nil")
 }
 
 func TestEnrichResultsWithSeverity(t *testing.T) {
@@ -291,7 +297,7 @@ func TestEnrichResultsWithSeverity(t *testing.T) {
 			ScoreFactor: 6.0,
 		},
 	}
-	
+
 	// Create mock results with associated controls
 	results := []resourcesresults.Result{
 		{
@@ -317,10 +323,10 @@ func TestEnrichResultsWithSeverity(t *testing.T) {
 			},
 		},
 	}
-	
+
 	// Enrich results with severity
 	enrichedResults := enrichResultsWithSeverity(results, controlSummaries)
-	
+
 	// Verify results structure
 	assert.Equal(t, 2, len(enrichedResults))
 	
