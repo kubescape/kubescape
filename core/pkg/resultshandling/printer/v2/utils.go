@@ -23,6 +23,19 @@ type ControlSummaryWithSeverity struct {
 	Severity string `json:"severity"`
 }
 
+// ResourceAssociatedControlWithSeverity wraps ResourceAssociatedControl to add severity field
+type ResourceAssociatedControlWithSeverity struct {
+	resourcesresults.ResourceAssociatedControl
+	Severity string `json:"severity"`
+}
+
+// ResultWithSeverity wraps Result to include severity in associated controls
+type ResultWithSeverity struct {
+	ResourceID         string                                      `json:"resourceID"`
+	AssociatedControls []ResourceAssociatedControlWithSeverity     `json:"controls,omitempty"`
+	PrioritizedResource *prioritization.PrioritizedResource        `json:"prioritizedResource,omitempty"`
+}
+
 // SummaryDetailsWithSeverity wraps SummaryDetails to include enriched controls
 type SummaryDetailsWithSeverity struct {
 	Controls                  map[string]ControlSummaryWithSeverity `json:"controls,omitempty"`
@@ -46,7 +59,7 @@ type PostureReportWithSeverity struct {
 	SummaryDetails        SummaryDetailsWithSeverity   `json:"summaryDetails,omitempty"`
 	Resources             []reporthandling.Resource    `json:"resources,omitempty"`
 	Attributes            []reportsummary.PostureAttributes `json:"attributes"`
-	Results               []resourcesresults.Result    `json:"results,omitempty"`
+	Results               []ResultWithSeverity         `json:"results,omitempty"`
 	Metadata              reporthandlingv2.Metadata    `json:"metadata,omitempty"`
 }
 
@@ -63,9 +76,35 @@ func enrichControlsWithSeverity(controls reportsummary.ControlSummaries) map[str
 	return enrichedControls
 }
 
+// enrichResultsWithSeverity adds severity field to controls in results
+func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummaries reportsummary.ControlSummaries) []ResultWithSeverity {
+	enrichedResults := make([]ResultWithSeverity, len(results))
+	for i, result := range results {
+		enrichedControls := make([]ResourceAssociatedControlWithSeverity, len(result.AssociatedControls))
+		for j, control := range result.AssociatedControls {
+			// Get the severity from the control summary
+			severity := "Unknown"
+			if controlSummary, exists := controlSummaries[control.GetID()]; exists {
+				severity = apis.ControlSeverityToString(controlSummary.GetScoreFactor())
+			}
+			enrichedControls[j] = ResourceAssociatedControlWithSeverity{
+				ResourceAssociatedControl: control,
+				Severity:                  severity,
+			}
+		}
+		enrichedResults[i] = ResultWithSeverity{
+			ResourceID:          result.ResourceID,
+			AssociatedControls:  enrichedControls,
+			PrioritizedResource: result.PrioritizedResource,
+		}
+	}
+	return enrichedResults
+}
+
 // ConvertToPostureReportWithSeverity converts PostureReport to PostureReportWithSeverity
 func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) *PostureReportWithSeverity {
 	enrichedControls := enrichControlsWithSeverity(report.SummaryDetails.Controls)
+	enrichedResults := enrichResultsWithSeverity(report.Results, report.SummaryDetails.Controls)
 	
 	return &PostureReportWithSeverity{
 		ReportGenerationTime: report.ReportGenerationTime.Format("2006-01-02T15:04:05Z07:00"),
@@ -86,7 +125,7 @@ func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) 
 		},
 		Resources:  report.Resources,
 		Attributes: report.Attributes,
-		Results:    report.Results,
+		Results:    enrichedResults,
 		Metadata:   report.Metadata,
 	}
 }
