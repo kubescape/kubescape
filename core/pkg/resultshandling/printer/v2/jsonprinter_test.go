@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
@@ -274,4 +275,67 @@ func TestConvertToPostureReportWithSeverity(t *testing.T) {
 		assert.Equal(t, control.ControlID, enrichedControl.ControlID, "Control ID should match")
 		assert.Equal(t, control.ScoreFactor, enrichedControl.ScoreFactor, "ScoreFactor should match")
 	}
+}
+
+func TestEnrichResultsWithSeverity(t *testing.T) {
+	// Create mock control summaries
+	controlSummaries := reportsummary.ControlSummaries{
+		"C-0001": reportsummary.ControlSummary{
+			ControlID:   "C-0001",
+			Name:        "Test Control High",
+			ScoreFactor: 8.0,
+		},
+		"C-0002": reportsummary.ControlSummary{
+			ControlID:   "C-0002",
+			Name:        "Test Control Medium",
+			ScoreFactor: 6.0,
+		},
+	}
+	
+	// Create mock results with associated controls
+	results := []resourcesresults.Result{
+		{
+			ResourceID: "test-resource-1",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0001",
+					Name:      "Test Control High",
+				},
+			},
+		},
+		{
+			ResourceID: "test-resource-2",
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				{
+					ControlID: "C-0002",
+					Name:      "Test Control Medium",
+				},
+				{
+					ControlID: "C-0003", // Not in control summaries
+					Name:      "Unknown Control",
+				},
+			},
+		},
+	}
+	
+	// Enrich results with severity
+	enrichedResults := enrichResultsWithSeverity(results, controlSummaries)
+	
+	// Verify results structure
+	assert.Equal(t, 2, len(enrichedResults))
+	
+	// Verify first result
+	assert.Equal(t, "test-resource-1", enrichedResults[0].ResourceID)
+	assert.Equal(t, 1, len(enrichedResults[0].AssociatedControls))
+	assert.Equal(t, "High", enrichedResults[0].AssociatedControls[0].Severity)
+	assert.Equal(t, "C-0001", enrichedResults[0].AssociatedControls[0].ControlID)
+	
+	// Verify second result
+	assert.Equal(t, "test-resource-2", enrichedResults[1].ResourceID)
+	assert.Equal(t, 2, len(enrichedResults[1].AssociatedControls))
+	assert.Equal(t, "Medium", enrichedResults[1].AssociatedControls[0].Severity)
+	assert.Equal(t, "C-0002", enrichedResults[1].AssociatedControls[0].ControlID)
+	// Verify unknown control gets "Unknown" severity
+	assert.Equal(t, "Unknown", enrichedResults[1].AssociatedControls[1].Severity)
+	assert.Equal(t, "C-0003", enrichedResults[1].AssociatedControls[1].ControlID)
 }
