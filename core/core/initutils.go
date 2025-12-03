@@ -91,7 +91,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 	}
 
 	// Only initialize cloud connector if not in air-gapped mode
-	if !scanInfo.Local {
+	if !isAirGappedMode(scanInfo) {
 		getter.GetKSCloudAPIConnector()
 	}
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)

@@ -137,7 +137,8 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// Only create DownloadReleasedPolicy if not in air-gapped mode
 	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
 	if isAirGappedMode(scanInfo) {
-		// In air-gapped mode or when using local files, don't initialize the downloader
+		// In air-gapped mode (--keep-local or using local files via --use-from, --controls-config, --exceptions, or attack tracks),
+		// don't initialize the downloader to prevent network access
 		downloadReleasedPolicy = nil
 	} else {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy() // download config inputs from github release
@@ -289,7 +290,7 @@ func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
 func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
 	return scanInfo.Local ||
 		len(scanInfo.UseFrom) > 0 ||
-		len(scanInfo.ControlsInputs) > 0 ||
-		len(scanInfo.UseExceptions) > 0 ||
-		len(scanInfo.AttackTracks) > 0
+		scanInfo.ControlsInputs != "" ||
+		scanInfo.UseExceptions != "" ||
+		scanInfo.AttackTracks != ""
 }
