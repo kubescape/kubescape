@@ -11,3 +11,7 @@ ca.srl
 ks
 
 dist/
+
+# Test output files
+customFilename.pdf
+customFilename.xml
