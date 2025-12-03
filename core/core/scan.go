@@ -136,7 +136,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// Only create DownloadReleasedPolicy if not in air-gapped mode
 	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
-	if scanInfo.Local || len(scanInfo.UseFrom) > 0 || len(scanInfo.ControlsInputs) > 0 || len(scanInfo.UseExceptions) > 0 || len(scanInfo.AttackTracks) > 0 {
+	if isAirGappedMode(scanInfo) {
 		// In air-gapped mode or when using local files, don't initialize the downloader
 		downloadReleasedPolicy = nil
 	} else {
@@ -282,4 +282,14 @@ func scanSingleImage(ctx context.Context, img string, svc *imagescan.Service, re
 
 func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
 	return scanType == cautils.ScanTypeCluster || scanType == cautils.ScanTypeRepo
+}
+
+// isAirGappedMode returns true if the scan is configured to run in air-gapped mode
+// (i.e., without any network access to download policies, exceptions, or other artifacts)
+func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
+	return scanInfo.Local ||
+		len(scanInfo.UseFrom) > 0 ||
+		len(scanInfo.ControlsInputs) > 0 ||
+		len(scanInfo.UseExceptions) > 0 ||
+		len(scanInfo.AttackTracks) > 0
 }
