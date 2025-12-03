@@ -7,6 +7,7 @@ import (
 
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -191,4 +192,86 @@ func TestConvertToReportSummary(t *testing.T) {
 	got := convertToReportSummary(input)
 
 	assert.Equal(t, want, got)
+}
+
+func TestEnrichControlsWithSeverity(t *testing.T) {
+	tests := []struct {
+		name         string
+		scoreFactor  float32
+		wantSeverity string
+	}{
+		{
+			name:         "Critical severity",
+			scoreFactor:  9.0,
+			wantSeverity: "Critical",
+		},
+		{
+			name:         "High severity",
+			scoreFactor:  8.0,
+			wantSeverity: "High",
+		},
+		{
+			name:         "Medium severity",
+			scoreFactor:  6.0,
+			wantSeverity: "Medium",
+		},
+		{
+			name:         "Low severity",
+			scoreFactor:  3.0,
+			wantSeverity: "Low",
+		},
+		{
+			name:         "Unknown severity",
+			scoreFactor:  0.0,
+			wantSeverity: "Unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			controls := reportsummary.ControlSummaries{
+				"C-0001": reportsummary.ControlSummary{
+					ControlID:   "C-0001",
+					Name:        "Test Control",
+					ScoreFactor: tt.scoreFactor,
+				},
+			}
+
+			enrichedControls := enrichControlsWithSeverity(controls)
+
+			assert.Equal(t, 1, len(enrichedControls))
+			assert.Equal(t, tt.wantSeverity, enrichedControls["C-0001"].Severity)
+			assert.Equal(t, "Test Control", enrichedControls["C-0001"].Name)
+			assert.Equal(t, tt.scoreFactor, enrichedControls["C-0001"].ScoreFactor)
+		})
+	}
+}
+
+func TestConvertToPostureReportWithSeverity(t *testing.T) {
+	// Create a mock PostureReport with controls having different severity levels
+	mockReport := reportsummary.MockSummaryDetails()
+	
+	// Get the controls from mock data
+	controls := mockReport.Controls
+	
+	// Create a minimal PostureReport
+	report := &reporthandlingv2.PostureReport{
+		SummaryDetails: *mockReport,
+	}
+	
+	// Convert to PostureReportWithSeverity
+	reportWithSeverity := ConvertToPostureReportWithSeverity(report)
+	
+	// Verify controls have severity field
+	assert.NotNil(t, reportWithSeverity)
+	assert.NotNil(t, reportWithSeverity.SummaryDetails.Controls)
+	
+	// Verify each control in the original report has a corresponding enriched control with severity
+	for controlID, control := range controls {
+		enrichedControl, exists := reportWithSeverity.SummaryDetails.Controls[controlID]
+		assert.True(t, exists, "Control %s should exist in enriched controls", controlID)
+		assert.NotEmpty(t, enrichedControl.Severity, "Severity should not be empty for control %s", controlID)
+		assert.Equal(t, control.ControlID, enrichedControl.ControlID, "Control ID should match")
+		assert.Equal(t, control.ScoreFactor, enrichedControl.ScoreFactor, "ScoreFactor should match")
+	}
 }
