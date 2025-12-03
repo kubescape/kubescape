@@ -90,7 +90,10 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		return resourcehandler.NewFileResourceHandler()
 	}
 
-	getter.GetKSCloudAPIConnector()
+	// Only initialize cloud connector if not in air-gapped mode
+	if !scanInfo.Local {
+		getter.GetKSCloudAPIConnector()
+	}
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
 	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }

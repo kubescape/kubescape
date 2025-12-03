@@ -66,9 +66,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 
 	// ================== version testing ======================================
-
-	v := versioncheck.NewIVersionCheckHandler(ctx)
-	_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+	// Skip version check in air-gapped mode (when keep-local flag is set)
+	if !scanInfo.Local {
+		v := versioncheck.NewIVersionCheckHandler(ctx)
+		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+	}
 
 	// ================== setup host scanner object ======================================
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
@@ -132,7 +134,14 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	interfaces := getInterfaces(ctxInit, scanInfo)
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
-	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
+	// Only create DownloadReleasedPolicy if not in air-gapped mode
+	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
+	if scanInfo.Local || len(scanInfo.UseFrom) > 0 || len(scanInfo.ControlsInputs) > 0 || len(scanInfo.UseExceptions) > 0 || len(scanInfo.AttackTracks) > 0 {
+		// In air-gapped mode or when using local files, don't initialize the downloader
+		downloadReleasedPolicy = nil
+	} else {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy() // download config inputs from github release
+	}
 
 	// set policy getter only after setting the customerGUID
 	scanInfo.Getters.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
