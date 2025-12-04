@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gorilla/schema"
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -18,6 +19,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// MetricsQueryParams query params for metrics endpoint
+type MetricsQueryParams struct {
+	// Frameworks is a comma-separated list of frameworks to scan
+	// Example: "nsa,mitre,cis-v1.10.0"
+	// If not provided, all available frameworks will be scanned
+	Frameworks string `schema:"frameworks" json:"frameworks"`
+}
+
 // Metrics http listener for prometheus support
 func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 
@@ -25,8 +34,16 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	handler.state.setBusy(scanID)
 	defer handler.state.setNotBusy(scanID)
 
+	// Parse query parameters
+	metricsQueryParams := &MetricsQueryParams{}
+	if err := schema.NewDecoder().Decode(metricsQueryParams, r.URL.Query()); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
+		return
+	}
+
 	resultsFile := filepath.Join(OutputDir, scanID)
-	scanInfo := getPrometheusDefaultScanCommand(scanID, resultsFile)
+	scanInfo := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
 	scanParams := &scanRequestParams{
 		scanQueryParams: &ScanQueryParams{
@@ -69,7 +86,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	w.Write(f)
 }
 
-func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanInfo {
+func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string) *cautils.ScanInfo {
 	scanInfo := defaultScanInfo()
 	scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	scanInfo.Submit = false                              // do not submit results every scan
@@ -82,11 +99,16 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanIn
 	scanInfo.Output = resultsFile                            // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output format is prometheus
 	
-	// Check if specific frameworks are requested via environment variable
-	frameworksEnv := envToString("KS_METRICS_FRAMEWORKS", "")
-	if frameworksEnv != "" {
+	// Check if specific frameworks are requested
+	// Priority: 1) query parameter, 2) environment variable, 3) default (all frameworks)
+	frameworksList := frameworksParam
+	if frameworksList == "" {
+		frameworksList = envToString("KS_METRICS_FRAMEWORKS", "")
+	}
+	
+	if frameworksList != "" {
 		// Scan specific frameworks (comma-separated list)
-		frameworks := splitAndTrim(frameworksEnv, ",")
+		frameworks := splitAndTrim(frameworksList, ",")
 		scanInfo.SetPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
 	} else {
 		// Default: scan all available frameworks (including CIS)

@@ -16,7 +16,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		
 		scanID := "1234"
 		outputFile := filepath.Join(OutputDir, scanID)
-		scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile)
+		scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile, "")
 
 		assert.Equal(t, scanID, scanInfo.ScanID)
 		assert.Equal(t, outputFile, scanInfo.Output)
@@ -29,14 +29,13 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		assert.Equal(t, getter.DefaultLocalStore, scanInfo.UseArtifactsFrom)
 	})
 
-	t.Run("specific frameworks via environment variable", func(t *testing.T) {
-		// Set environment variable to scan specific frameworks
-		os.Setenv("KS_METRICS_FRAMEWORKS", "nsa,mitre,cis-v1.10.0")
-		defer os.Unsetenv("KS_METRICS_FRAMEWORKS")
+	t.Run("specific frameworks via query parameter", func(t *testing.T) {
+		// Ensure environment variable is not set
+		os.Unsetenv("KS_METRICS_FRAMEWORKS")
 		
 		scanID := "5678"
 		outputFile := filepath.Join(OutputDir, scanID)
-		scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile)
+		scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile, "nsa,mitre,cis-v1.10.0")
 
 		assert.Equal(t, scanID, scanInfo.ScanID)
 		assert.Equal(t, outputFile, scanInfo.Output)
@@ -53,6 +52,50 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		assert.Equal(t, "nsa", scanInfo.PolicyIdentifier[0].Identifier)
 		assert.Equal(t, "mitre", scanInfo.PolicyIdentifier[1].Identifier)
 		assert.Equal(t, "cis-v1.10.0", scanInfo.PolicyIdentifier[2].Identifier)
+	})
+
+	t.Run("specific frameworks via environment variable", func(t *testing.T) {
+		// Set environment variable to scan specific frameworks
+		os.Setenv("KS_METRICS_FRAMEWORKS", "nsa,mitre")
+		defer os.Unsetenv("KS_METRICS_FRAMEWORKS")
+		
+		scanID := "9012"
+		outputFile := filepath.Join(OutputDir, scanID)
+		scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile, "")
+
+		assert.Equal(t, scanID, scanInfo.ScanID)
+		assert.Equal(t, outputFile, scanInfo.Output)
+		assert.Equal(t, "prometheus", scanInfo.Format)
+		assert.False(t, scanInfo.Submit)
+		assert.True(t, scanInfo.Local)
+		assert.True(t, scanInfo.FrameworkScan)
+		assert.False(t, scanInfo.ScanAll) // Don't scan all when specific frameworks are set
+		assert.False(t, scanInfo.HostSensorEnabled.GetBool())
+		assert.Equal(t, getter.DefaultLocalStore, scanInfo.UseArtifactsFrom)
+		
+		// Verify specific frameworks are set
+		assert.Len(t, scanInfo.PolicyIdentifier, 2)
+		assert.Equal(t, "nsa", scanInfo.PolicyIdentifier[0].Identifier)
+		assert.Equal(t, "mitre", scanInfo.PolicyIdentifier[1].Identifier)
+	})
+
+	t.Run("query parameter overrides environment variable", func(t *testing.T) {
+		// Set environment variable
+		os.Setenv("KS_METRICS_FRAMEWORKS", "nsa")
+		defer os.Unsetenv("KS_METRICS_FRAMEWORKS")
+		
+		scanID := "3456"
+		outputFile := filepath.Join(OutputDir, scanID)
+		// Query parameter should override environment variable
+		scanInfo := getPrometheusDefaultScanCommand(scanID, outputFile, "mitre,cis-v1.10.0")
+
+		assert.Equal(t, scanID, scanInfo.ScanID)
+		assert.False(t, scanInfo.ScanAll)
+		
+		// Verify query parameter frameworks are used, not env var
+		assert.Len(t, scanInfo.PolicyIdentifier, 2)
+		assert.Equal(t, "mitre", scanInfo.PolicyIdentifier[0].Identifier)
+		assert.Equal(t, "cis-v1.10.0", scanInfo.PolicyIdentifier[1].Identifier)
 	})
 }
 
