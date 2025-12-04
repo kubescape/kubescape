@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/go-logger"
@@ -75,12 +76,35 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanIn
 	scanInfo.Local = true                                // do not submit results every scan
 	scanInfo.FrameworkScan = true
 	scanInfo.HostSensorEnabled.SetBool(false)                // disable host scanner
-	scanInfo.ScanAll = true                                  // scan all available frameworks (including CIS)
 	scanInfo.ScanID = scanID                                 // scan ID
 	scanInfo.FailThreshold = 100                             // Do not fail scanning
 	scanInfo.ComplianceThreshold = 0                         // Do not fail scanning
 	scanInfo.Output = resultsFile                            // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output should be json
-	// Framework identifiers will be set dynamically by the scan process when ScanAll is true
+	
+	// Check if specific frameworks are requested via environment variable
+	frameworksEnv := envToString("KS_METRICS_FRAMEWORKS", "")
+	if frameworksEnv != "" {
+		// Scan specific frameworks (comma-separated list)
+		frameworks := splitAndTrim(frameworksEnv, ",")
+		scanInfo.SetPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
+	} else {
+		// Default: scan all available frameworks (including CIS)
+		scanInfo.ScanAll = true
+		// Framework identifiers will be set dynamically by the scan process when ScanAll is true
+	}
+	
 	return scanInfo
+}
+
+// splitAndTrim splits a string by delimiter and trims whitespace from each element
+func splitAndTrim(s, sep string) []string {
+	parts := strings.Split(s, sep)
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
