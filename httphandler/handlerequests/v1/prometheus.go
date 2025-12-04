@@ -80,7 +80,7 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile string) *cautils.ScanIn
 	scanInfo.FailThreshold = 100                             // Do not fail scanning
 	scanInfo.ComplianceThreshold = 0                         // Do not fail scanning
 	scanInfo.Output = resultsFile                            // results output
-	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output should be json
+	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output format is prometheus
 	
 	// Check if specific frameworks are requested via environment variable
 	frameworksEnv := envToString("KS_METRICS_FRAMEWORKS", "")
