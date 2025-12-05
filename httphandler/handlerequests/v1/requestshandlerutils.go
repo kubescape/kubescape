@@ -30,7 +30,7 @@ func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{}
 
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
-	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID)
+	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
 		logger.L().Ctx(scanReq.ctx).Error("scanning failed", helpers.String("ID", scanReq.scanID), helpers.Error(err))
 		if scanReq.scanQueryParams.ReturnResults {
@@ -62,7 +62,7 @@ func (handler *HTTPHandler) watchForScan() {
 		handler.executeScan(scanReq)
 	}
 }
-func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*reporthandlingv2.PostureReport, error) {
+func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPersistence bool) (*reporthandlingv2.PostureReport, error) {
 	ctx, spanScan := otel.Tracer("").Start(ctx, "kubescape.scan")
 	defer spanScan.End()
 
@@ -86,16 +86,19 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string) (*repo
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
 		return nil, err
 	}
-	store := storage.GetStorage()
-	// do not store results locally when we are sending them
-	if store != nil && config.GetAccount() == "" {
-		pr := result.GetResults()
 
-		if err := store.StorePostureReportResults(ctx, pr); err != nil {
-			return nil, err
+	if !skipPersistence {
+		store := storage.GetStorage()
+		// do not store results locally when we are sending them
+		if store != nil && config.GetAccount() == "" {
+			pr := result.GetResults()
+
+			if err := store.StorePostureReportResults(ctx, pr); err != nil {
+				return nil, err
+			}
+		} else {
+			logger.L().Debug("storage is not initialized - skipping storing results")
 		}
-	} else {
-		logger.L().Debug("storage is not initialized - skipping storing results")
 	}
 
 	return nil, nil

@@ -34,21 +34,22 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 	handler.state.setBusy(scanID)
 	defer handler.state.setNotBusy(scanID)
 
-	// Parse query parameters
 	metricsQueryParams := &MetricsQueryParams{}
 	if err := schema.NewDecoder().Decode(metricsQueryParams, r.URL.Query()); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		handler.writeError(w, fmt.Errorf("failed to parse query params, reason: %s", err.Error()), scanID)
 		return
 	}
+	skipPersistence := r.URL.Query().Get("skipPersistence") == "true"
 
 	resultsFile := filepath.Join(OutputDir, scanID)
 	scanInfo := getPrometheusDefaultScanCommand(scanID, resultsFile, metricsQueryParams.Frameworks)
 
 	scanParams := &scanRequestParams{
 		scanQueryParams: &ScanQueryParams{
-			ReturnResults: true,
-			KeepResults:   false,
+			ReturnResults:   true,
+			KeepResults:     false,
+			SkipPersistence: skipPersistence,
 		},
 		scanInfo: scanInfo,
 		scanID:   scanID,

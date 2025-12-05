@@ -22,7 +22,7 @@ func testBody(t *testing.T) io.Reader {
 	return bytes.NewReader(b)
 }
 
-type scanner func(_ context.Context, _ *cautils.ScanInfo, _ string) (*reporthandlingv2.PostureReport, error)
+type scanner func(_ context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error)
 
 // TestScan tests that the scan handler passes the scan requests correctly to the underlying scan engine.
 func TestScan(t *testing.T) {
@@ -30,7 +30,7 @@ func TestScan(t *testing.T) {
 	// Our scanner is not setting up the k8s connection; the test is covering the rest of the wiring
 	// that the signaling from the http handler goes all the way to the scanner implementation.
 	defer func(o scanner) { scanImpl = o }(scanImpl)
-	scanImpl = func(context.Context, *cautils.ScanInfo, string) (*reporthandlingv2.PostureReport, error) {
+	scanImpl = func(context.Context, *cautils.ScanInfo, string, bool) (*reporthandlingv2.PostureReport, error) {
 		return nil, nil
 	}
 
