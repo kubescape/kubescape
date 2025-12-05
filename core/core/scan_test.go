@@ -58,3 +58,66 @@ func TestIsPrioritizationScanType(t *testing.T) {
 		})
 	}
 }
+
+func TestIsAirGappedMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		scanInfo *cautils.ScanInfo
+		want     bool
+	}{
+		{
+			name: "air-gapped with Local flag",
+			scanInfo: &cautils.ScanInfo{
+				Local: true,
+			},
+			want: true,
+		},
+		{
+			name: "air-gapped with UseFrom",
+			scanInfo: &cautils.ScanInfo{
+				UseFrom: []string{"/path/to/policy"},
+			},
+			want: true,
+		},
+		{
+			name: "air-gapped with ControlsInputs",
+			scanInfo: &cautils.ScanInfo{
+				ControlsInputs: "/path/to/controls",
+			},
+			want: true,
+		},
+		{
+			name: "air-gapped with UseExceptions",
+			scanInfo: &cautils.ScanInfo{
+				UseExceptions: "/path/to/exceptions",
+			},
+			want: true,
+		},
+		{
+			name: "air-gapped with AttackTracks",
+			scanInfo: &cautils.ScanInfo{
+				AttackTracks: "/path/to/attack-tracks",
+			},
+			want: true,
+		},
+		{
+			name:     "not air-gapped - all empty",
+			scanInfo: &cautils.ScanInfo{},
+			want:     false,
+		},
+		{
+			name: "air-gapped with multiple flags",
+			scanInfo: &cautils.ScanInfo{
+				Local:   true,
+				UseFrom: []string{"/path/to/policy"},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isAirGappedMode(tt.scanInfo))
+		})
+	}
+}

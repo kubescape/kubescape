@@ -66,9 +66,11 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	}
 
 	// ================== version testing ======================================
-
-	v := versioncheck.NewIVersionCheckHandler(ctx)
-	_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+	// Skip version check in air-gapped mode (when keep-local flag is set)
+	if !scanInfo.Local {
+		v := versioncheck.NewIVersionCheckHandler(ctx)
+		_ = v.CheckLatestVersion(ctx, versioncheck.NewVersionCheckRequest(scanInfo.AccountID, versioncheck.BuildNumber, policyIdentifierIdentities(scanInfo.PolicyIdentifier), "", string(scanInfo.GetScanningContext()), k8sClient))
+	}
 
 	// ================== setup host scanner object ======================================
 	ctxHostScanner, spanHostScanner := otel.Tracer("").Start(ctx, "setup host scanner")
@@ -132,7 +134,15 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	interfaces := getInterfaces(ctxInit, scanInfo)
 	interfaces.report.SetTenantConfig(interfaces.tenantConfig)
 
-	downloadReleasedPolicy := getter.NewDownloadReleasedPolicy() // download config inputs from github release
+	// Only create DownloadReleasedPolicy if not in air-gapped mode
+	var downloadReleasedPolicy *getter.DownloadReleasedPolicy
+	if isAirGappedMode(scanInfo) {
+		// In air-gapped mode (--keep-local or using local files via --use-from, --controls-config, --exceptions, or attack tracks),
+		// don't initialize the downloader to prevent network access
+		downloadReleasedPolicy = nil
+	} else {
+		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy() // download config inputs from github release
+	}
 
 	// set policy getter only after setting the customerGUID
 	scanInfo.Getters.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
@@ -273,4 +283,14 @@ func scanSingleImage(ctx context.Context, img string, svc *imagescan.Service, re
 
 func isPrioritizationScanType(scanType cautils.ScanTypes) bool {
 	return scanType == cautils.ScanTypeCluster || scanType == cautils.ScanTypeRepo
+}
+
+// isAirGappedMode returns true if the scan is configured to run in air-gapped mode
+// (i.e., without any network access to download policies, exceptions, or other artifacts)
+func isAirGappedMode(scanInfo *cautils.ScanInfo) bool {
+	return scanInfo.Local ||
+		len(scanInfo.UseFrom) > 0 ||
+		scanInfo.ControlsInputs != "" ||
+		scanInfo.UseExceptions != "" ||
+		scanInfo.AttackTracks != ""
 }
