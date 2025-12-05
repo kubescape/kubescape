@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gorilla/schema"
 	"github.com/google/uuid"
+	"github.com/gorilla/schema"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -98,24 +98,18 @@ func getPrometheusDefaultScanCommand(scanID, resultsFile, frameworksParam string
 	scanInfo.ComplianceThreshold = 0                         // Do not fail scanning
 	scanInfo.Output = resultsFile                            // results output
 	scanInfo.Format = envToString("KS_FORMAT", "prometheus") // default output format is prometheus
-	
-	// Check if specific frameworks are requested
-	// Priority: 1) query parameter, 2) environment variable, 3) default (all frameworks)
-	frameworksList := frameworksParam
-	if frameworksList == "" {
-		frameworksList = envToString("KS_METRICS_FRAMEWORKS", "")
-	}
-	
-	if frameworksList != "" {
+
+	// Check if specific frameworks are requested via query parameter
+	if frameworksParam != "" {
 		// Scan specific frameworks (comma-separated list)
-		frameworks := splitAndTrim(frameworksList, ",")
+		frameworks := splitAndTrim(frameworksParam, ",")
 		scanInfo.SetPolicyIdentifiers(frameworks, utilsapisv1.KindFramework)
 	} else {
 		// Default: scan all available frameworks (including CIS)
 		scanInfo.ScanAll = true
 		// Framework identifiers will be set dynamically by the scan process when ScanAll is true
 	}
-	
+
 	return scanInfo
 }
 
