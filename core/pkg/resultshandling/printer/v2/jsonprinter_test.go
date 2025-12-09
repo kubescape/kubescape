@@ -329,13 +329,13 @@ func TestEnrichResultsWithSeverity(t *testing.T) {
 
 	// Verify results structure
 	assert.Equal(t, 2, len(enrichedResults))
-	
+
 	// Verify first result
 	assert.Equal(t, "test-resource-1", enrichedResults[0].ResourceID)
 	assert.Equal(t, 1, len(enrichedResults[0].AssociatedControls))
 	assert.Equal(t, "High", enrichedResults[0].AssociatedControls[0].Severity)
 	assert.Equal(t, "C-0001", enrichedResults[0].AssociatedControls[0].ControlID)
-	
+
 	// Verify second result
 	assert.Equal(t, "test-resource-2", enrichedResults[1].ResourceID)
 	assert.Equal(t, 2, len(enrichedResults[1].AssociatedControls))
