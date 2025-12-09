@@ -99,6 +99,8 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		} else {
 			logger.L().Debug("storage is not initialized - skipping storing results")
 		}
+	} else {
+		logger.L().Info("skipPersistence=true, skipping storing results")
 	}
 
 	return nil, nil
