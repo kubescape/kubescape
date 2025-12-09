@@ -31,9 +31,9 @@ type ResourceAssociatedControlWithSeverity struct {
 
 // ResultWithSeverity wraps Result to include severity in associated controls
 type ResultWithSeverity struct {
-	ResourceID         string                                      `json:"resourceID"`
-	AssociatedControls []ResourceAssociatedControlWithSeverity     `json:"controls,omitempty"`
-	PrioritizedResource *prioritization.PrioritizedResource        `json:"prioritizedResource,omitempty"`
+	ResourceID          string                                  `json:"resourceID"`
+	AssociatedControls  []ResourceAssociatedControlWithSeverity `json:"controls,omitempty"`
+	PrioritizedResource *prioritization.PrioritizedResource     `json:"prioritizedResource,omitempty"`
 }
 
 // SummaryDetailsWithSeverity wraps SummaryDetails to include enriched controls
@@ -51,16 +51,16 @@ type SummaryDetailsWithSeverity struct {
 
 // PostureReportWithSeverity wraps PostureReport to include severity in controls
 type PostureReportWithSeverity struct {
-	ReportGenerationTime  string                       `json:"generationTime"`
-	ClusterAPIServerInfo  interface{}                  `json:"clusterAPIServerInfo"`
-	ClusterCloudProvider  string                       `json:"clusterCloudProvider"`
-	CustomerGUID          string                       `json:"customerGUID"`
-	ClusterName           string                       `json:"clusterName"`
-	SummaryDetails        SummaryDetailsWithSeverity   `json:"summaryDetails,omitempty"`
-	Resources             []reporthandling.Resource    `json:"resources,omitempty"`
-	Attributes            []reportsummary.PostureAttributes `json:"attributes"`
-	Results               []ResultWithSeverity         `json:"results,omitempty"`
-	Metadata              reporthandlingv2.Metadata    `json:"metadata,omitempty"`
+	ReportGenerationTime string                            `json:"generationTime"`
+	ClusterAPIServerInfo interface{}                       `json:"clusterAPIServerInfo"`
+	ClusterCloudProvider string                            `json:"clusterCloudProvider"`
+	CustomerGUID         string                            `json:"customerGUID"`
+	ClusterName          string                            `json:"clusterName"`
+	SummaryDetails       SummaryDetailsWithSeverity        `json:"summaryDetails,omitempty"`
+	Resources            []reporthandling.Resource         `json:"resources,omitempty"`
+	Attributes           []reportsummary.PostureAttributes `json:"attributes"`
+	Results              []ResultWithSeverity              `json:"results,omitempty"`
+	Metadata             reporthandlingv2.Metadata         `json:"metadata,omitempty"`
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor

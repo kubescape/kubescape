@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/google/go-containerregistry/pkg/name"
-	"github.com/sigstore/cosign/v2/pkg/cosign"
+	"github.com/sigstore/cosign/v3/pkg/cosign"
 )
 
 func has_signature(img string) bool {
