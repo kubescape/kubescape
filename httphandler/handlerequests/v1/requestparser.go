@@ -21,6 +21,9 @@ type ScanQueryParams struct {
 	// Do not delete results after returning (relevant only for synchronous requests)
 	// default: false
 	KeepResults bool `schema:"keep" json:"keep"`
+	// Do not persist data after scanning
+	//default: false
+	SkipPersistence bool `schema:"skipPersistence" json:"skipPersistence"`
 }
 
 // swagger:parameters getScanResults
