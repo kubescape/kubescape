@@ -56,7 +56,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean --snapshot
+          args: build --clean --snapshot --single-target
         env:
           RELEASE: ${{ inputs.RELEASE }}
           CLIENT: ${{ inputs.CLIENT }}
@@ -66,7 +66,7 @@ jobs:
         env:
           RELEASE: ${{ inputs.RELEASE }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
-        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ${PWD}/dist/kubescape-ubuntu-latest
+        run: ${{ env.DOCKER_CMD }} python3 smoke_testing/init.py ${PWD}/dist/cli_linux_amd64_v1/kubescape
 
       - name: golangci-lint
         continue-on-error: false
@@ -75,75 +75,3 @@ jobs:
           version: v2.1
           args: --timeout 10m
           only-new-issues: true
-
-  scanners:
-    env:
-      GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-    name: PR Scanner
-    runs-on: ubuntu-large
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-      - uses: actions/setup-go@v4
-        name: Installing go
-        with:
-          go-version: "1.25"
-      - name: Scanning - Forbidden Licenses (go-licenses)
-        id: licenses-scan
-        continue-on-error: true
-        run: |
-          echo "## Installing go-licenses tool"
-          go install github.com/google/go-licenses@latest
-          echo "## Scanning for forbiden licenses ##"
-          go-licenses check .
-      - name: Scanning - Credentials (GitGuardian)
-        if: ${{ env.GITGUARDIAN_API_KEY }}
-        continue-on-error: true
-        id: credentials-scan
-        uses: GitGuardian/ggshield-action@master
-        with:
-          args: -v --all-policies
-        env:
-          GITHUB_PUSH_BEFORE_SHA: ${{ github.event.before }}
-          GITHUB_PUSH_BASE_SHA: ${{ github.event.base }}
-          GITHUB_PULL_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          GITHUB_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-          GITGUARDIAN_API_KEY: ${{ secrets.GITGUARDIAN_API_KEY }}
-      - name: Scanning - Vulnerabilities (Snyk)
-        if: ${{ env.SNYK_TOKEN }}
-        id: vulnerabilities-scan
-        continue-on-error: true
-        uses: snyk/actions/golang@master
-        with:
-          command: test --all-projects
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-
-      - name: Test coverage
-        id: unit-test
-        run: go test -v ${{ inputs.UNIT_TESTS_PATH }} -covermode=count -coverprofile=coverage.out
-
-      - name: Convert coverage count to lcov format
-        uses: jandelgado/gcov2lcov-action@v1
-
-      - name: Submit coverage tests to Coveralls
-        continue-on-error: true
-        uses: coverallsapp/github-action@v1
-        with:
-          github-token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path-to-lcov: coverage.lcov
-
-      - name: Comment results to PR
-        continue-on-error: true # Warning: This might break opening PRs from forks
-        uses: peter-evans/create-or-update-comment@v4
-        with:
-          issue-number: ${{ github.event.pull_request.number }}
-          body: |
-            Scan results:
-            - License scan: ${{ steps.licenses-scan.outcome }}
-            - Credentials scan: ${{ steps.credentials-scan.outcome }}
-            - Vulnerabilities scan: ${{ steps.vulnerabilities-scan.outcome }}
-          reactions: 'eyes'

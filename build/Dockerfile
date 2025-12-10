@@ -1,25 +1,12 @@
-FROM --platform=$BUILDPLATFORM golang:1.25-trixie AS builder
-
-ENV GO111MODULE=on CGO_ENABLED=0
-WORKDIR /work
-ARG TARGETOS TARGETARCH
-
-RUN --mount=target=. \
-    --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg \
-    cd httphandler && GOOS=$TARGETOS GOARCH=$TARGETARCH go build -o /out/ksserver .
-RUN --mount=target=. \
-    --mount=type=cache,target=/root/.cache/go-build \
-    --mount=type=cache,target=/go/pkg \
-    go run downloader/main.go
-
 FROM gcr.io/distroless/static-debian13:nonroot
 
 USER nonroot
 WORKDIR /home/nonroot/
 
-COPY --from=builder /out/ksserver /usr/bin/ksserver
-COPY --from=builder /root/.kubescape /home/nonroot/.kubescape
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/downloader /usr/bin/downloader
+RUN ["downloader"]
+COPY $TARGETPLATFORM/ksserver /usr/bin/ksserver
 
 ARG image_version client
 ENV RELEASE=$image_version CLIENT=$client
