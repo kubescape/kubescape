@@ -54,6 +54,9 @@ jobs:
         run: |
           git tag ${{ needs.retag.outputs.NEW_TAG }}
 
+      - uses: anchore/sbom-action/download-syft@v0
+        name: Setup Syft
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
