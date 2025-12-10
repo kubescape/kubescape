@@ -125,6 +125,9 @@ sboms:
 
 krews:
   - name: kubescape
+    index:
+      owner: kubescape
+      name: krew-index
     ids:
       - cli
     homepage: https://kubescape.io/
