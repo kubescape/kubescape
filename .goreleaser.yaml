@@ -130,6 +130,9 @@ krews:
       name: krew-index
       pull_request:
         enabled: true
+        base:
+          owner: kubernetes-sigs
+          name: krew-index
     ids:
       - cli
     homepage: https://kubescape.io/
