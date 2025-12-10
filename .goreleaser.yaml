@@ -126,7 +126,7 @@ sboms:
 krews:
   - name: kubescape
     repository:
-      owner: kubernetes-sigs
+      owner: kubescape
       name: krew-index
       pull_request:
         enabled: true
