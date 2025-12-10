@@ -125,7 +125,7 @@ sboms:
 
 krews:
   - name: kubescape
-    index:
+    repository:
       owner: kubescape
       name: krew-index
     ids:
