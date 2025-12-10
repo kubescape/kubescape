@@ -126,8 +126,10 @@ sboms:
 krews:
   - name: kubescape
     repository:
-      owner: kubescape
+      owner: kubernetes-sigs
       name: krew-index
+      pull_request:
+        enabled: true
     ids:
       - cli
     homepage: https://kubescape.io/

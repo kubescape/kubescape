@@ -77,7 +77,7 @@ jobs:
           version: latest
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
           COSIGN_PWD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
           RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
           CLIENT: release
