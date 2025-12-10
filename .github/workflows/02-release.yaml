@@ -34,7 +34,7 @@ jobs:
       attestations: read
       artifact-metadata: read
     needs: [retag]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-large
     steps:
       - uses: actions/checkout@v4
         with:
