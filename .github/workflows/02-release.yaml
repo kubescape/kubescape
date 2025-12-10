@@ -15,10 +15,11 @@ jobs:
         uses: ./.github/actions/tag-action
         with:
           SUB_STRING: "-rc"
-  binary-build:
+  release:
     permissions:
       actions: read
       checks: read
+      contents: write
       deployments: read
       discussions: read
       id-token: write
@@ -28,92 +29,40 @@ jobs:
       pages: read
       pull-requests: read
       repository-projects: read
-      security-events: read
       statuses: read
-      contents: write
-      attestations: write
+      security-events: read
+      attestations: read
       artifact-metadata: read
     needs: [retag]
-    uses: ./.github/workflows/b-binary-build-and-e2e-tests.yaml
-    with:
-      COMPONENT_NAME: kubescape
-      CGO_ENABLED: 0
-      GO111MODULE: ""
-      GO_VERSION: "1.25"
-      RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
-      CLIENT: release
-    secrets: inherit
-  create-release:
-    permissions:
-      actions: read
-      checks: read
-      contents: write
-      deployments: read
-      discussions: read
-      id-token: write
-      issues: read
-      models: read
-      packages: read
-      pages: read
-      pull-requests: read
-      repository-projects: read
-      statuses: read
-      security-events: read
-      attestations: read
-      artifact-metadata: read
-    needs: [retag, binary-build]
-    uses: ./.github/workflows/c-create-release.yaml
-    with:
-      RELEASE_NAME: "Release ${{ needs.retag.outputs.NEW_TAG }}"
-      TAG: ${{ needs.retag.outputs.NEW_TAG }}
-      DRAFT: false
-    secrets: inherit
-  publish-image:
-    permissions:
-      actions: read
-      checks: read
-      deployments: read
-      discussions: read
-      id-token: write
-      issues: read
-      models: read
-      packages: write
-      pages: read
-      pull-requests: read
-      repository-projects: read
-      security-events: read
-      statuses: read
-      attestations: read
-      contents: write
-    uses: ./.github/workflows/d-publish-image.yaml
-    needs: [create-release, retag]
-    with:
-      client: "image-release"
-      image_name: "quay.io/${{ github.repository_owner }}/kubescape-cli"
-      image_tag: ${{ needs.retag.outputs.NEW_TAG }}
-      support_platforms: true
-      cosign: true
-    secrets: inherit
-  post-release:
-    permissions:
-      actions: read
-      checks: read
-      deployments: read
-      discussions: read
-      id-token: write
-      issues: read
-      models: read
-      packages: write
-      pages: read
-      pull-requests: read
-      repository-projects: read
-      security-events: read
-      statuses: read
-      attestations: read
-      contents: write
-      artifact-metadata: read
-    uses: ./.github/workflows/e-post-release.yaml
-    needs: [retag, publish-image]
-    with:
-      TAG: ${{ needs.retag.outputs.NEW_TAG }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.5.0
+
+      - name: Create Cosign Key
+        run: echo "${{ secrets.COSIGN_PRIVATE_KEY_V1 }}" > cosign.key
+
+      - name: Tag Release
+        run: |
+          git tag ${{ needs.retag.outputs.NEW_TAG }}
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: latest
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COSIGN_PWD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
+          RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
+          CLIENT: release
     secrets: inherit
