@@ -322,7 +322,7 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 	}
 
 	// Check if input is a URL (http:// or https://)
-	isURL := strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")
+	isURL := isHTTPURL(input)
 
 	// git url
 	if _, err := giturl.NewGitURL(input); err == nil {
@@ -336,13 +336,15 @@ func (scanInfo *ScanInfo) getScanningContext(input string) ScanningContext {
 		}
 		// If giturl.NewGitURL succeeded but cloning failed, the input is a git URL
 		// that couldn't be cloned. Don't treat it as a local path.
-		// The clone error was already logged by CloneGitRepo
-		return ContextDir // Return ContextDir to trigger "no files found" error with clear URL context
+		// The clone error was already logged by CloneGitRepo.
+		// Return ContextDir to prevent the URL from being joined with the current directory
+		// and to trigger a "no files found" error with the actual URL (not a mangled path).
+		return ContextDir
 	}
 
 	// If it looks like a URL but wasn't recognized as a git URL, still don't treat it as a local path
 	if isURL {
-		logger.L().Error("URL provided but not recognized as a valid git repository", helpers.String("url", input))
+		logger.L().Error("URL provided but not recognized as a valid git repository. Ensure the URL is correct and accessible", helpers.String("url", input))
 		return ContextDir
 	}
 
@@ -468,4 +470,9 @@ func getAbsPath(p string) string {
 		}
 	}
 	return p
+}
+
+// isHTTPURL checks if the input string is an HTTP or HTTPS URL
+func isHTTPURL(input string) bool {
+	return strings.HasPrefix(input, "http://") || strings.HasPrefix(input, "https://")
 }
