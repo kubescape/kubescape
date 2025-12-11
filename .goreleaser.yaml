@@ -125,19 +125,9 @@ sboms:
 
 krews:
   - name: kubescape
-    repository:
-      owner: kubescape
-      name: krew-index
-      pull_request:
-        enabled: true
-        base:
-          owner: kubernetes-sigs
-          name: krew-index
-    commit_author:
-      name: Matthias Bertschy
-      email: matthias.bertschy@gmail.com
     ids:
       - cli
+    skip_upload: true
     homepage: https://kubescape.io/
     description: It includes risk analysis, security compliance, and misconfiguration scanning with an easy-to-use CLI interface, flexible output formats, and automated scanning capabilities.
     short_description: Scan resources and cluster configs against security frameworks.
