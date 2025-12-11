@@ -133,6 +133,9 @@ krews:
         base:
           owner: kubernetes-sigs
           name: krew-index
+    commit_author:
+      name: Matthias Bertschy
+      email: matthias.bertschy@gmail.com
     ids:
       - cli
     homepage: https://kubescape.io/
