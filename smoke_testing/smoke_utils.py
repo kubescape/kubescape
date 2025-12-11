@@ -19,7 +19,7 @@ def run_command(command, stdin=subprocess.PIPE, stderr=subprocess.STDOUT):
 
 
 def assertion(msg):
-    errors = ["Error: invalid parameter", "exit status 1"]
+    errors = ["Error: invalid parameter", "exit status"]
     for e in errors:
         assert e not in msg, msg
 

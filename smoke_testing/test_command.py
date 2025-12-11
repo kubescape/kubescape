@@ -16,12 +16,11 @@ def run(kubescape_exec:str):
     print("Testing supported commands")
 
     test_command(command=[kubescape_exec, "version"])
-    test_command(command=[kubescape_exec, "download"])
+    test_command(command=[kubescape_exec, "download", "artifacts"])
     test_command(command=[kubescape_exec, "config"])
     test_command(command=[kubescape_exec, "help"])
-    test_command(command=[kubescape_exec, "scan", "framework"])
-    test_command(command=[kubescape_exec, "scan", "control"])
-    test_command(command=[kubescape_exec, "submit", "results"])
+    test_command(command=[kubescape_exec, "scan", "--keep-local", "framework", "nsa"])
+    test_command(command=[kubescape_exec, "scan", "--keep-local", "control", "C-0058"])
 
     print("Done testing commands")
 

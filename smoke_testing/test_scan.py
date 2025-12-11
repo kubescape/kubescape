@@ -3,65 +3,64 @@ import smoke_utils
 import sys
 
 
-all_files = os.path.join("..", "*.yaml")
-# all_files = os.path.join("..", "examples", "online-boutique", "*.yaml")
+all_files = os.path.join("..", "examples", "online-boutique", "*.yaml")
 single_file = os.path.join("..", "examples", "online-boutique", "frontend.yaml")
 
 
 def scan_all(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files])
 
 
 def scan_control_name(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'HostPath mount', all_files])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "control", 'HostPath mount', all_files])
 
 
 def scan_control_id(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048', all_files])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "control", 'C-0048', all_files])
 
 
 def scan_controls(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "control", 'C-0048,C-0016', all_files])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "control", 'C-0048,C-0016', all_files])
 
 
 def scan_framework(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa", all_files])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "framework", "nsa", all_files])
 
 
 def scan_frameworks(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", "framework", "nsa,mitre", all_files])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", "framework", "nsa,mitre", all_files])
 
 
 def scan_all(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files])
 
 
 def scan_all_format_sarif(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "sarif", "--output", "results"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files, "--format", "sarif", "--output", "results"])
 
 
 def scan_all_format_json(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "json", "--output", "results"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files, "--format", "json", "--output", "results"])
 
 
 def scan_all_format_junit(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "junit", "--output", "results"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files, "--format", "junit", "--output", "results"])
 
 
 def scan_all_format_pretty_printer(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "pretty-printer", "--output", "results"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files, "--format", "pretty-printer", "--output", "results"])
 
 
 def scan_all_format_html(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "html", "--output", "results"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files, "--format", "html", "--output", "results"])
 
 
 def scan_all_format_pdf(kubescape_exec: str):
-    return smoke_utils.run_command(command=[kubescape_exec, "scan", all_files, "--format", "pdf", "--output", "results"])
+    return smoke_utils.run_command(command=[kubescape_exec, "scan", "--keep-local", all_files, "--format", "pdf", "--output", "results"])
 
 
 def scan_from_stdin(kubescape_exec: str):
-    return smoke_utils.run_command(command=["cat", single_file, "|", kubescape_exec, "scan", "framework", "nsa", "-"])
+    return smoke_utils.run_command(command=["cat", single_file, "|", kubescape_exec, "--keep-local", "scan", "framework", "nsa", "-"])
 
 
 def run(kubescape_exec: str):

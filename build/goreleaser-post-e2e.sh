@@ -36,47 +36,42 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 : "${RUN_E2E:=false}"
-# Default to non-fatal E2E failures. To make failures fatal, set a truthy value such as 1 or true.
-: "${E2E_FAIL_ON_ERROR:=0}"
+# Default to fatal E2E failures.
+: "${E2E_FAIL_ON_ERROR:=1}"
 
 log "Starting goreleaser post-build e2e script"
 log "RUN_E2E=${RUN_E2E}"
 log "E2E_FAIL_ON_ERROR=${E2E_FAIL_ON_ERROR}"
+
+# Only run on linux/amd64 to avoid running multiple times (once per build)
+# and to ensure we can run the binary on the current host (assuming host is amd64).
+if [ -n "${GOARCH:-}" ] && [ "${GOARCH}" != "amd64" ]; then
+  log "Skipping e2e/smoke tests for non-amd64 build (GOARCH=${GOARCH})."
+  exit 0
+fi
 
 if ! is_true "${RUN_E2E}"; then
   log "RUN_E2E is not enabled. Skipping e2e/smoke tests. (RUN_E2E=${RUN_E2E})"
   exit 0
 fi
 
-# Locate an artifact in dist/. Prefer the first file starting with 'kubescape'
+# Locate the amd64 artifact in dist/. 
+# Goreleaser v2 puts binaries in dist/<id>_<os>_<arch>_<version>/<binary>
+# Example: dist/cli_linux_amd64_v1/kubescape
 ART_PATH=""
 if [ -d "$REPO_ROOT/dist" ]; then
-  for cand in "$REPO_ROOT"/dist/*; do
-    # If no files matched, the glob may remain literal on some shells; guard:
-    if [ ! -e "$cand" ]; then
-      continue
-    fi
-    base="$(basename "$cand")"
-    case "$base" in
-      kubescape* )
-        # skip obvious checksum files
-        case "$base" in
-          *.sha256|*.sha256sum) continue ;;
-        esac
-        if [ -f "$cand" ]; then
-          ART_PATH="$cand"
-          break
-        fi
-        ;;
-      * )
-        # not a kubescape artifact
-        ;;
-    esac
-  done
+  # Find any file named 'kubescape' inside a directory containing 'linux_amd64' inside 'dist'
+  # We use 'find' for robustness against varying directory names
+  ART_PATH=$(find "$REPO_ROOT/dist" -type f -name "kubescape" -path "*linux_amd64*" | head -n 1)
 fi
 
-if [ -z "$ART_PATH" ]; then
-  log "No kubescape artifact found in dist/. Skipping e2e/smoke tests."
+if [ -z "$ART_PATH" ] || [ ! -f "$ART_PATH" ]; then
+  log "No kubescape artifact found in dist/ matching *linux_amd64*/kubescape. Skipping e2e/smoke tests."
+  # If we are supposed to run E2E, not finding the artifact is probably an error.
+  if is_true "${E2E_FAIL_ON_ERROR}"; then
+     log "E2E_FAIL_ON_ERROR enabled -> failing because artifact was not found."
+     exit 1
+  fi
   exit 0
 fi
 
