@@ -87,6 +87,12 @@ elif command -v python >/dev/null 2>&1; then
   PYTHON=python
 fi
 
+# Prefer Python 3.11 for system-tests (Python 3.12 removes 'imp', used by some deps)
+SYSTEST_PYTHON_BIN=""
+if command -v python3.11 >/dev/null 2>&1; then
+  SYSTEST_PYTHON_BIN=python3.11
+fi
+
 if [ -z "$PYTHON" ]; then
   log "python3 (or python) not found in PATH."
   if is_true "${E2E_FAIL_ON_ERROR}"; then
@@ -162,6 +168,17 @@ else
     if [ -f "./create_env.sh" ]; then
       # The script expects to run inside the dir
       chmod +x ./create_env.sh
+
+      # Ensure create_env.sh runs with Python 3.11 when available
+      if [ -n "${SYSTEST_PYTHON_BIN:-}" ]; then
+        log "Using ${SYSTEST_PYTHON_BIN} for system-tests environment creation"
+        export PYTHON="${SYSTEST_PYTHON_BIN}"
+        export PYTHON_BIN="${SYSTEST_PYTHON_BIN}"
+        export Python_BIN="${SYSTEST_PYTHON_BIN}"
+      else
+        log "python3.11 not found in PATH; system-tests may fail if python3 points to 3.12+"
+      fi
+
       ./create_env.sh >/dev/null 2>&1 || log "Warning: create_env.sh returned non-zero"
 
       # Activate the environment if it exists
@@ -196,8 +213,16 @@ scan_custom_framework_scanning_cluster_and_file_scope_testing"
 
     FAILURES=0
 
-    # We use the python executable found earlier or the one from the venv
-    SYSTEST_PYTHON="python3"
+    # Prefer the virtualenv interpreter; otherwise use python3.11 if available
+    if [ -x "systests_python_env/bin/python" ]; then
+      SYSTEST_PYTHON="systests_python_env/bin/python"
+    elif [ -n "${SYSTEST_PYTHON_BIN:-}" ]; then
+      SYSTEST_PYTHON="${SYSTEST_PYTHON_BIN}"
+    else
+      SYSTEST_PYTHON="python3"
+    fi
+
+    log "System tests will run with: $SYSTEST_PYTHON ($($SYSTEST_PYTHON --version 2>/dev/null || true))"
 
     # Run tests
     for t in $TESTS; do
