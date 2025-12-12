@@ -87,15 +87,15 @@ elif command -v python >/dev/null 2>&1; then
   PYTHON=python
 fi
 
-# Prefer Python 3.11 for system-tests (Python 3.12 removes 'imp', used by some deps)
+# Prefer Python 3.9 for system-tests (matches historical CI workflow)
 SYSTEST_PYTHON_BIN=""
-if command -v python3.11 >/dev/null 2>&1; then
-  SYSTEST_PYTHON_BIN=python3.11
+if command -v python3.9 >/dev/null 2>&1; then
+  SYSTEST_PYTHON_BIN=python3.9
 fi
 
-# If you want system-tests to fall back instead of failing when 3.11 is missing,
-# set SYSTEST_REQUIRE_PY311=0.
-: "${SYSTEST_REQUIRE_PY311:=1}"
+# If you want system-tests to fall back instead of failing when 3.9 is missing,
+# set SYSTEST_REQUIRE_PY39=0.
+: "${SYSTEST_REQUIRE_PY39:=1}"
 
 if [ -z "$PYTHON" ]; then
   log "python3 (or python) not found in PATH."
@@ -173,14 +173,23 @@ else
       # The script expects to run inside the dir
       chmod +x ./create_env.sh
 
-      # Require Python 3.11 by default (system-tests deps are not Python 3.12 compatible)
+      # Require Python 3.9 by default (matches b-binary-build-and-e2e-tests.yaml)
       if [ -z "${SYSTEST_PYTHON_BIN:-}" ]; then
-        if is_true "${SYSTEST_REQUIRE_PY311}"; then
-          log "python3.11 not found in PATH; refusing to run system-tests because Python 3.12+ will fail (missing 'imp')."
-          log "Install python3.11 or set SYSTEST_REQUIRE_PY311=0 to allow fallback."
-          exit 4
+        if is_true "${SYSTEST_REQUIRE_PY39}"; then
+          log "python3.9 not found in PATH; refusing to run system-tests because other Python versions may fail (deps/tooling mismatch)."
+          log "Install python3.9 or set SYSTEST_REQUIRE_PY39=0 to allow fallback."
+
+          # Honor E2E_FAIL_ON_ERROR: if enabled, fail the release; otherwise skip system tests.
+          if is_true "${E2E_FAIL_ON_ERROR}"; then
+            exit 4
+          else
+            log "E2E_FAIL_ON_ERROR disabled -> skipping system tests due to missing python3.9."
+            cd "$PUSHED_DIR"
+            rm -rf "$SYSTEST_DIR"
+            exit 0
+          fi
         else
-          log "python3.11 not found in PATH; continuing with default python (may fail if python3 points to 3.12+)."
+          log "python3.9 not found in PATH; continuing with default python (may fail depending on deps)."
         fi
       else
         log "Using ${SYSTEST_PYTHON_BIN} for system-tests environment creation"
@@ -235,13 +244,22 @@ scan_custom_framework_scanning_cluster_and_file_scope_testing"
     SYSTEST_PY_VER="$($SYSTEST_PYTHON --version 2>/dev/null || true)"
     log "System tests will run with: $SYSTEST_PYTHON ($SYSTEST_PY_VER)"
 
-    # Abort if the venv ended up on Python 3.12+ (known to fail due to removed stdlib 'imp')
-    if is_true "${SYSTEST_REQUIRE_PY311}"; then
+    # Abort if the venv ended up on Python 3.10+ when we're expecting 3.9 (matches historical CI)
+    if is_true "${SYSTEST_REQUIRE_PY39}"; then
       case "$SYSTEST_PY_VER" in
-        "Python 3.12."*|"Python 3.13."*|"Python 3.14."*)
-          log "System-tests virtualenv was created with $SYSTEST_PY_VER; refusing to run (expected Python 3.11.x)."
-          log "Ensure python3.11 is available and that create_env.sh uses it."
-          exit 5
+        "Python 3.10."*|"Python 3.11."*|"Python 3.12."*|"Python 3.13."*|"Python 3.14."*)
+          log "System-tests virtualenv was created with $SYSTEST_PY_VER; refusing to run (expected Python 3.9.x)."
+          log "Ensure python3.9 is available and that create_env.sh uses it."
+
+          # Honor E2E_FAIL_ON_ERROR: if enabled, fail the release; otherwise skip system tests.
+          if is_true "${E2E_FAIL_ON_ERROR}"; then
+            exit 5
+          else
+            log "E2E_FAIL_ON_ERROR disabled -> skipping system tests due to unexpected Python version."
+            cd "$PUSHED_DIR"
+            rm -rf "$SYSTEST_DIR"
+            exit 0
+          fi
           ;;
       esac
     fi
