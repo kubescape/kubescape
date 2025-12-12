@@ -11,6 +11,11 @@ on:
         required: false
         default: true
         type: boolean
+      skip_system_tests:
+        description: "Skip system tests (intended for hotfix releases)"
+        required: false
+        default: false
+        type: boolean
       release_tag:
         description: "Release tag to simulate (must contain -rc, e.g. v0.0.0-rc.0)"
         required: false
@@ -114,7 +119,7 @@ jobs:
           COSIGN_PWD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
           RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
           CLIENT: release
-          RUN_E2E: "true"
+          RUN_E2E: ${{ inputs.skip_system_tests == true && 'false' || 'true' }}
           KUBESCAPE_SKIP_UPDATE_CHECK: "true"
           CUSTOMER: ${{ secrets.CUSTOMER }}
           USERNAME: ${{ secrets.USERNAME }}
@@ -123,3 +128,10 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: System Tests Report
+        uses: mikepenz/action-junit-report@v5
+        if: always()
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          report_paths: "test-results/system-tests/**/results_xml_format/**.xml"

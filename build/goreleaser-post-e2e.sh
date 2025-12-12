@@ -23,6 +23,19 @@ log() {
   printf '%s [goreleaser-post-e2e] %s\n' "$(_now)" "$*"
 }
 
+# GitHub Actions log grouping helpers (no-op outside Actions)
+gha_group_start() {
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    # Titles must be on a single line
+    printf '::group::%s\n' "$*"
+  fi
+}
+gha_group_end() {
+  if [ "${GITHUB_ACTIONS:-}" = "true" ]; then
+    printf '::endgroup::\n'
+  fi
+}
+
 # Small helper to interpret various truthy forms (1/true/yes/y)
 is_true() {
   case "${1:-}" in
@@ -121,6 +134,7 @@ if [ ! -f "$SMOKE_RUNNER" ]; then
   fi
 fi
 
+gha_group_start "Smoke tests"
 log "Running smoke tests with $PYTHON $SMOKE_RUNNER \"$ART_PATH\""
 # Run the test runner, propagate exit code
 set +e
@@ -132,8 +146,9 @@ if [ $rc -eq 0 ]; then
   log "Smoke/e2e tests passed (exit code 0)."
 fi
 
-
 log "Smoke/e2e tests exited with code: $rc"
+gha_group_end
+
 if [ $rc -ne 0 ]; then
   if is_true "${E2E_FAIL_ON_ERROR}"; then
     log "E2E_FAIL_ON_ERROR enabled -> failing the release (exit code $rc)."
@@ -264,30 +279,59 @@ scan_custom_framework_scanning_cluster_and_file_scope_testing"
       esac
     fi
 
+    # Where to store per-test logs (helps diagnosing failures in CI)
+    RESULTS_DIR="$SYSTEST_DIR/results"
+    mkdir -p "$RESULTS_DIR"
+
     # Run tests
     for t in $TESTS; do
+      gha_group_start "System test: $t"
       log "Running system test: $t"
+
+      LOG_FILE="$RESULTS_DIR/${t}.log"
 
       set +e
       # Note: We must pass the absolute path to kubescape binary
+      # Capture output to file and also print to console for live feedback.
       $SYSTEST_PYTHON systest-cli.py \
         -t "$t" \
         -b production \
         -c CyberArmorTests \
         --duration 3 \
         --logger DEBUG \
-        --kwargs kubescape="$ART_PATH"
+        --kwargs kubescape="$ART_PATH" 2>&1 | tee "$LOG_FILE"
 
       t_rc=$?
       set -e
 
       if [ $t_rc -ne 0 ]; then
-        log "Test $t FAILED."
+        log "Test $t FAILED. (log: $LOG_FILE)"
         FAILURES=$((FAILURES + 1))
       else
-        log "Test $t PASSED."
+        log "Test $t PASSED. (log: $LOG_FILE)"
       fi
+      gha_group_end
     done
+
+    # Copy JUnit XML results (if any) into a stable workspace path for reporting
+    # Old workflow used glob '**/results_xml_format/**.xml'
+    DEST_DIR="$REPO_ROOT/test-results/system-tests"
+    mkdir -p "$DEST_DIR"
+
+    if find "$SYSTEST_DIR" -type f -path "*/results_xml_format/*.xml" -print -quit 2>/dev/null | grep -q .; then
+      gha_group_start "Collect system-tests JUnit XML"
+      log "Copying system-tests JUnit XML results into: $DEST_DIR"
+      # Preserve directory structure under results_xml_format to avoid filename collisions
+      find "$SYSTEST_DIR" -type f -path "*/results_xml_format/*.xml" -print0 2>/dev/null | while IFS= read -r -d '' f; do
+        rel="${f#"$SYSTEST_DIR"/}"
+        out_dir="$DEST_DIR/$(dirname "$rel")"
+        mkdir -p "$out_dir"
+        cp -f "$f" "$out_dir/"
+      done
+      gha_group_end
+    else
+      log "No system-tests JUnit XML results found under results_xml_format/."
+    fi
 
     # Cleanup
     # deactivate 2>/dev/null || true
