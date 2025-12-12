@@ -3,8 +3,10 @@ import smoke_utils
 import sys
 
 
-all_files = os.path.join("..", "examples", "online-boutique", "*.yaml")
-single_file = os.path.join("..", "examples", "online-boutique", "frontend.yaml")
+curr_dir = os.path.dirname(os.path.realpath(__file__))
+# examples/online-boutique/*.yaml is at ../examples/online-boutique/*.yaml relative to this script
+all_files = os.path.join(curr_dir, "..", "examples", "online-boutique", "*.yaml")
+single_file = os.path.join(curr_dir, "..", "examples", "online-boutique", "frontend.yaml")
 
 
 def scan_all(kubescape_exec: str):

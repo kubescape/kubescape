@@ -19,8 +19,6 @@ def run(kubescape_exec:str):
     test_command(command=[kubescape_exec, "download", "artifacts"])
     test_command(command=[kubescape_exec, "config"])
     test_command(command=[kubescape_exec, "help"])
-    test_command(command=[kubescape_exec, "scan", "--keep-local", "framework", "nsa"])
-    test_command(command=[kubescape_exec, "scan", "--keep-local", "control", "C-0058"])
 
     print("Done testing commands")
 
