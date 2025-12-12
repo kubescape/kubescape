@@ -94,3 +94,4 @@ jobs:
           COSIGN_PWD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
           RELEASE: ${{ needs.retag.outputs.NEW_TAG }}
           CLIENT: release
+          RUN_E2E: "true"
