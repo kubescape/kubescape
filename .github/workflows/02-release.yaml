@@ -129,9 +129,17 @@ jobs:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
 
+      - name: List collected system-test results (debug)
+        if: always()
+        run: |
+          echo "Listing test-results/system-tests (if any):"
+          ls -laR test-results/system-tests || true
+
       - name: System Tests Report
         uses: mikepenz/action-junit-report@v5
         if: always()
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           report_paths: "test-results/system-tests/**/results_xml_format/**.xml"
+          annotate_only: true
+          job_summary: true
