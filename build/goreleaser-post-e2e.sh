@@ -93,6 +93,10 @@ if command -v python3.11 >/dev/null 2>&1; then
   SYSTEST_PYTHON_BIN=python3.11
 fi
 
+# If you want system-tests to fall back instead of failing when 3.11 is missing,
+# set SYSTEST_REQUIRE_PY311=0.
+: "${SYSTEST_REQUIRE_PY311:=1}"
+
 if [ -z "$PYTHON" ]; then
   log "python3 (or python) not found in PATH."
   if is_true "${E2E_FAIL_ON_ERROR}"; then
@@ -169,14 +173,20 @@ else
       # The script expects to run inside the dir
       chmod +x ./create_env.sh
 
-      # Ensure create_env.sh runs with Python 3.11 when available
-      if [ -n "${SYSTEST_PYTHON_BIN:-}" ]; then
+      # Require Python 3.11 by default (system-tests deps are not Python 3.12 compatible)
+      if [ -z "${SYSTEST_PYTHON_BIN:-}" ]; then
+        if is_true "${SYSTEST_REQUIRE_PY311}"; then
+          log "python3.11 not found in PATH; refusing to run system-tests because Python 3.12+ will fail (missing 'imp')."
+          log "Install python3.11 or set SYSTEST_REQUIRE_PY311=0 to allow fallback."
+          exit 4
+        else
+          log "python3.11 not found in PATH; continuing with default python (may fail if python3 points to 3.12+)."
+        fi
+      else
         log "Using ${SYSTEST_PYTHON_BIN} for system-tests environment creation"
         export PYTHON="${SYSTEST_PYTHON_BIN}"
         export PYTHON_BIN="${SYSTEST_PYTHON_BIN}"
         export Python_BIN="${SYSTEST_PYTHON_BIN}"
-      else
-        log "python3.11 not found in PATH; system-tests may fail if python3 points to 3.12+"
       fi
 
       ./create_env.sh >/dev/null 2>&1 || log "Warning: create_env.sh returned non-zero"
@@ -222,7 +232,19 @@ scan_custom_framework_scanning_cluster_and_file_scope_testing"
       SYSTEST_PYTHON="python3"
     fi
 
-    log "System tests will run with: $SYSTEST_PYTHON ($($SYSTEST_PYTHON --version 2>/dev/null || true))"
+    SYSTEST_PY_VER="$($SYSTEST_PYTHON --version 2>/dev/null || true)"
+    log "System tests will run with: $SYSTEST_PYTHON ($SYSTEST_PY_VER)"
+
+    # Abort if the venv ended up on Python 3.12+ (known to fail due to removed stdlib 'imp')
+    if is_true "${SYSTEST_REQUIRE_PY311}"; then
+      case "$SYSTEST_PY_VER" in
+        "Python 3.12."*|"Python 3.13."*|"Python 3.14."*)
+          log "System-tests virtualenv was created with $SYSTEST_PY_VER; refusing to run (expected Python 3.11.x)."
+          log "Ensure python3.11 is available and that create_env.sh uses it."
+          exit 5
+          ;;
+      esac
+    fi
 
     # Run tests
     for t in $TESTS; do
