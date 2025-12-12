@@ -11,6 +11,11 @@ on:
         required: false
         default: true
         type: boolean
+      release_tag:
+        description: "Release tag to simulate (must contain -rc, e.g. v0.0.0-rc.0)"
+        required: false
+        default: "v0.0.0-rc.0"
+        type: string
 jobs:
   retag:
     outputs:
@@ -21,6 +26,7 @@ jobs:
       - id: tag-calculator
         uses: ./.github/actions/tag-action
         with:
+          ORIGINAL_TAG: ${{ inputs.release_tag != '' && inputs.release_tag || github.ref_name }}
           SUB_STRING: "-rc"
   release:
     permissions:
