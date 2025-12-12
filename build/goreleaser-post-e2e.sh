@@ -120,14 +120,130 @@ set -e
 
 if [ $rc -eq 0 ]; then
   log "Smoke/e2e tests passed (exit code 0)."
-  exit 0
 fi
 
+
 log "Smoke/e2e tests exited with code: $rc"
-if is_true "${E2E_FAIL_ON_ERROR}"; then
-  log "E2E_FAIL_ON_ERROR enabled -> failing the release (exit code $rc)."
-  exit $rc
-else
-  log "E2E_FAIL_ON_ERROR disabled -> continuing despite test failures."
-  exit 0
+if [ $rc -ne 0 ]; then
+  if is_true "${E2E_FAIL_ON_ERROR}"; then
+    log "E2E_FAIL_ON_ERROR enabled -> failing the release (exit code $rc)."
+    exit $rc
+  else
+    log "E2E_FAIL_ON_ERROR disabled -> continuing despite test failures."
+  fi
 fi
+
+# -----------------------------------------------------------------------------
+# System Tests (replicating b-binary-build-and-e2e-tests.yaml)
+# -----------------------------------------------------------------------------
+
+log "Starting System Tests (armosec/system-tests)..."
+
+# Check if we have connectivity to a cluster
+if ! command -v kubectl >/dev/null 2>&1; then
+  log "kubectl not found. Skipping system tests that require a cluster."
+elif ! kubectl config current-context >/dev/null 2>&1; then
+  log "No active kubernetes context found (kubectl config current-context failed). Skipping system tests."
+else
+  log "Kubernetes cluster connection verified."
+  
+  # Create a temporary directory for system tests
+  SYSTEST_DIR=$(mktemp -d)
+  log "Cloning system-tests into $SYSTEST_DIR"
+  
+  if git clone --depth 1 https://github.com/armosec/system-tests.git "$SYSTEST_DIR"; then
+    
+    # Save current directory to return later
+    PUSHED_DIR=$(pwd)
+    cd "$SYSTEST_DIR"
+
+    # Setup Python Environment
+    log "Setting up system tests python environment..."
+    if [ -f "./create_env.sh" ]; then
+      # The script expects to run inside the dir
+      chmod +x ./create_env.sh
+      ./create_env.sh >/dev/null 2>&1 || log "Warning: create_env.sh returned non-zero"
+      
+      # Activate the environment if it exists
+      if [ -f "systests_python_env/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        . "systests_python_env/bin/activate"
+      else
+        log "Warning: systests_python_env/bin/activate not found. Trying global python."
+      fi
+    else
+      log "create_env.sh not found. Attempting to use existing python environment."
+    fi
+
+    # List of tests to run (from b-binary-build-and-e2e-tests.yaml defaults)
+    TESTS="scan_nsa \
+scan_mitre \
+scan_with_exceptions \
+scan_repository \
+scan_local_file \
+scan_local_glob_files \
+scan_local_list_of_files \
+scan_nsa_and_submit_to_backend \
+scan_mitre_and_submit_to_backend \
+scan_local_repository_and_submit_to_backend \
+scan_repository_from_url_and_submit_to_backend \
+scan_with_custom_framework \
+scan_customer_configuration \
+scan_compliance_score \
+scan_custom_framework_scanning_file_scope_testing \
+scan_custom_framework_scanning_cluster_scope_testing \
+scan_custom_framework_scanning_cluster_and_file_scope_testing"
+
+    FAILURES=0
+    
+    # We use the python executable found earlier or the one from the venv
+    SYSTEST_PYTHON="python3"
+    
+    # Run tests
+    for t in $TESTS; do
+      log "Running system test: $t"
+      
+      set +e
+      # Note: We must pass the absolute path to kubescape binary
+      $SYSTEST_PYTHON systest-cli.py \
+        -t "$t" \
+        -b production \
+        -c CyberArmorTests \
+        --duration 3 \
+        --logger DEBUG \
+        --kwargs kubescape="$ART_PATH"
+      
+      t_rc=$?
+      set -e
+      
+      if [ $t_rc -ne 0 ]; then
+        log "Test $t FAILED."
+        FAILURES=$((FAILURES + 1))
+      else
+        log "Test $t PASSED."
+      fi
+    done
+
+    # Cleanup
+    # deactivate 2>/dev/null || true
+    cd "$PUSHED_DIR"
+    rm -rf "$SYSTEST_DIR"
+
+    if [ $FAILURES -gt 0 ]; then
+      log "System tests completed with $FAILURES failures."
+      if is_true "${E2E_FAIL_ON_ERROR}"; then
+        exit 1
+      fi
+    else
+      log "All system tests passed."
+    fi
+
+  else
+    log "Failed to clone system-tests repo. Skipping."
+    if is_true "${E2E_FAIL_ON_ERROR}"; then
+       exit 1
+    fi
+  fi
+fi
+
+exit 0

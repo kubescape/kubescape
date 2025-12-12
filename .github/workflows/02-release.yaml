@@ -4,6 +4,13 @@ on:
   push:
     tags:
       - "v*.*.*-rc.*"
+  workflow_dispatch:
+    inputs:
+      skip_publish:
+        description: "Skip publishing artifacts"
+        required: false
+        default: true
+        type: boolean
 jobs:
   retag:
     outputs:
@@ -75,7 +82,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean
+          args: release --clean ${{ inputs.skip_publish == true && '--skip=publish' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
           COSIGN_PWD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
