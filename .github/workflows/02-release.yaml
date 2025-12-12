@@ -69,7 +69,7 @@ jobs:
             libpq5 \
             libpq-dev \
             gcc \
-            python3.11-dev
+            python3-dev
           sudo rm -rf /var/lib/apt/lists/*
 
       - name: Install Cosign
