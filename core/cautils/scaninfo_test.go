@@ -88,6 +88,16 @@ func TestGetScanningContext(t *testing.T) {
 			input: os.TempDir(),
 			want:  ContextDir,
 		},
+		{
+			name:  "self-hosted GitLab URL that can't be cloned",
+			input: "https://gitlab.private-domain.com/my-org/my-repo.git",
+			want:  ContextDir, // Should return ContextDir when clone fails, not try to treat as local path
+		},
+		{
+			name:  "http URL that can't be cloned",
+			input: "http://gitlab.example.com/org/repo",
+			want:  ContextDir, // Should return ContextDir when clone fails, not try to treat as local path
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
