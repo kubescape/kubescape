@@ -83,6 +83,11 @@ jobs:
       - uses: anchore/sbom-action/download-syft@v0
         name: Setup Syft
 
+      - name: Create k8s Kind Cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: kubescape-e2e
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:

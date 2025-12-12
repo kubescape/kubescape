@@ -55,7 +55,7 @@ if ! is_true "${RUN_E2E}"; then
   exit 0
 fi
 
-# Locate the amd64 artifact in dist/. 
+# Locate the amd64 artifact in dist/.
 # Goreleaser v2 puts binaries in dist/<id>_<os>_<arch>_<version>/<binary>
 # Example: dist/cli_linux_amd64_v1/kubescape
 ART_PATH=""
@@ -146,13 +146,13 @@ elif ! kubectl config current-context >/dev/null 2>&1; then
   log "No active kubernetes context found (kubectl config current-context failed). Skipping system tests."
 else
   log "Kubernetes cluster connection verified."
-  
+
   # Create a temporary directory for system tests
   SYSTEST_DIR=$(mktemp -d)
   log "Cloning system-tests into $SYSTEST_DIR"
-  
+
   if git clone --depth 1 https://github.com/armosec/system-tests.git "$SYSTEST_DIR"; then
-    
+
     # Save current directory to return later
     PUSHED_DIR=$(pwd)
     cd "$SYSTEST_DIR"
@@ -163,7 +163,7 @@ else
       # The script expects to run inside the dir
       chmod +x ./create_env.sh
       ./create_env.sh >/dev/null 2>&1 || log "Warning: create_env.sh returned non-zero"
-      
+
       # Activate the environment if it exists
       if [ -f "systests_python_env/bin/activate" ]; then
         # shellcheck disable=SC1091
@@ -195,14 +195,14 @@ scan_custom_framework_scanning_cluster_scope_testing \
 scan_custom_framework_scanning_cluster_and_file_scope_testing"
 
     FAILURES=0
-    
+
     # We use the python executable found earlier or the one from the venv
     SYSTEST_PYTHON="python3"
-    
+
     # Run tests
     for t in $TESTS; do
       log "Running system test: $t"
-      
+
       set +e
       # Note: We must pass the absolute path to kubescape binary
       $SYSTEST_PYTHON systest-cli.py \
@@ -212,10 +212,10 @@ scan_custom_framework_scanning_cluster_and_file_scope_testing"
         --duration 3 \
         --logger DEBUG \
         --kwargs kubescape="$ART_PATH"
-      
+
       t_rc=$?
       set -e
-      
+
       if [ $t_rc -ne 0 ]; then
         log "Test $t FAILED."
         FAILURES=$((FAILURES + 1))

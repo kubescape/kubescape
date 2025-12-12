@@ -38,7 +38,7 @@ builds:
       - -X "github.com/kubescape/kubescape/v3/core/cautils.Client={{.Env.CLIENT}}"
     hooks:
       post:
-        - "/bin/sh -lc 'GOARCH={{ .Arch }} sh build/goreleaser-post-e2e.sh'"
+        - "/bin/sh -lc 'sh build/goreleaser-post-e2e.sh'"
   - id: downloader
     dir: downloader
     binary: downloader
