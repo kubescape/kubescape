@@ -113,7 +113,7 @@ jobs:
         with:
           distribution: goreleaser
           version: latest
-          args: release --clean ${{ inputs.skip_publish == true && '--skip=publish' || '' }}
+          args: release --clean --tag ${{ needs.retag.outputs.NEW_TAG }} ${{ inputs.skip_publish == true && '--skip=publish' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN || secrets.GITHUB_TOKEN }}
           COSIGN_PWD: ${{ secrets.COSIGN_PRIVATE_KEY_V1_PASSWORD }}
