@@ -29,6 +29,8 @@ builds:
       - CGO_ENABLED=0
     goos:
       - linux
+      - darwin
+      - windows
     goarch:
       - amd64
       - arm64
@@ -136,7 +138,7 @@ krews:
     short_description: Scan resources and cluster configs against security frameworks.
 
 release:
-  draft: true
+  draft: false
   footer: >-
 
     ---

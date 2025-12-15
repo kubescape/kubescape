@@ -8,20 +8,39 @@ KUBESCAPE_EXEC=kubescape
 determine_os_and_arch() {
     osName=$(uname -s)
     case $osName in
-        *MINGW*) osName=windows ;;
-        Darwin*) osName=macos ;;
-        *) osName=ubuntu ;;
+        Linux*) osName=linux ;;
+        Darwin*) osName=darwin ;;
+        *MINGW*|*CYGWIN*|*MSYS*)
+            echo -e "\033[31mError: Windows is not supported by this script. Please use the PowerShell installer or download manually from:"
+            echo -e "\033[1;35;40mhttps://github.com/kubescape/kubescape/releases"
+            exit 1
+            ;;
+        *)
+            echo -e "\033[31mError: Unsupported operating system: $osName"
+            exit 1
+            ;;
     esac
 
     arch=$(uname -m)
     case $arch in
-        *aarch64*|*arm64*) arch="-arm64" ;;
-        *x86_64*) arch="" ;;
+        x86_64|amd64) arch="amd64" ;;
+        aarch64|arm64) arch="arm64" ;;
         *)
-            echo -e "\033[33mArchitecture $arch may be unsupported, will try to install the amd64 one anyway."
-            arch=""
+            echo -e "\033[31mError: Unsupported architecture: $arch"
+            exit 1
             ;;
     esac
+}
+
+# Function to get the latest release version from GitHub API
+get_latest_version() {
+    local latest_release
+    latest_release=$(curl -s "https://api.github.com/repos/kubescape/kubescape/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    if [ -z "$latest_release" ]; then
+        echo -e "\033[31mError: Failed to fetch latest release version"
+        exit 1
+    fi
+    echo "$latest_release"
 }
 
 # Function to remove old installations
@@ -33,25 +52,42 @@ remove_old_install() {
 }
 
 # Parse command-line arguments
+VERSION=""
 while getopts v: option; do
     case ${option} in
-        v) RELEASE="download/${OPTARG}";;
+        v) VERSION="${OPTARG}";;
         *) ;;
     esac
 done
-
-[ -z "${RELEASE}" ] && RELEASE="latest/download"
 
 echo -e "\033[0;36mInstalling Kubescape..."
 
 determine_os_and_arch
 
+# Get version (use provided or fetch latest)
+if [ -z "${VERSION}" ]; then
+    VERSION=$(get_latest_version)
+    echo -e "\033[0;36mLatest version: $VERSION"
+fi
+
+# Remove 'v' prefix if present for the filename
+VERSION_NUM="${VERSION#v}"
+
 mkdir -p $BASE_DIR
 
 OUTPUT=$BASE_DIR/$KUBESCAPE_EXEC
-DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/${RELEASE}/kubescape${arch}-${osName}-latest"
+# New URL pattern: kubescape_{version}_{os}_{arch}
+DOWNLOAD_URL="https://github.com/kubescape/kubescape/releases/download/${VERSION}/kubescape_${VERSION_NUM}_${osName}_${arch}"
 
+echo -e "\033[0;36mDownloading from: $DOWNLOAD_URL"
 curl --progress-bar -L $DOWNLOAD_URL -o $OUTPUT
+
+# Verify download was successful
+if [ ! -s "$OUTPUT" ]; then
+    echo -e "\033[31mError: Download failed or file is empty"
+    rm -f "$OUTPUT"
+    exit 1
+fi
 
 # Determine install directory
 install_dir=/usr/local/bin
