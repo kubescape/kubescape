@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
@@ -75,7 +76,11 @@ func getKustomizeDirectoryName(path string) string {
 func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[string][]workloadinterface.IMetadata, []error) {
 
 	fSys := filesys.MakeFsOnDisk()
-	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	// Use LoadRestrictionsNone to allow loading resources from outside the kustomize directory.
+	// This is necessary for overlays that reference base configurations in parent directories.
+	opts := krusty.MakeDefaultOptions()
+	opts.LoadRestrictions = types.LoadRestrictionsNone
+	kustomizer := krusty.MakeKustomizer(opts)
 	resmap, err := kustomizer.Run(fSys, kustomizeDirectoryPath)
 
 	if err != nil {
