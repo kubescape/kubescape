@@ -140,6 +140,7 @@ type ScanInfo struct {
 	UseDefaultMatchers    bool
 	ChartPath             string
 	FilePath              string
+	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
 	cleanups              []func()
 }

@@ -61,6 +61,7 @@ type PostureReportWithSeverity struct {
 	Attributes           []reportsummary.PostureAttributes `json:"attributes"`
 	Results              []ResultWithSeverity              `json:"results,omitempty"`
 	Metadata             reporthandlingv2.Metadata         `json:"metadata,omitempty"`
+	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor
@@ -103,11 +104,23 @@ func enrichResultsWithSeverity(results []resourcesresults.Result, controlSummari
 
 // ConvertToPostureReportWithSeverity converts PostureReport to PostureReportWithSeverity
 func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) *PostureReportWithSeverity {
+	return ConvertToPostureReportWithSeverityAndLabels(report, nil, nil)
+}
+
+// ConvertToPostureReportWithSeverityAndLabels converts PostureReport to PostureReportWithSeverity
+// and extracts specified labels from workloads
+func ConvertToPostureReportWithSeverityAndLabels(report *reporthandlingv2.PostureReport, labelsToCopy []string, allResources map[string]workloadinterface.IMetadata) *PostureReportWithSeverity {
 	if report == nil {
 		return nil
 	}
 	enrichedControls := enrichControlsWithSeverity(report.SummaryDetails.Controls)
 	enrichedResults := enrichResultsWithSeverity(report.Results, report.SummaryDetails.Controls)
+
+	// Extract labels from resources if labelsToCopy is specified
+	var resourceLabels map[string]map[string]string
+	if len(labelsToCopy) > 0 && allResources != nil {
+		resourceLabels = extractResourceLabels(allResources, labelsToCopy)
+	}
 
 	return &PostureReportWithSeverity{
 		ReportGenerationTime: report.ReportGenerationTime.Format("2006-01-02T15:04:05Z07:00"),
@@ -126,11 +139,44 @@ func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) 
 			Score:                     report.SummaryDetails.Score,
 			ComplianceScore:           report.SummaryDetails.ComplianceScore,
 		},
-		Resources:  report.Resources,
-		Attributes: report.Attributes,
-		Results:    enrichedResults,
-		Metadata:   report.Metadata,
+		Resources:      report.Resources,
+		Attributes:     report.Attributes,
+		Results:        enrichedResults,
+		Metadata:       report.Metadata,
+		ResourceLabels: resourceLabels,
 	}
+}
+
+// extractResourceLabels extracts specified labels from all resources
+func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, labelsToCopy []string) map[string]map[string]string {
+	resourceLabels := make(map[string]map[string]string)
+
+	for resourceID, resource := range allResources {
+		// IMetadata doesn't have GetLabels, need to cast to IBasicWorkload
+		basicWorkload, ok := resource.(workloadinterface.IBasicWorkload)
+		if !ok {
+			continue
+		}
+
+		labels := basicWorkload.GetLabels()
+		if labels == nil {
+			continue
+		}
+
+		extractedLabels := make(map[string]string)
+		for _, labelKey := range labelsToCopy {
+			if value, exists := labels[labelKey]; exists {
+				extractedLabels[labelKey] = value
+			}
+		}
+
+		// Only add to result if at least one label was found
+		if len(extractedLabels) > 0 {
+			resourceLabels[resourceID] = extractedLabels
+		}
+	}
+
+	return resourceLabels
 }
 
 // FinalizeResults finalize the results objects by copying data from map to lists

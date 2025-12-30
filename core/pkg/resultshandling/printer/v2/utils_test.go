@@ -1,12 +1,14 @@
 package printer
 
 import (
+	"encoding/json"
 	"testing"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
 	"github.com/stretchr/testify/assert"
 )
@@ -738,6 +740,134 @@ func TestSetSeverityToSummaryMap(t *testing.T) {
 				if tt.originalMap[k].NumberOfFixableCVEs != tt.want[k].NumberOfFixableCVEs {
 					t.Errorf("%s failed for fixable CVEs number, got = %v, want %v", tt.name, tt.originalMap[k].NumberOfFixableCVEs, tt.want[k].NumberOfFixableCVEs)
 				}
+			}
+		})
+	}
+}
+
+func createWorkloadWithLabels(name, namespace string, labels map[string]string) workloadinterface.IMetadata {
+	// Convert labels to map[string]interface{} for JSON marshaling
+	labelsInterface := make(map[string]interface{})
+	for k, v := range labels {
+		labelsInterface[k] = v
+	}
+
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": namespace,
+			"labels":    labelsInterface,
+		},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"spec": map[string]interface{}{
+					"containers": []interface{}{},
+				},
+			},
+		},
+	}
+	objBytes, _ := json.Marshal(obj)
+	workload, _ := workloadinterface.NewWorkload(objBytes)
+	return workload
+}
+
+func TestExtractResourceLabels(t *testing.T) {
+	tests := []struct {
+		name         string
+		allResources map[string]workloadinterface.IMetadata
+		labelsToCopy []string
+		want         map[string]map[string]string
+	}{
+		{
+			name:         "empty resources",
+			allResources: map[string]workloadinterface.IMetadata{},
+			labelsToCopy: []string{"app", "team"},
+			want:         map[string]map[string]string{},
+		},
+		{
+			name:         "empty labels to copy",
+			allResources: map[string]workloadinterface.IMetadata{},
+			labelsToCopy: []string{},
+			want:         map[string]map[string]string{},
+		},
+		{
+			name: "single resource with matching labels",
+			allResources: map[string]workloadinterface.IMetadata{
+				"resource-1": createWorkloadWithLabels("test-deploy", "default", map[string]string{
+					"app":     "myapp",
+					"team":    "platform",
+					"version": "v1",
+				}),
+			},
+			labelsToCopy: []string{"app", "team"},
+			want: map[string]map[string]string{
+				"resource-1": {
+					"app":  "myapp",
+					"team": "platform",
+				},
+			},
+		},
+		{
+			name: "single resource with partial matching labels",
+			allResources: map[string]workloadinterface.IMetadata{
+				"resource-1": createWorkloadWithLabels("test-deploy", "default", map[string]string{
+					"app": "myapp",
+				}),
+			},
+			labelsToCopy: []string{"app", "team"},
+			want: map[string]map[string]string{
+				"resource-1": {
+					"app": "myapp",
+				},
+			},
+		},
+		{
+			name: "single resource with no matching labels",
+			allResources: map[string]workloadinterface.IMetadata{
+				"resource-1": createWorkloadWithLabels("test-deploy", "default", map[string]string{
+					"version": "v1",
+				}),
+			},
+			labelsToCopy: []string{"app", "team"},
+			want:         map[string]map[string]string{},
+		},
+		{
+			name: "multiple resources with various labels",
+			allResources: map[string]workloadinterface.IMetadata{
+				"resource-1": createWorkloadWithLabels("deploy-1", "default", map[string]string{
+					"app":  "app1",
+					"team": "team1",
+				}),
+				"resource-2": createWorkloadWithLabels("deploy-2", "default", map[string]string{
+					"app": "app2",
+				}),
+				"resource-3": createWorkloadWithLabels("deploy-3", "default", map[string]string{
+					"version": "v1",
+				}),
+			},
+			labelsToCopy: []string{"app", "team"},
+			want: map[string]map[string]string{
+				"resource-1": {
+					"app":  "app1",
+					"team": "team1",
+				},
+				"resource-2": {
+					"app": "app2",
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractResourceLabels(tt.allResources, tt.labelsToCopy)
+			assert.Equal(t, len(tt.want), len(got), "number of resources with extracted labels should match")
+			for resourceID, wantLabels := range tt.want {
+				gotLabels, ok := got[resourceID]
+				assert.True(t, ok, "resource %s should be present in result", resourceID)
+				assert.Equal(t, wantLabels, gotLabels, "labels for resource %s should match", resourceID)
 			}
 		})
 	}
