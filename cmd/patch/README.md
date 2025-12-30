@@ -73,7 +73,7 @@ We will demonstrate how to use the patch command with an example of [nginx](http
     sudo buildkitd
     ```
 
-2. In a seperate terminal, run the `kubescape patch` command: 
+2. In a separate terminal, run the `kubescape patch` command: 
     
     ```bash
     sudo kubescape patch --image docker.io/library/nginx:1.22
