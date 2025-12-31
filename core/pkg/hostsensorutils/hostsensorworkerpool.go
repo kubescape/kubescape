@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"github.com/kubescape/go-logger"
-	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 )
 
@@ -44,16 +43,17 @@ func (wp *workerPool) init(noOfPods ...int) {
 
 // The worker takes a job out of the chan, executes the request, and pushes the result to the results chan
 func (wp *workerPool) hostSensorWorker(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup, log *LogsMap) {
-	defer wg.Done()
-	for job := range wp.jobs {
-		hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
-		if err != nil && !log.isDuplicated(failedToGetData) {
-			logger.L().Ctx(ctx).Warning(failedToGetData, helpers.String("path", job.path), helpers.Error(err))
-			log.update(failedToGetData)
-			continue
-		}
-		wp.results <- hostSensorDataEnvelope
-	}
+	logger.L().Debug("Worker started")
+	// defer wg.Done()
+	// for job := range wp.jobs {
+	// 	hostSensorDataEnvelope, err := hsh.getResourcesFromPod(job.podName, job.nodeName, job.requestKind, job.path)
+	// 	if err != nil && !log.isDuplicated(failedToGetData) {
+	// 		logger.L().Ctx(ctx).Warning(failedToGetData, helpers.String("path", job.path), helpers.Error(err))
+	// 		log.update(failedToGetData)
+	// 		continue
+	// 	}
+	// 	wp.results <- hostSensorDataEnvelope
+	// }
 }
 
 func (wp *workerPool) createWorkerPool(ctx context.Context, hsh *HostSensorHandler, wg *sync.WaitGroup, log *LogsMap) {
