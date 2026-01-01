@@ -3,186 +3,154 @@ package hostsensorutils
 import (
 	"context"
 	stdjson "encoding/json"
-	"errors"
 	"fmt"
 	"reflect"
-	"strings"
-	"sync"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// getPodList clones the internal list of pods being watched as a map of pod names.
-func (hsh *HostSensorHandler) getPodList() map[string]string {
-	hsh.podListLock.RLock()
-	res := make(map[string]string, len(hsh.hostSensorPodNames))
-	for k, v := range hsh.hostSensorPodNames {
-		res[k] = v
+// mapResourceToPlural maps scanner resource types to their CRD plural names
+func mapResourceToPlural(r scannerResource) string {
+	switch r {
+	case OsReleaseFile:
+		return "osreleasefiles"
+	case KernelVersion:
+		return "kernelversions"
+	case LinuxSecurityHardeningStatus:
+		return "linuxsecurityhardeningstatuses"
+	case OpenPortsList:
+		return "openportslists"
+	case LinuxKernelVariables:
+		return "linuxkernelvariables"
+	case KubeletInfo:
+		return "kubeletinfos"
+	case KubeProxyInfo:
+		return "kubeproxyinfos"
+	case ControlPlaneInfo:
+		return "controlplaneinfos"
+	case CloudProviderInfo:
+		return "cloudproviderinfos"
+	case CNIInfo:
+		return "cniinfos"
+	default:
+		return ""
 	}
-	hsh.podListLock.RUnlock()
-
-	return res
 }
 
-// httpGetToPod sends the request to a pod using the HostSensorPort.
-func (hsh *HostSensorHandler) httpGetToPod(podName, path string) ([]byte, error) {
-	restProxy := hsh.k8sObj.KubernetesClient.CoreV1().Pods(hsh.daemonSet.Namespace).ProxyGet("http", podName, fmt.Sprintf("%d", hsh.hostSensorPort), path, map[string]string{})
-	return restProxy.DoRaw(hsh.k8sObj.Context)
-}
+// getCRDResources retrieves resources from CRDs and converts them to HostSensorDataEnvelope format
+func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType scannerResource) ([]hostsensor.HostSensorDataEnvelope, error) {
+	pluralName := mapResourceToPlural(resourceType)
+	if pluralName == "" {
+		return nil, fmt.Errorf("unsupported resource type: %s", resourceType)
+	}
 
-func (hsh *HostSensorHandler) getResourcesFromPod(podName, nodeName string, resourceKind scannerResource, path string) (hostsensor.HostSensorDataEnvelope, error) {
-	//  send the request and pack the response as an hostSensorDataEnvelope
-
-	resBytes, err := hsh.httpGetToPod(podName, path)
+	// List CRD resources
+	items, err := hsh.listCRDResources(ctx, pluralName, resourceType.String())
 	if err != nil {
-		return hostsensor.HostSensorDataEnvelope{}, err
+		return nil, err
 	}
 
-	hostSensorDataEnvelope := hostsensor.HostSensorDataEnvelope{}
-	hostSensorDataEnvelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
-	hostSensorDataEnvelope.SetKind(resourceKind.String())
-	hostSensorDataEnvelope.SetName(nodeName)
-	hostSensorDataEnvelope.SetData(resBytes)
-
-	return hostSensorDataEnvelope, nil
-}
-
-// forwardToPod is currently not implemented.
-func (hsh *HostSensorHandler) forwardToPod(podName, path string) ([]byte, error) {
-	// NOT IN USE:
-	// ---
-	// spawn port forwarding
-	// req := hsh.k8sObj.KubernetesClient.CoreV1().RESTClient().Post()
-	// req = req.Name(podName)
-	// req = req.Namespace(hsh.DaemonSet.Namespace)
-	// req = req.Resource("pods")
-	// req = req.SubResource("portforward")
-	// ----
-	// https://github.com/gianarb/kube-port-forward
-	// fullPath := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward",
-	// 	hsh.DaemonSet.Namespace, podName)
-	// transport, upgrader, err := spdy.RoundTripperFor(hsh.k8sObj.KubernetesClient.config)
-	// if err != nil {
-	// 	return nil, err
-	// }
-	// hostIP := strings.TrimLeft(req.RestConfig.Host, "htps:/")
-	// dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, &url.URL{Scheme: "http", Path: path, Host: hostIP})
-	return nil, errors.New("not implemented")
-}
-
-// sendAllPodsHTTPGETRequest fills the raw bytes response in the envelope and the node name, but not the GroupVersionKind
-// so the caller is responsible to convert the raw data to some structured data and add the GroupVersionKind details
-//
-// The function produces a worker-pool with a fixed number of workers.
-//
-// For each node the request is pushed to the jobs channel, the worker sends the request and pushes the result to the result channel.
-// When all workers have finished, the function returns a list of results
-func (hsh *HostSensorHandler) sendAllPodsHTTPGETRequest(ctx context.Context, path string, requestKind scannerResource) ([]hostsensor.HostSensorDataEnvelope, error) {
-	podList := hsh.getPodList()
-	res := make([]hostsensor.HostSensorDataEnvelope, 0, len(podList))
-	var wg sync.WaitGroup
-
-	// initialization of the channels
-	hsh.workerPool.init(len(podList))
-
-	// log is used to avoid log duplication
-	// coming from the different host-scanner instances
-	log := NewLogCoupling()
-
-	hsh.workerPool.hostSensorApplyJobs(podList, path, requestKind)
-	hsh.workerPool.hostSensorGetResults(&res)
-	hsh.workerPool.createWorkerPool(ctx, hsh, &wg, log)
-	hsh.workerPool.waitForDone(&wg)
-
-	return res, nil
-}
-
-// getVersion returns the version of the deployed host scanner.
-//
-// NOTE: we pick the version from the first responding pod.
-func (hsh *HostSensorHandler) getVersion() (string, error) {
-	// loop over pods and port-forward it to each of them
-	podList := hsh.getPodList()
-
-	// initialization of the channels
-	hsh.workerPool.init(len(podList))
-	hsh.workerPool.hostSensorApplyJobs(podList, "/version", "version")
-	for job := range hsh.workerPool.jobs {
-		resBytes, err := hsh.httpGetToPod(job.podName, job.path)
+	// Convert to HostSensorDataEnvelope format
+	result := make([]hostsensor.HostSensorDataEnvelope, 0, len(items))
+	for _, item := range items {
+		envelope, err := hsh.convertCRDToEnvelope(item, resourceType)
 		if err != nil {
-			return "", err
-		} else {
-			version := strings.ReplaceAll(string(resBytes), "\"", "")
-			version = strings.ReplaceAll(version, "\n", "")
-
-			return version, nil
+			logger.L().Warning("Failed to convert CRD to envelope",
+				helpers.String("kind", resourceType.String()),
+				helpers.String("name", item.GetName()),
+				helpers.Error(err))
+			continue
 		}
+		result = append(result, envelope)
 	}
 
-	return "", nil
+	logger.L().Debug("Retrieved resources from CRDs",
+		helpers.String("kind", resourceType.String()),
+		helpers.Int("count", len(result)))
+
+	return result, nil
 }
 
-// getKernelVariables returns the list of Linux Kernel variables.
-func (hsh *HostSensorHandler) getKernelVariables(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/LinuxKernelVariables", LinuxKernelVariables)
+// convertCRDToEnvelope converts a CRD unstructured object to HostSensorDataEnvelope
+func (hsh *HostSensorHandler) convertCRDToEnvelope(item unstructured.Unstructured, resourceType scannerResource) (hostsensor.HostSensorDataEnvelope, error) {
+	envelope := hostsensor.HostSensorDataEnvelope{}
+
+	// Set API version and kind
+	envelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
+	envelope.SetKind(resourceType.String())
+
+	// Set name (node name)
+	nodeName := item.GetName()
+	envelope.SetName(nodeName)
+
+	// Extract content from spec.content
+	content, found, err := unstructured.NestedString(item.Object, "spec", "content")
+	if err != nil {
+		return envelope, fmt.Errorf("failed to extract spec.content: %w", err)
+	}
+	if !found {
+		return envelope, fmt.Errorf("spec.content not found in CRD")
+	}
+
+	// Set data as raw bytes
+	envelope.SetData([]byte(content))
+
+	return envelope, nil
 }
 
-// getOpenPortsList returns the list of open ports.
-func (hsh *HostSensorHandler) getOpenPortsList(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/openedPorts", OpenPortsList)
-}
-
-// getLinuxSecurityHardeningStatus returns the list of LinuxSecurityHardeningStatus metadata.
-func (hsh *HostSensorHandler) getLinuxSecurityHardeningStatus(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/linuxSecurityHardening", LinuxSecurityHardeningStatus)
-}
-
-// getKubeletInfo returns the list of kubelet metadata.
-func (hsh *HostSensorHandler) getKubeletInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeletInfo", KubeletInfo)
-}
-
-// getKubeProxyInfo returns the list of kubeProxy metadata.
-func (hsh *HostSensorHandler) getKubeProxyInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/kubeProxyInfo", KubeProxyInfo)
-}
-
-// getControlPlaneInfo returns the list of controlPlaneInfo metadata
-func (hsh *HostSensorHandler) getControlPlaneInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/controlPlaneInfo", ControlPlaneInfo)
-}
-
-// getCloudProviderInfo returns the list of cloudProviderInfo metadata.
-func (hsh *HostSensorHandler) getCloudProviderInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/cloudProviderInfo", CloudProviderInfo)
-}
-
-// getCNIInfo returns the list of CNI metadata
-func (hsh *HostSensorHandler) getCNIInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/CNIInfo", CNIInfo)
-}
-
-// getKernelVersion returns the list of kernelVersion metadata.
-func (hsh *HostSensorHandler) getKernelVersion(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/kernelVersion", "KernelVersion")
-}
-
-// getOsReleaseFile returns the list of osRelease metadata.
+// getOsReleaseFile returns the list of osRelease metadata from CRDs.
 func (hsh *HostSensorHandler) getOsReleaseFile(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
-	// loop over pods and port-forward it to each of them
-	return hsh.sendAllPodsHTTPGETRequest(ctx, "/osRelease", "OsReleaseFile")
+	return hsh.getCRDResources(ctx, OsReleaseFile)
+}
+
+// getKernelVersion returns the list of kernelVersion metadata from CRDs.
+func (hsh *HostSensorHandler) getKernelVersion(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, KernelVersion)
+}
+
+// getLinuxSecurityHardeningStatus returns the list of LinuxSecurityHardeningStatus metadata from CRDs.
+func (hsh *HostSensorHandler) getLinuxSecurityHardeningStatus(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, LinuxSecurityHardeningStatus)
+}
+
+// getOpenPortsList returns the list of open ports from CRDs.
+func (hsh *HostSensorHandler) getOpenPortsList(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, OpenPortsList)
+}
+
+// getKernelVariables returns the list of Linux Kernel variables from CRDs.
+func (hsh *HostSensorHandler) getKernelVariables(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, LinuxKernelVariables)
+}
+
+// getKubeletInfo returns the list of kubelet metadata from CRDs.
+func (hsh *HostSensorHandler) getKubeletInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, KubeletInfo)
+}
+
+// getKubeProxyInfo returns the list of kubeProxy metadata from CRDs.
+func (hsh *HostSensorHandler) getKubeProxyInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, KubeProxyInfo)
+}
+
+// getControlPlaneInfo returns the list of controlPlaneInfo metadata from CRDs.
+func (hsh *HostSensorHandler) getControlPlaneInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, ControlPlaneInfo)
+}
+
+// getCloudProviderInfo returns the list of cloudProviderInfo metadata from CRDs.
+func (hsh *HostSensorHandler) getCloudProviderInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, CloudProviderInfo)
+}
+
+// getCNIInfo returns the list of CNI metadata from CRDs.
+func (hsh *HostSensorHandler) getCNIInfo(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, error) {
+	return hsh.getCRDResources(ctx, CNIInfo)
 }
 
 // hasCloudProviderInfo iterates over the []hostsensor.HostSensorDataEnvelope list to find info about the cloud provider.
@@ -190,7 +158,7 @@ func (hsh *HostSensorHandler) getOsReleaseFile(ctx context.Context) ([]hostsenso
 // If information are found, then return true. Return false otherwise.
 func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
 	for index := range cpi {
-		if !reflect.DeepEqual(cpi[index].GetData(), stdjson.RawMessage("{}\n")) {
+		if !reflect.DeepEqual(cpi[index].GetData(), stdjson.RawMessage("{}\\n")) {
 			return true
 		}
 	}
@@ -198,32 +166,19 @@ func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
 	return false
 }
 
-// CollectResources collects all required information about all the pods for this host.
+// CollectResources collects all required information from CRDs.
 func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	res := make([]hostsensor.HostSensorDataEnvelope, 0)
 	infoMap := make(map[string]apis.StatusInfo)
-	if hsh.daemonSet == nil {
-		return res, nil, nil
-	}
 
-	logger.L().Debug("Accessing host scanner")
-	version, err := hsh.getVersion()
-	if err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
-	}
-
-	if len(version) > 0 {
-		logger.L().Info("Host scanner version : " + version)
-	} else {
-		logger.L().Info("Unknown host scanner version")
-	}
+	logger.L().Debug("Collecting host sensor data from CRDs")
 
 	var hasCloudProvider bool
 	for _, toPin := range []struct {
 		Resource scannerResource
 		Query    func(context.Context) ([]hostsensor.HostSensorDataEnvelope, error)
 	}{
-		// queries to the deployed host-scanner
+		// queries to CRDs
 		{
 			Resource: OsReleaseFile,
 			Query:    hsh.getOsReleaseFile,
@@ -276,7 +231,9 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		kcData, err := k8sInfo.Query(ctx)
 		if err != nil {
 			addInfoToMap(k8sInfo.Resource, infoMap, err)
-			logger.L().Ctx(ctx).Warning(err.Error())
+			logger.L().Ctx(ctx).Warning("Failed to get resource from CRD",
+				helpers.String("resource", k8sInfo.Resource.String()),
+				helpers.Error(err))
 		}
 
 		if k8sInfo.Resource == CloudProviderInfo {
@@ -288,6 +245,6 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		}
 	}
 
-	logger.L().Debug("Done reading information from host scanner")
+	logger.L().Debug("Done collecting information from CRDs", helpers.Int("totalResources", len(res)))
 	return res, infoMap, nil
 }
