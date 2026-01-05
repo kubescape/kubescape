@@ -121,8 +121,9 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	}
 
 	// Convert to PostureReportWithSeverity to add severity field to controls
+	// and extract specified labels from workloads
 	finalizedReport := FinalizeResults(opaSessionObj)
-	reportWithSeverity := ConvertToPostureReportWithSeverity(finalizedReport)
+	reportWithSeverity := ConvertToPostureReportWithSeverityAndLabels(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources)
 
 	r, err := json.Marshal(reportWithSeverity)
 	_, err = jp.writer.Write(r)

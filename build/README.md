@@ -25,14 +25,16 @@ This guide covers how to build Kubescape from source.
 
 - **Docker** - [Installation Guide](https://docs.docker.com/get-docker/)
 - **Docker Buildx** - For multi-platform builds (included with Docker Desktop)
+- **GoReleaser** - [Installation Guide](https://goreleaser.com/install/)
 
 ### Verify Prerequisites
 
 ```bash
-go version    # Should be 1.21 or higher
+go version    # Should be 1.23 or higher
 git --version
 make --version
-docker --version  # Optional
+docker --version      # Optional
+goreleaser --version  # Optional
 ```
 
 ---
@@ -62,6 +64,13 @@ make build
 go build -o kubescape .
 ```
 
+### Build with GoReleaser
+
+```bash
+# Build for your current platform
+RELEASE=v0.0.1 CLIENT=local goreleaser build --snapshot --clean --single-target
+```
+
 ### Cross-Compilation
 
 Build for different platforms:
@@ -87,50 +96,19 @@ GOOS=windows GOARCH=amd64 go build -o kubescape-windows-amd64.exe .
 
 ## Building Docker Images
 
-### Build All Images
+Kubescape uses [GoReleaser](https://goreleaser.com/) to build its Docker images. The Dockerfiles are specifically designed to work with GoReleaser's build pipeline, which handles cross-compilation and places binaries in the expected directory structure.
+
+### Build with GoReleaser
+
+The recommended way to build Docker images locally is using GoReleaser. Note that `RELEASE`, `CLIENT`, and `RUN_E2E` environment variables are required:
 
 ```bash
-make all
+# Build all artifacts and Docker images locally without publishing
+# --skip=before,krew,nfpm,sbom skips unnecessary steps for faster local builds
+RELEASE=v0.0.1 CLIENT=local RUN_E2E=false goreleaser release --snapshot --clean --skip=before,nfpm,sbom
 ```
 
-### Build CLI Docker Image
-
-Build a Docker image containing only the Kubescape CLI:
-
-```bash
-# First build the binary
-make build
-
-# Then build the Docker image
-docker buildx build \
-  -t kubescape-cli:latest \
-  -f build/kubescape-cli.Dockerfile \
-  --build-arg="ks_binary=kubescape" \
-  --load .
-```
-
-### Build Full Kubescape Image
-
-Build the complete Kubescape image (includes HTTP handler):
-
-```bash
-docker buildx build \
-  -t kubescape:latest \
-  -f build/Dockerfile \
-  --load .
-```
-
-### Multi-Platform Build
-
-Build for multiple architectures:
-
-```bash
-docker buildx build \
-  -t kubescape:latest \
-  -f build/Dockerfile \
-  --platform linux/amd64,linux/arm64 \
-  --push .
-```
+Please read the [GoReleaser documentation](https://goreleaser.com/customization/dockers_v2/#testing-locally) for more details on using it for local testing.
 
 ---
 
@@ -227,14 +205,13 @@ CGO_ENABLED=0 go build -o kubescape .
 
 ### Docker Build Fails
 
-Ensure Docker daemon is running and you have sufficient permissions:
+Ensure Docker daemon is running and you have sufficient permissions.
+
+If you encounter an error like `failed to calculate checksum ... "/linux/amd64/kubescape": not found`, it usually means you are trying to run `docker build` manually. Because the Dockerfiles are optimized for GoReleaser, you should use the `goreleaser release --snapshot` command described in the [Building Docker Images](#building-docker-images) section instead.
 
 ```bash
 # Check Docker status
 docker info
-
-# Run with sudo if needed (Linux)
-sudo docker buildx build ...
 ```
 
 ### Out of Memory During Build
