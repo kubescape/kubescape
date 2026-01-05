@@ -25,6 +25,10 @@ type MetricsQueryParams struct {
 	// Example: "nsa,mitre,cis-v1.10.0"
 	// If not provided, all available frameworks will be scanned
 	Frameworks string `schema:"frameworks" json:"frameworks"`
+
+	// Do not persist data after scanning
+	// default: false
+	SkipPersistence bool `schema:"skipPersistence" json:"skipPersistence"`
 }
 
 // Metrics http listener for prometheus support
