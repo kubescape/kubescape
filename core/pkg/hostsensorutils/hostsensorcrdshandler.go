@@ -76,15 +76,15 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 
 	list, err := hsh.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{Limit: 1})
 	if err != nil {
-		logger.L().Warning("Failed to list OsReleaseFile CRDs - node-agent may not be deployed",
+		logger.L().Warning("node-agent status: Failed to list OsReleaseFile CRDs - node-agent may not be deployed",
 			helpers.Error(err))
 		return fmt.Errorf("failed to verify CRD access: %w (ensure node-agent is deployed)", err)
 	}
 
 	if len(list.Items) == 0 {
-		logger.L().Warning("No OsReleaseFile CRDs found - node-agent may not be running or sensing yet")
+		logger.L().Warning("node-agent status: No OsReleaseFile CRDs found - node-agent may not be running or sensing yet")
 	} else {
-		logger.L().Info("Successfully verified CRD access", helpers.Int("osReleaseFiles", len(list.Items)))
+		logger.L().Info("node-agent status: Successfully verified CRD access", helpers.Int("osReleaseFiles", len(list.Items)))
 	}
 
 	return nil
@@ -95,11 +95,6 @@ func (hsh *HostSensorHandler) Init(ctx context.Context) error {
 func (hsh *HostSensorHandler) TearDown() error {
 	logger.L().Debug("CRD-based host sensor teardown (no-op)")
 	return nil
-}
-
-// GetNamespace returns empty string as CRDs are cluster-scoped.
-func (hsh *HostSensorHandler) GetNamespace() string {
-	return ""
 }
 
 // listCRDResources is a generic function to list CRD resources and convert them to the expected format.

@@ -18,6 +18,5 @@ func TestHostSensorHandlerMock(t *testing.T) {
 	require.Nil(t, status)
 	require.NoError(t, err)
 
-	require.Empty(t, h.GetNamespace())
 	require.NoError(t, h.TearDown())
 }
