@@ -27,7 +27,3 @@ func (hshm *HostSensorHandlerMock) TearDown() error {
 func (hshm *HostSensorHandlerMock) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
 	return []hostsensor.HostSensorDataEnvelope{}, nil, nil
 }
-
-func (hshm *HostSensorHandlerMock) GetNamespace() string {
-	return ""
-}
