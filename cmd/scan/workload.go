@@ -95,7 +95,7 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
 	scanInfo.ScanObject.SetKind(kind)
 	scanInfo.ScanObject.SetName(name)
 
-	scanInfo.SetPolicyIdentifiers([]string{"workloadscan"}, v1.KindFramework)
+	scanInfo.SetPolicyIdentifiers([]string{"workloadscan", "allcontrols"}, v1.KindFramework)
 
 	if scanInfo.FilePath != "" {
 		scanInfo.InputPatterns = []string{scanInfo.FilePath}
