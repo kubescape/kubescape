@@ -23,6 +23,7 @@ jobs:
     pr-scanner:
         permissions:
             actions: read
+            artifact-metadata: read
             attestations: read
             checks: read
             contents: write
@@ -37,7 +38,6 @@ jobs:
             repository-projects: read
             security-events: read
             statuses: read
-            artifact-metadata: read
         uses: ./.github/workflows/a-pr-scanner.yaml
         with:
             RELEASE: ""
