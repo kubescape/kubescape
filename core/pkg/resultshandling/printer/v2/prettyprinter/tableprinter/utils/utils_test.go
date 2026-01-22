@@ -401,4 +401,3 @@ func TestCheckShortTerminalWidth(t *testing.T) {
 		})
 	}
 }
-
