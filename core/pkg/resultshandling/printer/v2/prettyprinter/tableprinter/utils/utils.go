@@ -144,14 +144,23 @@ func CheckShortTerminalWidth(rows []table.Row, headers table.Row) bool {
 	for _, row := range rows {
 		rowWidth := 0
 		for idx, cell := range row {
-			cellLen := len(cell.(string))
+			cellStr, ok := cell.(string)
+			if !ok {
+				// If cell is not a string, skip this calculation
+				continue
+			}
+			cellLen := len(cellStr)
 			if cellLen > 50 { // Take only 50 characters of each sentence for counting size
 				cellLen = 50
 			}
-			if cellLen > len(headers[idx].(string)) {
+			headerStr, ok := headers[idx].(string)
+			if !ok {
+				// If header is not a string, use cell length
+				rowWidth += cellLen
+			} else if cellLen > len(headerStr) {
 				rowWidth += cellLen
 			} else {
-				rowWidth += len(headers[idx].(string))
+				rowWidth += len(headerStr)
 			}
 			rowWidth += 2
 		}
