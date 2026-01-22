@@ -5,7 +5,7 @@ go 1.25.0
 replace github.com/kubescape/kubescape/v3 => ../
 
 require (
-	github.com/armosec/armoapi-go v0.0.562
+	github.com/armosec/armoapi-go v0.0.667
 	github.com/armosec/utils-go v0.0.58
 	github.com/armosec/utils-k8s-go v0.0.30
 	github.com/go-openapi/runtime v0.29.2
@@ -14,7 +14,7 @@ require (
 	github.com/gorilla/schema v1.4.1
 	github.com/kubescape/backend v0.0.20
 	github.com/kubescape/go-logger v0.0.25
-	github.com/kubescape/k8s-interface v0.0.195
+	github.com/kubescape/k8s-interface v0.0.202
 	github.com/kubescape/kubescape/v3 v3.0.4
 	github.com/kubescape/opa-utils v0.0.288
 	github.com/kubescape/storage v0.0.184
