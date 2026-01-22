@@ -294,11 +294,19 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			namespace = "kubescape"
 		}
+		namespaceStr, ok := namespace.(string)
+		if !ok {
+			return nil, fmt.Errorf("namespace must be a string")
+		}
 		manifestName, ok := arguments["manifest_name"]
 		if !ok {
 			return nil, fmt.Errorf("manifest_name is required")
 		}
-		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespace.(string)).Get(context.Background(), manifestName.(string), metav1.GetOptions{})
+		manifestNameStr, ok := manifestName.(string)
+		if !ok {
+			return nil, fmt.Errorf("manifest_name must be a string")
+		}
+		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(context.Background(), manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %s", err)
 		}
@@ -323,21 +331,33 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			namespace = "kubescape"
 		}
+		namespaceStr, ok := namespace.(string)
+		if !ok {
+			return nil, fmt.Errorf("namespace must be a string")
+		}
 		manifestName, ok := arguments["manifest_name"]
 		if !ok {
 			return nil, fmt.Errorf("manifest_name is required")
+		}
+		manifestNameStr, ok := manifestName.(string)
+		if !ok {
+			return nil, fmt.Errorf("manifest_name must be a string")
 		}
 		cveID, ok := arguments["cve_id"]
 		if !ok {
 			return nil, fmt.Errorf("cve_id is required")
 		}
-		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespace.(string)).Get(context.Background(), manifestName.(string), metav1.GetOptions{})
+		cveIDStr, ok := cveID.(string)
+		if !ok {
+			return nil, fmt.Errorf("cve_id must be a string")
+		}
+		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(context.Background(), manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %s", err)
 		}
 		var match []v1beta1.Match
 		for _, m := range manifest.Spec.Payload.Matches {
-			if m.Vulnerability.ID == cveID.(string) {
+			if m.Vulnerability.ID == cveIDStr {
 				match = append(match, m)
 			}
 		}
@@ -358,7 +378,11 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			namespace = "kubescape"
 		}
-		manifests, err := ksServer.ksClient.WorkloadConfigurationScans(namespace.(string)).List(context.Background(), metav1.ListOptions{})
+		namespaceStr, ok := namespace.(string)
+		if !ok {
+			return nil, fmt.Errorf("namespace must be a string")
+		}
+		manifests, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).List(context.Background(), metav1.ListOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -394,11 +418,19 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			namespace = "kubescape"
 		}
+		namespaceStr, ok := namespace.(string)
+		if !ok {
+			return nil, fmt.Errorf("namespace must be a string")
+		}
 		manifestName, ok := arguments["manifest_name"]
 		if !ok {
 			return nil, fmt.Errorf("manifest_name is required")
 		}
-		manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespace.(string)).Get(context.Background(), manifestName.(string), metav1.GetOptions{})
+		manifestNameStr, ok := manifestName.(string)
+		if !ok {
+			return nil, fmt.Errorf("manifest_name must be a string")
+		}
+		manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).Get(context.Background(), manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get configuration manifest: %s", err)
 		}
