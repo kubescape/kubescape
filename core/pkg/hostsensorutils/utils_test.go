@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/hostsensor"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -20,12 +21,12 @@ func TestAddInfoToMap(t *testing.T) {
 	testErr := errors.New("test error")
 
 	for _, toPin := range []struct {
-		Resource scannerResource
+		Resource hostsensor.HostSensorResource
 		Err      error
 		Expected map[string]apis.StatusInfo
 	}{
 		{
-			Resource: KubeletConfiguration,
+			Resource: hostsensor.KubeletConfiguration,
 			Err:      testErr,
 			Expected: map[string]apis.StatusInfo{
 				"hostdata.kubescape.cloud/v1beta0/KubeletConfiguration": {
@@ -35,7 +36,7 @@ func TestAddInfoToMap(t *testing.T) {
 			},
 		},
 		{
-			Resource: CNIInfo,
+			Resource: hostsensor.CNIInfo,
 			Err:      testErr,
 			Expected: map[string]apis.StatusInfo{
 				"hostdata.kubescape.cloud/v1beta0/CNIInfo": {
@@ -45,7 +46,7 @@ func TestAddInfoToMap(t *testing.T) {
 			},
 		},
 		{
-			Resource: scannerResource("invalid"),
+			Resource: hostsensor.HostSensorResource("invalid"),
 			Err:      testErr,
 			Expected: map[string]apis.StatusInfo{
 				"//invalid": { // no group, no version
@@ -72,55 +73,55 @@ func TestMapHostSensorResourceToApiGroup(t *testing.T) {
 	url := "hostdata.kubescape.cloud/v1beta0"
 
 	tests := []struct {
-		resource scannerResource
+		resource hostsensor.HostSensorResource
 		want     string
 	}{
 		{
-			resource: KubeletConfiguration,
+			resource: hostsensor.KubeletConfiguration,
 			want:     url,
 		},
 		{
-			resource: OsReleaseFile,
+			resource: hostsensor.OsReleaseFile,
 			want:     url,
 		},
 		{
-			resource: KubeletCommandLine,
+			resource: hostsensor.KubeletCommandLine,
 			want:     url,
 		},
 		{
-			resource: KernelVersion,
+			resource: hostsensor.KernelVersion,
 			want:     url,
 		},
 		{
-			resource: LinuxSecurityHardeningStatus,
+			resource: hostsensor.LinuxSecurityHardeningStatus,
 			want:     url,
 		},
 		{
-			resource: OpenPortsList,
+			resource: hostsensor.OpenPortsList,
 			want:     url,
 		},
 		{
-			resource: LinuxKernelVariables,
+			resource: hostsensor.LinuxKernelVariables,
 			want:     url,
 		},
 		{
-			resource: KubeletInfo,
+			resource: hostsensor.KubeletInfo,
 			want:     url,
 		},
 		{
-			resource: KubeProxyInfo,
+			resource: hostsensor.KubeProxyInfo,
 			want:     url,
 		},
 		{
-			resource: ControlPlaneInfo,
+			resource: hostsensor.ControlPlaneInfo,
 			want:     url,
 		},
 		{
-			resource: CloudProviderInfo,
+			resource: hostsensor.CloudProviderInfo,
 			want:     url,
 		},
 		{
-			resource: CNIInfo,
+			resource: hostsensor.CNIInfo,
 			want:     url,
 		},
 		{
@@ -131,7 +132,7 @@ func TestMapHostSensorResourceToApiGroup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
-			assert.Equal(t, tt.want, mapHostSensorResourceToApiGroup(tt.resource))
+			assert.Equal(t, tt.want, hostsensor.MapHostSensorResourceToApiGroup(tt.resource))
 		})
 	}
 }
