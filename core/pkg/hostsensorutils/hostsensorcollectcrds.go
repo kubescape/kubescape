@@ -68,13 +68,18 @@ func (hsh *HostSensorHandler) convertCRDToEnvelope(item unstructured.Unstructure
 	}
 	if !found {
 		// fallback to "spec" itself
-		content, found, err = unstructured.NestedString(item.Object, "spec")
+		contentI, found, err := unstructured.NestedFieldNoCopy(item.Object, "spec")
 		if err != nil {
 			return envelope, fmt.Errorf("failed to extract spec: %w", err)
 		}
 		if !found {
 			return envelope, fmt.Errorf("spec not found in CRD")
 		}
+		contentBytes, err := stdjson.Marshal(contentI)
+		if err != nil {
+			return envelope, fmt.Errorf("failed to marshal spec: %w", err)
+		}
+		content = string(contentBytes)
 	}
 
 	// Set data as raw bytes
