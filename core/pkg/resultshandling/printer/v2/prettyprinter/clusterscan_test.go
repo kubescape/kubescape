@@ -42,17 +42,21 @@ func TestClusterScan_getWorkloadScanCommand(t *testing.T) {
 
 func TestNewClusterPrinter(t *testing.T) {
 	// Test case 1: Valid writer
-	cp := NewClusterPrinter(os.Stdout)
+	cp := NewClusterPrinter(os.Stdout, false)
 	assert.NotNil(t, cp)
 	assert.Equal(t, os.Stdout, cp.writer)
 	assert.NotNil(t, cp.categoriesTablePrinter)
+	assert.NotNil(t, cp.imageTablePrinter)
+	assert.False(t, cp.verboseMode)
 
 	// Test case 2: Nil writer
 	var writer *os.File
-	cp = NewClusterPrinter(writer)
+	cp = NewClusterPrinter(writer, true)
 	assert.NotNil(t, cp)
 	assert.Nil(t, cp.writer)
 	assert.NotNil(t, cp.categoriesTablePrinter)
+	assert.NotNil(t, cp.imageTablePrinter)
+	assert.True(t, cp.verboseMode)
 }
 
 func TestPrintNextSteps(t *testing.T) {
@@ -63,7 +67,7 @@ func TestPrintNextSteps(t *testing.T) {
 	}
 	defer f.Close()
 
-	cp := NewClusterPrinter(f)
+	cp := NewClusterPrinter(f, false)
 
 	// Redirect stderr to the temporary file
 	oldStderr := os.Stderr
@@ -88,7 +92,7 @@ func TestPrintNextSteps(t *testing.T) {
 }
 
 func TestGetWorkloadScanCommand(t *testing.T) {
-	cp := NewClusterPrinter(os.Stdout)
+	cp := NewClusterPrinter(os.Stdout, false)
 	assert.NotNil(t, cp)
 	assert.Equal(t, os.Stdout, cp.writer)
 	assert.NotNil(t, cp.categoriesTablePrinter)

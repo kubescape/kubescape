@@ -15,6 +15,7 @@ func TestNewSummaryPrinter(t *testing.T) {
 	assert.Equal(t, os.Stdout, printer.writer)
 	assert.Equal(t, verbose, printer.verboseMode)
 	assert.NotNil(t, printer.summaryTablePrinter)
+	assert.NotNil(t, printer.imageTablePrinter)
 
 	// Test case 2: Valid writer and non-verbose mode
 	verbose = false
@@ -23,6 +24,7 @@ func TestNewSummaryPrinter(t *testing.T) {
 	assert.Equal(t, os.Stdout, printer.writer)
 	assert.Equal(t, verbose, printer.verboseMode)
 	assert.NotNil(t, printer.summaryTablePrinter)
+	assert.NotNil(t, printer.imageTablePrinter)
 
 	// Test case 3: Nil writer and verbose mode
 	var writer *os.File
@@ -32,6 +34,7 @@ func TestNewSummaryPrinter(t *testing.T) {
 	assert.Nil(t, printer.writer)
 	assert.Equal(t, verbose, printer.verboseMode)
 	assert.NotNil(t, printer.summaryTablePrinter)
+	assert.NotNil(t, printer.imageTablePrinter)
 
 	// Test case 4: Nil writer and non-verbose mode
 	verbose = false
@@ -40,6 +43,7 @@ func TestNewSummaryPrinter(t *testing.T) {
 	assert.Nil(t, printer.writer)
 	assert.Equal(t, verbose, printer.verboseMode)
 	assert.NotNil(t, printer.summaryTablePrinter)
+	assert.NotNil(t, printer.imageTablePrinter)
 }
 
 func TestGetVerboseMode(t *testing.T) {
