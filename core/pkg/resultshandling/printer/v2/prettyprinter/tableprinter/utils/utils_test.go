@@ -5,6 +5,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
@@ -331,6 +332,72 @@ func TestGetColorForVulnerabilitySeverity(t *testing.T) {
 			coloredString := colorFunc(tt.testMessage) // Call the colorFunc with the same input string
 
 			assert.Equal(t, tt.expected.coloredString, coloredString)
+		})
+	}
+}
+
+func TestCheckShortTerminalWidth(t *testing.T) {
+	tests := []struct {
+		name    string
+		rows    []table.Row
+		headers table.Row
+		// We can't predict the exact result since it depends on terminal size
+		// but we can test it doesn't panic with various inputs
+		shouldNotPanic bool
+	}{
+		{
+			name: "Normal string rows",
+			rows: []table.Row{
+				{"cell1", "cell2", "cell3"},
+				{"longer cell 1", "longer cell 2", "longer cell 3"},
+			},
+			headers:        table.Row{"Header1", "Header2", "Header3"},
+			shouldNotPanic: true,
+		},
+		{
+			name: "Rows with non-string values (map)",
+			rows: []table.Row{
+				{"cell1", map[string]interface{}{"key": "value"}, "cell3"},
+				{"cell4", "cell5", "cell6"},
+			},
+			headers:        table.Row{"Header1", "Header2", "Header3"},
+			shouldNotPanic: true,
+		},
+		{
+			name: "Headers with non-string values",
+			rows: []table.Row{
+				{"cell1", "cell2", "cell3"},
+			},
+			headers:        table.Row{"Header1", map[string]interface{}{"key": "value"}, "Header3"},
+			shouldNotPanic: true,
+		},
+		{
+			name: "Both rows and headers with non-string values",
+			rows: []table.Row{
+				{map[string]interface{}{"key": "value"}, "cell2", 123},
+			},
+			headers:        table.Row{[]string{"a", "b"}, "Header2", true},
+			shouldNotPanic: true,
+		},
+		{
+			name:           "Empty rows",
+			rows:           []table.Row{},
+			headers:        table.Row{"Header1", "Header2"},
+			shouldNotPanic: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					if tt.shouldNotPanic {
+						t.Errorf("CheckShortTerminalWidth() panicked when it shouldn't: %v", r)
+					}
+				}
+			}()
+			// Call the function - we just want to ensure it doesn't panic
+			_ = CheckShortTerminalWidth(tt.rows, tt.headers)
 		})
 	}
 }

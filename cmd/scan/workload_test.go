@@ -28,6 +28,10 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 						Identifier: "workloadscan",
 						Kind:       v1.KindFramework,
 					},
+					{
+						Identifier: "allcontrols",
+						Kind:       v1.KindFramework,
+					},
 				},
 				ScanType: cautils.ScanTypeWorkload,
 				ScanObject: &objectsenvelopes.ScanObject{
@@ -59,12 +63,19 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanObject.Metadata.Name, tc.want.ScanObject.Metadata.Name)
 				}
 
-				if len(scanInfo.PolicyIdentifier) != 1 {
-					t.Errorf("got: %v, want: %v", len(scanInfo.PolicyIdentifier), 1)
+				if len(scanInfo.PolicyIdentifier) != len(tc.want.PolicyIdentifier) {
+					t.Errorf("got: %v policy identifiers, want: %v", len(scanInfo.PolicyIdentifier), len(tc.want.PolicyIdentifier))
 				}
 
-				if scanInfo.PolicyIdentifier[0].Identifier != tc.want.PolicyIdentifier[0].Identifier {
-					t.Errorf("got: %v, want: %v", scanInfo.PolicyIdentifier[0].Identifier, tc.want.PolicyIdentifier[0].Identifier)
+				for i, wantPolicy := range tc.want.PolicyIdentifier {
+					if i < len(scanInfo.PolicyIdentifier) {
+						if scanInfo.PolicyIdentifier[i].Identifier != wantPolicy.Identifier {
+							t.Errorf("got: %v, want: %v", scanInfo.PolicyIdentifier[i].Identifier, wantPolicy.Identifier)
+						}
+						if scanInfo.PolicyIdentifier[i].Kind != wantPolicy.Kind {
+							t.Errorf("got: %v, want: %v", scanInfo.PolicyIdentifier[i].Kind, wantPolicy.Kind)
+						}
+					}
 				}
 			},
 		)

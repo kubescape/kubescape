@@ -36,7 +36,6 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X "github.com/kubescape/kubescape/v3/core/cautils.BuildNumber={{.Env.RELEASE}}"
       - -X "github.com/kubescape/kubescape/v3/core/cautils.Client={{.Env.CLIENT}}"
     hooks:
       post:
