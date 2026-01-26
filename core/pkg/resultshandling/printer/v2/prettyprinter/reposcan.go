@@ -15,20 +15,30 @@ import (
 type RepoPrinter struct {
 	writer                 *os.File
 	categoriesTablePrinter configurationprinter.TablePrinter
+	imageTablePrinter      imageprinter.TablePrinter
+	verboseMode            bool
 }
 
-func NewRepoPrinter(writer *os.File, inputPatterns []string) *RepoPrinter {
+func NewRepoPrinter(writer *os.File, inputPatterns []string, verboseMode bool) *RepoPrinter {
 	return &RepoPrinter{
 		writer:                 writer,
 		categoriesTablePrinter: configurationprinter.NewRepoPrinter(inputPatterns),
+		imageTablePrinter:      imageprinter.NewTableWriter(),
+		verboseMode:            verboseMode,
 	}
 }
 
 var _ MainPrinter = &RepoPrinter{}
 
 func (rp *RepoPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
-	printImageScanningSummary(rp.writer, *summary, false)
-	printImagesCommands(rp.writer, *summary)
+	if rp.verboseMode {
+		rp.imageTablePrinter.PrintImageScanningTable(rp.writer, *summary)
+		cautils.SimpleDisplay(rp.writer, "\n")
+	}
+	printImageScanningSummary(rp.writer, *summary, rp.verboseMode)
+	if !rp.verboseMode {
+		printImagesCommands(rp.writer, *summary)
+	}
 	printTopComponents(rp.writer, *summary)
 }
 
