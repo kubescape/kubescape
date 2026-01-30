@@ -42,11 +42,12 @@ func generateRows(summary ImageScanSummary) []table.Row {
 }
 
 func generateRow(cve CVE) table.Row {
-	row := make(table.Row, 5)
+	row := make(table.Row, 6)
 	row[imageColumnSeverity] = utils.GetColorForVulnerabilitySeverity(cve.Severity)(cve.Severity)
 	row[imageColumnName] = cve.ID
 	row[imageColumnComponent] = cve.Package
 	row[imageColumnVersion] = cve.Version
+	row[imageColumnImage] = cve.Image
 
 	// if the CVE is fixed, show all the versions that fix it
 	if cve.FixedState == string(v5.FixedState) {
@@ -62,12 +63,13 @@ func generateRow(cve CVE) table.Row {
 }
 
 func getImageScanningHeaders() table.Row {
-	headers := make(table.Row, 5)
+	headers := make(table.Row, 6)
 	headers[imageColumnSeverity] = "Severity"
 	headers[imageColumnName] = "Vulnerability"
 	headers[imageColumnComponent] = "Component"
 	headers[imageColumnVersion] = "Version"
 	headers[imageColumnFixedIn] = "Fixed in"
+	headers[imageColumnImage] = "Image"
 	return headers
 }
 
@@ -78,5 +80,6 @@ func getImageScanningColumnsAlignments() []table.ColumnConfig {
 		{Number: 3, Align: text.AlignLeft},
 		{Number: 4, Align: text.AlignLeft},
 		{Number: 5, Align: text.AlignLeft},
+		{Number: 6, Align: text.AlignLeft},
 	}
 }

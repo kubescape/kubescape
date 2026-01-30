@@ -70,7 +70,7 @@ func (jp *JsonPrinter) convertToImageScanSummary(imageScanData []cautils.ImageSc
 			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
 		}
 
-		CVEs := extractCVEs(imageScanData[i].Matches)
+		CVEs := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
 
 		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)

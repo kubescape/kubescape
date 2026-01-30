@@ -10,6 +10,7 @@ const (
 	imageColumnComponent = iota
 	imageColumnVersion   = iota
 	imageColumnFixedIn   = iota
+	imageColumnImage     = iota
 )
 
 type TableWriter struct {

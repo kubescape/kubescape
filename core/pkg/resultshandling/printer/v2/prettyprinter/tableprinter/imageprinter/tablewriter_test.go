@@ -25,6 +25,7 @@ func TestPrintImageScanningTable(t *testing.T) {
 						Package:    "package1",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "nginx:latest",
 					},
 					{
 						ID:         "CVE-2020-0002",
@@ -32,6 +33,7 @@ func TestPrintImageScanningTable(t *testing.T) {
 						Package:    "package2",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "alpine:3.18",
 					},
 					{
 						ID:         "CVE-2020-0003",
@@ -39,10 +41,11 @@ func TestPrintImageScanningTable(t *testing.T) {
 						Package:    "package3",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "ubuntu:22.04",
 					},
 				},
 			},
-			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────┬──────────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │ Image        │\n├──────────┼───────────────┼───────────┼─────────┼──────────┼──────────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │ alpine:3.18  │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │ ubuntu:22.04 │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │ nginx:latest │\n╰──────────┴───────────────┴───────────┴─────────┴──────────┴──────────────╯\n",
 		},
 		{
 			name: "check fixed CVEs show versions",
@@ -54,6 +57,7 @@ func TestPrintImageScanningTable(t *testing.T) {
 						Package:    "package1",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "test:latest",
 					},
 					{
 						ID:          "CVE-2020-0002",
@@ -62,10 +66,11 @@ func TestPrintImageScanningTable(t *testing.T) {
 						Version:     "1.0.0",
 						FixVersions: []string{"v1", "v2"},
 						FixedState:  string(v5.FixedState),
+						Image:       "golang:1.24",
 					},
 				},
 			},
-			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────┬─────────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │ Image       │\n├──────────┼───────────────┼───────────┼─────────┼──────────┼─────────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │ golang:1.24 │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │ test:latest │\n╰──────────┴───────────────┴───────────┴─────────┴──────────┴─────────────╯\n",
 		},
 	}
 

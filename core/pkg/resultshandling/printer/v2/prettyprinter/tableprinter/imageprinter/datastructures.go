@@ -19,6 +19,7 @@ type CVE struct {
 	Version     string
 	FixVersions []string
 	FixedState  string
+	Image       string
 }
 
 type PackageScore struct {

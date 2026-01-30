@@ -17,6 +17,7 @@ func TestExtractCVEs(t *testing.T) {
 	tests := []struct {
 		name    string
 		matches match.Matches
+		image   string
 		want    []imageprinter.CVE
 	}{
 		{
@@ -40,6 +41,7 @@ func TestExtractCVEs(t *testing.T) {
 					},
 				},
 			}...),
+			image: "nginx:latest",
 			want: []imageprinter.CVE{
 				{
 					ID:          "CVE-2020-1234",
@@ -48,6 +50,7 @@ func TestExtractCVEs(t *testing.T) {
 					Version:     "1.2.3",
 					FixVersions: []string{"1.2.3"},
 					FixedState:  "Fixed",
+					Image:       "nginx:latest",
 				},
 			},
 		},
@@ -106,6 +109,7 @@ func TestExtractCVEs(t *testing.T) {
 					},
 				},
 			}...),
+			image: "golang:1.24.6",
 			want: []imageprinter.CVE{
 				{
 					ID:          "CVE-2020-1234",
@@ -114,6 +118,7 @@ func TestExtractCVEs(t *testing.T) {
 					Version:     "1.2.3",
 					FixVersions: []string{"1.2.3"},
 					FixedState:  "Fixed",
+					Image:       "golang:1.24.6",
 				},
 				{
 					ID:          "CVE-2020-1235",
@@ -122,6 +127,7 @@ func TestExtractCVEs(t *testing.T) {
 					Version:     "1",
 					FixVersions: []string{"1"},
 					FixedState:  "Fixed",
+					Image:       "golang:1.24.6",
 				},
 				{
 					ID:          "CVE-2020-1236",
@@ -130,19 +136,21 @@ func TestExtractCVEs(t *testing.T) {
 					Version:     "3",
 					FixVersions: []string{"2", "3", "4"},
 					FixedState:  "Not fixed",
+					Image:       "golang:1.24.6",
 				},
 			},
 		},
 		{
 			name:    "empty vulns",
 			matches: match.NewMatches([]match.Match{}...),
+			image:   "test:latest",
 			want:    []imageprinter.CVE{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			actual := extractCVEs(tt.matches)
+			actual := extractCVEs(tt.matches, tt.image)
 			if len(actual) != len(tt.want) {
 				t.Errorf("extractCVEs() = %v, want %v", actual, tt.want)
 			}
@@ -169,6 +177,9 @@ func TestExtractCVEs(t *testing.T) {
 					if actual[i].FixVersions[j] != tt.want[i].FixVersions[j] {
 						t.Errorf("extractCVEs() = %v, want %v", actual, tt.want)
 					}
+				}
+				if actual[i].Image != tt.want[i].Image {
+					t.Errorf("extractCVEs() image = %v, want %v", actual[i].Image, tt.want[i].Image)
 				}
 			}
 		})
