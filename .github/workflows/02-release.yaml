@@ -103,6 +103,12 @@ jobs:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
 
+      - name: Update new version in krew-index
+        if: github.event_name != 'workflow_dispatch' || inputs.skip_publish != true
+        uses: rajatjindal/krew-release-bot@v0.0.47
+        with:
+          krew_template_file: .krew.yaml
+
       - name: List collected system-test results (debug)
         if: always()
         run: |
