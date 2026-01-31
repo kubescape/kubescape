@@ -29,9 +29,12 @@ func renderTable(writer io.Writer, headers table.Row, columnAlignments []table.C
 func generateRows(summary ImageScanSummary) []table.Row {
 	rows := make([]table.Row, 0, len(summary.CVEs))
 
-	// sort CVEs by severity
+	// sort CVEs by severity (descending) and then by CVE ID (ascending)
 	sort.Slice(summary.CVEs, func(i, j int) bool {
-		return utils.ImageSeverityToInt(summary.CVEs[i].Severity) > utils.ImageSeverityToInt(summary.CVEs[j].Severity)
+		if utils.ImageSeverityToInt(summary.CVEs[i].Severity) != utils.ImageSeverityToInt(summary.CVEs[j].Severity) {
+			return utils.ImageSeverityToInt(summary.CVEs[i].Severity) > utils.ImageSeverityToInt(summary.CVEs[j].Severity)
+		}
+		return summary.CVEs[i].ID < summary.CVEs[j].ID
 	})
 
 	for _, cve := range summary.CVEs {
