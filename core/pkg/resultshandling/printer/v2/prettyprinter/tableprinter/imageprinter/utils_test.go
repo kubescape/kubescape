@@ -28,6 +28,7 @@ func TestRenderTable(t *testing.T) {
 						Package:    "package1",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "nginx:latest",
 					},
 					{
 						ID:         "CVE-2020-0002",
@@ -35,6 +36,7 @@ func TestRenderTable(t *testing.T) {
 						Package:    "package2",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "alpine:3.18",
 					},
 					{
 						ID:         "CVE-2020-0003",
@@ -42,10 +44,11 @@ func TestRenderTable(t *testing.T) {
 						Package:    "package3",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "ubuntu:22.04",
 					},
 				},
 			},
-			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────┬──────────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │ Image        │\n├──────────┼───────────────┼───────────┼─────────┼──────────┼──────────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │          │ alpine:3.18  │\n│  Medium  │ CVE-2020-0003 │ package3  │ 1.0.0   │          │ ubuntu:22.04 │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │ nginx:latest │\n╰──────────┴───────────────┴───────────┴─────────┴──────────┴──────────────╯\n",
 		},
 		{
 			name: "check fixed CVEs show versions",
@@ -57,6 +60,7 @@ func TestRenderTable(t *testing.T) {
 						Package:    "package1",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "test:latest",
 					},
 					{
 						ID:          "CVE-2020-0002",
@@ -65,10 +69,11 @@ func TestRenderTable(t *testing.T) {
 						Version:     "1.0.0",
 						FixVersions: []string{"v1", "v2"},
 						FixedState:  string(v5.FixedState),
+						Image:       "golang:1.24",
 					},
 				},
 			},
-			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │\n├──────────┼───────────────┼───────────┼─────────┼──────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │\n╰──────────┴───────────────┴───────────┴─────────┴──────────╯\n",
+			want: "╭──────────┬───────────────┬───────────┬─────────┬──────────┬─────────────╮\n│ Severity │ Vulnerability │ Component │ Version │ Fixed in │ Image       │\n├──────────┼───────────────┼───────────┼─────────┼──────────┼─────────────┤\n│   High   │ CVE-2020-0002 │ package2  │ 1.0.0   │ v1,v2    │ golang:1.24 │\n│    Low   │ CVE-2020-0001 │ package1  │ 1.0.0   │          │ test:latest │\n╰──────────┴───────────────┴───────────┴─────────┴──────────┴─────────────╯\n",
 		},
 	}
 
@@ -121,6 +126,7 @@ func TestGenerateRows(t *testing.T) {
 						Package:    "package1",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "nginx:latest",
 					},
 					{
 						ID:         "CVE-2020-0002",
@@ -128,6 +134,7 @@ func TestGenerateRows(t *testing.T) {
 						Package:    "package2",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "alpine:3.18",
 					},
 					{
 						ID:         "CVE-2020-0003",
@@ -135,13 +142,14 @@ func TestGenerateRows(t *testing.T) {
 						Package:    "package3",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "ubuntu:22.04",
 					},
 				},
 			},
 			expectedRows: [][]string{
-				{"High", "CVE-2020-0002", "package2", "1.0.0", ""},
-				{"Medium", "CVE-2020-0003", "package3", "1.0.0", ""},
-				{"Low", "CVE-2020-0001", "package1", "1.0.0", ""},
+				{"High", "CVE-2020-0002", "package2", "1.0.0", "", "alpine:3.18"},
+				{"Medium", "CVE-2020-0003", "package3", "1.0.0", "", "ubuntu:22.04"},
+				{"Low", "CVE-2020-0001", "package1", "1.0.0", "", "nginx:latest"},
 			},
 		},
 		{
@@ -154,6 +162,7 @@ func TestGenerateRows(t *testing.T) {
 						Package:    "package1",
 						Version:    "1.0.0",
 						FixedState: string(v5.NotFixedState),
+						Image:      "test:latest",
 					},
 					{
 						ID:          "CVE-2020-0002",
@@ -162,12 +171,13 @@ func TestGenerateRows(t *testing.T) {
 						Version:     "1.0.0",
 						FixVersions: []string{"v1", "v2"},
 						FixedState:  string(v5.FixedState),
+						Image:       "golang:1.24",
 					},
 				},
 			},
 			expectedRows: [][]string{
-				{"High", "CVE-2020-0002", "package2", "1.0.0", "v1,v2"},
-				{"Low", "CVE-2020-0001", "package1", "1.0.0", ""},
+				{"High", "CVE-2020-0002", "package2", "1.0.0", "v1,v2", "golang:1.24"},
+				{"Low", "CVE-2020-0001", "package1", "1.0.0", "", "test:latest"},
 			},
 		},
 	}
@@ -206,8 +216,9 @@ func TestGenerateRow(t *testing.T) {
 				Version:     "1.0.0",
 				FixVersions: []string{"v1", "v2"},
 				FixedState:  string(v5.FixedState),
+				Image:       "golang:1.24",
 			},
-			want: []string{"High", "CVE-2020-0001", "package1", "1.0.0", "v1,v2"},
+			want: []string{"High", "CVE-2020-0001", "package1", "1.0.0", "v1,v2", "golang:1.24"},
 		},
 		{
 			name: "check row with not fixed version",
@@ -217,8 +228,9 @@ func TestGenerateRow(t *testing.T) {
 				Package:    "package1",
 				Version:    "1.0.0",
 				FixedState: string(v5.NotFixedState),
+				Image:      "nginx:latest",
 			},
-			want: []string{"High", "CVE-2020-0001", "package1", "1.0.0", ""},
+			want: []string{"High", "CVE-2020-0001", "package1", "1.0.0", "", "nginx:latest"},
 		},
 	}
 
@@ -238,7 +250,7 @@ func TestGenerateRow(t *testing.T) {
 func TestGetImageScanningHeaders(t *testing.T) {
 	headers := getImageScanningHeaders()
 
-	expectedHeaders := []string{"Severity", "Vulnerability", "Component", "Version", "Fixed in"}
+	expectedHeaders := []string{"Severity", "Vulnerability", "Component", "Version", "Fixed in", "Image"}
 
 	for i := range headers {
 		if headers[i] != expectedHeaders[i] {

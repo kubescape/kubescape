@@ -289,7 +289,7 @@ func setPkgNameToScoreMap(matches match.Matches, pkgScores map[string]*imageprin
 	}
 }
 
-func extractCVEs(matches match.Matches) []imageprinter.CVE {
+func extractCVEs(matches match.Matches, image string) []imageprinter.CVE {
 	var CVEs []imageprinter.CVE
 	for _, m := range matches.Sorted() {
 		cve := imageprinter.CVE{
@@ -299,6 +299,7 @@ func extractCVEs(matches match.Matches) []imageprinter.CVE {
 			Version:     m.Package.Version,
 			FixVersions: m.Vulnerability.Fix.Versions,
 			FixedState:  m.Vulnerability.Fix.State.String(),
+			Image:       image,
 		}
 		CVEs = append(CVEs, cve)
 	}

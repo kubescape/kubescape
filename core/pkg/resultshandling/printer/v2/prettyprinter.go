@@ -55,13 +55,13 @@ func NewPrettyPrinter(verboseMode bool, formatVersion string, attackTree bool, v
 func (pp *PrettyPrinter) SetMainPrinter() {
 	switch pp.scanType {
 	case cautils.ScanTypeCluster:
-		pp.mainPrinter = prettyprinter.NewClusterPrinter(pp.writer)
+		pp.mainPrinter = prettyprinter.NewClusterPrinter(pp.writer, pp.verboseMode)
 	case cautils.ScanTypeRepo:
-		pp.mainPrinter = prettyprinter.NewRepoPrinter(pp.writer, pp.inputPatterns)
+		pp.mainPrinter = prettyprinter.NewRepoPrinter(pp.writer, pp.inputPatterns, pp.verboseMode)
 	case cautils.ScanTypeImage:
 		pp.mainPrinter = prettyprinter.NewImagePrinter(pp.writer, pp.verboseMode)
 	case cautils.ScanTypeWorkload:
-		pp.mainPrinter = prettyprinter.NewWorkloadPrinter(pp.writer)
+		pp.mainPrinter = prettyprinter.NewWorkloadPrinter(pp.writer, pp.verboseMode)
 	default:
 		pp.mainPrinter = prettyprinter.NewSummaryPrinter(pp.writer, pp.verboseMode)
 	}
@@ -84,7 +84,7 @@ func (pp *PrettyPrinter) convertToImageScanSummary(imageScanData []cautils.Image
 			imageScanSummary.Images = append(imageScanSummary.Images, imageScanData[i].Image)
 		}
 
-		CVEs := extractCVEs(imageScanData[i].Matches)
+		CVEs := extractCVEs(imageScanData[i].Matches, imageScanData[i].Image)
 		imageScanSummary.CVEs = append(imageScanSummary.CVEs, CVEs...)
 
 		setPkgNameToScoreMap(imageScanData[i].Matches, imageScanSummary.PackageScores)

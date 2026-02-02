@@ -14,20 +14,30 @@ import (
 type ClusterPrinter struct {
 	writer                 *os.File
 	categoriesTablePrinter configurationprinter.TablePrinter
+	imageTablePrinter      imageprinter.TablePrinter
+	verboseMode            bool
 }
 
-func NewClusterPrinter(writer *os.File) *ClusterPrinter {
+func NewClusterPrinter(writer *os.File, verboseMode bool) *ClusterPrinter {
 	return &ClusterPrinter{
 		writer:                 writer,
 		categoriesTablePrinter: configurationprinter.NewClusterPrinter(),
+		imageTablePrinter:      imageprinter.NewTableWriter(),
+		verboseMode:            verboseMode,
 	}
 }
 
 var _ MainPrinter = &ClusterPrinter{}
 
 func (cp *ClusterPrinter) PrintImageScanning(summary *imageprinter.ImageScanSummary) {
-	printImageScanningSummary(cp.writer, *summary, false)
-	printImagesCommands(cp.writer, *summary)
+	if cp.verboseMode {
+		cp.imageTablePrinter.PrintImageScanningTable(cp.writer, *summary)
+		cautils.SimpleDisplay(cp.writer, "\n")
+	}
+	printImageScanningSummary(cp.writer, *summary, cp.verboseMode)
+	if !cp.verboseMode {
+		printImagesCommands(cp.writer, *summary)
+	}
 }
 
 func (cp *ClusterPrinter) PrintConfigurationsScanning(summaryDetails *reportsummary.SummaryDetails, sortedControlIDs [][]string, topWorkloadsByScore []reporthandling.IResource) {
