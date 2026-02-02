@@ -64,7 +64,7 @@ func Test_CreatePortForwarder(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			k8sClient := k8sinterface.KubernetesApi{
-				KubernetesClient: fake.NewSimpleClientset(),
+				KubernetesClient: fake.NewClientset(),
 				K8SConfig: &rest.Config{
 					Host: "any",
 				},
@@ -105,7 +105,7 @@ func Test_GetPortForwardLocalhost(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			k8sClient := k8sinterface.KubernetesApi{
-				KubernetesClient: fake.NewSimpleClientset(),
+				KubernetesClient: fake.NewClientset(),
 				K8SConfig: &rest.Config{
 					Host: "any",
 				},

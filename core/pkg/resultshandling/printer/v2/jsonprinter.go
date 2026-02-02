@@ -126,6 +126,9 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 	reportWithSeverity := ConvertToPostureReportWithSeverityAndLabels(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources)
 
 	r, err := json.Marshal(reportWithSeverity)
+	if err != nil {
+		return err
+	}
 	_, err = jp.writer.Write(r)
 
 	return err

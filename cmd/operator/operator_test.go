@@ -21,7 +21,7 @@ func TestGetOperatorCmd(t *testing.T) {
 	assert.Equal(t, operatorExamples, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})
-	expectedErrorMessage := "For the operator sub-command, you need to provide at least one additional sub-command. Refer to the examples above."
+	expectedErrorMessage := "for the operator sub-command, you need to provide at least one additional sub-command. Refer to the examples above"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.Args(&cobra.Command{}, []string{"scan", "configurations"})
@@ -37,6 +37,6 @@ func TestGetOperatorCmd(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.RunE(&cobra.Command{}, []string{"random-subcommand", "random-config"})
-	expectedErrorMessage = "For the operator sub-command, only " + scanSubCommand + " is supported. Refer to the examples above."
+	expectedErrorMessage = "for the operator sub-command, only " + scanSubCommand + " is supported. Refer to the examples above"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }

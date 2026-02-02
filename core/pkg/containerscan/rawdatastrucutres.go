@@ -88,6 +88,6 @@ type PkgFiles []PackageFile
 
 func (v *ScanResultReport) AsFNVHash() string {
 	hasher := fnv.New64a()
-	hasher.Write([]byte(fmt.Sprintf("%v", *v)))
+	fmt.Fprintf(hasher, "%v", *v)
 	return fmt.Sprintf("%v", hasher.Sum64())
 }

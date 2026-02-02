@@ -78,7 +78,7 @@ func (p *portForward) StopPortForwarder() {
 
 func (p *portForward) StartPortForwarder() error {
 	go func() {
-		p.PortForwarder.ForwardPorts()
+		p.ForwardPorts()
 	}()
 	p.waitForPortForwardReadiness()
 

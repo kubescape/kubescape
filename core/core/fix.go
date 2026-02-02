@@ -48,7 +48,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 		for _, err := range errors {
 			logger.L().Ctx(ks.Context()).Warning(err.Error())
 		}
-		return fmt.Errorf("Failed to fix some resources, check the logs for more details")
+		return fmt.Errorf("failed to fix some resources, check the logs for more details")
 	}
 
 	return nil
@@ -64,9 +64,10 @@ func userConfirmed() bool {
 		}
 
 		input = strings.ToLower(input)
-		if input == "y" || input == "yes" {
+		switch input {
+		case "y", "yes":
 			return true
-		} else if input == "n" || input == "no" {
+		case "n", "no":
 			return false
 		}
 	}

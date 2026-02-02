@@ -434,9 +434,9 @@ func TestRemoveOutOfRangeLines(t *testing.T) {
 func TestShouldCalculateTotalNumberOfChildrenAndAddToCurrentTracker(t *testing.T) {
 	node := &yaml.Node{
 		Content: []*yaml.Node{
-			&yaml.Node{},
-			&yaml.Node{},
-			&yaml.Node{},
+			{},
+			{},
+			{},
 		},
 	}
 	currentTracker := 5

@@ -521,9 +521,3 @@ func GetTenantConfig(accountID, accessKey, clusterName, customClusterName string
 }
 
 // firstNonEmpty returns the first non-empty string
-func firstNonEmpty(s1, s2 string) string {
-	if s1 != "" {
-		return s1
-	}
-	return s2
-}

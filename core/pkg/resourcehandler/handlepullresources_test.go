@@ -3,7 +3,6 @@ package resourcehandler
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"testing"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -16,21 +15,8 @@ import (
 	"k8s.io/client-go/dynamic/fake"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-var (
-	//go:embed testdata/kubeconfig_mock.json
-	kubeConfigMock string
-)
-
-func getKubeConfigMock() *clientcmdapi.Config {
-	kubeConfig := clientcmdapi.Config{}
-	if err := json.Unmarshal([]byte(kubeConfigMock), &kubeConfig); err != nil {
-		panic(err)
-	}
-	return &kubeConfig
-}
 func Test_getCloudMetadata(t *testing.T) {
 
 	tests := []struct {
@@ -73,7 +59,7 @@ func Test_getCloudMetadata(t *testing.T) {
 // https://github.com/kubescape/kubescape/pull/1004
 // Cluster named .*eks.* config without a cloudconfig panics whereas we just want to scan a file
 func getResourceHandlerMock() *K8sResourceHandler {
-	client := fakeclientset.NewSimpleClientset()
+	client := fakeclientset.NewClientset()
 	fakeDiscovery := client.Discovery()
 
 	k8s := &k8sinterface.KubernetesApi{

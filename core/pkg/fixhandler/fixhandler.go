@@ -209,7 +209,7 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 		fixedYamlString, err := ApplyFixToContent(ctx, fileAsString, yamlExpression)
 
 		if err != nil {
-			errors = append(errors, fmt.Errorf("Failed to fix file %s: %w ", filepath, err))
+			errors = append(errors, fmt.Errorf("failed to fix file %s: %w ", filepath, err))
 			continue
 		} else {
 			updatedFiles[filepath] = true
@@ -344,7 +344,7 @@ func GetFileString(filepath string) (string, error) {
 	bytes, err := os.ReadFile(filepath)
 
 	if err != nil {
-		return "", fmt.Errorf("Error reading file %s", filepath)
+		return "", fmt.Errorf("error reading file %s", filepath)
 	}
 
 	return string(bytes), nil
@@ -354,7 +354,7 @@ func writeFixesToFile(filepath, content string) error {
 	err := os.WriteFile(filepath, []byte(content), 0644) //nolint:gosec
 
 	if err != nil {
-		return fmt.Errorf("Error writing fixes to file: %w", err)
+		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
 
 	return nil

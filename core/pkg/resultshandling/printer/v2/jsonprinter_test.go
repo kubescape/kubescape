@@ -1,7 +1,7 @@
 package printer
 
 import (
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 
@@ -79,7 +79,7 @@ func TestScore_Json(t *testing.T) {
 
 			// Read the contents of the temporary file
 			f.Seek(0, 0)
-			got, err := ioutil.ReadAll(f)
+			got, err := io.ReadAll(f)
 			if err != nil {
 				panic(err)
 			}
@@ -169,22 +169,22 @@ func TestConvertToPackageScores(t *testing.T) {
 
 func TestConvertToReportSummary(t *testing.T) {
 	input := map[string]*imageprinter.SeveritySummary{
-		"High": &imageprinter.SeveritySummary{
+		"High": {
 			NumberOfCVEs:        10,
 			NumberOfFixableCVEs: 5,
 		},
-		"Medium": &imageprinter.SeveritySummary{
+		"Medium": {
 			NumberOfCVEs:        5,
 			NumberOfFixableCVEs: 2,
 		},
 	}
 
 	want := map[string]*reportsummary.SeveritySummary{
-		"High": &reportsummary.SeveritySummary{
+		"High": {
 			NumberOfCVEs:        10,
 			NumberOfFixableCVEs: 5,
 		},
-		"Medium": &reportsummary.SeveritySummary{
+		"Medium": {
 			NumberOfCVEs:        5,
 			NumberOfFixableCVEs: 2,
 		},

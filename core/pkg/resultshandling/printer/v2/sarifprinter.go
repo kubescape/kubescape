@@ -152,7 +152,7 @@ func (sp *SARIFPrinter) printImageScan(ctx context.Context, scanResults cautils.
 		return err
 	}
 
-	return os.WriteFile(sp.writer.Name(), updatedSarifReport, os.ModePerm)
+	return os.WriteFile(sp.writer.Name(), updatedSarifReport, 0644) //nolint:gosec // Read-only report output, acceptable permissions
 }
 
 func (sp *SARIFPrinter) PrintNextSteps() {
@@ -519,7 +519,7 @@ func formReplaceFixedYamlString(node cautils.MappingNode, fileAsString string, l
 		yamlLines[location.Line] = yamlLines[location.Line] + " # This is the suggested modification, the value for " + fixPath + " is " + fixValue + "\n"
 	} else {
 		replacedLine := "# This is the suggested modification\n" + yamlLines[location.Line]
-		newLine := strings.Replace(replacedLine, replcaedValue, fixValue, -1)
+		newLine := strings.ReplaceAll(replacedLine, replcaedValue, fixValue)
 		yamlLines[location.Line] = newLine
 	}
 	fixedYamlString := strings.Join(yamlLines, "\n")

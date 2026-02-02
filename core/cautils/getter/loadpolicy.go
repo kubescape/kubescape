@@ -226,7 +226,7 @@ func (lp *LoadPolicy) GetControlsInputs(_ /* clusterName */ string) (map[string]
 	buf, err := os.ReadFile(filePath)
 	if err != nil {
 		formattedError := fmt.Errorf(
-			`Error opening %s file, "controls-config" will be downloaded from ARMO management portal`,
+			`error opening %s file, "controls-config" will be downloaded from ARMO management portal`,
 			fileName,
 		)
 
@@ -236,7 +236,7 @@ func (lp *LoadPolicy) GetControlsInputs(_ /* clusterName */ string) (map[string]
 	controlInputs := make(map[string][]string, 100) // from armotypes.Settings.PostureControlInputs
 	if err = json.Unmarshal(buf, &controlInputs); err != nil {
 		formattedError := fmt.Errorf(
-			`Error reading %s file, %v, "controls-config" will be downloaded from ARMO management portal`,
+			`error reading %s file, %v, "controls-config" will be downloaded from ARMO management portal`,
 			fileName, err,
 		)
 

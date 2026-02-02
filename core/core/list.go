@@ -48,7 +48,7 @@ func (ks *Kubescape) List(listPolicies *metav1.ListPolicies) error {
 		if listFormatFunction, ok := listFormatFunc[listPolicies.Format]; ok {
 			listFormatFunction(ks.Context(), listPolicies.Target, policies)
 		} else {
-			return fmt.Errorf("Invalid format \"%s\", Supported formats: 'pretty-print'/'json' ", listPolicies.Format)
+			return fmt.Errorf("invalid format \"%s\", supported formats: 'pretty-print'/'json' ", listPolicies.Format)
 		}
 
 		return nil
@@ -168,7 +168,7 @@ func generateControlRows(policies []string) []table.Row {
 
 		docs := cautils.GetControlLink(id)
 
-		currentRow := table.Row{id, control, docs, strings.Replace(framework, " ", "\n", -1)}
+		currentRow := table.Row{id, control, docs, strings.ReplaceAll(framework, " ", "\n")}
 
 		rows = append(rows, currentRow)
 	}
@@ -188,7 +188,7 @@ func generatePolicyRows(policies []string) []table.Row {
 func shortFormatControlRows(controlRows []table.Row) []table.Row {
 	rows := make([]table.Row, 0, len(controlRows))
 	for _, controlRow := range controlRows {
-		rows = append(rows, table.Row{fmt.Sprintf("Control ID"+strings.Repeat(" ", 3)+": %+v\nControl Name"+strings.Repeat(" ", 1)+": %+v\nDocs"+strings.Repeat(" ", 9)+": %+v\nFrameworks"+strings.Repeat(" ", 3)+": %+v", controlRow[0], controlRow[1], controlRow[2], strings.Replace(controlRow[3].(string), "\n", " ", -1))})
+		rows = append(rows, table.Row{fmt.Sprintf("Control ID"+strings.Repeat(" ", 3)+": %+v\nControl Name"+strings.Repeat(" ", 1)+": %+v\nDocs"+strings.Repeat(" ", 9)+": %+v\nFrameworks"+strings.Repeat(" ", 3)+": %+v", controlRow[0], controlRow[1], controlRow[2], strings.ReplaceAll(controlRow[3].(string), "\n", " "))})
 	}
 	return rows
 }

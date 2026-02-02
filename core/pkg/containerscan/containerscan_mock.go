@@ -46,8 +46,6 @@ var hash = []rune("abcdef0123456789")
 var nums = []rune("0123456789")
 
 func randSeq(n int, bank []rune) string {
-	rand.Seed(time.Now().UnixNano())
-
 	b := make([]rune, n)
 	for i := range b {
 		b[i] = bank[rand.Intn(len(bank))] //nolint:gosec
