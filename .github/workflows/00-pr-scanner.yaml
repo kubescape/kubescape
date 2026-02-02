@@ -50,7 +50,6 @@ jobs:
         name: secret-validator
         runs-on: ubuntu-latest
         outputs:
-            TEST_NAMES: ${{ steps.export_tests_to_env.outputs.TEST_NAMES }}
             is-secret-set: ${{ steps.check-secret-set.outputs.is-secret-set }}
 
         steps:
@@ -66,33 +65,8 @@ jobs:
                   REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
               run: "echo \"is-secret-set=${{ env.CUSTOMER != '' && env.USERNAME != '' && env.PASSWORD != '' && env.CLIENT_ID != '' && env.SECRET_KEY != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != '' }}\" >> $GITHUB_OUTPUT\n"
 
-            - id: export_tests_to_env
-              name: set test name
-              run: |
-                  echo "TEST_NAMES=$input" >> $GITHUB_OUTPUT
-              env:
-                  input: '[
-                      "scan_nsa",
-                      "scan_mitre",
-                      "scan_with_exceptions",
-                      "scan_repository",
-                      "scan_local_file",
-                      "scan_local_glob_files",
-                      "scan_local_list_of_files",
-                      "scan_git_repository_and_submit_to_backend",
-                      "scan_and_submit_to_backend",
-                      "scan_customer_configuration",
-                      "scan_compliance_score",
-                      "scan_custom_framework_scanning_file_scope_testing",
-                      "scan_custom_framework_scanning_cluster_scope_testing",
-                      "scan_custom_framework_scanning_cluster_and_file_scope_testing"
-                      ]'
 
     run-system-tests:
-        strategy:
-            fail-fast: false
-            matrix:
-                TEST: ${{ fromJson(needs.wf-preparation.outputs.TEST_NAMES) }}
         needs: [wf-preparation, pr-scanner]
         if: ${{ (needs.wf-preparation.outputs.is-secret-set == 'true') && (always() && (contains(needs.*.result, 'success') || contains(needs.*.result, 'skipped')) && !(contains(needs.*.result, 'failure')) && !(contains(needs.*.result, 'cancelled'))) }}
         runs-on: ubuntu-latest
@@ -101,89 +75,169 @@ jobs:
             contents: read
             pull-requests: write
         steps:
-            - uses: actions/checkout@v4
-              with:
-                  fetch-depth: 0
-                  submodules: recursive
-
-            - uses: actions/setup-go@v4
-              name: Installing go
-              with:
-                  go-version: "1.25"
-
-            - uses: anchore/sbom-action/download-syft@v0
-              name: Setup Syft
-
-            - uses: goreleaser/goreleaser-action@v6
-              name: Build
-              with:
-                  distribution: goreleaser
-                  version: latest
-                  args: build --clean --snapshot --single-target
-              env:
-                  RELEASE: ""
-                  CLIENT: test
-                  CGO_ENABLED: 0
-
-            - name: chmod +x
-              run: chmod +x -R ${PWD}/dist/cli_linux_amd64_v1/kubescape
-
-            - name: Checkout systests repo
-              uses: actions/checkout@v4
-              with:
-                  repository: armosec/system-tests
-                  path: system-tests
-
-            - uses: actions/setup-python@v4
-              with:
-                  python-version: "3.9"
-                  cache: "pip"
-
-            - name: create env
-              run: ./create_env.sh
-              working-directory: system-tests
-
-            - name: Generate uuid
-              id: uuid
+            - name: Set dispatch info
+              id: dispatch-info
               run: |
-                  echo "RANDOM_UUID=$(uuidgen)" >> $GITHUB_OUTPUT
+                  # Correlation ID WITHOUT attempt - so re-runs can find the original run
+                  CORRELATION_ID="${GITHUB_REPOSITORY##*/}-${{ github.run_id }}"
+                  echo "correlation_id=${CORRELATION_ID}" >> "$GITHUB_OUTPUT"
+                  echo "Correlation ID: ${CORRELATION_ID}, Attempt: ${{ github.run_attempt }}"
 
-            - name: Create k8s Kind Cluster
-              id: kind-cluster-install
-              uses: helm/kind-action@v1.10.0
+            - name: Generate GitHub App token
+              id: app-token
+              uses: actions/create-github-app-token@v1
               with:
-                  cluster_name: ${{ steps.uuid.outputs.RANDOM_UUID }}
+                  app-id: ${{ secrets.E2E_DISPATCH_APP_ID }}
+                  private-key: ${{ secrets.E2E_DISPATCH_APP_PRIVATE_KEY }}
+                  owner: armosec
+                  repositories: shared-workflows
 
-            - name: run-tests-on-local-built-kubescape
+            - name: Dispatch system tests to private repo
+              if: ${{ github.run_attempt == 1 }}
               env:
-                  CUSTOMER: ${{ secrets.CUSTOMER }}
-                  USERNAME: ${{ secrets.USERNAME }}
-                  PASSWORD: ${{ secrets.PASSWORD }}
-                  CLIENT_ID: ${{ secrets.CLIENT_ID_PROD }}
-                  SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
-                  REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-                  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-              working-directory: system-tests
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  CORRELATION_ID: ${{ steps.dispatch-info.outputs.correlation_id }}
+                  KS_BRANCH: ${{ github.head_ref || github.ref_name }}
               run: |
-                  echo "Test history:"
-                  echo " ${{ matrix.TEST }} " >/tmp/testhistory
-                  cat /tmp/testhistory
-                  source systests_python_env/bin/activate
+                  echo "Dispatching E2E tests with correlation_id: ${CORRELATION_ID}"
+                  echo "Using test group: KUBESCAPE_CLI_E2E"
 
-                  python3 systest-cli.py             \
-                    -t ${{ matrix.TEST }}            \
-                    -b production                    \
-                    -c CyberArmorTests               \
-                    --duration 3                     \
-                    --logger DEBUG                   \
-                    --kwargs kubescape=${GITHUB_WORKSPACE}/dist/cli_linux_amd64_v1/kubescape
+                  gh api "repos/armosec/shared-workflows/dispatches" \
+                    -f event_type="e2e-test-trigger" \
+                    -f "client_payload[correlation_id]=${CORRELATION_ID}" \
+                    -f "client_payload[github_repository]=${GITHUB_REPOSITORY}" \
+                    -f "client_payload[environment]=production" \
+                    -f "client_payload[tests_groups]=KUBESCAPE_CLI_E2E" \
+                    -f "client_payload[systests_branch]=master" \
+                    -f "client_payload[ks_branch]=${KS_BRANCH}"
 
-                  deactivate
+                  echo "Dispatch completed"
 
-            - name: Test Report
-              uses: mikepenz/action-junit-report@v5
-              if: always()
+            - name: Find E2E workflow run
+              id: find-run
+              env:
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  CORRELATION_ID: ${{ steps.dispatch-info.outputs.correlation_id }}
+              run: |
+                  for i in {1..15}; do
+                    run_id=$(gh api "repos/armosec/shared-workflows/actions/runs?event=repository_dispatch&per_page=30" \
+                      --jq '.workflow_runs | map(select(.name | contains("'"$CORRELATION_ID"'"))) | first | .id // empty')
+
+                    if [ -n "$run_id" ]; then
+                      echo "run_id=${run_id}" >> "$GITHUB_OUTPUT"
+                      gh api "repos/armosec/shared-workflows/actions/runs/${run_id}" --jq '"url=" + .html_url' >> "$GITHUB_OUTPUT"
+                      exit 0
+                    fi
+                    echo "Attempt $i: waiting for run..."
+                    sleep $((i < 5 ? 10 : 30))
+                  done
+                  echo "::error::Could not find workflow run"
+                  exit 1
+
+            - name: Re-run failed jobs in private repo
+              id: rerun
+              if: ${{ github.run_attempt > 1 }}
+              env:
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  RUN_ID: ${{ steps.find-run.outputs.run_id }}
+              run: |
+                  conclusion=$(gh api "repos/armosec/shared-workflows/actions/runs/${RUN_ID}" --jq '.conclusion')
+                  echo "Previous conclusion: $conclusion"
+
+                  if [ "$conclusion" = "success" ]; then
+                    echo "Previous run passed. Nothing to re-run."
+                    echo "skip=true" >> "$GITHUB_OUTPUT"
+                    exit 0
+                  fi
+
+                  # Full rerun if cancelled, partial if failed
+                  if [ "$conclusion" = "cancelled" ]; then
+                    echo "Run was cancelled - triggering full re-run"
+                    gh api --method POST "repos/armosec/shared-workflows/actions/runs/${RUN_ID}/rerun"
+                  else
+                    echo "Re-running failed jobs only"
+                    gh api --method POST "repos/armosec/shared-workflows/actions/runs/${RUN_ID}/rerun-failed-jobs"
+                  fi
+
+                  # Wait for status to flip from 'completed'
+                  for i in {1..30}; do
+                    [ "$(gh api "repos/armosec/shared-workflows/actions/runs/${RUN_ID}" --jq '.status')" != "completed" ] && break
+                    sleep 2
+                  done
+
+            - name: Wait for E2E tests to complete
+              if: ${{ steps.rerun.outputs.skip != 'true' }}
+              env:
+                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  RUN_ID: ${{ steps.find-run.outputs.run_id }}
+                  URL: ${{ steps.find-run.outputs.url }}
+              run: |
+                  echo "Monitoring: ${URL}"
+
+                  for i in {1..60}; do  # 60 iterations × 60s = 1 hour max
+                    read status conclusion < <(gh api "repos/armosec/shared-workflows/actions/runs/${RUN_ID}" \
+                      --jq '[.status, .conclusion // "null"] | @tsv')
+
+                    echo "Status: ${status} | Conclusion: ${conclusion}"
+
+                    if [ "$status" = "completed" ]; then
+                      if [ "$conclusion" = "success" ]; then
+                        echo "E2E tests passed!"
+                        exit 0
+                      fi
+
+                      echo "::error::E2E tests failed: ${conclusion}"
+                      echo ""
+
+                      # Get failed job IDs to a file first
+                      gh api "repos/armosec/shared-workflows/actions/runs/${RUN_ID}/jobs" \
+                        --jq '.jobs[] | select(.conclusion == "failure") | [.id, .name, (.steps[] | select(.conclusion == "failure") | .name)] | @tsv' > /tmp/failed_jobs.txt
+
+                      # Process each failed job
+                      while IFS=$'\t' read -r job_id job_name step_name; do
+                        # Extract test name: "run-helm-e2e / ST (relevancy_python)" → "relevancy_python"
+                        test_name=$(echo "$job_name" | sed 's/.*(\(.*\))/\1/')
+
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                        echo "${job_name}"
+                        echo "   Step: ${step_name}"
+                        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+                        # Fetch logs to temp file
+                        gh api "repos/armosec/shared-workflows/actions/jobs/${job_id}/logs" 2>/dev/null > /tmp/job_logs.txt
+
+                        # Show summary in console
+                        grep -E "(ERROR|FAILURE)" /tmp/job_logs.txt | tail -10
+                        echo ""
+
+                        # Save to separate file per test
+                        log_file="failed_${test_name}.txt"
+                        echo "════════════════════════════════════════" > "$log_file"
+                        echo "${job_name}" >> "$log_file"
+                        echo "   Step: ${step_name}" >> "$log_file"
+                        echo "════════════════════════════════════════" >> "$log_file"
+                        last_endgroup=$(grep -n "##\\[endgroup\\]" /tmp/job_logs.txt | tail -1 | cut -d: -f1)
+                        if [ -n "$last_endgroup" ]; then
+                          tail -n +$((last_endgroup + 1)) /tmp/job_logs.txt >> "$log_file"
+                        else
+                          tail -500 /tmp/job_logs.txt >> "$log_file"
+                        fi
+                      done < /tmp/failed_jobs.txt
+
+                      echo "View full logs: ${URL}"
+                      exit 1
+                    fi
+
+                    sleep 60
+                  done
+
+                  echo "::error::Timeout waiting for tests"
+                  exit 1
+
+            - name: Upload failed step logs
+              if: failure()
+              uses: actions/upload-artifact@v4
               with:
-                  github_token: ${{ secrets.GITHUB_TOKEN }}
-                  report_paths: "system-tests/**/results_xml_format/**.xml"
-                  commit: ${{github.event.workflow_run.head_sha}}
+                  name: failed-e2e-logs-attempt-${{ github.run_attempt }}
+                  path: failed_*.txt
+                  retention-days: 7
