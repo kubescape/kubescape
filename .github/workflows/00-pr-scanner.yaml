@@ -97,6 +97,7 @@ jobs:
               env:
                   GH_TOKEN: ${{ steps.app-token.outputs.token }}
                   CORRELATION_ID: ${{ steps.dispatch-info.outputs.correlation_id }}
+                  KS_BRANCH: ${{ github.head_ref || github.ref_name }}
               run: |
                   echo "Dispatching E2E tests with correlation_id: ${CORRELATION_ID}"
                   echo "Using test group: KUBESCAPE_CLI_E2E"
@@ -108,7 +109,7 @@ jobs:
                     -f "client_payload[environment]=production" \
                     -f "client_payload[tests_groups]=KUBESCAPE_CLI_E2E" \
                     -f "client_payload[systests_branch]=master" \
-                    -f "client_payload[ks_branch]=${{ github.head_ref || github.ref_name }}"
+                    -f "client_payload[ks_branch]=${KS_BRANCH}"
 
                   echo "Dispatch completed"
 
