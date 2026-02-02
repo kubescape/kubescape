@@ -8,7 +8,6 @@ import (
 	"github.com/jedib0t/go-pretty/v6/table"
 	"github.com/jwalton/gchalk"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/utils"
-	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
@@ -100,19 +99,6 @@ func (rp *RepoPrinter) generateCountingCategoryRow(controlSummary reportsummary.
 	rows[2] = rp.generateTableNextSteps(controlSummary, inputPatterns)
 
 	return rows
-}
-
-func (rp *RepoPrinter) getWorkloadScanCommand(ns, kind, name string, source reporthandling.Source) string {
-	cmd := fmt.Sprintf("$ kubescape scan workload %s/%s/%s", ns, kind, name)
-	if ns == "" {
-		cmd = fmt.Sprintf("$ kubescape scan workload %s/%s", kind, name)
-	}
-	if source.FileType == "Helm" {
-		return fmt.Sprintf("%s --chart-path=%s", cmd, source.RelativePath)
-
-	} else {
-		return fmt.Sprintf("%s --file-path=%s", cmd, source.RelativePath)
-	}
 }
 
 func (rp *RepoPrinter) generateTableNextSteps(controlSummary reportsummary.IControlSummary, inputPatterns []string) string {

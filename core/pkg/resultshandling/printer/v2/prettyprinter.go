@@ -24,11 +24,6 @@ import (
 	"k8s.io/utils/strings/slices"
 )
 
-const (
-	prettyPrinterOutputFile             = "report"
-	clusterScanningScopeInformationLink = "https://github.com/kubescape/regolibrary/tree/master#add-a-framework"
-)
-
 var _ printer.IPrinter = &PrettyPrinter{}
 
 type PrettyPrinter struct {
@@ -157,12 +152,13 @@ func (pp *PrettyPrinter) printOverview(opaSessionObj *cautils.OPASessionObj, pri
 }
 
 func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
-	if pp.scanType == cautils.ScanTypeCluster {
+	switch pp.scanType {
+	case cautils.ScanTypeCluster:
 		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for cluster: '%s'\n\n", pp.clusterName))
 		cautils.SimpleDisplay(pp.writer, "In this overview, Kubescape shows you a summary of your cluster security posture, including the number of users who can perform administrative actions. For each result greater than 0, you should evaluate its need, and then define an exception to allow it. This baseline can be used to detect drift in future.\n\n")
-	} else if pp.scanType == cautils.ScanTypeRepo {
+	case cautils.ScanTypeRepo:
 		cautils.InfoDisplay(pp.writer, fmt.Sprintf("\nSecurity posture overview for repo: '%s'\n\n", strings.Join(pp.inputPatterns, ", ")))
-	} else if pp.scanType == cautils.ScanTypeWorkload {
+	case cautils.ScanTypeWorkload:
 		cautils.InfoDisplay(pp.writer, "Workload security posture overview for:\n")
 		ns := opaSessionObj.SingleResourceScan.GetNamespace()
 		var rows []table.Row

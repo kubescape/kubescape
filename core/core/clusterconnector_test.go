@@ -23,13 +23,13 @@ func Test_getOperatorPod(t *testing.T) {
 			name:                                  "test error no operator exist",
 			createOperatorPod:                     false,
 			createAnotherOperatorPodWithSameLabel: false,
-			expectedError:                         fmt.Errorf("Could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts"),
+			expectedError:                         fmt.Errorf("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts"),
 		},
 		{
 			name:                                  "test error several operators exist",
 			createOperatorPod:                     true,
 			createAnotherOperatorPodWithSameLabel: true,
-			expectedError:                         fmt.Errorf("Could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts"),
+			expectedError:                         fmt.Errorf("could not find the Kubescape Operator chart, please validate that the Kubescape Operator helm chart is installed and running -> https://github.com/kubescape/helm-charts"),
 		},
 		{
 			name:                                  "test no error",
@@ -42,7 +42,7 @@ func Test_getOperatorPod(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			k8sClient := k8sinterface.KubernetesApi{
-				KubernetesClient: fake.NewSimpleClientset(),
+				KubernetesClient: fake.NewClientset(),
 				Context:          context.TODO(),
 			}
 

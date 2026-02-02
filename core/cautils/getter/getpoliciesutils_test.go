@@ -1,7 +1,7 @@
 package getter
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -102,7 +102,7 @@ func TestHttpRespToString_NilResponse(t *testing.T) {
 
 func TestHttpRespToString_ValidResponse(t *testing.T) {
 	resp := &http.Response{
-		Body:       ioutil.NopCloser(strings.NewReader("test response")),
+		Body:       io.NopCloser(strings.NewReader("test response")),
 		Status:     "200 OK",
 		StatusCode: 200,
 	}
@@ -114,7 +114,7 @@ func TestHttpRespToString_ValidResponse(t *testing.T) {
 // Returns an error with status and reason when unable to read response body.
 func TestHttpRespToString_ReadError(t *testing.T) {
 	resp := &http.Response{
-		Body: ioutil.NopCloser(strings.NewReader("test response")),
+		Body: io.NopCloser(strings.NewReader("test response")),
 	}
 	resp.Body.Close()
 	result, err := httpRespToString(resp)
@@ -125,7 +125,7 @@ func TestHttpRespToString_ReadError(t *testing.T) {
 // Returns an error with status and reason when unable to read response body.
 func TestHttpRespToString_ErrorCodeLessThan200(t *testing.T) {
 	resp := &http.Response{
-		Body:       ioutil.NopCloser(strings.NewReader("test response")),
+		Body:       io.NopCloser(strings.NewReader("test response")),
 		StatusCode: 100,
 	}
 	resp.Body.Close()

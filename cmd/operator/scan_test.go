@@ -41,6 +41,6 @@ func TestGetOperatorScanCmd(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = cmd.RunE(&cobra.Command{}, []string{"random"})
-	expectedErrorMessage = "For the operator sub-command, only " + vulnerabilitiesSubCommand + " and " + configurationsSubCommand + " are supported. Refer to the examples above."
+	expectedErrorMessage = "for the operator sub-command, only " + vulnerabilitiesSubCommand + " and " + configurationsSubCommand + " are supported. Refer to the examples above"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }

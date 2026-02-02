@@ -37,7 +37,7 @@ func TestResolveLocation(t *testing.T) {
 
 	resolver, _ := NewFixPathLocationResolver(yamlFilePath)
 
-	for fixPath, _ := range fixPathToExpectedLineAndColumn {
+	for fixPath := range fixPathToExpectedLineAndColumn {
 		location, err := resolver.ResolveLocation(fixPath, 100000)
 		assert.Contains(t, err.Error(), "node index [100000] out of range ")
 		assert.Empty(t, location)

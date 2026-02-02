@@ -145,14 +145,14 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	}
 
 	// set policy getter only after setting the customerGUID
-	scanInfo.Getters.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
-	scanInfo.Getters.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
-	scanInfo.Getters.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
-	scanInfo.Getters.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
+	scanInfo.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
 	// TODO - list supported frameworks/controls
 	if scanInfo.ScanAll {
-		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.Getters.PolicyGetter), apisv1.KindFramework)
+		scanInfo.SetPolicyIdentifiers(listFrameworksNames(scanInfo.PolicyGetter), apisv1.KindFramework)
 	}
 
 	// remove host scanner components
@@ -200,7 +200,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ======================== prioritization ===================
 	if scanInfo.PrintAttackTree || isPrioritizationScanType(scanInfo.ScanType) {
 		_, spanPrioritization := otel.Tracer("").Start(ctxOpa, "prioritization")
-		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.Getters.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
+		if priotizationHandler, err := resourcesprioritization.NewResourcesPrioritizationHandler(ctxOpa, scanInfo.AttackTracksGetter, scanInfo.PrintAttackTree); err != nil {
 			logger.L().Ctx(ks.Context()).Warning("failed to get attack tracks, this may affect the scanning results", helpers.Error(err))
 		} else if err := priotizationHandler.PrioritizeResources(scanData); err != nil {
 			return resultsHandling, fmt.Errorf("%w", err)

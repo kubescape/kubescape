@@ -81,7 +81,7 @@ func Test_GetRequestPayload(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := tc.OperatorScanInfo.GetRequestPayload()
+			result := tc.GetRequestPayload()
 			assert.Equal(t, tc.result, result)
 		})
 	}
@@ -136,8 +136,8 @@ func Test_ValidatePayload(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := tc.OperatorScanInfo.GetRequestPayload()
-			result := tc.OperatorScanInfo.ValidatePayload(payload)
+			payload := tc.GetRequestPayload()
+			result := tc.ValidatePayload(payload)
 			assert.Equal(t, tc.result, result)
 		})
 	}

@@ -125,11 +125,12 @@ func (pp *PdfPrinter) getTableObjects(summaryDetails *reportsummary.SummaryDetai
 }
 
 func getSeverityColor(severity string) *props.Color {
-	if severity == "Critical" {
+	switch severity {
+	case "Critical":
 		return &props.Color{Red: 255, Green: 0, Blue: 0}
-	} else if severity == "High" {
+	case "High":
 		return &props.Color{Red: 0, Green: 0, Blue: 255}
-	} else if severity == "Medium" {
+	case "Medium":
 		return &props.Color{Red: 252, Green: 186, Blue: 3}
 	}
 	return &props.BlackColor

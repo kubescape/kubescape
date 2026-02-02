@@ -26,7 +26,7 @@ func decodeDocumentRoots(yamlAsString string) ([]yaml.Node, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("Cannot Decode File as YAML")
+			return nil, fmt.Errorf("cannot decode file as YAML")
 
 		}
 
@@ -55,7 +55,7 @@ func getFixedNodes(ctx context.Context, yamlAsString, yamlExpression string) ([]
 	fixedCandidateNodes, err := allAtOnceEvaluator.EvaluateCandidateNodes(yamlExpression, allDocuments)
 
 	if err != nil {
-		return nil, fmt.Errorf("Error fixing YAML, %w", err)
+		return nil, fmt.Errorf("error fixing YAML, %w", err)
 	}
 
 	fixedNodes := make([]yaml.Node, 0)

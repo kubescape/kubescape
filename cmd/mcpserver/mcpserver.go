@@ -233,9 +233,10 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 
 		// Get workload-level manifests
 		labelSelector := ""
-		if level == "workload" {
+		switch level {
+		case "workload":
 			labelSelector = "kubescape.io/context=filtered"
-		} else if level == "image" {
+		case "image":
 			labelSelector = "kubescape.io/context=non-filtered"
 		}
 
@@ -480,7 +481,7 @@ func mcpServerEntrypoint() error {
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
-		return fmt.Errorf("Server error: %v\n", err)
+		return fmt.Errorf("server error: %v", err)
 	}
 	return nil
 }

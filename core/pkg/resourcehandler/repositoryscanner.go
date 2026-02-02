@@ -3,13 +3,13 @@ package resourcehandler
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	giturls "github.com/chainguard-dev/git-urls"
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"k8s.io/utils/strings/slices"
 )
 
@@ -167,7 +167,7 @@ func (g *GitHubRepository) setBranch(branchOptional string) error {
 	if g.branch != "" {
 		return nil
 	}
-	body, err := getter.HttpGetter(&http.Client{}, g.defaultBranchAPI(), g.getHeaders())
+	body, err := httpGet(&http.Client{}, g.defaultBranchAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}
@@ -193,12 +193,27 @@ func (g *GitHubRepository) getHeaders() map[string]string {
 	}
 	return map[string]string{"Authorization": fmt.Sprintf("token %s", g.token)}
 }
+func httpGet(client *http.Client, url string, headers map[string]string) ([]byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
 func (g *GitHubRepository) setTree() error {
 	if g.isFile {
 		return nil
 	}
 
-	body, err := getter.HttpGetter(&http.Client{}, g.treeAPI(), g.getHeaders())
+	body, err := httpGet(&http.Client{}, g.treeAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}

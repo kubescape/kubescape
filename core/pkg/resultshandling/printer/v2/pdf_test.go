@@ -2,7 +2,7 @@ package printer
 
 import (
 	"context"
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 
@@ -76,7 +76,7 @@ func TestScore_Pdf(t *testing.T) {
 
 			// Read the contents of the temporary file
 			f.Seek(0, 0)
-			got, err := ioutil.ReadAll(f)
+			got, err := io.ReadAll(f)
 			if err != nil {
 				panic(err)
 			}

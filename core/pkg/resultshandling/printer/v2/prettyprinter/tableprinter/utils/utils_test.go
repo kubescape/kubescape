@@ -1,7 +1,7 @@
 package utils
 
 import (
-	"io/ioutil"
+	"io"
 	"os"
 	"testing"
 
@@ -127,7 +127,7 @@ func TestPrintInfo(t *testing.T) {
 		{
 			name: "Critical info",
 			infoToPrintInfo: []InfoStars{
-				InfoStars{
+				{
 					Stars: "5",
 					Info:  "Critical Info",
 				},
@@ -137,11 +137,11 @@ func TestPrintInfo(t *testing.T) {
 		{
 			name: "Medium and high info",
 			infoToPrintInfo: []InfoStars{
-				InfoStars{
+				{
 					Stars: "3",
 					Info:  "Medium Info",
 				},
-				InfoStars{
+				{
 					Stars: "4",
 					Info:  "High Info",
 				},
@@ -151,11 +151,11 @@ func TestPrintInfo(t *testing.T) {
 		{
 			name: "Negligible and low info",
 			infoToPrintInfo: []InfoStars{
-				InfoStars{
+				{
 					Stars: "1",
 					Info:  "Negligible Info",
 				},
-				InfoStars{
+				{
 					Stars: "2",
 					Info:  "Low Info",
 				},
@@ -184,7 +184,7 @@ func TestPrintInfo(t *testing.T) {
 
 			// Read the contents of the temporary file
 			f.Seek(0, 0)
-			got, err := ioutil.ReadAll(f)
+			got, err := io.ReadAll(f)
 			if err != nil {
 				panic(err)
 			}

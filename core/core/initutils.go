@@ -82,7 +82,7 @@ func getReporter(ctx context.Context, tenantConfig cautils.ITenantConfig, report
 }
 
 func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantConfig cautils.ITenantConfig, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor) resourcehandler.IResourceHandler {
-	ctx, span := otel.Tracer("").Start(ctx, "getResourceHandler")
+	_, span := otel.Tracer("").Start(ctx, "getResourceHandler")
 	defer span.End()
 
 	if len(scanInfo.InputPatterns) > 0 || k8s == nil {

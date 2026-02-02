@@ -86,7 +86,7 @@ func adjustFixedListLines(originalList, fixedList *[]nodeInfo) {
 func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (string, error) {
 
 	if tracker < 0 || tracker >= len(*nodeList) {
-		return "", fmt.Errorf("Index out of range for nodeList: tracker=%d, length=%d", tracker, len(*nodeList))
+		return "", fmt.Errorf("index out of range for nodeList: tracker=%d, length=%d", tracker, len(*nodeList))
 	}
 
 	content := make([]*yaml.Node, 0)
@@ -112,11 +112,11 @@ func enocodeIntoYaml(parentNode *yaml.Node, nodeList *[]nodeInfo, tracker int) (
 
 	errorEncoding := encoder.Encode(parentForContent)
 	if errorEncoding != nil {
-		return "", fmt.Errorf("Error debugging node, %v", errorEncoding.Error())
+		return "", fmt.Errorf("error debugging node, %v", errorEncoding.Error())
 	}
 	errorClosingEncoder := encoder.Close()
 	if errorClosingEncoder != nil {
-		return "", fmt.Errorf("Error closing encoder: %v", errorClosingEncoder.Error())
+		return "", fmt.Errorf("error closing encoder: %v", errorClosingEncoder.Error())
 	}
 	return fmt.Sprintf(`%v`, buf.String()), nil
 }
@@ -216,7 +216,7 @@ func getLastLineOfResource(linesSlice *[]string, currentLine int) (int, error) {
 		}
 	}
 
-	return 0, fmt.Errorf("Provided line is greater than the length of YAML file")
+	return 0, fmt.Errorf("provided line is greater than the length of YAML file")
 }
 
 func getNodeLine(nodeList *[]nodeInfo, tracker int) int {
@@ -300,7 +300,7 @@ func isEmptyLineOrComment(lineContent string) bool {
 func readDocuments(ctx context.Context, reader io.Reader, decoder yqlib.Decoder) (*list.List, error) {
 	err := decoder.Init(reader)
 	if err != nil {
-		return nil, fmt.Errorf("Error Initializing the decoder, %w", err)
+		return nil, fmt.Errorf("error initializing the decoder, %w", err)
 	}
 	inputList := list.New()
 
@@ -316,7 +316,7 @@ func readDocuments(ctx context.Context, reader io.Reader, decoder yqlib.Decoder)
 			}
 			return inputList, nil
 		} else if errorReading != nil {
-			return nil, fmt.Errorf("Error Decoding YAML file, %w", errorReading)
+			return nil, fmt.Errorf("error decoding yaml file, %w", errorReading)
 		}
 
 		candidateNode.Document = currentIndex

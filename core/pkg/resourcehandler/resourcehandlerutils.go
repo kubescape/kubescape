@@ -138,7 +138,7 @@ func updateQueryableResourcesMapFromRuleMatchObject(match *reporthandling.RuleMa
 					}
 					queryableResource.AddFieldSelector(globalFieldSelector)
 
-					if match.FieldSelector == nil || len(match.FieldSelector) == 0 {
+					if len(match.FieldSelector) == 0 {
 						queryableResources.Add(queryableResource)
 						continue
 					}

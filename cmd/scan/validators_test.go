@@ -35,7 +35,7 @@ func Test_validateControlScanInfo(t *testing.T) {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				var want error = tc.Want
+				var want = tc.Want
 
 				got := validateControlScanInfo(tc.ScanInfo)
 
@@ -85,7 +85,7 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				var want error = tc.Want
+				var want = tc.Want
 
 				got := validateFrameworkScanInfo(tc.ScanInfo)
 

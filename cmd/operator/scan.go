@@ -32,7 +32,7 @@ func getOperatorScanCmd(ks meta.IKubescape, operatorInfo cautils.OperatorInfo) *
 				return errors.New("for operator scan sub command, you must pass at least 1 more sub commands, see above examples")
 			}
 			if (args[0] != vulnerabilitiesSubCommand) && (args[0] != configurationsSubCommand) {
-				return errors.New(fmt.Sprintf("For the operator sub-command, only %s and %s are supported. Refer to the examples above.", vulnerabilitiesSubCommand, configurationsSubCommand))
+				return fmt.Errorf("for the operator sub-command, only %s and %s are supported. Refer to the examples above", vulnerabilitiesSubCommand, configurationsSubCommand)
 			}
 			return nil
 		},

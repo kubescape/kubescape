@@ -77,7 +77,7 @@ var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.T
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
 	// Replace double backslashes with single backslashes
-	bbStr := strings.Replace(string(bStr), "\\n", "\n", -1)
+	bbStr := strings.ReplaceAll(string(bStr), "\\n", "\n")
 	result, err := verify(string(aStr), bbStr)
 	if err != nil {
 		// Do not change this log from debug level. We might find a lot of images without signature

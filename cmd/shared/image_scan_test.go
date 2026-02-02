@@ -50,7 +50,7 @@ func TestValidateImageScanInfo(t *testing.T) {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				var want error = tc.Want
+				var want = tc.Want
 
 				got := ValidateImageScanInfo(tc.ScanInfo)
 

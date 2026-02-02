@@ -322,7 +322,7 @@ func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
 			return nil
 		}
 		fileFormat := getFileFormat(path)
-		if !(fileFormat == JSON_FILE_FORMAT || fileFormat == YAML_FILE_FORMAT) {
+		if fileFormat != JSON_FILE_FORMAT && fileFormat != YAML_FILE_FORMAT {
 			return nil
 		}
 		if matched, err := filepath.Match(pattern, filepath.Base(path)); err != nil {

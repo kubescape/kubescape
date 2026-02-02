@@ -67,11 +67,11 @@ func generateCategoryStatusRow(controlSummary reportsummary.IControlSummary) tab
 
 	rows[0] = utils.GetStatusIcon(controlSummary.GetStatus().Status())
 
-	rows[1] = controlSummary.GetName()
-	if len(controlSummary.GetName()) > 50 {
-		rows[1] = controlSummary.GetName()[:50] + "..."
+	name := controlSummary.GetName()
+	if len(name) > 50 {
+		rows[1] = name[:50] + "..." //nolint:gosec // Safe: rows has length 3, accessing index 1
 	} else {
-		rows[1] = controlSummary.GetName()
+		rows[1] = name //nolint:gosec // Safe: rows has length 3, accessing index 1
 	}
 
 	rows[2] = getDocsForControl(controlSummary)

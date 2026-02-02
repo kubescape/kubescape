@@ -54,7 +54,7 @@ func TestGetKustomizeDirectoryName(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			tempFile := filepath.Join(tt.args.path, "kustomization.yaml")
 			if tt.createKustomization {
-				_ = os.WriteFile(tempFile, []byte(""), 0644)
+				_ = os.WriteFile(tempFile, []byte(""), 0600)
 			}
 			if got := getKustomizeDirectoryName(tt.args.path); got != tt.want {
 				t.Errorf("GetKustomizeDirectoryName() = %v, want %v", got, tt.want)

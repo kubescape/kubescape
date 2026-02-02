@@ -122,7 +122,7 @@ func generateResourceHeader(short bool) table.Row {
 func shortFormatResource(resourceRows []table.Row) []table.Row {
 	rows := make([]table.Row, len(resourceRows))
 	for i, resourceRow := range resourceRows {
-		rows[i] = table.Row{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.Replace(resourceRow[resourceColumnPath].(string), "\n", "\n"+strings.Repeat(" ", 23), -1))}
+		rows[i] = table.Row{fmt.Sprintf("Severity"+strings.Repeat(" ", 13)+": %+v\nControl Name"+strings.Repeat(" ", 9)+": %+v\nDocs"+strings.Repeat(" ", 17)+": %+v\nAssisted Remediation"+strings.Repeat(" ", 1)+": %+v", resourceRow[resourceColumnSeverity], resourceRow[resourceColumnName], resourceRow[resourceColumnURL], strings.ReplaceAll(resourceRow[resourceColumnPath].(string), "\n", "\n"+strings.Repeat(" ", 23)))}
 	}
 	return rows
 }

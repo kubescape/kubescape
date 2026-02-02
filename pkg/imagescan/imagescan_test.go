@@ -135,7 +135,7 @@ func TestGetProviderConfig(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			providerConfig := getProviderConfig(tt.creds)
 			assert.NotNil(t, providerConfig)
-			assert.Equal(t, true, providerConfig.SynthesisConfig.GenerateMissingCPEs)
+			assert.Equal(t, true, providerConfig.GenerateMissingCPEs)
 		})
 	}
 }

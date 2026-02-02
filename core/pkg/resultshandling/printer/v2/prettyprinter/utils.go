@@ -136,7 +136,7 @@ func filterCVEsBySeverities(cves []imageprinter.CVE, severities []string) []imag
 // getSortPackageScores returns a slice of package names sorted by score
 func getSortPackageScores(pkgScores map[string]*imageprinter.PackageScore) []string {
 	sortedSlice := make([]string, 0, len(pkgScores))
-	for pkgName, _ := range pkgScores {
+	for pkgName := range pkgScores {
 		sortedSlice = append(sortedSlice, pkgName)
 	}
 
@@ -203,8 +203,6 @@ func printTopComponents(writer *os.File, summary imageprinter.ImageScanSummary) 
 	}
 
 	cautils.SimpleDisplay(writer, "\n")
-
-	return
 }
 
 func printImageScanningSummary(writer *os.File, summary imageprinter.ImageScanSummary, verboseMode bool) {

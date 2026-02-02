@@ -63,12 +63,12 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 
 func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressListener IJobProgressNotificationClient) error {
 	scanningScope := cautils.GetScanningScope(opap.Metadata.ContextMetadata)
-	opap.OPASessionObj.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, scanningScope)
+	opap.AllPolicies = convertFrameworksToPolicies(opap.Policies, opap.ExcludedRules, scanningScope)
 
-	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.OPASessionObj.AllPolicies)
+	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
 	// process
-	if err := opap.Process(ctx, opap.OPASessionObj.AllPolicies, progressListener); err != nil {
+	if err := opap.Process(ctx, opap.AllPolicies, progressListener); err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 		// Return error?
 	}
@@ -126,7 +126,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {
-	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
+	targetScan := opap.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
 		logger.L().Start("Scanning", helpers.String(targetScan.String(), opap.clusterName))
 	} else {
@@ -135,7 +135,7 @@ func (opap *OPAProcessor) loggerStartScanning() {
 }
 
 func (opap *OPAProcessor) loggerDoneScanning() {
-	targetScan := opap.OPASessionObj.Metadata.ScanMetadata.ScanningTarget
+	targetScan := opap.Metadata.ScanMetadata.ScanningTarget
 	if reporthandlingv2.Cluster == targetScan {
 		logger.L().StopSuccess("Done scanning", helpers.String(targetScan.String(), opap.clusterName))
 	} else {
@@ -405,7 +405,7 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConf
 	}
 
 	dataControlInputs := map[string]string{
-		"cloudProvider": opap.OPASessionObj.Report.ClusterCloudProvider,
+		"cloudProvider": opap.Report.ClusterCloudProvider,
 	}
 
 	return resources.RegoDependenciesData{

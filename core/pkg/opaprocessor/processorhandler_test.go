@@ -64,6 +64,12 @@ func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error 
 	}
 
 	_, err = io.Copy(dstFile, fileInArchive) //nolint:gosec
+	if err != nil {
+		dstFile.Close()
+		fileInArchive.Close()
+		archive.Close()
+		return err
+	}
 
 	dstFile.Close()
 	fileInArchive.Close()
@@ -165,12 +171,12 @@ func BenchmarkProcess(b *testing.B) {
 			go monitorHeapSpace(&maxHeap, quitChan)
 
 			// test
-			opap.Process(context.Background(), opap.OPASessionObj.AllPolicies, nil)
+			opap.Process(context.Background(), opap.AllPolicies, nil)
 
 			// teardown
 			quitChan <- true
-			b.Log(fmt.Sprintf("%s_max_heap_space_gb:  %.2f", testName, float64(maxHeap)/(1024*1024*1024)))
-			b.Log(fmt.Sprintf("%s_execution_time_sec: %f", testName, b.Elapsed().Seconds()))
+			b.Logf("%s_max_heap_space_gb:  %.2f", testName, float64(maxHeap)/(1024*1024*1024))
+			b.Logf("%s_execution_time_sec: %f", testName, b.Elapsed().Seconds())
 		})
 	}
 }

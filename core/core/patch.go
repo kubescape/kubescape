@@ -313,7 +313,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 		return res, nil
 	}, buildChannel)
 
-	return nil
+	return err
 }
 
 func getOSType(ctx context.Context, osreleaseBytes []byte) (string, error) {

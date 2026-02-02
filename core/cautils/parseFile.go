@@ -170,7 +170,6 @@ func getInfoFromOne(output string, lastNumber int, isMapType bool) (value string
 		if isMapType {
 			lineNumber = lineNumber - 1
 		}
-		lastNumber = lineNumber
 		// save to structure
 	} else {
 		lineNumber = lastNumber

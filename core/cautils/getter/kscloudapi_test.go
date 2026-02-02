@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -25,10 +24,6 @@ const (
 
 var (
 	globalMx sync.Mutex // a mutex to avoid data races on package globals while testing
-
-	testOptions = []v1.KSCloudOption{
-		v1.WithTrace(os.Getenv("DEBUG_TEST") != ""),
-	}
 )
 
 func TestGlobalKSCloudAPIConnector(t *testing.T) {
@@ -112,8 +107,6 @@ func mockAPIServer(t testing.TB) *testServer {
 		// write a json response here
 		defer func() { _ = r.Body.Close() }()
 		_, _ = io.Copy(w, r.Body)
-
-		return
 
 	})
 
