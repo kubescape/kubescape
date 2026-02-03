@@ -18,6 +18,7 @@ archives:
   - id: cli
     ids:
       - cli
+
     formats:
       - binary
       - tar.gz

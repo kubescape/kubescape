@@ -1,0 +1,60 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: kubescape
+spec:
+  version: {{ .TagName }}
+  platforms:
+  - selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_amd64.tar.gz" $version) .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_arm64.tar.gz" $version) .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_amd64.tar.gz" $version) .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_arm64.tar.gz" $version) .TagName }}
+    bin: kubescape
+  - selector:
+      matchLabels:
+        os: windows
+        arch: amd64
+    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_amd64.tar.gz" $version) .TagName }}
+    bin: kubescape.exe
+  - selector:
+      matchLabels:
+        os: windows
+        arch: arm64
+    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_arm64.tar.gz" $version) .TagName }}
+    bin: kubescape.exe
+  shortDescription: Scan resources and cluster configs against security frameworks.
+  description: |
+    Kubescape is the first tool for testing if Kubernetes is deployed securely
+    according to mitigations and best practices. It includes risk analysis,
+    security compliance, and misconfiguration scanning with an easy-to-use
+    CLI interface, flexible output formats, and automated scanning capabilities.
+
+    Features:
+    - Risk analysis: Identify vulnerabilities and security risks in your cluster
+    - Security compliance: Check your cluster against multiple security frameworks
+    - Misconfiguration scanning: Detect security misconfigurations in your workloads
+    - Flexible output: Results in JSON, SARIF, HTML, JUnit, and Prometheus formats
+    - CI/CD integration: Easily integrate into your CI/CD pipeline
+  homepage: https://kubescape.io/
+  caveats: |
+    Requires kubectl and basic knowledge of Kubernetes.
+    Run 'kubescape scan' to scan your Kubernetes cluster or manifests.
