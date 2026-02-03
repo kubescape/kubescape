@@ -20,6 +20,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/kubescape/opa-utils/resources"
+	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -49,10 +50,6 @@ func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error 
 	os.RemoveAll(destFilePath)
 
 	f := archive.File[0]
-	if err != nil {
-		return err
-	}
-
 	dstFile, err := os.OpenFile(destFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
 	if err != nil {
 		return err
@@ -89,7 +86,9 @@ func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error 
 }
 
 func NewOPAProcessorMock(opaSessionObjMock string, resourcesMock []byte) *OPAProcessor {
-	opap := &OPAProcessor{}
+	opap := &OPAProcessor{
+		compiledModules: make(map[string]*ast.Compiler),
+	}
 	if err := json.Unmarshal([]byte(regoDependenciesData), &opap.regoDependenciesData); err != nil {
 		panic(err)
 	}

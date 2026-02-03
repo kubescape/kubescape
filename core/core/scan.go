@@ -3,8 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
-	"slices"
 
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -225,7 +225,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 }
 
 func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx context.Context, resultsHandling *resultshandling.ResultsHandler, scanInfo *cautils.ScanInfo) {
-	var imagesToScan []string
+	imagesToScan := mapset.NewSet[string]()
 
 	if scanType == cautils.ScanTypeWorkload {
 		containers, err := workloadinterface.NewWorkloadObj(scanData.SingleResourceScan.GetObject()).GetContainers()
@@ -234,9 +234,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 			return
 		}
 		for _, container := range containers {
-			if !slices.Contains(imagesToScan, container.Image) {
-				imagesToScan = append(imagesToScan, container.Image)
-			}
+			imagesToScan.Add(container.Image)
 		}
 	} else {
 		for _, workload := range scanData.AllResources {
@@ -246,9 +244,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 				continue
 			}
 			for _, container := range containers {
-				if !slices.Contains(imagesToScan, container.Image) {
-					imagesToScan = append(imagesToScan, container.Image)
-				}
+				imagesToScan.Add(container.Image)
 			}
 		}
 	}
@@ -261,7 +257,7 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 	}
 	defer svc.Close()
 
-	for _, img := range imagesToScan {
+	for img := range imagesToScan.Iter() {
 		logger.L().Start("Scanning", helpers.String("image", img))
 		if err := scanSingleImage(ctx, img, svc, resultsHandling); err != nil {
 			logger.L().StopError("failed to scan", helpers.String("image", img), helpers.Error(err))

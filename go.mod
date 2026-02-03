@@ -15,6 +15,7 @@ require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/chainguard-dev/git-urls v1.0.2
 	github.com/containerd/platforms v1.0.0-rc.2
+	github.com/deckarep/golang-set/v2 v2.8.0
 	github.com/distribution/reference v0.6.0
 	github.com/docker/buildx v0.30.1
 	github.com/docker/cli v29.0.3+incompatible
