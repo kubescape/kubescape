@@ -22,12 +22,25 @@ import (
 	"github.com/kubescape/kubescape/v3/pkg/ksinit"
 )
 
+// GoReleaser will fill these at build time
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 const (
 	defaultNamespace = "kubescape"
 )
 
 func main() {
 	ctx := context.Background()
+	versioncheck.BuildNumber = version
+
+	logger.L().Info("Starting Kubescape server",
+		helpers.String("version", version),
+		helpers.String("commit", commit),
+		helpers.String("date", date))
 
 	cfg, err := config.LoadConfig("/etc/config")
 	if err != nil {
@@ -41,7 +54,7 @@ func main() {
 	// to enable otel, set OTEL_COLLECTOR_SVC=otel-collector:4317
 	if otelHost, present := os.LookupEnv("OTEL_COLLECTOR_SVC"); present {
 		ctx = logger.InitOtel("kubescape",
-			os.Getenv(versioncheck.BuildNumber),
+			version,
 			config.GetAccount(),
 			clusterName,
 			url.URL{Host: otelHost})

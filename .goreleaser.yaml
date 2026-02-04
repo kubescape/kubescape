@@ -36,8 +36,8 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -s -w
-      - -X "github.com/kubescape/kubescape/v3/core/cautils.Client={{.Env.CLIENT}}"
+      - "{{.Ldflags}}"
+      - -X "github.com/kubescape/backend/pkg/versioncheck.Client={{.Env.CLIENT}}"
     hooks:
       post:
         - cmd: >

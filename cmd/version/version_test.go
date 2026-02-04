@@ -21,12 +21,12 @@ func TestGetVersionCmd(t *testing.T) {
 		{
 			name:        "Undefined Build Number",
 			buildNumber: "unknown",
-			want:        "Your current version is: unknown\n",
+			want:        "Your current version is: unknown\nBuild commit: \nBuild date: \n",
 		},
 		{
 			name:        "Defined Build Number: v3.0.1",
 			buildNumber: "v3.0.1",
-			want:        "Your current version is: v3.0.1\n",
+			want:        "Your current version is: v3.0.1\nBuild commit: \nBuild date: \n",
 		},
 	}
 	for _, tt := range tests {
@@ -34,7 +34,7 @@ func TestGetVersionCmd(t *testing.T) {
 			versioncheck.BuildNumber = tt.buildNumber
 
 			ks := core.NewKubescape(context.TODO())
-			if cmd := GetVersionCmd(ks); cmd != nil {
+			if cmd := GetVersionCmd(ks, tt.buildNumber, "", ""); cmd != nil {
 				buf := bytes.NewBufferString("")
 				cmd.SetOut(buf)
 				cmd.Execute()

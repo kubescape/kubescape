@@ -9,14 +9,14 @@ import (
 
 func TestNewDefaultKubescapeCommand(t *testing.T) {
 	t.Run("NewDefaultKubescapeCommand", func(t *testing.T) {
-		cmd := NewDefaultKubescapeCommand(context.Background())
+		cmd := NewDefaultKubescapeCommand(context.Background(), "", "", "")
 		assert.NotNil(t, cmd)
 	})
 }
 
 func TestExecute(t *testing.T) {
 	t.Run("Execute", func(t *testing.T) {
-		err := Execute(context.Background())
+		err := Execute(context.Background(), "", "", "")
 		if err != nil {
 			assert.EqualErrorf(t, err, "unknown command \"^\\\\QTestExecute\\\\E$\" for \"kubescape\"", err.Error())
 		}

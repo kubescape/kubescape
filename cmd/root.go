@@ -44,12 +44,12 @@ var ksExamples = fmt.Sprintf(`
   %[1]s config view
 `, cautils.ExecName())
 
-func NewDefaultKubescapeCommand(ctx context.Context) *cobra.Command {
+func NewDefaultKubescapeCommand(ctx context.Context, ksVersion, ksCommit, ksDate string) *cobra.Command {
 	ks := core.NewKubescape(ctx)
-	return getRootCmd(ks)
+	return getRootCmd(ks, ksVersion, ksCommit, ksDate)
 }
 
-func getRootCmd(ks meta.IKubescape) *cobra.Command {
+func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.Command {
 
 	rootCmd := &cobra.Command{
 		Use:     "kubescape",
@@ -93,7 +93,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	rootCmd.AddCommand(download.GetDownloadCmd(ks))
 	rootCmd.AddCommand(list.GetListCmd(ks))
 	rootCmd.AddCommand(completion.GetCompletionCmd())
-	rootCmd.AddCommand(version.GetVersionCmd(ks))
+	rootCmd.AddCommand(version.GetVersionCmd(ks, ksVersion, ksCommit, ksDate))
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
 	rootCmd.AddCommand(update.GetUpdateCmd(ks))
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
@@ -116,7 +116,7 @@ func getRootCmd(ks meta.IKubescape) *cobra.Command {
 	return rootCmd
 }
 
-func Execute(ctx context.Context) error {
-	ks := NewDefaultKubescapeCommand(ctx)
+func Execute(ctx context.Context, ksVersion, ksCommit, ksDate string) error {
+	ks := NewDefaultKubescapeCommand(ctx, ksVersion, ksCommit, ksDate)
 	return ks.Execute()
 }
