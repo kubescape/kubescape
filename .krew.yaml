@@ -9,37 +9,37 @@ spec:
       matchLabels:
         os: linux
         arch: amd64
-    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_amd64.tar.gz" $version) .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_amd64.tar.gz" .TagName) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: linux
         arch: arm64
-    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_arm64.tar.gz" $version) .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_linux_arm64.tar.gz" .TagName) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: darwin
         arch: amd64
-    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_amd64.tar.gz" $version) .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_amd64.tar.gz" .TagName) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: darwin
         arch: arm64
-    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_arm64.tar.gz" $version) .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_darwin_arm64.tar.gz" .TagName) .TagName }}
     bin: kubescape
   - selector:
       matchLabels:
         os: windows
         arch: amd64
-    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_amd64.tar.gz" $version) .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_amd64.tar.gz" .TagName) .TagName }}
     bin: kubescape.exe
   - selector:
       matchLabels:
         os: windows
         arch: arm64
-    {{ $version := trimPrefix "v" .TagName }}{{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_arm64.tar.gz" $version) .TagName }}
+    {{ addURIAndSha "https://github.com/kubescape/kubescape/releases/download/" .TagName (printf "kubescape_%s_windows_arm64.tar.gz" .TagName) .TagName }}
     bin: kubescape.exe
   shortDescription: Scan resources and cluster configs against security frameworks.
   description: |
