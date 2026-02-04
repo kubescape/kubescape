@@ -73,23 +73,36 @@ type OPASessionObj struct {
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
+	clusterSize := estimateClusterSize(k8sResources)
+	if clusterSize < 100 {
+		clusterSize = 100
+	}
+
 	return &OPASessionObj{
 		Report:                &reporthandlingv2.PostureReport{},
 		Policies:              frameworks,
 		K8SResources:          k8sResources,
-		AllResources:          make(map[string]workloadinterface.IMetadata),
-		ResourcesResult:       make(map[string]resourcesresults.Result),
-		ResourcesPrioritized:  make(map[string]prioritization.PrioritizedResource),
-		InfoMap:               make(map[string]apis.StatusInfo),
-		ResourceToControlsMap: make(map[string][]string),
-		ResourceSource:        make(map[string]reporthandling.Source),
+		AllResources:          make(map[string]workloadinterface.IMetadata, clusterSize),
+		ResourcesResult:       make(map[string]resourcesresults.Result, clusterSize),
+		ResourcesPrioritized:  make(map[string]prioritization.PrioritizedResource, clusterSize/10),
+		InfoMap:               make(map[string]apis.StatusInfo, clusterSize/10),
+		ResourceToControlsMap: make(map[string][]string, clusterSize/2),
+		ResourceSource:        make(map[string]reporthandling.Source, clusterSize),
 		SessionID:             scanInfo.ScanID,
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
 		OmitRawResources:      scanInfo.OmitRawResources,
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
-		TemplateMapping:       make(map[string]MappingNodes),
+		TemplateMapping:       make(map[string]MappingNodes, clusterSize/10),
 		LabelsToCopy:          scanInfo.LabelsToCopy,
 	}
+}
+
+func estimateClusterSize(k8sResources K8SResources) int {
+	total := 0
+	for _, resourceIDs := range k8sResources {
+		total += len(resourceIDs)
+	}
+	return total
 }
 
 // SetTopWorkloads sets the top workloads by score

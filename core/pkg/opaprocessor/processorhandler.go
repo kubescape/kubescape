@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -43,6 +44,8 @@ type OPAProcessor struct {
 	excludeNamespaces []string
 	includeNamespaces []string
 	printEnabled      bool
+	compiledModules   map[string]*ast.Compiler
+	compiledMu        sync.RWMutex
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool) *OPAProcessor {
@@ -58,6 +61,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		excludeNamespaces:    split(excludeNamespaces),
 		includeNamespaces:    split(includeNamespaces),
 		printEnabled:         enableRegoPrint,
+		compiledModules:      make(map[string]*ast.Compiler),
 	}
 }
 
@@ -256,13 +260,14 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				ruleResult.Paths = appendPaths(ruleResult.Paths, ruleResponse.AssistedRemediation, failedResource.GetID())
 				// if ruleResponse has relatedObjects, add it to ruleResult
 				if len(ruleResponse.RelatedObjects) > 0 {
+					relatedResourcesSet := mapset.NewSet[string](ruleResult.RelatedResourcesIDs...)
 					for _, relatedObject := range ruleResponse.RelatedObjects {
 						wl := objectsenvelopes.NewObject(relatedObject.Object)
 						if wl != nil {
-							// avoid adding duplicate related resource IDs
-							if !slices.Contains(ruleResult.RelatedResourcesIDs, wl.GetID()) {
+							if !relatedResourcesSet.Contains(wl.GetID()) {
 								ruleResult.RelatedResourcesIDs = append(ruleResult.RelatedResourcesIDs, wl.GetID())
 							}
+							relatedResourcesSet.Add(wl.GetID())
 							ruleResult.Paths = appendPaths(ruleResult.Paths, relatedObject.AssistedRemediation, wl.GetID())
 						}
 					}
@@ -307,27 +312,16 @@ func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reportha
 
 // runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
 func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
-	modules, err := getRuleDependencies(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("rule: '%s', %s", rule.Name, err.Error())
-	}
-
 	opap.opaRegisterOnce.Do(func() {
-		// register signature verification methods for the OPA ast engine (since these are package level symbols, we do it only once)
 		rego.RegisterBuiltin2(cosignVerifySignatureDeclaration, cosignVerifySignatureDefinition)
 		rego.RegisterBuiltin1(cosignHasSignatureDeclaration, cosignHasSignatureDefinition)
 		rego.RegisterBuiltin1(imageNameNormalizeDeclaration, imageNameNormalizeDefinition)
 	})
 
-	modules[rule.Name] = getRuleData(rule)
-
-	// NOTE: OPA module compilation is the most resource-intensive operation.
-	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
-		EnablePrintStatements: opap.printEnabled,
-		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
-	})
+	ruleData := getRuleData(rule)
+	compiled, err := opap.getCompiledRule(ctx, rule.Name, ruleData, opap.printEnabled)
 	if err != nil {
-		return nil, fmt.Errorf("in 'runRegoOnK8s', failed to compile rule, name: %s, reason: %w", rule.Name, err)
+		return nil, fmt.Errorf("rule: '%s', %w", rule.Name, err)
 	}
 
 	store, err := ruleRegoDependenciesData.TOStorage()
@@ -335,7 +329,6 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 		return nil, err
 	}
 
-	// Eval
 	results, err := opap.regoEval(ctx, k8sObjects, compiled, &store)
 	if err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
@@ -434,4 +427,44 @@ func split(namespaces string) []string {
 		return nil
 	}
 	return strings.Split(namespaces, ",")
+}
+
+func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, error) {
+	cacheKey := ruleName + "|" + ruleData
+
+	opap.compiledMu.RLock()
+	if compiled, ok := opap.compiledModules[cacheKey]; ok {
+		opap.compiledMu.RUnlock()
+		return compiled, nil
+	}
+	opap.compiledMu.RUnlock()
+
+	opap.compiledMu.Lock()
+	defer opap.compiledMu.Unlock()
+
+	if compiled, ok := opap.compiledModules[cacheKey]; ok {
+		return compiled, nil
+	}
+
+	baseModules, err := getRuleDependencies(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get rule dependencies: %w", err)
+	}
+
+	modules := make(map[string]string, len(baseModules)+1)
+	for k, v := range baseModules {
+		modules[k] = v
+	}
+	modules[ruleName] = ruleData
+
+	compiled, err := ast.CompileModulesWithOpt(modules, ast.CompileOpts{
+		EnablePrintStatements: printEnabled,
+		ParserOptions:         ast.ParserOptions{RegoVersion: ast.RegoV0},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to compile rule '%s': %w", ruleName, err)
+	}
+
+	opap.compiledModules[cacheKey] = compiled
+	return compiled, nil
 }
