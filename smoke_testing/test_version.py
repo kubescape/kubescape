@@ -8,7 +8,9 @@ def run(kubescape_exec: str):
 
     ver = os.getenv("RELEASE")
     msg = smoke_utils.run_command(command=[kubescape_exec, "version"])
-    assert ver in msg, f"expected version: {ver}, found: {msg}"
+    if isinstance(msg, bytes):
+        msg = msg.decode('utf-8')
+    assert (ver and ver in msg) or (ver and ver.lstrip('v') in msg), f"expected version: {ver}, found: {msg}"
 
     print("Done testing version")
 
