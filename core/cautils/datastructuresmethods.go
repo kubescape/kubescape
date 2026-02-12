@@ -76,14 +76,18 @@ func ShouldSkipRule(control reporthandling.Control, rule reporthandling.PolicyRu
 // In local build (BuildNumber = ""):
 // returns true only if rule doesn't have the "until" attribute
 func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version string) bool {
+	normalizedVersion := version
+	if version != "" && !semver.IsValid(version) {
+		normalizedVersion = "v" + version
+	}
+
 	if from, ok := attributes["useFromKubescapeVersion"]; ok && from != nil {
 		switch sfrom := from.(type) {
 		case string:
-			if version != "" && semver.Compare(version, sfrom) == -1 {
+			if normalizedVersion != "" && semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, sfrom) == -1 {
 				return false
 			}
 		default:
-			// Handle case where useFromKubescapeVersion is not a string
 			return false
 		}
 	}
@@ -91,11 +95,10 @@ func isRuleKubescapeVersionCompatible(attributes map[string]interface{}, version
 	if until, ok := attributes["useUntilKubescapeVersion"]; ok && until != nil {
 		switch suntil := until.(type) {
 		case string:
-			if version == "" || semver.Compare(version, suntil) >= 0 {
+			if normalizedVersion == "" || (semver.IsValid(normalizedVersion) && semver.Compare(normalizedVersion, suntil) >= 0) {
 				return false
 			}
 		default:
-			// Handle case where useUntilKubescapeVersion is not a string
 			return false
 		}
 	}
