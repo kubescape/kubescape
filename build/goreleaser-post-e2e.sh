@@ -128,7 +128,7 @@ gha_group_start "Smoke tests"
 log "Running smoke tests with $PYTHON $SMOKE_RUNNER \"$ART_PATH\""
 # Run the test runner, propagate exit code
 set +e
-"$PYTHON" "$SMOKE_RUNNER" "$ART_PATH"
+RELEASE="${RELEASE:-}" "$PYTHON" "$SMOKE_RUNNER" "$ART_PATH"
 rc=$?
 set -e
 
