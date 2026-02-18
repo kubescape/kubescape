@@ -36,7 +36,7 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - -X main.version={{.Version}}
+      - -X main.version={{.Tag}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       - -X github.com/kubescape/backend/pkg/versioncheck.Client={{.Env.CLIENT}}
