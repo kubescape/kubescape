@@ -48,8 +48,12 @@ func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Conf
 	finalURL := defaultGrypeListingURL
 	if grypeURL != "" {
 		parsed, err := url.ParseRequestURI(grypeURL)
-		if err != nil || parsed.Host == "" {
+		if err != nil {
 			return distribution.Config{}, installation.Config{}, false, err
+		}
+
+		if parsed.Host == "" {
+			return distribution.Config{}, installation.Config{}, false, fmt.Errorf("invalid grype DB URL: missing host")
 		}
 
 		if parsed.Scheme != "https" && parsed.Scheme != "http" {
