@@ -249,7 +249,11 @@ func scanImages(scanType cautils.ScanTypes, scanData *cautils.OPASessionObj, ctx
 		}
 	}
 
-	distCfg, installCfg, _ := imagescan.NewDefaultDBConfig()
+	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
+	if err != nil {
+		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
+		return
+	}
 	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, scanInfo.UseDefaultMatchers)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))

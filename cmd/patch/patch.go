@@ -80,6 +80,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 
 	patchCmd.PersistentFlags().StringVarP(&scanInfo.FailThresholdSeverity, "severity-threshold", "s", "", "Severity threshold is the severity of a vulnerability at which the command fails and returns exit code 1")
 	patchCmd.PersistentFlags().BoolVarP(&useDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
+	patchCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
 
 	return patchCmd
 }

@@ -48,7 +48,11 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	logger.L().Start(fmt.Sprintf("Scanning image: %s", patchInfo.Image))
 
 	// Setup the scan service
-	distCfg, installCfg, _ := imagescan.NewDefaultDBConfig()
+	distCfg, installCfg, _, err := imagescan.NewDefaultDBConfig(scanInfo.ListingURL)
+	if err != nil {
+		logger.L().StopError(fmt.Sprintf("Invalid Grype database URL '%s': %v", scanInfo.ListingURL, err))
+		return false, err
+	}
 	svc, err := imagescan.NewScanServiceWithMatchers(distCfg, installCfg, scanInfo.UseDefaultMatchers)
 	if err != nil {
 		logger.L().StopError(fmt.Sprintf("Failed to initialize image scanner: %s", err))
