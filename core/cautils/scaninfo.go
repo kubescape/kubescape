@@ -143,6 +143,7 @@ type ScanInfo struct {
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
 	cleanups              []func()
+	ListingURL            string //Grype vulnerability database URL
 }
 
 type Getters struct {

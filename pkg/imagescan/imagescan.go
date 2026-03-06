@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -42,16 +43,33 @@ func (c RegistryCredentials) IsEmpty() bool {
 	return c.Username == "" || c.Password == ""
 }
 
-func NewDefaultDBConfig() (distribution.Config, installation.Config, bool) {
+func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Config, bool, error) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
-	url := defaultGrypeListingURL
+	finalURL := defaultGrypeListingURL
+	if grypeURL != "" {
+		parsed, err := url.ParseRequestURI(grypeURL)
+		if err != nil {
+			return distribution.Config{}, installation.Config{}, false, err
+		}
+
+		if parsed.Host == "" {
+			return distribution.Config{}, installation.Config{}, false, fmt.Errorf("invalid grype DB URL: missing host")
+		}
+
+		if parsed.Scheme != "https" && parsed.Scheme != "http" {
+			return distribution.Config{}, installation.Config{}, false, fmt.Errorf("invalid scheme: %s", parsed.Scheme)
+		}
+
+		finalURL = grypeURL
+	}
+
 	shouldUpdate := true
 
 	return distribution.Config{
-			LatestURL: url,
+			LatestURL: finalURL,
 		}, installation.Config{
 			DBRootDir: dir,
-		}, shouldUpdate
+		}, shouldUpdate, nil
 }
 
 func getMatchers(useDefaultMatchers bool) []match.Matcher {
