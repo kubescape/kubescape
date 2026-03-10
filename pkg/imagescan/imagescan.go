@@ -26,6 +26,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
@@ -47,6 +48,7 @@ func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Conf
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	finalURL := defaultGrypeListingURL
 	if grypeURL != "" {
+		logger.L().Info(fmt.Sprintf("Using custom Grype database URL: %s", grypeURL))
 		parsed, err := url.ParseRequestURI(grypeURL)
 		if err != nil {
 			return distribution.Config{}, installation.Config{}, false, err
