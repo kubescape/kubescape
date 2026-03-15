@@ -176,7 +176,7 @@ func TestNewScanServiceWithMatchers(t *testing.T) {
 
 func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	// Test the actual NewScanServiceWithMatchers function
-	distCfg, installCfg, _ := NewDefaultDBConfig()
+	distCfg, installCfg, _, _ := NewDefaultDBConfig("")
 
 	// Test with default matchers enabled
 	svcWithDefault, err := NewScanServiceWithMatchers(distCfg, installCfg, true)

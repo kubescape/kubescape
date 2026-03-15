@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 
@@ -25,6 +26,7 @@ import (
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/anchore/stereoscope/pkg/image"
 	"github.com/anchore/syft/syft"
+	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 )
 
@@ -42,16 +44,34 @@ func (c RegistryCredentials) IsEmpty() bool {
 	return c.Username == "" || c.Password == ""
 }
 
-func NewDefaultDBConfig() (distribution.Config, installation.Config, bool) {
+func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Config, bool, error) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
-	url := defaultGrypeListingURL
+	finalURL := defaultGrypeListingURL
+	if grypeURL != "" {
+		logger.L().Info(fmt.Sprintf("Using custom Grype database URL: %s", grypeURL))
+		parsed, err := url.ParseRequestURI(grypeURL)
+		if err != nil {
+			return distribution.Config{}, installation.Config{}, false, err
+		}
+
+		if parsed.Host == "" {
+			return distribution.Config{}, installation.Config{}, false, fmt.Errorf("invalid grype DB URL: missing host")
+		}
+
+		if parsed.Scheme != "https" && parsed.Scheme != "http" {
+			return distribution.Config{}, installation.Config{}, false, fmt.Errorf("invalid scheme: %s", parsed.Scheme)
+		}
+
+		finalURL = grypeURL
+	}
+
 	shouldUpdate := true
 
 	return distribution.Config{
-			LatestURL: url,
+			LatestURL: finalURL,
 		}, installation.Config{
 			DBRootDir: dir,
-		}, shouldUpdate
+		}, shouldUpdate, nil
 }
 
 func getMatchers(useDefaultMatchers bool) []match.Matcher {

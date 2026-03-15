@@ -237,6 +237,15 @@ kubescape scan image nginx:1.21 -v
 kubescape scan image myregistry/myimage:tag --username user --password pass
 ```
 
+#### Using an Offline Grype Database
+```bash
+# Start the offline Grype-DB server (using docker)
+docker run --rm -p8080:8080 quay.io/kubescape/grype-offline-db:v6-latest
+
+# Scan an image using the offline database:
+kubescape scan image --grype-db-url http://localhost:8080/databases/ nginx:latest
+```
+
 ### Auto-Fix
 
 Automatically fix misconfigurations in your manifest files:
