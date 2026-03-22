@@ -51,6 +51,10 @@ func NewHostSensorHandler(k8sObj *k8sinterface.KubernetesApi, _ string) (*HostSe
 		dynamicClient: dynamicClient,
 	}
 
+	if k8sObj.KubernetesClient == nil {
+		return nil, fmt.Errorf("nil Kubernetes client")
+	}
+
 	// Verify we can access nodes (basic sanity check)
 	if nodeList, err := k8sObj.KubernetesClient.CoreV1().Nodes().List(k8sObj.Context, metav1.ListOptions{}); err != nil || len(nodeList.Items) == 0 {
 		if err == nil {

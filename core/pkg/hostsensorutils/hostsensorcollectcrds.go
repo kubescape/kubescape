@@ -4,7 +4,6 @@ import (
 	"context"
 	stdjson "encoding/json"
 	"fmt"
-	"reflect"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -25,6 +24,10 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 	// List CRD resources
 	items, err := hsh.listCRDResources(ctx, pluralName, resourceType.String())
 	if err != nil {
+		logger.L().Ctx(ctx).Error("failed to list CRD resources", 
+			helpers.String("kind", resourceType.String()),
+			helpers.String("plural", pluralName),
+			helpers.Error(err))
 		return nil, err
 	}
 
@@ -42,7 +45,7 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 		result = append(result, envelope)
 	}
 
-	logger.L().Debug("Retrieved resources from CRDs",
+	logger.L().Ctx(ctx).Info("Retrieved resources from CRDs",
 		helpers.String("kind", resourceType.String()),
 		helpers.Int("count", len(result)))
 
@@ -54,6 +57,8 @@ func (hsh *HostSensorHandler) convertCRDToEnvelope(item unstructured.Unstructure
 	envelope := hostsensor.HostSensorDataEnvelope{}
 
 	// Set API version and kind
+	// The cluster CRDs use v1beta1, but the OPA policies expect v1beta0.
+	// We use hostsensor.Version which is "v1beta0".
 	envelope.SetApiVersion(k8sinterface.JoinGroupVersion(hostsensor.GroupHostSensor, hostsensor.Version))
 	envelope.SetKind(resourceType.String())
 
@@ -61,29 +66,44 @@ func (hsh *HostSensorHandler) convertCRDToEnvelope(item unstructured.Unstructure
 	nodeName := item.GetName()
 	envelope.SetName(nodeName)
 
-	// Extract content from spec.content
-	content, found, err := unstructured.NestedString(item.Object, "spec", "content")
+	// The host sensor CRDs store the actual data in the 'spec' field.
+	// We need to map 'spec' to the envelope's 'Data' field.
+	spec, found, err := unstructured.NestedMap(item.Object, "spec")
 	if err != nil {
-		return envelope, fmt.Errorf("failed to extract spec.content: %w", err)
+		return envelope, fmt.Errorf("failed to extract spec: %w", err)
 	}
 	if !found {
-		// fallback to "spec" itself
-		contentI, found, err := unstructured.NestedFieldNoCopy(item.Object, "spec")
-		if err != nil {
-			return envelope, fmt.Errorf("failed to extract spec: %w", err)
-		}
-		if !found {
-			return envelope, fmt.Errorf("spec not found in CRD")
-		}
-		contentBytes, err := stdjson.Marshal(contentI)
-		if err != nil {
-			return envelope, fmt.Errorf("failed to marshal spec: %w", err)
-		}
-		content = string(contentBytes)
+		logger.L().Warning("spec not found in CRD item",
+			helpers.String("kind", resourceType.String()),
+			helpers.String("name", nodeName))
+		return envelope, fmt.Errorf("spec not found in CRD")
 	}
 
+	// Remove nodeName as it's already in the envelope metadata
+	delete(spec, "nodeName")
+
+	// The Rego policies expect the data in a specific structure.
+	// For most resources (like ControlPlaneInfo), the 'spec' already contains the required fields:
+	// APIServerInfo, KubeProxyInfo, etc.
+	// However, for some resources like KubeletInfo, the CRD's 'spec' wraps the actual data
+	// in a field named after the resource type. We need to unwrap it if it exists.
+	var data interface{} = spec
+	if inner, ok := spec[resourceType.String()]; ok {
+		data = inner
+	}
+
+	contentBytes, err := stdjson.Marshal(data)
+	if err != nil {
+		return envelope, fmt.Errorf("failed to marshal spec: %w", err)
+	}
+
+	logger.L().Debug("Converted CRD to envelope",
+		helpers.String("kind", resourceType.String()),
+		helpers.String("name", nodeName),
+		helpers.Int("dataSize", len(contentBytes)))
+
 	// Set data as raw bytes
-	envelope.SetData([]byte(content))
+	envelope.SetData(contentBytes)
 
 	return envelope, nil
 }
@@ -143,8 +163,14 @@ func (hsh *HostSensorHandler) getCNIInfo(ctx context.Context) ([]hostsensor.Host
 // If information are found, then return true. Return false otherwise.
 func hasCloudProviderInfo(cpi []hostsensor.HostSensorDataEnvelope) bool {
 	for index := range cpi {
-		if !reflect.DeepEqual(cpi[index].GetData(), stdjson.RawMessage("{}\\n")) {
-			return true
+		var data map[string]interface{}
+		if err := stdjson.Unmarshal(cpi[index].GetData(), &data); err != nil {
+			continue
+		}
+		if val, ok := data["providerMetaDataAPIAccess"]; ok {
+			if b, ok := val.(bool); ok && b {
+				return true
+			}
 		}
 	}
 
@@ -156,9 +182,21 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 	res := make([]hostsensor.HostSensorDataEnvelope, 0)
 	infoMap := make(map[string]apis.StatusInfo)
 
-	logger.L().Debug("Collecting host sensor data from CRDs")
+	logger.L().Info("Collecting host sensor data from CRDs")
 
 	var hasCloudProvider bool
+	// We first query CloudProviderInfo to determine if we should skip ControlPlaneInfo
+	cloudProviderData, err := hsh.getCloudProviderInfo(ctx)
+	if err != nil {
+		addInfoToMap(k8shostsensor.CloudProviderInfo, infoMap, err)
+		logger.L().Ctx(ctx).Warning("Failed to get CloudProviderInfo from CRD", helpers.Error(err))
+	} else {
+		hasCloudProvider = hasCloudProviderInfo(cloudProviderData)
+		if len(cloudProviderData) > 0 {
+			res = append(res, cloudProviderData...)
+		}
+	}
+
 	for _, toPin := range []struct {
 		Resource k8shostsensor.HostSensorResource
 		Query    func(context.Context) ([]hostsensor.HostSensorDataEnvelope, error)
@@ -193,15 +231,10 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 			Query:    hsh.getKubeProxyInfo,
 		},
 		{
-			Resource: k8shostsensor.CloudProviderInfo,
-			Query:    hsh.getCloudProviderInfo,
-		},
-		{
 			Resource: k8shostsensor.CNIInfo,
 			Query:    hsh.getCNIInfo,
 		},
 		{
-			// ControlPlaneInfo is queried _after_ CloudProviderInfo.
 			Resource: k8shostsensor.ControlPlaneInfo,
 			Query:    hsh.getControlPlaneInfo,
 		},
@@ -209,6 +242,7 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 		k8sInfo := toPin
 
 		if k8sInfo.Resource == k8shostsensor.ControlPlaneInfo && hasCloudProvider {
+			logger.L().Info("Skipping ControlPlaneInfo collection due to cloud provider presence")
 			// we retrieve control plane info only if we are not using a cloud provider
 			continue
 		}
@@ -221,15 +255,11 @@ func (hsh *HostSensorHandler) CollectResources(ctx context.Context) ([]hostsenso
 				helpers.Error(err))
 		}
 
-		if k8sInfo.Resource == k8shostsensor.CloudProviderInfo {
-			hasCloudProvider = hasCloudProviderInfo(kcData)
-		}
-
 		if len(kcData) > 0 {
 			res = append(res, kcData...)
 		}
 	}
 
-	logger.L().Debug("Done collecting information from CRDs", helpers.Int("totalResources", len(res)))
+	logger.L().Info("Done collecting information from CRDs", helpers.Int("totalResources", len(res)))
 	return res, infoMap, nil
 }

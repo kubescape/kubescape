@@ -415,14 +415,19 @@ func (k8sHandler *K8sResourceHandler) collectHostResources(ctx context.Context, 
 
 	for rscIdx := range hostResources {
 		g, v := getGroupNVersion(hostResources[rscIdx].GetApiVersion())
-		groupResource := k8sinterface.JoinResourceTriplets(g, v, hostResources[rscIdx].GetKind())
 		allResources[hostResources[rscIdx].GetID()] = &hostResources[rscIdx]
 
-		grpResourceList, ok := externalResourceMap[groupResource]
-		if !ok {
-			grpResourceList = make([]string, 0)
+		// Use ResourceGroupToString (not JoinResourceTriplets) to match the key format used by
+		// setKSResourceMap: when the host sensor CRD exists in the cluster, IsKindKubernetes returns
+		// true and ResourceGroupToString normalizes the kind to lowercase+plural ("kubeletinfos").
+		groupResources := k8sinterface.ResourceGroupToString(g, v, hostResources[rscIdx].GetKind())
+		for _, groupResource := range groupResources {
+			grpResourceList, ok := externalResourceMap[groupResource]
+			if !ok {
+				grpResourceList = make([]string, 0)
+			}
+			externalResourceMap[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 		}
-		externalResourceMap[groupResource] = append(grpResourceList, hostResources[rscIdx].GetID())
 	}
 	return infoMap, nil
 }
