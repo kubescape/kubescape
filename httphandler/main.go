@@ -7,7 +7,7 @@ import (
 
 	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/backend/pkg/servicediscovery"
-	servicediscoveryv2 "github.com/kubescape/backend/pkg/servicediscovery/v2"
+	servicediscoveryv3 "github.com/kubescape/backend/pkg/servicediscovery/v3"
 	"github.com/kubescape/backend/pkg/utils"
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
@@ -112,20 +112,19 @@ func initializeLoggerLevel() {
 }
 
 func initializeSaaSEnv() {
-	serviceDiscoveryFilePath := "/etc/config/services.json"
-	if envVar := os.Getenv("KS_SERVICE_DISCOVERY_FILE_PATH"); envVar != "" {
-		logger.L().Debug("service discovery file path updated from env var", helpers.String("path", envVar))
-		serviceDiscoveryFilePath = envVar
+	apiURL := "api.armosec.io"
+	if envVar := os.Getenv("API_URL"); envVar != "" {
+		logger.L().Debug("API URL updated from env var", helpers.String("url", envVar))
+		apiURL = envVar
 	}
 
-	if _, err := os.Stat(serviceDiscoveryFilePath); err != nil {
-		logger.L().Info("service discovery file not found - skipping", helpers.String("path", serviceDiscoveryFilePath))
+	sdClient, err := servicediscoveryv3.NewServiceDiscoveryClientV3(apiURL)
+	if err != nil {
+		logger.L().Fatal("failed to initialize service discovery client", helpers.Error(err))
 		return
 	}
 
-	backendServices, err := servicediscovery.GetServices(
-		servicediscoveryv2.NewServiceDiscoveryFileV2(serviceDiscoveryFilePath),
-	)
+	backendServices, err := servicediscovery.GetServices(sdClient)
 	if err != nil {
 		logger.L().Fatal("failed to get backend services", helpers.Error(err))
 		return
