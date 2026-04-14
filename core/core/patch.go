@@ -202,7 +202,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	defer bkClient.Close()
 
 	dockerConfig := config.LoadDefaultConfigFile(os.Stderr)
-	cfg := authprovider.DockerAuthProviderConfig{ConfigFile: dockerConfig}
+	cfg := authprovider.DockerAuthProviderConfig{AuthConfigProvider: authprovider.LoadAuthConfig(dockerConfig)}
 	attachable := []session.Attachable{authprovider.NewDockerAuthProvider(cfg)}
 	solveOpt := client.SolveOpt{
 		Exports: []client.ExportEntry{
