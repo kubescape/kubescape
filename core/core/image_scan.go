@@ -135,9 +135,26 @@ func getUniqueVulnerabilitiesAndSeverities(policies []VulnerabilitiesIgnorePolic
 		// Include the exceptions only if the image is one of the targets
 		if isTargetImage(policy.Targets, imageAttributes) {
 			for _, vulnerability := range policy.Vulnerabilities {
-				// Add to slice directly
+				// grype's IgnoreRule matching is case-sensitive and advisory
+				// sources do not share a single casing convention: CVE IDs
+				// are uppercase, while GHSA IDs keep a lowercase suffix
+				// (e.g. "GHSA-jc7w-c686-c4v9"). Emit the trimmed original
+				// casing plus the uppercased and lowercased forms so users
+				// can list the ID in any casing without the filter silently
+				// missing the match (kubescape issue #1870).
+				vulnerability = strings.TrimSpace(vulnerability)
+				if vulnerability == "" {
+					continue
+				}
+				uniqueVulns[vulnerability] = append(uniqueVulns[vulnerability], vulnerability)
 				vulnerabilityUppercase := strings.ToUpper(vulnerability)
-				uniqueVulns[vulnerabilityUppercase] = append(uniqueVulns[vulnerabilityUppercase], vulnerability)
+				if vulnerabilityUppercase != vulnerability {
+					uniqueVulns[vulnerabilityUppercase] = append(uniqueVulns[vulnerabilityUppercase], vulnerability)
+				}
+				vulnerabilityLowercase := strings.ToLower(vulnerability)
+				if vulnerabilityLowercase != vulnerability && vulnerabilityLowercase != vulnerabilityUppercase {
+					uniqueVulns[vulnerabilityLowercase] = append(uniqueVulns[vulnerabilityLowercase], vulnerability)
+				}
 			}
 
 			for _, severity := range policy.Severities {
