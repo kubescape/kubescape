@@ -513,6 +513,32 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 			expectedVulnerabilities: []string{"CVE-2024-1234", "cve-2024-1234"},
 			expectedSeverities:      []string{},
 		},
+		{
+			// An all-lowercase CVE ID must produce exactly two forms (original
+			// + uppercase), not three — the lowercase variant equals the
+			// original so it must not be re-added as a duplicate key.
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "lowercase-cve",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"cve-2023-1234"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"CVE-2023-1234", "cve-2023-1234"},
+			expectedSeverities:      []string{},
+		},
 	}
 
 	for _, tt := range tests {
