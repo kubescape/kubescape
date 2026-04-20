@@ -326,7 +326,7 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 				},
 			},
 			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
-			expectedVulnerabilities: []string{"CVE-2023-42365"},
+			expectedVulnerabilities: []string{"CVE-2023-42365", "cve-2023-42365"},
 			expectedSeverities:      []string{},
 		},
 		{
@@ -430,8 +430,88 @@ func TestGetVulnerabilitiesAndSeverities(t *testing.T) {
 				},
 			},
 			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
-			expectedVulnerabilities: []string{"CVE-2022-30065", "CVE-2022-28391"},
+			expectedVulnerabilities: []string{"CVE-2022-28391", "CVE-2022-30065", "cve-2022-28391", "cve-2022-30065"},
 			expectedSeverities:      []string{"CRITICAL"},
+		},
+		{
+			// A lowercase-suffix GHSA ID on its own must reach grype in
+			// original, uppercase, and lowercase form, because grype's
+			// IgnoreRule matching is case-sensitive and the advisory is
+			// reported with a mixed casing (see issue #1870).
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-lowercase-only",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"GHSA-jc7w-c686-c4v9"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"GHSA-JC7W-C686-C4V9", "GHSA-jc7w-c686-c4v9", "ghsa-jc7w-c686-c4v9"},
+			expectedSeverities:      []string{},
+		},
+		{
+			// When users list the same GHSA ID in both cases, each variant
+			// is preserved so the filter still works regardless of how the
+			// advisory is reported.
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "ghsa-mixed-and-upper",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"GHSA-jc7w-c686-c4v9", "GHSA-JC7W-C686-C4V9"},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"GHSA-JC7W-C686-C4V9", "GHSA-jc7w-c686-c4v9", "ghsa-jc7w-c686-c4v9"},
+			expectedSeverities:      []string{},
+		},
+		{
+			// Empty or whitespace-only entries are skipped so they cannot
+			// produce an empty IgnoreRule that grype would treat as a
+			// match-everything wildcard, and surrounding whitespace from a
+			// hand-edited exceptions file is tolerated.
+			policies: []VulnerabilitiesIgnorePolicy{
+				{
+					Metadata: Metadata{
+						Name: "edge-empty-whitespace",
+					},
+					Kind: "VulnerabilitiesIgnorePolicy",
+					Targets: []Target{
+						{
+							DesignatorType: "Attributes",
+							Attributes: Attributes{
+								Registry: "quay.io",
+							},
+						},
+					},
+					Vulnerabilities: []string{"", "   ", "  CVE-2024-1234  "},
+					Severities:      []string{},
+				},
+			},
+			image:                   "quay.io/kubescape/kubescape-cli:v3.0.0",
+			expectedVulnerabilities: []string{"CVE-2024-1234", "cve-2024-1234"},
+			expectedSeverities:      []string{},
 		},
 	}
 
