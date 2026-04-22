@@ -408,6 +408,11 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConf
 }
 
 func (opap *OPAProcessor) skipNamespace(ns string) bool {
+	if ns == "" {
+		// Cluster-scoped resources are never filtered by namespace selectors.
+		return false
+	}
+
 	if includeNamespaces := opap.includeNamespaces; len(includeNamespaces) > 0 {
 		if !slices.Contains(includeNamespaces, ns) {
 			// skip ns not in IncludeNamespaces

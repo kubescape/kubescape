@@ -516,3 +516,48 @@ func TestAppendPaths(t *testing.T) {
 		})
 	}
 }
+
+func TestSkipNamespace(t *testing.T) {
+	tests := []struct {
+		name              string
+		includeNamespaces []string
+		excludeNamespaces []string
+		namespace         string
+		expectedSkip      bool
+	}{
+		{
+			name:              "included namespace is not skipped",
+			includeNamespaces: []string{"default"},
+			namespace:         "default",
+			expectedSkip:      false,
+		},
+		{
+			name:              "non included namespace is skipped",
+			includeNamespaces: []string{"default"},
+			namespace:         "kube-system",
+			expectedSkip:      true,
+		},
+		{
+			name:              "cluster scoped resources are not skipped when include namespaces are set",
+			includeNamespaces: []string{"default"},
+			namespace:         "",
+			expectedSkip:      false,
+		},
+		{
+			name:              "excluded namespace is skipped",
+			excludeNamespaces: []string{"kube-system"},
+			namespace:         "kube-system",
+			expectedSkip:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opap := &OPAProcessor{
+				includeNamespaces: tt.includeNamespaces,
+				excludeNamespaces: tt.excludeNamespaces,
+			}
+			assert.Equal(t, tt.expectedSkip, opap.skipNamespace(tt.namespace))
+		})
+	}
+}
