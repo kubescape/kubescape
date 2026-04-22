@@ -3,6 +3,7 @@ package cautils
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -150,9 +151,25 @@ func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
 	assert.True(t, isKustomizeDirectory(helmPath), "helm directory should be detected as kustomize directory")
 
 	kd := NewKustomizeDirectory(helmPath)
-	_, errs := kd.GetWorkloads(helmPath)
+	workloads, errs := kd.GetWorkloads(helmPath)
 
 	for _, err := range errs {
 		assert.NotContains(t, err.Error(), "must specify --enable-helm", "kustomize should run with helm enabled")
+		if strings.Contains(err.Error(), `exec: "helmV3": executable file not found`) {
+			t.Skip("helmV3 is not installed in test environment")
+		}
 	}
+
+	assert.Empty(t, errs, "kustomize with helm charts should render without errors")
+	assert.NotEmpty(t, workloads, "rendered workloads should include resources from helm chart")
+
+	var configMapFound bool
+	for _, wls := range workloads {
+		for _, wl := range wls {
+			if wl.GetKind() == "ConfigMap" && wl.GetName() == "test-config" {
+				configMapFound = true
+			}
+		}
+	}
+	assert.True(t, configMapFound, "helm chart ConfigMap should be present in rendered workloads")
 }
