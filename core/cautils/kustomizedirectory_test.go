@@ -143,3 +143,16 @@ func TestKustomizeBaseDirectory(t *testing.T) {
 	assert.Empty(t, errs, "should not have errors loading base directory")
 	assert.NotEmpty(t, workloads, "should have workloads from base directory")
 }
+
+func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
+	helmPath := filepath.Join(kustomizeTestdataPath(), "helm")
+
+	assert.True(t, isKustomizeDirectory(helmPath), "helm directory should be detected as kustomize directory")
+
+	kd := NewKustomizeDirectory(helmPath)
+	_, errs := kd.GetWorkloads(helmPath)
+
+	for _, err := range errs {
+		assert.NotContains(t, err.Error(), "must specify --enable-helm", "kustomize should run with helm enabled")
+	}
+}
