@@ -81,6 +81,7 @@ func (kd *KustomizeDirectory) GetWorkloads(kustomizeDirectoryPath string) (map[s
 	opts := krusty.MakeDefaultOptions()
 	opts.LoadRestrictions = types.LoadRestrictionsNone
 	opts.PluginConfig = types.EnabledPluginConfig(types.BploUseStaticallyLinked)
+	opts.PluginConfig.HelmConfig.Command = "helm"
 	kustomizer := krusty.MakeKustomizer(opts)
 	resmap, err := kustomizer.Run(fSys, kustomizeDirectoryPath)
 

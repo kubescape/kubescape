@@ -155,8 +155,8 @@ func TestKustomizeDirectoryWithHelmCharts(t *testing.T) {
 
 	for _, err := range errs {
 		assert.NotContains(t, err.Error(), "must specify --enable-helm", "kustomize should run with helm enabled")
-		if strings.Contains(err.Error(), `exec: "helmV3": executable file not found`) {
-			t.Skip("helmV3 is not installed in test environment")
+		if strings.Contains(err.Error(), `exec: "helm": executable file not found`) {
+			t.Skip("helm is not installed in test environment")
 		}
 	}
 
