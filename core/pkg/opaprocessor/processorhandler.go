@@ -231,8 +231,8 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 		ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
 		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to evaluate rule, skipping", helpers.String("rule", rule.Name), helpers.Error(err))
 			continue
-			// return resources, allResources, err
 		}
 
 		// Build the set of failed IDs so we can correctly mark the remainder as passed.
@@ -243,6 +243,9 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 		failedIDs := make(map[string]struct{})
 		for _, ruleResponse := range ruleResponses {
 			for _, failedResource := range objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources()) {
+				if opap.skipNamespace(failedResource.GetNamespace()) {
+					continue
+				}
 				id := failedResource.GetID()
 				failedIDs[id] = struct{}{}
 				resources[id] = &resourcesresults.ResourceAssociatedRule{
