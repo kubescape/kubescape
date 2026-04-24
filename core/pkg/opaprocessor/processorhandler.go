@@ -222,22 +222,46 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 		inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 
-		for i, inputResource := range inputResources {
+		for _, inputResource := range inputResources {
 			if opap.skipNamespace(inputResource.GetNamespace()) {
 				continue
 			}
-			resources[inputResource.GetID()] = &resourcesresults.ResourceAssociatedRule{
-				Name:                  rule.Name,
-				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
-				Status:                apis.StatusPassed,
-			}
-			opap.AllResources[inputResource.GetID()] = inputResources[i]
+			opap.AllResources[inputResource.GetID()] = inputResource
 		}
 
 		ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
 		if err != nil {
 			continue
 			// return resources, allResources, err
+		}
+
+		// Build the set of failed IDs so we can correctly mark the remainder as passed.
+		// Resources are only written to the result map after a successful OPA evaluation,
+		// preventing stale StatusPassed entries when evaluation fails.
+		// Failed entries are pre-seeded with rule metadata so the loop below can
+		// find them and attach paths/status without losing Name/ControlConfigurations.
+		failedIDs := make(map[string]struct{})
+		for _, ruleResponse := range ruleResponses {
+			for _, failedResource := range objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources()) {
+				id := failedResource.GetID()
+				failedIDs[id] = struct{}{}
+				resources[id] = &resourcesresults.ResourceAssociatedRule{
+					Name:                  rule.Name,
+					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+				}
+			}
+		}
+		for _, inputResource := range inputResources {
+			if opap.skipNamespace(inputResource.GetNamespace()) {
+				continue
+			}
+			if _, failed := failedIDs[inputResource.GetID()]; !failed {
+				resources[inputResource.GetID()] = &resourcesresults.ResourceAssociatedRule{
+					Name:                  rule.Name,
+					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+					Status:                apis.StatusPassed,
+				}
+			}
 		}
 
 		// ruleResponse to ruleResult
@@ -331,7 +355,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 
 	results, err := opap.regoEval(ctx, k8sObjects, compiled, &store)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		return nil, fmt.Errorf("rule '%s': rego eval failed: %w", rule.Name, err)
 	}
 
 	return results, nil
