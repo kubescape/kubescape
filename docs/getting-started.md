@@ -208,23 +208,29 @@ Objects with exceptions will be presented as `exclude` and not `fail`.
 
 [See more examples about exceptions.](/examples/exceptions/README.md)
 
-#### Scan Helm charts 
+#### Scan Helm charts
 
-```bash
-kubescape scan </path/to/directory>
-```
+Kubescape automatically detects a Helm chart directory by the 
+presence of a `Chart.yaml` file.
 
-> **Note**  
-> Kubescape will load the default VALUES file.
-
-#### Scan a Kustomize directory 
-
-```bash
-kubescape scan </path/to/directory>
-```
+    kubescape scan /path/to/helm/chart/directory
 
 > **Note**  
-> Kubescape will generate Kubernetes YAML objects using a `kustomize` file and scan them for security.
+> Kubescape will load the default `values.yaml` file. To use a 
+> custom values file, use the `--helm-values` flag.
+
+#### Scan a Kustomize directory
+
+Kubescape automatically detects a Kustomize directory by the 
+presence of a `kustomization.yaml` file.
+
+    kubescape scan /path/to/kustomize/directory
+
+> **Note**  
+> Kubescape will generate Kubernetes YAML objects using the 
+> `kustomization.yaml` file and scan them for security.
+> If a directory contains both `Chart.yaml` and 
+> `kustomization.yaml`, Kubescape will treat it as a Helm chart.
 
 #### Trigger in cluster components for scanning your cluster
 
