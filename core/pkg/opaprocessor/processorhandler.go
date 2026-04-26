@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -72,9 +73,9 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
 	// process
-	if err := opap.Process(ctx, opap.AllPolicies, progressListener); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
-		// Return error?
+	processErr := opap.Process(ctx, opap.AllPolicies, progressListener)
+	if processErr != nil {
+		logger.L().Ctx(ctx).Warning(processErr.Error())
 	}
 
 	// edit results
@@ -84,7 +85,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	_ = scorewrapper.Calculate(score.EPostureReportV2)
 
-	return nil
+	return processErr
 }
 
 // Process OPA policies (rules) on all configured controls.
@@ -99,6 +100,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		defer progressListener.Stop()
 	}
 
+	var processErrs []error
 	for _, toPin := range policies.Controls {
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
@@ -108,7 +110,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 
 		resourcesAssociatedControl, err := opap.processControl(ctx, &control)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning(err.Error())
+			processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
 		}
 
 		if len(resourcesAssociatedControl) == 0 {
@@ -126,7 +128,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		}
 	}
 
-	return nil
+	return errors.Join(processErrs...)
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {
@@ -154,11 +156,11 @@ func (opap *OPAProcessor) loggerDoneScanning() {
 func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
 	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
 
+	var ruleErrs []error
 	for i := range control.Rules {
 		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning(err.Error())
-			continue
+			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
 		}
 
 		// append failed rules to controls
@@ -182,7 +184,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 		}
 	}
 
-	return resourcesAssociatedControl, nil
+	return resourcesAssociatedControl, errors.Join(ruleErrs...)
 }
 
 // processRule processes a single policy rule, with some extra fixed control inputs.
@@ -194,6 +196,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
+	var evalErrs []error
 	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule)
 	for i := range resourcesPerNS {
 		resourceToScan := resourcesPerNS[i]
@@ -205,6 +208,8 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			resourceToScan, // NOTE: this uses the initial snapshot of AllResources
 		)
 		if err != nil {
+			evalErrs = append(evalErrs, fmt.Errorf("aggregator failed for namespace %q: %w", i, err))
+			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, resourceToScan, err)
 			continue
 		}
 
@@ -217,6 +222,8 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 		// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
 		enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources)
 		if err != nil {
+			evalErrs = append(evalErrs, fmt.Errorf("enumerator failed for namespace %q: %w", i, err))
+			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 			continue
 		}
 
@@ -231,7 +238,8 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 		ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning("failed to evaluate rule, skipping", helpers.String("rule", rule.Name), helpers.Error(err))
+			evalErrs = append(evalErrs, fmt.Errorf("rego eval failed for namespace %q: %w", i, err))
+			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 			continue
 		}
 
@@ -258,12 +266,17 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			if opap.skipNamespace(inputResource.GetNamespace()) {
 				continue
 			}
-			if _, failed := failedIDs[inputResource.GetID()]; !failed {
-				resources[inputResource.GetID()] = &resourcesresults.ResourceAssociatedRule{
-					Name:                  rule.Name,
-					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
-					Status:                apis.StatusPassed,
-				}
+			id := inputResource.GetID()
+			if _, failed := failedIDs[id]; failed {
+				continue
+			}
+			if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
+				continue
+			}
+			resources[id] = &resourcesresults.ResourceAssociatedRule{
+				Name:                  rule.Name,
+				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+				Status:                apis.StatusPassed,
 			}
 		}
 
@@ -304,7 +317,38 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			}
 		}
 	}
-	return resources, nil
+	return resources, errors.Join(evalErrs...)
+}
+
+// markResourcesSkipped seeds the result map with StatusSkipped entries for every
+// in-scope input resource and records the OPA error in opap.InfoMap. Without
+// this, an evaluation failure would leave the resources absent from the rule's
+// output: a sibling rule that passed could then drive the parent control to
+// StatusPassed, masking the fact that this rule never completed.
+func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.ResourceAssociatedRule, rule *reporthandling.PolicyRule, deps resources.RegoDependenciesData, inputResources []workloadinterface.IMetadata, evalErr error) {
+	statusInfo := apis.StatusInfo{
+		InnerInfo:   evalErr.Error(),
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusUnknown,
+	}
+	for _, inputResource := range inputResources {
+		if opap.skipNamespace(inputResource.GetNamespace()) {
+			continue
+		}
+		id := inputResource.GetID()
+		if existing, ok := out[id]; ok && existing.Status == apis.StatusFailed {
+			continue // don't downgrade a definitive failure to skipped
+		}
+		out[id] = &resourcesresults.ResourceAssociatedRule{
+			Name:                  rule.Name,
+			ControlConfigurations: deps.PostureControlInputs,
+			Status:                apis.StatusSkipped,
+			SubStatus:             apis.SubStatusUnknown,
+		}
+		if opap.InfoMap != nil {
+			opap.InfoMap[id] = statusInfo
+		}
+	}
 }
 
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
