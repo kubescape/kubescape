@@ -212,9 +212,9 @@ Objects with exceptions will be presented as `exclude` and not `fail`.
 
 Kubescape automatically detects a Helm chart directory by the 
 presence of a `Chart.yaml` file.
-
+ ```bash
     kubescape scan /path/to/helm/chart/directory
-
+ ```
 > **Note**  
 > Kubescape will load the default `values.yaml` file. To use a 
 > custom values file, use the `--helm-values` flag.
@@ -222,10 +222,10 @@ presence of a `Chart.yaml` file.
 #### Scan a Kustomize directory
 
 Kubescape automatically detects a Kustomize directory by the 
-presence of a `kustomization.yaml` file.
-
-    kubescape scan /path/to/kustomize/directory
-
+presence of a `kustomization.yaml`, `kustomization.yml`, or `kustomization` file.
+```bash
+kubescape scan /path/to/kustomize/directory
+```
 > **Note**  
 > Kubescape will generate Kubernetes YAML objects using the 
 > `kustomization.yaml` file and scan them for security.
