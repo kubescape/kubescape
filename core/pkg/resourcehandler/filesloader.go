@@ -54,7 +54,6 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 		for k, v := range workloadIDToSource {
 			sessionObj.ResourceSource[k] = v
-			sessionObj.TemplateMapping[k] = cautils.MappingNodes{}
 		}
 
 		// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
