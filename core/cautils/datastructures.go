@@ -67,7 +67,6 @@ type OPASessionObj struct {
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
-	TemplateMapping       map[string]MappingNodes // Map chart obj to template (only for rendering from path)
 	TriggeredByCLI        bool
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 }
@@ -92,7 +91,6 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
 		OmitRawResources:      scanInfo.OmitRawResources,
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
-		TemplateMapping:       make(map[string]MappingNodes, clusterSize/10),
 		LabelsToCopy:          scanInfo.LabelsToCopy,
 	}
 }

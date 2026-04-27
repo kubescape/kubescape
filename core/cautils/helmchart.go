@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/kubescape/go-logger"
@@ -168,21 +167,4 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 		}
 	}
 	return workloads, errs
-}
-
-func (hc *HelmChart) AddCommentToTemplate() {
-	for index, t := range hc.chart.Templates {
-		if IsYaml(strings.ToLower(t.Name)) {
-			var newLines []string
-			originalTemplate := string(t.Data)
-			lines := strings.Split(originalTemplate, "\n")
-
-			for index, line := range lines {
-				comment := " #This is the " + strconv.Itoa(index+1) + " line"
-				newLines = append(newLines, line+comment)
-			}
-			templateWithComment := strings.Join(newLines, "\n")
-			hc.chart.Templates[index].Data = []byte(templateWithComment)
-		}
-	}
 }
