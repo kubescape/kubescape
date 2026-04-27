@@ -176,80 +176,121 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		},
 	}
 
+	makeSummary := func(controls reportsummary.ControlSummaries) *reportsummary.SummaryDetails {
+		return &reportsummary.SummaryDetails{Controls: controls}
+	}
+
 	t.Run("no exceptions defined", func(t *testing.T) {
-		summaries := reportsummary.ControlSummaries{"C-0286": manualControl}
-		applyExceptionsToManualControls(summaries, nil)
-		ctrl := summaries["C-0286"]
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		applyExceptionsToManualControls(sd, nil)
+		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
 	})
 
 	t.Run("exception matches manual control", func(t *testing.T) {
-		summaries := reportsummary.ControlSummaries{"C-0286": manualControl}
-		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual})
-		ctrl := summaries["C-0286"]
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
-		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
 	})
 
 	t.Run("exception does not match non-manual control", func(t *testing.T) {
-		summaries := reportsummary.ControlSummaries{"C-0001": nonManualControl}
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0001": nonManualControl})
 		// exception explicitly targets C-0001 — the only reason it should be skipped
 		// is because the control is not SubStatusManualReview, not because the ID doesn't match
 		exceptionForNonManual := armotypes.PostureExceptionPolicy{
 			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0001"}},
 		}
-		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForNonManual})
-		ctrl := summaries["C-0001"]
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForNonManual})
+		ctrl := sd.Controls["C-0001"]
 		assert.Equal(t, apis.SubStatusUnknown, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusFailed, ctrl.GetStatus().Status())
 	})
 
 	t.Run("exception does not match different control ID", func(t *testing.T) {
-		summaries := reportsummary.ControlSummaries{
+		sd := makeSummary(reportsummary.ControlSummaries{
 			"C-0287": {
 				ControlID:  "C-0287",
 				StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusManualReview},
 			},
-		}
-		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual})
-		ctrl := summaries["C-0287"]
+		})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		ctrl := sd.Controls["C-0287"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
 	})
 
 	t.Run("only matching manual control is updated, others unchanged", func(t *testing.T) {
-		summaries := reportsummary.ControlSummaries{
+		sd := makeSummary(reportsummary.ControlSummaries{
 			"C-0286": manualControl,
 			"C-0287": {
 				ControlID:  "C-0287",
 				StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusManualReview},
 			},
-		}
-		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual})
-		matched := summaries["C-0286"]
-		unmatched := summaries["C-0287"]
+		})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		matched := sd.Controls["C-0286"]
+		unmatched := sd.Controls["C-0287"]
 		assert.Equal(t, apis.SubStatusException, matched.GetSubStatus())
-		assert.Equal(t, apis.StatusSkipped, matched.GetStatus().Status())
+		assert.Equal(t, apis.StatusPassed, matched.GetStatus().Status())
 		assert.Equal(t, apis.SubStatusManualReview, unmatched.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, unmatched.GetStatus().Status())
 	})
 
+	t.Run("framework controls are updated in sync with top-level controls", func(t *testing.T) {
+		sd := &reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{"C-0286": manualControl},
+			Frameworks: []reportsummary.FrameworkSummary{
+				{Controls: reportsummary.ControlSummaries{"C-0286": manualControl}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		topLevel := sd.Controls["C-0286"]
+		fwLevel := sd.Frameworks[0].Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, topLevel.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, topLevel.GetStatus().Status())
+		assert.Equal(t, apis.SubStatusException, fwLevel.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, fwLevel.GetStatus().Status())
+	})
+
 	t.Run("broad exception with empty posturePolicies does not affect manual controls", func(t *testing.T) {
-		summaries := reportsummary.ControlSummaries{"C-0286": manualControl}
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
 		broadException := armotypes.PostureExceptionPolicy{
 			PosturePolicies: []armotypes.PosturePolicy{}, // empty = matches all resources, not controls
 		}
-		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{broadException})
-		ctrl := summaries["C-0286"]
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{broadException})
+		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
 	})
 
 	t.Run("empty control summaries", func(t *testing.T) {
-		summaries := reportsummary.ControlSummaries{}
+		sd := makeSummary(reportsummary.ControlSummaries{})
 		assert.NotPanics(t, func() {
-			applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual})
+			applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
 		})
+	})
+
+	t.Run("case-insensitive controlID match", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		lowerCaseException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "c-0286"}},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{lowerCaseException})
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
+	t.Run("exception with frameworkName only does not match", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		fwOnlyException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "cis-v1.10.0"}},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{fwOnlyException})
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 	})
 }

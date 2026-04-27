@@ -70,7 +70,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	// manual controls have no resource results, so exceptions must be applied directly on the summary.
-	applyExceptionsToManualControls(opap.Report.SummaryDetails.Controls, opap.Exceptions)
+	applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions)
 
 	// set result summary
 	// map control to error
@@ -78,32 +78,40 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
 }
 
-// applyExceptionsToManualControls applies exceptions directly to manual controls.
-// Since manual controls have no OPA rules they produce no resource results, so the
-// resource-level exception loop never reaches them. Matching controls are marked
-// as skipped with SubStatusException.
+// applyExceptionsToManualControls marks manual controls as passed+w/exceptions when
+// an explicit exception exists for them. Updates both the top-level and per-framework
+// control maps since manual controls produce no resource results for the normal exception loop.
 func applyExceptionsToManualControls(
-	controlSummaries reportsummary.ControlSummaries,
+	summaryDetails *reportsummary.SummaryDetails,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
 ) {
 	if len(exceptionPolicies) == 0 {
 		return
 	}
 
+	applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies)
+
+	for i := range summaryDetails.Frameworks {
+		applyExceptionsToControlSummaries(summaryDetails.Frameworks[i].Controls, exceptionPolicies)
+	}
+}
+
+// applyExceptionsToControlSummaries updates manual controls in a single ControlSummaries map.
+func applyExceptionsToControlSummaries(
+	controlSummaries reportsummary.ControlSummaries,
+	exceptionPolicies []armotypes.PostureExceptionPolicy,
+) {
 	for controlID, ctrl := range controlSummaries {
 		if ctrl.GetSubStatus() != apis.SubStatusManualReview {
 			continue
 		}
 
-		// only apply exceptions that explicitly target this controlID.
-		// broad exceptions (empty posturePolicies) are resource-scoped and
-		// should not affect manual controls which have no resources.
 		if !hasExplicitControlException(exceptionPolicies, controlID) {
 			continue
 		}
 
 		ctrl.SetStatus(&apis.StatusInfo{
-			InnerStatus: apis.StatusSkipped,
+			InnerStatus: apis.StatusPassed,
 			SubStatus:   apis.SubStatusException,
 		})
 		controlSummaries[controlID] = ctrl
