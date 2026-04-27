@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"context"
+	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
@@ -69,7 +70,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	// manual controls have no resource results, so exceptions must be applied directly on the summary.
-	applyExceptionsToManualControls(opap.Report.SummaryDetails.Controls, opap.Exceptions, processor)
+	applyExceptionsToManualControls(opap.Report.SummaryDetails.Controls, opap.Exceptions)
 
 	// set result summary
 	// map control to error
@@ -84,7 +85,6 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 func applyExceptionsToManualControls(
 	controlSummaries reportsummary.ControlSummaries,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
-	processor *exceptions.Processor,
 ) {
 	if len(exceptionPolicies) == 0 {
 		return
@@ -95,7 +95,10 @@ func applyExceptionsToManualControls(
 			continue
 		}
 
-		if matched := processor.ListRuleExceptions(exceptionPolicies, "", controlID, ""); len(matched) == 0 {
+		// only apply exceptions that explicitly target this controlID.
+		// broad exceptions (empty posturePolicies) are resource-scoped and
+		// should not affect manual controls which have no resources.
+		if !hasExplicitControlException(exceptionPolicies, controlID) {
 			continue
 		}
 
@@ -105,6 +108,19 @@ func applyExceptionsToManualControls(
 		})
 		controlSummaries[controlID] = ctrl
 	}
+}
+
+// hasExplicitControlException returns true if any exception policy explicitly
+// targets the given controlID in its posturePolicies.
+func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID string) bool {
+	for _, policy := range exceptionPolicies {
+		for _, pp := range policy.PosturePolicies {
+			if strings.EqualFold(pp.ControlID, controlID) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {
