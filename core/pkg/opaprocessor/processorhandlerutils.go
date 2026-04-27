@@ -3,6 +3,7 @@ package opaprocessor
 import (
 	"context"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -67,10 +68,45 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		opap.ResourcesResult[i] = t
 	}
 
+	// manual controls have no resource results, so exceptions must be applied directly on the summary.
+	applyExceptionsToManualControls(opap.Report.SummaryDetails.Controls, opap.AllPolicies.Controls, opap.Exceptions, opap.clusterName, processor)
+
 	// set result summary
 	// map control to error
 	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
+}
+
+// applyExceptionsToManualControls applies exceptions directly to manual controls.
+// Since manual controls have no OPA rules they produce no resource results, so the
+// resource-level exception loop never reaches them. Matching controls are marked
+// as skipped with SubStatusException.
+func applyExceptionsToManualControls(
+	controlSummaries reportsummary.ControlSummaries,
+	allControls map[string]reporthandling.Control,
+	exceptionPolicies []armotypes.PostureExceptionPolicy,
+	clusterName string,
+	processor *exceptions.Processor,
+) {
+	if len(exceptionPolicies) == 0 {
+		return
+	}
+
+	for controlID, ctrl := range controlSummaries {
+		if ctrl.GetSubStatus() != apis.SubStatusManualReview {
+			continue
+		}
+
+		if matched := processor.ListRuleExceptions(exceptionPolicies, "", controlID, ""); len(matched) == 0 {
+			continue
+		}
+
+		ctrl.SetStatus(&apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusException,
+		})
+		controlSummaries[controlID] = ctrl
+	}
 }
 
 func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {
