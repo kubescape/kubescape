@@ -192,9 +192,14 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 
 	t.Run("exception does not match non-manual control", func(t *testing.T) {
 		summaries := reportsummary.ControlSummaries{"C-0001": nonManualControl}
-		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		// exception explicitly targets C-0001 — the only reason it should be skipped
+		// is because the control is not SubStatusManualReview, not because the ID doesn't match
+		exceptionForNonManual := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0001"}},
+		}
+		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForNonManual})
 		ctrl := summaries["C-0001"]
-		assert.NotEqual(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.SubStatusUnknown, ctrl.GetSubStatus())
 	})
 
 	t.Run("exception does not match different control ID", func(t *testing.T) {
