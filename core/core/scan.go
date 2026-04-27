@@ -78,6 +78,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	if err := hostSensorHandler.Init(ctxHostScanner); err != nil {
 		logger.L().Ctx(ctxHostScanner).Error("failed to init host scanner", helpers.Error(err))
 		hostSensorHandler = hostsensorutils.NewHostSensorHandlerMock()
+		scanInfo.HostSensorEnabled.SetBool(false)
 	}
 	spanHostScanner.End()
 

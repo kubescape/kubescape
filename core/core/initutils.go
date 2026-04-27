@@ -121,10 +121,16 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 		return hostSensorHandler
 
 	case hostSensorVal == nil && wantsHostSensorControls:
-		// TODO: we need to determine which controls need the host scanner
-		scanInfo.HostSensorEnabled.SetBool(false)
-
-		fallthrough
+		// Auto-detect: if node-agent CRDs are available, use them without requiring --enable-host-scanner.
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, "")
+		if err != nil {
+			logger.L().Ctx(ctx).Debug("node-agent not available, host sensor disabled", helpers.Error(err))
+			scanInfo.HostSensorEnabled.SetBool(false)
+			return hostsensorutils.NewHostSensorHandlerMock()
+		}
+		logger.L().Ctx(ctx).Info("node-agent detected, using CRD-based host sensor")
+		scanInfo.HostSensorEnabled.SetBool(true)
+		return hostSensorHandler
 
 	default:
 		return hostsensorutils.NewHostSensorHandlerMock()
