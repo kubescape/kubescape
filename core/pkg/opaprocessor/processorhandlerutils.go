@@ -69,7 +69,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	// manual controls have no resource results, so exceptions must be applied directly on the summary.
-	applyExceptionsToManualControls(opap.Report.SummaryDetails.Controls, opap.AllPolicies.Controls, opap.Exceptions, opap.clusterName, processor)
+	applyExceptionsToManualControls(opap.Report.SummaryDetails.Controls, opap.Exceptions, processor)
 
 	// set result summary
 	// map control to error
@@ -83,9 +83,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 // as skipped with SubStatusException.
 func applyExceptionsToManualControls(
 	controlSummaries reportsummary.ControlSummaries,
-	allControls map[string]reporthandling.Control,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
-	clusterName string,
 	processor *exceptions.Processor,
 ) {
 	if len(exceptionPolicies) == 0 {

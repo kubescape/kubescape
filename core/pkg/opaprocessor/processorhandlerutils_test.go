@@ -3,7 +3,11 @@ package opaprocessor
 import (
 	"testing"
 
+	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/exceptions"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -150,4 +154,95 @@ func TestRemoveEphemeralContainersData(t *testing.T) {
 			assert.Equal(t, "XXXXXX", e.Value)
 		}
 	}
+}
+
+func TestApplyExceptionsToManualControls(t *testing.T) {
+	processor := exceptions.NewProcessor()
+
+	manualControl := reportsummary.ControlSummary{
+		ControlID: "C-0286",
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusManualReview,
+		},
+	}
+	nonManualControl := reportsummary.ControlSummary{
+		ControlID: "C-0001",
+		StatusInfo: apis.StatusInfo{
+			InnerStatus: apis.StatusFailed,
+		},
+	}
+
+	exceptionForManual := armotypes.PostureExceptionPolicy{
+		PosturePolicies: []armotypes.PosturePolicy{
+			{ControlID: "C-0286"},
+		},
+	}
+
+	t.Run("no exceptions defined", func(t *testing.T) {
+		summaries := reportsummary.ControlSummaries{
+			"C-0286": manualControl,
+		}
+		applyExceptionsToManualControls(summaries, nil, processor)
+		ctrl := summaries["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+	})
+
+	t.Run("exception matches manual control", func(t *testing.T) {
+		summaries := reportsummary.ControlSummaries{
+			"C-0286": manualControl,
+		}
+		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual}, processor)
+		ctrl := summaries["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+	})
+
+	t.Run("exception does not match non-manual control", func(t *testing.T) {
+		summaries := reportsummary.ControlSummaries{
+			"C-0001": nonManualControl,
+		}
+		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual}, processor)
+		ctrl := summaries["C-0001"]
+		assert.NotEqual(t, apis.SubStatusException, ctrl.GetSubStatus())
+	})
+
+	t.Run("exception does not match different control ID", func(t *testing.T) {
+		summaries := reportsummary.ControlSummaries{
+			"C-0287": {
+				ControlID: "C-0287",
+				StatusInfo: apis.StatusInfo{
+					InnerStatus: apis.StatusSkipped,
+					SubStatus:   apis.SubStatusManualReview,
+				},
+			},
+		}
+		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual}, processor)
+		ctrl := summaries["C-0287"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+	})
+
+	t.Run("only matching manual control is updated, others unchanged", func(t *testing.T) {
+		summaries := reportsummary.ControlSummaries{
+			"C-0286": manualControl,
+			"C-0287": {
+				ControlID: "C-0287",
+				StatusInfo: apis.StatusInfo{
+					InnerStatus: apis.StatusSkipped,
+					SubStatus:   apis.SubStatusManualReview,
+				},
+			},
+		}
+		applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual}, processor)
+		matched := summaries["C-0286"]
+		unmatched := summaries["C-0287"]
+		assert.Equal(t, apis.SubStatusException, matched.GetSubStatus())
+		assert.Equal(t, apis.SubStatusManualReview, unmatched.GetSubStatus())
+	})
+
+	t.Run("empty control summaries", func(t *testing.T) {
+		summaries := reportsummary.ControlSummaries{}
+		assert.NotPanics(t, func() {
+			applyExceptionsToManualControls(summaries, []armotypes.PostureExceptionPolicy{exceptionForManual}, processor)
+		})
+	})
 }
