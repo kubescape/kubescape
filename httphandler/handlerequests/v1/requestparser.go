@@ -87,10 +87,10 @@ func getScanParamsFromRequest(r *http.Request, scanID string) (*scanRequestParam
 			// handler.writeError(w, fmt.Errorf("failed to read request body, reason: %s", err.Error()), scanID)
 			return nil, fmt.Errorf("failed to read request body, reason: %s", err.Error())
 		}
-		logger.L().Info("REST API received scan request", helpers.String("body", string(readBuffer)))
 		if err := json.Unmarshal(readBuffer, &scanRequest); err != nil {
 			return nil, fmt.Errorf("failed to parse request payload, reason: %s", err.Error())
 		}
+		logger.L().Info("REST API received scan request", helpers.String("scanID", scanID), helpers.String("format", scanRequest.Format))
 	}
 
 	p := &scanRequestParams{
