@@ -70,7 +70,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 	}
 
 	// manual controls have no resource results, so exceptions must be applied directly on the summary.
-	applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions)
+	applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions, opap.clusterName, processor)
 
 	// set result summary
 	// map control to error
@@ -84,15 +84,17 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 func applyExceptionsToManualControls(
 	summaryDetails *reportsummary.SummaryDetails,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
+	clusterName string,
+	processor *exceptions.Processor,
 ) {
 	if len(exceptionPolicies) == 0 {
 		return
 	}
 
-	applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies)
+	applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies, clusterName, processor)
 
 	for i := range summaryDetails.Frameworks {
-		applyExceptionsToControlSummaries(summaryDetails.Frameworks[i].Controls, exceptionPolicies)
+		applyExceptionsToControlSummaries(summaryDetails.Frameworks[i].Controls, exceptionPolicies, clusterName, processor)
 	}
 }
 
@@ -100,13 +102,15 @@ func applyExceptionsToManualControls(
 func applyExceptionsToControlSummaries(
 	controlSummaries reportsummary.ControlSummaries,
 	exceptionPolicies []armotypes.PostureExceptionPolicy,
+	clusterName string,
+	processor *exceptions.Processor,
 ) {
 	for controlID, ctrl := range controlSummaries {
 		if ctrl.GetSubStatus() != apis.SubStatusManualReview {
 			continue
 		}
 
-		if !hasExplicitControlException(exceptionPolicies, controlID) {
+		if !hasExplicitControlException(exceptionPolicies, controlID, clusterName, processor) {
 			continue
 		}
 
@@ -119,12 +123,22 @@ func applyExceptionsToControlSummaries(
 }
 
 // hasExplicitControlException returns true if any exception policy explicitly
-// targets the given controlID in its posturePolicies.
-func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID string) bool {
+// targets the given controlID in its posturePolicies, and the cluster designator
+// (if specified) matches the current cluster name.
+func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) bool {
 	for _, policy := range exceptionPolicies {
 		for _, pp := range policy.PosturePolicies {
-			if strings.EqualFold(pp.ControlID, controlID) {
+			if !strings.EqualFold(pp.ControlID, controlID) {
+				continue
+			}
+			// no resources = no scope constraint, matches any cluster
+			if len(policy.Resources) == 0 {
 				return true
+			}
+			for _, resource := range policy.Resources {
+				if processor.MatchesCluster(&resource, clusterName) {
+					return true
+				}
 			}
 		}
 	}

@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/exceptions"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
@@ -156,6 +158,8 @@ func TestRemoveEphemeralContainersData(t *testing.T) {
 }
 
 func TestApplyExceptionsToManualControls(t *testing.T) {
+	processor := exceptions.NewProcessor()
+
 	manualControl := reportsummary.ControlSummary{
 		ControlID: "C-0286",
 		StatusInfo: apis.StatusInfo{
@@ -176,24 +180,90 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		},
 	}
 
+	_ = exceptionForManual // kept for reference; cluster-scoped variants used in tests below
+
 	makeSummary := func(controls reportsummary.ControlSummaries) *reportsummary.SummaryDetails {
 		return &reportsummary.SummaryDetails{Controls: controls}
 	}
 
+	// exceptionForManualWithCluster is scoped to prod-cluster only
+	exceptionForManualWithCluster := armotypes.PostureExceptionPolicy{
+		PosturePolicies: []armotypes.PosturePolicy{
+			{ControlID: "C-0286"},
+		},
+		Resources: []identifiers.PortalDesignator{
+			{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"cluster": "prod-cluster"}},
+		},
+	}
+
+	// exceptionForManualNoCluster has a resource designator but no cluster constraint
+	exceptionForManualNoCluster := armotypes.PostureExceptionPolicy{
+		PosturePolicies: []armotypes.PosturePolicy{
+			{ControlID: "C-0286"},
+		},
+		Resources: []identifiers.PortalDesignator{
+			{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+		},
+	}
+
 	t.Run("no exceptions defined", func(t *testing.T) {
 		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
-		applyExceptionsToManualControls(sd, nil)
+		applyExceptionsToManualControls(sd, nil, "prod-cluster", processor)
 		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
 	})
 
-	t.Run("exception matches manual control", func(t *testing.T) {
+	t.Run("exception matches manual control — no cluster constraint", func(t *testing.T) {
 		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManualNoCluster}, "any-cluster", processor)
 		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
+	t.Run("exception matches manual control — cluster matches", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManualWithCluster}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
+	t.Run("exception does not apply — cluster mismatch", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManualWithCluster}, "dev-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
+	})
+
+	t.Run("exception cluster uses regex — matches", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		regexException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"cluster": "prod-.*"}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{regexException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
+	t.Run("exception cluster uses regex — no match", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		regexException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"cluster": "prod-.*"}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{regexException}, "dev-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
 	})
 
 	t.Run("exception does not match non-manual control", func(t *testing.T) {
@@ -202,8 +272,11 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		// is because the control is not SubStatusManualReview, not because the ID doesn't match
 		exceptionForNonManual := armotypes.PostureExceptionPolicy{
 			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0001"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+			},
 		}
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForNonManual})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForNonManual}, "prod-cluster", processor)
 		ctrl := sd.Controls["C-0001"]
 		assert.Equal(t, apis.SubStatusUnknown, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusFailed, ctrl.GetStatus().Status())
@@ -216,7 +289,7 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 				StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusManualReview},
 			},
 		})
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManualNoCluster}, "prod-cluster", processor)
 		ctrl := sd.Controls["C-0287"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
@@ -230,7 +303,7 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 				StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusSkipped, SubStatus: apis.SubStatusManualReview},
 			},
 		})
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManualNoCluster}, "prod-cluster", processor)
 		matched := sd.Controls["C-0286"]
 		unmatched := sd.Controls["C-0287"]
 		assert.Equal(t, apis.SubStatusException, matched.GetSubStatus())
@@ -246,7 +319,7 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 				{Controls: reportsummary.ControlSummaries{"C-0286": manualControl}},
 			},
 		}
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManualNoCluster}, "prod-cluster", processor)
 		topLevel := sd.Controls["C-0286"]
 		fwLevel := sd.Frameworks[0].Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusException, topLevel.GetSubStatus())
@@ -260,16 +333,28 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		broadException := armotypes.PostureExceptionPolicy{
 			PosturePolicies: []armotypes.PosturePolicy{}, // empty = matches all resources, not controls
 		}
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{broadException})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{broadException}, "prod-cluster", processor)
 		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
 	})
 
+	t.Run("exception with no Resources field matches any cluster", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		noResourcesException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			// no Resources = no scope constraint, applies everywhere
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{noResourcesException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
+
 	t.Run("empty control summaries", func(t *testing.T) {
 		sd := makeSummary(reportsummary.ControlSummaries{})
 		assert.NotPanics(t, func() {
-			applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManual})
+			applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{exceptionForManualNoCluster}, "prod-cluster", processor)
 		})
 	})
 
@@ -277,8 +362,11 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
 		lowerCaseException := armotypes.PostureExceptionPolicy{
 			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "c-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+			},
 		}
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{lowerCaseException})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{lowerCaseException}, "prod-cluster", processor)
 		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
@@ -288,8 +376,11 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
 		fwOnlyException := armotypes.PostureExceptionPolicy{
 			PosturePolicies: []armotypes.PosturePolicy{{FrameworkName: "cis-v1.10.0"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+			},
 		}
-		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{fwOnlyException})
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{fwOnlyException}, "prod-cluster", processor)
 		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 	})
