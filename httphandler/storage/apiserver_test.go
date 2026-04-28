@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func NewFakeAPIServerStorage(namespace string) *APIServerStore {
@@ -486,6 +487,52 @@ func Test_RoleBindingResourceTripletToSlug(t *testing.T) {
 	}
 }
 
+func TestStoreWorkloadConfigurationScanResult_MergesNilMetadataMaps(t *testing.T) {
+	ctx := context.Background()
+	store := NewFakeAPIServerStorage("test-namespace")
+
+	existing := &v1beta1.WorkloadConfigurationScan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-scan",
+			Namespace: "test-namespace",
+		},
+	}
+	_, err := store.StorageClient.WorkloadConfigurationScans("test-namespace").Create(ctx, existing, metav1.CreateOptions{})
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	manifest := &v1beta1.WorkloadConfigurationScan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-scan",
+			Namespace:   "test-namespace",
+			Annotations: map[string]string{"kubescape.io/wlid": "wlid://cluster-minikube/namespace-test-namespace/pod-test-pod"},
+			Labels:      map[string]string{"kubescape.io/workload-name": "test-pod"},
+		},
+		Spec: v1beta1.WorkloadConfigurationScanSpec{
+			Controls: map[string]v1beta1.ScannedControl{
+				"control-1": {},
+			},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		err = store.StoreWorkloadConfigurationScanResult(ctx, manifest)
+	})
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	stored, err := store.StorageClient.WorkloadConfigurationScans("test-namespace").Get(ctx, manifest.Name, metav1.GetOptions{})
+	if !assert.NoError(t, err) {
+		return
+	}
+
+	assert.Equal(t, manifest.Annotations, stored.Annotations)
+	assert.Equal(t, manifest.Labels, stored.Labels)
+	assert.Contains(t, stored.Spec.Controls, "control-1")
+}
+
 func TestMergeMaps(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -523,12 +570,23 @@ func TestMergeMaps(t *testing.T) {
 			new:      map[string]string{},
 			expected: map[string]string{},
 		},
+		{
+			name:     "merge with nil existing map",
+			existing: nil,
+			new:      map[string]string{"key1": "value1"},
+			expected: map[string]string{"key1": "value1"},
+		},
+		{
+			name:     "merge with nil maps",
+			existing: nil,
+			new:      nil,
+			expected: nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mergeMaps(tt.existing, tt.new)
-			assert.Equal(t, tt.expected, tt.existing)
+			assert.Equal(t, tt.expected, mergeMaps(tt.existing, tt.new))
 		})
 	}
 }
