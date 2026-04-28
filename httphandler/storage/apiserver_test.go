@@ -523,12 +523,24 @@ func TestMergeMaps(t *testing.T) {
 			new:      map[string]string{},
 			expected: map[string]string{},
 		},
+		{
+			name:     "merge with nil existing map",
+			existing: nil,
+			new:      map[string]string{"key1": "value1"},
+			expected: map[string]string{"key1": "value1"},
+		},
+		{
+			name:     "merge with both maps nil",
+			existing: nil,
+			new:      nil,
+			expected: map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mergeMaps(tt.existing, tt.new)
-			assert.Equal(t, tt.expected, tt.existing)
+			result := mergeMaps(tt.existing, tt.new)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
