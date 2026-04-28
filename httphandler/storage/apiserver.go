@@ -195,8 +195,8 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Contex
 				return getErr
 			}
 			// update the workload configuration scan manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = mergeWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
 			// try to send the updated workload configuration scan manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -294,8 +294,8 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 				return getErr
 			}
 			// update the manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
 			// try to send the updated manifest
 			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
@@ -540,8 +540,12 @@ func parseWorkloadScanRelatedObjectList(relatedObjects []workloadinterface.IMeta
 }
 
 // mergeMaps merges new into existing, overwriting existing keys with new values
-func mergeMaps(existing, new map[string]string) {
+func mergeMaps(existing, new map[string]string) map[string]string {
+	if existing == nil {
+		existing = make(map[string]string)
+	}
 	for k, v := range new {
 		existing[k] = v
 	}
+	return existing
 }
