@@ -325,7 +325,104 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 		}
 	}
 
+	workloads, workloadIDToSource = dedupWorkloadsBySource(workloads, workloadIDToSource)
+
 	return workloadIDToSource, workloads, nil
+}
+
+// dedupWorkloadsBySource collapses workloads that point to the same logical
+// resource (RelativePath + apiVersion + kind + namespace + name) when emitted
+// by *different* loaders. The plain YAML walker, the helm renderer, and the
+// kustomize renderer are each recursive over the input directory; a helm
+// chart whose templates happen to be valid plain YAML (no `{{ }}` placeholders)
+// is otherwise picked up twice — once as a raw YAML file and once as a
+// rendered chart resource. Downstream consumers that aggregate by file path
+// then see the same file with conflicting Source.HelmChartName values, which
+// breaks any per-file invariant (Armo's BE childCount vs. file_summary
+// mismatch on `armosec/kubescape@master`'s test-chart fixture is the
+// user-visible symptom).
+//
+// Precedence keeps the most specific attribution: HelmChart > Kustomize > YAML/JSON.
+//
+// Multi-document YAML files where the *same* resource identity legitimately
+// appears more than once within a single file (used heavily under
+// core/pkg/fixhandler/testdata/) are preserved, because they share a
+// FileType and so don't trip the cross-loader collapse.
+func dedupWorkloadsBySource(workloads []workloadinterface.IMetadata, workloadIDToSource map[string]reporthandling.Source) ([]workloadinterface.IMetadata, map[string]reporthandling.Source) {
+	if len(workloads) == 0 {
+		return workloads, workloadIDToSource
+	}
+
+	priority := func(fileType string) int {
+		switch fileType {
+		case reporthandling.SourceTypeHelmChart:
+			return 3
+		case reporthandling.SourceTypeKustomizeDirectory:
+			return 2
+		case reporthandling.SourceTypeYaml, reporthandling.SourceTypeJson:
+			return 1
+		default:
+			return 0
+		}
+	}
+
+	idToWorkload := make(map[string]workloadinterface.IMetadata, len(workloads))
+	for _, w := range workloads {
+		idToWorkload[w.GetID()] = w
+	}
+
+	type entry struct {
+		id       string
+		fileType string
+	}
+	groups := make(map[string][]entry, len(workloads))
+	keep := make(map[string]struct{}, len(workloads))
+
+	for id, src := range workloadIDToSource {
+		w, ok := idToWorkload[id]
+		if !ok || src.RelativePath == "" {
+			// Workloads without source attribution are kept untouched —
+			// they cannot collide with file-anchored emissions.
+			keep[id] = struct{}{}
+			continue
+		}
+		key := strings.Join([]string{src.RelativePath, w.GetApiVersion(), w.GetKind(), w.GetNamespace(), w.GetName()}, "\x00")
+		groups[key] = append(groups[key], entry{id: id, fileType: src.FileType})
+	}
+
+	for _, group := range groups {
+		bestRank := -1
+		for _, e := range group {
+			if r := priority(e.fileType); r > bestRank {
+				bestRank = r
+			}
+		}
+		// Preserve every workload whose loader matches the highest-rank
+		// FileType in the group: this keeps multi-document repetition
+		// while collapsing duplicates that came from less-specific loaders.
+		for _, e := range group {
+			if priority(e.fileType) == bestRank {
+				keep[e.id] = struct{}{}
+			}
+		}
+	}
+
+	if len(keep) == len(workloadIDToSource) {
+		return workloads, workloadIDToSource
+	}
+
+	dedupedWorkloads := make([]workloadinterface.IMetadata, 0, len(keep))
+	for _, w := range workloads {
+		if _, ok := keep[w.GetID()]; ok {
+			dedupedWorkloads = append(dedupedWorkloads, w)
+		}
+	}
+	for id := range workloadIDToSource {
+		if _, ok := keep[id]; !ok {
+			delete(workloadIDToSource, id)
+		}
+	}
+	return dedupedWorkloads, workloadIDToSource
 }
 
 func extractGitRepo(path string) (string, *cautils.LocalGitRepository) {
