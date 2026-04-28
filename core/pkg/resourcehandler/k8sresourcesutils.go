@@ -87,6 +87,9 @@ func setComplexKSResourceMap(frameworks []reporthandling.Framework, resourceToCo
 	for _, framework := range frameworks {
 		for _, control := range framework.Controls {
 			for _, rule := range control.Rules {
+				for _, match := range rule.Match {
+					insertKSResourcesAndControls(k8sResources, match, resourceToControls, control)
+				}
 				for _, match := range rule.DynamicMatch {
 					insertKSResourcesAndControls(k8sResources, match, resourceToControls, control)
 				}
