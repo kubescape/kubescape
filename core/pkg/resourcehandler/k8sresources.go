@@ -98,6 +98,9 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
 	}
 	for gvr, e := range failedGVRs {
+		if len(k8sResourcesMap[gvr]) > 0 {
+			continue
+		}
 		logger.L().Ctx(ctx).Warning("failed to pull resource type; affected controls will be marked skipped",
 			helpers.String("gvr", gvr), helpers.Error(e))
 		cautils.SetInfoMapForResources(e.Error(), []string{gvr}, sessionObj.InfoMap)
