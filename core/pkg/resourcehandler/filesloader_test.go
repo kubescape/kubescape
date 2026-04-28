@@ -151,6 +151,32 @@ func TestDedupWorkloadsBySource_MultiDocCollapsesAcrossLoaders(t *testing.T) {
 	}
 }
 
+// A workload present in `workloads` but absent from the source map must
+// survive dedup, even when other groups collapse.
+func TestDedupWorkloadsBySource_OrphanWorkloadKept(t *testing.T) {
+	const cm = `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test-config","namespace":""}}`
+	const path = "templates/configmap.yaml"
+	wOrphan := newLocalWorkload(t, `{"apiVersion":"v1","kind":"Pod","metadata":{"name":"orphan"}}`, "orphan.yaml")
+	wYaml := newLocalWorkload(t, cm, path)
+	wHelm := newLocalWorkload(t, cm, "helm:"+path)
+	workloads := []workloadinterface.IMetadata{wOrphan, wYaml, wHelm}
+	src := map[string]reporthandling.Source{
+		// wOrphan intentionally absent from the source map.
+		wYaml.GetID(): {RelativePath: path, FileType: reporthandling.SourceTypeYaml},
+		wHelm.GetID(): {RelativePath: path, FileType: reporthandling.SourceTypeHelmChart, HelmChartName: "x"},
+	}
+
+	gotW, _ := dedupWorkloadsBySource(workloads, src)
+
+	gotIDs := map[string]struct{}{}
+	for _, w := range gotW {
+		gotIDs[w.GetID()] = struct{}{}
+	}
+	assert.Contains(t, gotIDs, wOrphan.GetID(), "orphan workload (no source entry) must be preserved")
+	assert.Contains(t, gotIDs, wHelm.GetID())
+	assert.NotContains(t, gotIDs, wYaml.GetID())
+}
+
 func TestDedupWorkloadsBySource_NoSourceAttributionLeftAlone(t *testing.T) {
 	wA := newLocalWorkload(t, `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"a"}}`, "a.yaml")
 	workloads := []workloadinterface.IMetadata{wA}
