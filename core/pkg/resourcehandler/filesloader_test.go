@@ -177,6 +177,83 @@ func TestDedupWorkloadsBySource_OrphanWorkloadKept(t *testing.T) {
 	assert.NotContains(t, gotIDs, wYaml.GetID())
 }
 
+// Direct coverage for the generic helper, independent of the kubescape
+// types it's wrapped in.
+func TestDedupByRank(t *testing.T) {
+	type item struct {
+		key  string
+		rank int
+		// hasKey false → opts out of grouping (kept as-is)
+		hasKey bool
+		tag    string
+	}
+	keyRankOf := func(it item) (string, int, bool) { return it.key, it.rank, it.hasKey }
+	tagsOf := func(items []item) []string {
+		out := make([]string, len(items))
+		for i, it := range items {
+			out[i] = it.tag
+		}
+		return out
+	}
+
+	cases := []struct {
+		name string
+		in   []item
+		want []string
+	}{
+		{
+			name: "single key wins",
+			in: []item{
+				{key: "p", rank: 1, hasKey: true, tag: "yaml"},
+				{key: "p", rank: 3, hasKey: true, tag: "helm"},
+			},
+			want: []string{"helm"},
+		},
+		{
+			name: "ties at the top survive together",
+			in: []item{
+				{key: "p", rank: 1, hasKey: true, tag: "yaml-a"},
+				{key: "p", rank: 3, hasKey: true, tag: "helm-a"},
+				{key: "p", rank: 3, hasKey: true, tag: "helm-b"},
+			},
+			want: []string{"helm-a", "helm-b"},
+		},
+		{
+			name: "items without a key are passed through",
+			in: []item{
+				{tag: "orphan"},
+				{key: "p", rank: 1, hasKey: true, tag: "yaml"},
+				{key: "p", rank: 3, hasKey: true, tag: "helm"},
+			},
+			want: []string{"orphan", "helm"},
+		},
+		{
+			name: "different keys are independent",
+			in: []item{
+				{key: "p", rank: 1, hasKey: true, tag: "p-yaml"},
+				{key: "q", rank: 1, hasKey: true, tag: "q-yaml"},
+			},
+			want: []string{"p-yaml", "q-yaml"},
+		},
+		{
+			name: "stable order",
+			in: []item{
+				{key: "p", rank: 3, hasKey: true, tag: "first"},
+				{key: "p", rank: 1, hasKey: true, tag: "drop-me"},
+				{key: "p", rank: 3, hasKey: true, tag: "second"},
+			},
+			want: []string{"first", "second"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := dedupByRank(tc.in, keyRankOf)
+			assert.Equal(t, tc.want, tagsOf(got))
+		})
+	}
+}
+
 func TestDedupWorkloadsBySource_NoSourceAttributionLeftAlone(t *testing.T) {
 	wA := newLocalWorkload(t, `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"a"}}`, "a.yaml")
 	workloads := []workloadinterface.IMetadata{wA}

@@ -341,6 +341,54 @@ var fileTypeRank = map[string]int{
 	reporthandling.SourceTypeJson:               1,
 }
 
+// dedupByRank collapses items that share a key, keeping every item whose
+// rank ties for the maximum within the group. Items for which keyRankOf
+// returns hasKey=false are passed through untouched (no group membership,
+// no collapse).
+//
+// Stable: the relative order of kept items mirrors their order in `items`.
+func dedupByRank[T any](items []T, keyRankOf func(T) (key string, rank int, hasKey bool)) []T {
+	if len(items) < 2 {
+		return items
+	}
+	type entry struct {
+		idx, rank int
+	}
+	groups := make(map[string][]entry, len(items))
+	keep := make(map[int]struct{}, len(items))
+	for i, it := range items {
+		key, rank, ok := keyRankOf(it)
+		if !ok {
+			keep[i] = struct{}{}
+			continue
+		}
+		groups[key] = append(groups[key], entry{idx: i, rank: rank})
+	}
+	for _, g := range groups {
+		best := g[0].rank
+		for _, e := range g[1:] {
+			if e.rank > best {
+				best = e.rank
+			}
+		}
+		for _, e := range g {
+			if e.rank == best {
+				keep[e.idx] = struct{}{}
+			}
+		}
+	}
+	if len(keep) == len(items) {
+		return items
+	}
+	out := make([]T, 0, len(keep))
+	for i, it := range items {
+		if _, ok := keep[i]; ok {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // dedupWorkloadsBySource collapses workloads that point to the same logical
 // resource (RelativePath + apiVersion + kind + namespace + name) when emitted
 // by *different* loaders. The plain YAML walker, the helm renderer, and the
@@ -352,54 +400,23 @@ var fileTypeRank = map[string]int{
 // repeats within one file are preserved: their entries share a FileType and
 // therefore tie at the highest rank.
 func dedupWorkloadsBySource(workloads []workloadinterface.IMetadata, sources map[string]reporthandling.Source) ([]workloadinterface.IMetadata, map[string]reporthandling.Source) {
-	if len(workloads) < 2 {
-		return workloads, sources
-	}
-
-	type entry struct {
-		id   string
-		rank int
-	}
-	groups := make(map[string][]entry, len(workloads))
-	keep := make(map[string]struct{}, len(workloads))
-
-	for _, w := range workloads {
-		id := w.GetID()
-		src, ok := sources[id]
+	deduped := dedupByRank(workloads, func(w workloadinterface.IMetadata) (string, int, bool) {
+		src, ok := sources[w.GetID()]
 		if !ok || src.RelativePath == "" {
-			keep[id] = struct{}{}
-			continue
+			return "", 0, false
 		}
 		key := src.RelativePath + "\x00" + w.GetApiVersion() + "\x00" + w.GetKind() + "\x00" + w.GetNamespace() + "\x00" + w.GetName()
-		groups[key] = append(groups[key], entry{id: id, rank: fileTypeRank[src.FileType]})
-	}
-
-	for _, g := range groups {
-		best := g[0].rank
-		for _, e := range g[1:] {
-			if e.rank > best {
-				best = e.rank
-			}
-		}
-		for _, e := range g {
-			if e.rank == best {
-				keep[e.id] = struct{}{}
-			}
-		}
-	}
-
-	if len(keep) == len(workloads) {
+		return key, fileTypeRank[src.FileType], true
+	})
+	if len(deduped) == len(workloads) {
 		return workloads, sources
 	}
-
-	deduped := make([]workloadinterface.IMetadata, 0, len(keep))
-	for _, w := range workloads {
-		if _, ok := keep[w.GetID()]; ok {
-			deduped = append(deduped, w)
-		}
+	survivors := make(map[string]struct{}, len(deduped))
+	for _, w := range deduped {
+		survivors[w.GetID()] = struct{}{}
 	}
 	for id := range sources {
-		if _, ok := keep[id]; !ok {
+		if _, ok := survivors[id]; !ok {
 			delete(sources, id)
 		}
 	}
