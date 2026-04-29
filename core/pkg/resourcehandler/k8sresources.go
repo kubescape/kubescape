@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -229,8 +230,13 @@ func (k8sHandler *K8sResourceHandler) collectCloudResources(ctx context.Context,
 		logger.L().Debug("Collecting cloud data ", helpers.String("resourceKind", resourceKind))
 		wl, err := resourceGetter(k8sHandler.clusterName, k8sHandler.cloudProvider)
 		if err != nil {
-			if !strings.Contains(err.Error(), cloudv1.NotSupportedMsg) {
-				// Return error with useful info on how to configure credentials for getting cloud provider info
+			switch {
+			case strings.Contains(err.Error(), cloudv1.NotSupportedMsg):
+				// silently skip unsupported providers
+			case errors.Is(err, cloudsupport.ErrCloudDescribeUnavailable):
+				logger.L().Debug("cloud describe unavailable, continuing scan", helpers.String("resourceKind", resourceKind), helpers.Error(err))
+				cautils.SetInfoMapForResources("cloud-describe-unavailable", cloudResources, sessionObj.InfoMap)
+			default:
 				logger.L().Debug("failed to get cloud data", helpers.String("resourceKind", resourceKind), helpers.Error(err))
 				err = fmt.Errorf("failed to get %s descriptive information. Read more: https://kubescape.io/docs/integrations/kubescape-integration-with-cloud-providers/", strings.ToUpper(k8sHandler.cloudProvider))
 				cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
