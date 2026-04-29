@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -122,13 +123,27 @@ func applyExceptionsToControlSummaries(
 	}
 }
 
-// hasExplicitControlException returns true if any exception policy explicitly
-// targets the given controlID in its posturePolicies, and the cluster designator
-// (if specified) matches the current cluster name.
+// requiresResourceMatch reports whether the designator has constraints
+// (namespace, name, kind, labels, path, resourceID, WLID/WildWLID) that
+// require a real workload — manual controls have none.
+func requiresResourceMatch(designator identifiers.PortalDesignator) bool {
+	if designator.WLID != "" || designator.WildWLID != "" {
+		return true
+	}
+	return designator.GetNamespace() != "" ||
+		designator.GetName() != "" ||
+		designator.GetKind() != "" ||
+		designator.GetPath() != "" ||
+		designator.GetResourceID() != "" ||
+		len(designator.GetLabels()) != 0
+}
+
+// hasExplicitControlException reports whether an exception policy targets controlID
+// with a cluster-or-global-only designator matching clusterName.
 func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) bool {
 	for _, policy := range exceptionPolicies {
 		for _, pp := range policy.PosturePolicies {
-			if !strings.EqualFold(pp.ControlID, controlID) {
+			if !strings.EqualFold(pp.ControlID, controlID) && !processor.RegexCompareControlID(pp.ControlID, controlID) {
 				continue
 			}
 			// no resources = no scope constraint, matches any cluster
@@ -136,6 +151,9 @@ func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionP
 				return true
 			}
 			for _, resource := range policy.Resources {
+				if requiresResourceMatch(resource) {
+					continue
+				}
 				if processor.MatchesCluster(&resource, clusterName) {
 					return true
 				}

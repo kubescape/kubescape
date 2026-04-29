@@ -384,4 +384,46 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		ctrl := sd.Controls["C-0286"]
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 	})
+
+	t.Run("exception with namespace constraint does not apply to manual control", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		namespaceScopedException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{"namespace": "kube-system"}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{namespaceScopedException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
+	})
+
+	t.Run("exception with WLID does not apply to manual control", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		wlidException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-0286"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorWlid, WLID: "wlid://cluster-prod/namespace-default/deployment-nginx"},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{wlidException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
+	})
+
+	t.Run("regex controlID match applies exception", func(t *testing.T) {
+		sd := makeSummary(reportsummary.ControlSummaries{"C-0286": manualControl})
+		regexControlException := armotypes.PostureExceptionPolicy{
+			PosturePolicies: []armotypes.PosturePolicy{{ControlID: "C-028.*"}},
+			Resources: []identifiers.PortalDesignator{
+				{DesignatorType: identifiers.DesignatorAttributes, Attributes: map[string]string{}},
+			},
+		}
+		applyExceptionsToManualControls(sd, []armotypes.PostureExceptionPolicy{regexControlException}, "prod-cluster", processor)
+		ctrl := sd.Controls["C-0286"]
+		assert.Equal(t, apis.SubStatusException, ctrl.GetSubStatus())
+		assert.Equal(t, apis.StatusPassed, ctrl.GetStatus().Status())
+	})
 }
