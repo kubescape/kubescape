@@ -3,6 +3,8 @@ package opaprocessor
 import (
 	"context"
 
+	"github.com/armosec/armoapi-go/armotypes"
+	"github.com/armosec/armoapi-go/identifiers"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -67,10 +69,97 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 		opap.ResourcesResult[i] = t
 	}
 
+	// manual controls have no resource results, so exceptions must be applied directly on the summary.
+	applyExceptionsToManualControls(&opap.Report.SummaryDetails, opap.Exceptions, opap.clusterName, processor)
+
 	// set result summary
 	// map control to error
 	controlToInfoMap := mapControlToInfo(opap.ResourceToControlsMap, opap.InfoMap, opap.Report.SummaryDetails.Controls)
 	opap.Report.SummaryDetails.InitResourcesSummary(controlToInfoMap)
+}
+
+// applyExceptionsToManualControls marks manual controls as passed+w/exceptions when
+// an explicit exception exists for them. Updates both the top-level and per-framework
+// control maps since manual controls produce no resource results for the normal exception loop.
+func applyExceptionsToManualControls(
+	summaryDetails *reportsummary.SummaryDetails,
+	exceptionPolicies []armotypes.PostureExceptionPolicy,
+	clusterName string,
+	processor *exceptions.Processor,
+) {
+	if len(exceptionPolicies) == 0 {
+		return
+	}
+
+	applyExceptionsToControlSummaries(summaryDetails.Controls, exceptionPolicies, clusterName, processor)
+
+	for i := range summaryDetails.Frameworks {
+		applyExceptionsToControlSummaries(summaryDetails.Frameworks[i].Controls, exceptionPolicies, clusterName, processor)
+	}
+}
+
+// applyExceptionsToControlSummaries updates manual controls in a single ControlSummaries map.
+func applyExceptionsToControlSummaries(
+	controlSummaries reportsummary.ControlSummaries,
+	exceptionPolicies []armotypes.PostureExceptionPolicy,
+	clusterName string,
+	processor *exceptions.Processor,
+) {
+	for controlID, ctrl := range controlSummaries {
+		if ctrl.GetSubStatus() != apis.SubStatusManualReview {
+			continue
+		}
+
+		if !hasExplicitControlException(exceptionPolicies, controlID, clusterName, processor) {
+			continue
+		}
+
+		ctrl.SetStatus(&apis.StatusInfo{
+			InnerStatus: apis.StatusPassed,
+			SubStatus:   apis.SubStatusException,
+		})
+		controlSummaries[controlID] = ctrl
+	}
+}
+
+// requiresResourceMatch reports whether the designator has constraints
+// (namespace, name, kind, labels, path, resourceID, WLID/WildWLID) that
+// require a real workload — manual controls have none.
+func requiresResourceMatch(designator identifiers.PortalDesignator) bool {
+	if designator.WLID != "" || designator.WildWLID != "" {
+		return true
+	}
+	return designator.GetNamespace() != "" ||
+		designator.GetName() != "" ||
+		designator.GetKind() != "" ||
+		designator.GetPath() != "" ||
+		designator.GetResourceID() != "" ||
+		len(designator.GetLabels()) != 0
+}
+
+// hasExplicitControlException reports whether an exception policy targets controlID
+// with a cluster-or-global-only designator matching clusterName.
+func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) bool {
+	for _, policy := range exceptionPolicies {
+		for _, pp := range policy.PosturePolicies {
+			if !processor.RegexCompareControlID(pp.ControlID, controlID) {
+				continue
+			}
+			// no resources = no scope constraint, matches any cluster
+			if len(policy.Resources) == 0 {
+				return true
+			}
+			for _, resource := range policy.Resources {
+				if requiresResourceMatch(resource) {
+					continue
+				}
+				if processor.MatchesCluster(&resource, clusterName) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func mapControlToInfo(mapResourceToControls map[string][]string, infoMap map[string]apis.StatusInfo, controlSummary reportsummary.ControlSummaries) map[string]apis.StatusInfo {
