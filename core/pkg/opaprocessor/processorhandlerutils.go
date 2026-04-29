@@ -2,7 +2,6 @@ package opaprocessor
 
 import (
 	"context"
-	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
@@ -143,7 +142,7 @@ func requiresResourceMatch(designator identifiers.PortalDesignator) bool {
 func hasExplicitControlException(exceptionPolicies []armotypes.PostureExceptionPolicy, controlID, clusterName string, processor *exceptions.Processor) bool {
 	for _, policy := range exceptionPolicies {
 		for _, pp := range policy.PosturePolicies {
-			if !strings.EqualFold(pp.ControlID, controlID) && !processor.RegexCompareControlID(pp.ControlID, controlID) {
+			if !processor.RegexCompareControlID(pp.ControlID, controlID) {
 				continue
 			}
 			// no resources = no scope constraint, matches any cluster
