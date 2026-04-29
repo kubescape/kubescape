@@ -88,10 +88,23 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	// pull k8s resources
-	k8sResourcesMap, allResources, err := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
-	if err != nil {
+	k8sResourcesMap, allResources, failedGVRs := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
+	if len(allResources) == 0 && len(failedGVRs) > 0 {
+		// Every resource type failed — nothing was collected; treat as fatal.
+		var combined []string
+		for gvr, e := range failedGVRs {
+			combined = append(combined, fmt.Sprintf("%s: %s", gvr, e.Error()))
+		}
 		cautils.StopSpinner()
-		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, err
+		return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("failed to pull any Kubernetes resources: %s", strings.Join(combined, "; "))
+	}
+	for gvr, e := range failedGVRs {
+		if len(k8sResourcesMap[gvr]) > 0 {
+			continue
+		}
+		logger.L().Ctx(ctx).Warning("failed to pull resource type; affected controls will be marked skipped",
+			helpers.String("gvr", gvr), helpers.Error(e))
+		cautils.SetInfoMapForResources(e.Error(), []string{gvr}, sessionObj.InfoMap)
 	}
 
 	// add single resource to k8s resources map (for single resource scan)
@@ -316,24 +329,18 @@ func setMapNamespaceToNumOfResources(ctx context.Context, allResources map[strin
 	sessionObj.SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources)
 }
 
-func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, error) {
+func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]error) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
 
-	var errs error
+	failedGVRs := map[string]error{}
 	for i := range queryableResources {
 		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(queryableResources[i].GroupVersionResourceTriplet)
 		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors, globalFieldSelectors)
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
-				logger.L().Warning("failed to pull resource", helpers.String("resource", queryableResources[i].GroupVersionResourceTriplet), helpers.Error(err))
-				// handle error
-				if errs == nil {
-					errs = err
-				} else {
-					errs = fmt.Errorf("%s; %s", errs, err.Error())
-				}
+				failedGVRs[queryableResources[i].GroupVersionResourceTriplet] = err
 			}
 			continue
 		}
@@ -351,13 +358,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		}
 	}
 
-	// we don't want to fail the scan if we failed to pull only some resources
-	// in that case, we return nil error (and errors are logged in the loop above)
-	if errs != nil && len(allResources) > 0 {
-		errs = nil
-	}
-
-	return k8sResources, allResources, errs
+	return k8sResources, allResources, failedGVRs
 }
 
 func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, error) {
