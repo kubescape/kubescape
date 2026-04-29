@@ -350,10 +350,10 @@ func getManifestObjectLabelsAndAnnotations(clusterName string, resource workload
 	}
 	labels := make(map[string]string)
 	labels[helpersv1.ApiGroupMetadataKey], labels[helpersv1.ApiVersionMetadataKey] = k8sinterface.SplitApiVersion(resource.GetApiVersion())
-	labels[helpersv1.KindMetadataKey] = resource.GetKind()
-	labels[helpersv1.NameMetadataKey] = resource.GetName()
+	labels[helpersv1.RelatedKindMetadataKey] = resource.GetKind()
+	labels[helpersv1.RelatedNameMetadataKey] = resource.GetName()
 	if k8sinterface.IsResourceInNamespaceScope(resource.GetKind()) {
-		labels[helpersv1.NamespaceMetadataKey] = resource.GetNamespace()
+		labels[helpersv1.RelatedNamespaceMetadataKey] = resource.GetNamespace()
 	}
 
 	if len(relatedObjects) > 0 {
