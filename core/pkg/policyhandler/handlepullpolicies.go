@@ -23,7 +23,6 @@ const (
 // PolicyHandler
 type PolicyHandler struct {
 	clusterName             string
-	getters                 *cautils.Getters
 	cachedPolicyIdentifiers *TimedCache[[]string]
 	cachedFrameworks        *TimedCache[[]reporthandling.Framework]
 	cachedExceptions        *TimedCache[[]armotypes.PostureExceptionPolicy]
@@ -46,10 +45,8 @@ func NewPolicyHandler(clusterName string) *PolicyHandler {
 func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, scanInfo *cautils.ScanInfo) (*cautils.OPASessionObj, error) {
 	opaSessionObj := cautils.NewOPASessionObj(ctx, nil, nil, scanInfo)
 
-	policyHandler.getters = &scanInfo.Getters
-
 	// get policies, exceptions and controls inputs
-	policies, exceptions, controlInputs, err := policyHandler.getPolicies(ctx, policyIdentifier)
+	policies, exceptions, controlInputs, err := policyHandler.getPolicies(ctx, policyIdentifier, &scanInfo.Getters)
 	if err != nil {
 		return opaSessionObj, err
 	}
@@ -61,14 +58,14 @@ func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyI
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, err error) {
+func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, err error) {
 	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getPolicies")
 	defer span.End()
 
 	logger.L().Start("Loading policies...")
 
 	// get policies
-	policies, err = policyHandler.getScanPolicies(ctx, policyIdentifier)
+	policies, err = policyHandler.getScanPolicies(ctx, policyIdentifier, getters)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -80,7 +77,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading exceptions...")
 
 	// get exceptions
-	if exceptions, err = policyHandler.getExceptions(); err != nil {
+	if exceptions, err = policyHandler.getExceptions(getters); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to load exceptions", helpers.Error(err))
 	}
 
@@ -88,7 +85,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
-	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
+	if controlInputs, err = policyHandler.getControlInputs(getters); err != nil {
 		logger.L().Ctx(ctx).Warning(err.Error())
 	}
 
@@ -98,7 +95,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 }
 
 // getScanPolicies - get policies from cache or downloads them. The function returns an error if the policies could not be downloaded.
-func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) ([]reporthandling.Framework, error) {
+func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) ([]reporthandling.Framework, error) {
 	policyIdentifiersSlice := policyIdentifierToSlice(policyIdentifier)
 	// check if policies are cached
 	if cachedPolicies, policiesExist := policyHandler.cachedFrameworks.Get(); policiesExist {
@@ -113,7 +110,7 @@ func (policyHandler *PolicyHandler) getScanPolicies(ctx context.Context, policyI
 		policyHandler.cachedFrameworks.Invalidate()
 	}
 
-	policies, err := policyHandler.downloadScanPolicies(ctx, policyIdentifier)
+	policies, err := policyHandler.downloadScanPolicies(ctx, policyIdentifier, getters)
 	if err == nil {
 		policyHandler.cachedFrameworks.Set(policies)
 		policyHandler.cachedPolicyIdentifiers.Set(policyIdentifiersSlice)
@@ -136,14 +133,14 @@ func deepCopyPolicies(src []reporthandling.Framework) ([]reporthandling.Framewor
 	return dst, nil
 }
 
-func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) ([]reporthandling.Framework, error) {
+func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier, getters *cautils.Getters) ([]reporthandling.Framework, error) {
 	frameworks := []reporthandling.Framework{}
 
 	switch getScanKind(policyIdentifier) {
 	case apisv1.KindFramework: // Download frameworks
 		for _, rule := range policyIdentifier {
 			logger.L().Debug("Downloading framework", helpers.String("framework", rule.Identifier))
-			receivedFramework, err := policyHandler.getters.PolicyGetter.GetFramework(rule.Identifier)
+			receivedFramework, err := getters.PolicyGetter.GetFramework(rule.Identifier)
 			if err != nil {
 				return frameworks, frameworkDownloadError(err, rule.Identifier)
 			}
@@ -153,7 +150,7 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
 				cache := getter.GetDefaultPath(rule.Identifier + ".json")
-				if _, ok := policyHandler.getters.PolicyGetter.(*getter.LoadPolicy); ok {
+				if _, ok := getters.PolicyGetter.(*getter.LoadPolicy); ok {
 					continue // skip caching for local files
 				}
 				if err := getter.SaveInFile(receivedFramework, cache); err != nil {
@@ -167,7 +164,7 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 		var err error
 		for _, policy := range policyIdentifier {
 			logger.L().Debug("Downloading control", helpers.String("control", policy.Identifier))
-			receivedControl, err = policyHandler.getters.PolicyGetter.GetControl(policy.Identifier)
+			receivedControl, err = getters.PolicyGetter.GetControl(policy.Identifier)
 			if err != nil {
 				return frameworks, controlDownloadError(err, policy.Identifier)
 			}
@@ -188,13 +185,13 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 	return frameworks, nil
 }
 
-func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptionPolicy, error) {
+func (policyHandler *PolicyHandler) getExceptions(getters *cautils.Getters) ([]armotypes.PostureExceptionPolicy, error) {
 	if cachedExceptions, exist := policyHandler.cachedExceptions.Get(); exist {
 		logger.L().Info("Using cached exceptions")
 		return cachedExceptions, nil
 	}
 
-	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(policyHandler.clusterName)
+	exceptions, err := getters.ExceptionsGetter.GetExceptions(policyHandler.clusterName)
 	if err == nil {
 		policyHandler.cachedExceptions.Set(exceptions)
 	}
@@ -202,13 +199,13 @@ func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptio
 	return exceptions, err
 }
 
-func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, error) {
+func (policyHandler *PolicyHandler) getControlInputs(getters *cautils.Getters) (map[string][]string, error) {
 	if cachedControlInputs, exist := policyHandler.cachedControlInputs.Get(); exist {
 		logger.L().Info("Using cached control inputs")
 		return cachedControlInputs, nil
 	}
 
-	controlInputs, err := policyHandler.getters.ControlsInputsGetter.GetControlsInputs(policyHandler.clusterName)
+	controlInputs, err := getters.ControlsInputsGetter.GetControlsInputs(policyHandler.clusterName)
 	if err == nil {
 		policyHandler.cachedControlInputs.Set(controlInputs)
 	}
