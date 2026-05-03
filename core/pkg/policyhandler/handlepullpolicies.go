@@ -209,9 +209,9 @@ func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptio
 		crdExceptions, crdErr := policyHandler.getters.CRDExceptionsGetter.GetExceptions(policyHandler.clusterName)
 		if crdErr != nil {
 			logger.L().Warning("failed to get CRD exceptions", helpers.Error(crdErr))
-		} else {
-			exceptions = append(exceptions, crdExceptions...)
+			return exceptions, nil
 		}
+		exceptions = append(exceptions, crdExceptions...)
 	}
 
 	policyHandler.cachedExceptions.Set(exceptions)
