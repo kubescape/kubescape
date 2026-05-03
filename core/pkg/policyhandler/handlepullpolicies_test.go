@@ -7,6 +7,7 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
@@ -221,6 +222,57 @@ func TestGetExceptions(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, cachedExceptions, exceptions)
+}
+
+type CRDExceptionsGetterMock struct{}
+
+func (mock *CRDExceptionsGetterMock) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	return []armotypes.PostureExceptionPolicy{*mocks.MockExceptionAllKinds(&armotypes.PosturePolicy{ControlID: "C-0198"})}, nil
+}
+
+type CRDExceptionsGetterErrorMock struct{}
+
+func (mock *CRDExceptionsGetterErrorMock) GetExceptions(clusterName string) ([]armotypes.PostureExceptionPolicy, error) {
+	return nil, fmt.Errorf("CRD not available")
+}
+
+func TestGetExceptions_WithCRDExceptions(t *testing.T) {
+	tests := []struct {
+		name              string
+		crdGetter         getter.IExceptionsGetter
+		wantTotalCount    int
+	}{
+		{
+			name:           "no CRD getter configured",
+			crdGetter:      nil,
+			wantTotalCount: 1,
+		},
+		{
+			name:           "CRD getter returns exceptions, merged with primary",
+			crdGetter:      &CRDExceptionsGetterMock{},
+			wantTotalCount: 2,
+		},
+		{
+			name:           "CRD getter returns error, primary exceptions still returned",
+			crdGetter:      &CRDExceptionsGetterErrorMock{},
+			wantTotalCount: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			policyHandler := NewPolicyHandler("test-cluster")
+			policyHandler.getters = &cautils.Getters{
+				ExceptionsGetter:    &ExceptionsGetterMock{},
+				CRDExceptionsGetter: tt.crdGetter,
+			}
+
+			exceptions, err := policyHandler.getExceptions()
+
+			assert.NoError(t, err)
+			assert.Len(t, exceptions, tt.wantTotalCount)
+		})
+	}
 }
 
 func TestGetControlInputs(t *testing.T) {
