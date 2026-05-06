@@ -155,7 +155,7 @@ func CloneGitRepo(path *string) (string, error) {
 
 	gitURL, err := giturl.NewGitAPI(*path)
 	if err != nil {
-		return "", nil
+		return "", err
 	}
 
 	// Clone git repository if needed

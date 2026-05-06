@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	giturls "github.com/chainguard-dev/git-urls"
 	"k8s.io/utils/strings/slices"
@@ -47,6 +48,10 @@ type GitHubRepository struct {
 }
 type githubDefaultBranchAPI struct {
 	DefaultBranch string `json:"default_branch"`
+}
+
+var defaultHTTPClient = &http.Client{
+	Timeout: 30 * time.Second,
 }
 
 func NewGitHubRepository() *GitHubRepository {
@@ -167,7 +172,7 @@ func (g *GitHubRepository) setBranch(branchOptional string) error {
 	if g.branch != "" {
 		return nil
 	}
-	body, err := httpGet(&http.Client{}, g.defaultBranchAPI(), g.getHeaders())
+	body, err := httpGet(defaultHTTPClient, g.defaultBranchAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}
@@ -213,7 +218,7 @@ func (g *GitHubRepository) setTree() error {
 		return nil
 	}
 
-	body, err := httpGet(&http.Client{}, g.treeAPI(), g.getHeaders())
+	body, err := httpGet(defaultHTTPClient, g.treeAPI(), g.getHeaders())
 	if err != nil {
 		return err
 	}

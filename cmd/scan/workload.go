@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
@@ -57,6 +58,14 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if scanInfo.FailThresholdSeverity != "" {
+				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+					return err
+				}
+			}
+			if err := validateThresholdsOnly(scanInfo); err != nil {
+				return err
+			}
 			kind, name, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
 				return fmt.Errorf("invalid input: %s", err.Error())

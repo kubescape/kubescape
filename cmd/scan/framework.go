@@ -70,6 +70,11 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 
+			if scanInfo.FailThresholdSeverity != "" {
+				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+					return err
+				}
+			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
 			}
@@ -217,4 +222,18 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 
 	// Validate the user's credentials
 	return cautils.ValidateAccountID(scanInfo.AccountID)
+}
+
+// validateThresholdsOnly validates only the numeric threshold ranges
+// (compliance-threshold and fail-threshold must be between 0 and 100).
+// Unlike validateFrameworkScanInfo, this function does not mutate scanInfo
+// or enforce unrelated constraints.
+func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
+	if 100 < scanInfo.ComplianceThreshold || 0 > scanInfo.ComplianceThreshold {
+		return ErrBadThreshold
+	}
+	if 100 < scanInfo.FailThreshold || 0 > scanInfo.FailThreshold {
+		return ErrBadThreshold
+	}
+	return nil
 }

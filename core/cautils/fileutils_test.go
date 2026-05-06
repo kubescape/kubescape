@@ -45,7 +45,8 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads, sourceToChartName := LoadResourcesFromHelmCharts(context.TODO(), helmChartPath())
+	sourceToWorkloads, sourceToChartName, err := LoadResourcesFromHelmCharts(context.TODO(), helmChartPath(), HelmValueOptions{})
+	assert.NoError(t, err)
 	assert.Equal(t, 6, len(sourceToWorkloads))
 
 	for file, workloads := range sourceToWorkloads {

@@ -21,6 +21,99 @@ type FakeCachedDiscoveryClient struct {
 	Invalidations      int
 }
 
+func Test_splitHostAndBasePath(t *testing.T) {
+	testCases := []struct {
+		name         string
+		host         string
+		wantHost     string
+		wantBasePath string
+		wantErr      bool
+	}{
+		{
+			name:     "https scheme is stripped",
+			host:     "https://1.2.3.4:6443",
+			wantHost: "1.2.3.4:6443",
+		},
+		{
+			name:     "http scheme is stripped",
+			host:     "http://1.2.3.4:6443",
+			wantHost: "1.2.3.4:6443",
+		},
+		{
+			name:     "host without scheme is returned unchanged",
+			host:     "1.2.3.4:6443",
+			wantHost: "1.2.3.4:6443",
+		},
+		{
+			name:     "empty host is returned unchanged",
+			host:     "",
+			wantHost: "",
+		},
+		{
+			name:     "hostname starting with 'h' is preserved after https scheme",
+			host:     "https://hello-cluster.example.com:6443",
+			wantHost: "hello-cluster.example.com:6443",
+		},
+		{
+			name:     "hostname starting with 't' is preserved after https scheme",
+			host:     "https://test.example.com:6443",
+			wantHost: "test.example.com:6443",
+		},
+		{
+			name:     "hostname starting with 'p' is preserved after https scheme",
+			host:     "https://prod.example.com",
+			wantHost: "prod.example.com",
+		},
+		{
+			name:     "hostname starting with 's' is preserved after https scheme",
+			host:     "https://staging.example.com",
+			wantHost: "staging.example.com",
+		},
+		{
+			name:     "kubernetes.docker.internal is preserved",
+			host:     "https://kubernetes.docker.internal:6443",
+			wantHost: "kubernetes.docker.internal:6443",
+		},
+		{
+			name:         "host with base path preserves path",
+			host:         "https://proxy.example.com/k8s",
+			wantHost:     "proxy.example.com",
+			wantBasePath: "/k8s",
+		},
+		{
+			name:         "host with port and base path preserves both",
+			host:         "https://proxy.example.com:6443/k8s",
+			wantHost:     "proxy.example.com:6443",
+			wantBasePath: "/k8s",
+		},
+		{
+			name:         "trailing slash on base path is trimmed",
+			host:         "https://proxy.example.com/k8s/",
+			wantHost:     "proxy.example.com",
+			wantBasePath: "/k8s",
+		},
+		{
+			name:         "multi-segment base path is preserved",
+			host:         "https://proxy.example.com/api/v1/k8s",
+			wantHost:     "proxy.example.com",
+			wantBasePath: "/api/v1/k8s",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotHost, gotBasePath, err := splitHostAndBasePath(tc.host)
+			if tc.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.wantHost, gotHost)
+			assert.Equal(t, tc.wantBasePath, gotBasePath)
+		})
+	}
+}
+
 func Test_getPortForwardingPort(t *testing.T) {
 	testCases := []struct {
 		name          string

@@ -133,3 +133,47 @@ func TestScanInfoFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestSplitNamespaceList(t *testing.T) {
+	testCases := []struct {
+		name string
+		in   string
+		want []string
+	}{
+		{"empty", "", nil},
+		{"single", "ns-a", []string{"ns-a"}},
+		{"multiple", "ns-a,ns-b,ns-c", []string{"ns-a", "ns-b", "ns-c"}},
+		{"whitespace", "ns-a, ns-b ,ns-c", []string{"ns-a", "ns-b", "ns-c"}},
+		{"empty entries dropped", "ns-a,,ns-b,", []string{"ns-a", "ns-b"}},
+		{"only commas", ",,,", nil},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, splitNamespaceList(tc.in))
+		})
+	}
+}
+
+func TestScanInfoToScanMetadataNamespaces(t *testing.T) {
+	t.Run("populates excluded namespaces", func(t *testing.T) {
+		scanInfo := &ScanInfo{ExcludedNamespaces: "kube-system,kube-public"}
+		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		assert.Equal(t, []string{"kube-system", "kube-public"}, md.ScanMetadata.ExcludedNamespaces)
+		assert.Empty(t, md.ScanMetadata.IncludeNamespaces)
+	})
+
+	t.Run("populates included namespaces", func(t *testing.T) {
+		scanInfo := &ScanInfo{IncludeNamespaces: "default,prod"}
+		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		assert.Equal(t, []string{"default", "prod"}, md.ScanMetadata.IncludeNamespaces)
+		assert.Empty(t, md.ScanMetadata.ExcludedNamespaces)
+	})
+
+	t.Run("empty when not set", func(t *testing.T) {
+		scanInfo := &ScanInfo{}
+		md := scanInfoToScanMetadata(context.Background(), scanInfo)
+		assert.Empty(t, md.ScanMetadata.ExcludedNamespaces)
+		assert.Empty(t, md.ScanMetadata.IncludeNamespaces)
+	})
+}

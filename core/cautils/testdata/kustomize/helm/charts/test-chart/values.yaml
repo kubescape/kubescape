@@ -1,0 +1,3 @@
+# Empty default values for test-chart fixture used by TestKustomizeDirectoryWithHelmCharts.
+# Helm's chart loader requires this file to exist even when the chart's templates
+# do not reference any .Values fields.

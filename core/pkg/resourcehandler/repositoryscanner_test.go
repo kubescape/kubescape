@@ -1,6 +1,12 @@
 package resourcehandler
 
 import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"reflect"
 	"testing"
 
@@ -11,7 +17,7 @@ var (
 	urlA = "https://github.com/kubescape/kubescape"
 	urlB = "https://github.com/kubescape/kubescape/blob/master/examples/online-boutique/adservice.yaml"
 	urlC = "https://github.com/kubescape/kubescape/tree/master/examples/online-boutique"
-	// urlD = "https://raw.githubusercontent.com/kubescape/kubescape/master/examples/online-boutique/adservice.yaml"
+	urlD = "https://raw.githubusercontent.com/kubescape/kubescape/master/examples/online-boutique/adservice.yaml"
 )
 
 var mockTree = tree{
@@ -21,6 +27,59 @@ var mockTree = tree{
 		{Path: "charts/other-chart/templates/deployment.yaml"},
 		{Path: "README.md"},
 	},
+}
+
+type mockTransport struct{}
+
+func (t *mockTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var responseBody []byte
+
+	if req.URL.Host != "api.github.com" {
+		return nil, fmt.Errorf("unexpected mocked host: %s", req.URL.Host)
+	}
+
+	if req.URL.Path == "/repos/kubescape/kubescape" {
+		responseBody = []byte(`{"default_branch": "master"}`)
+	} else if (req.URL.Path == "/repos/kubescape/kubescape/git/trees/master" || req.URL.Path == "/repos/kubescape/kubescape/git/trees/dev") && req.URL.RawQuery == "recursive=1" {
+		tree := tree{
+			InnerTrees: []innerTree{
+				{Path: "examples/online-boutique/adservice.yaml"},
+				{Path: "examples/online-boutique/cartservice.yaml"},
+				{Path: "examples/online-boutique/checkoutservice.yaml"},
+				{Path: "examples/online-boutique/currencyservice.yaml"},
+				{Path: "examples/online-boutique/emailservice.yaml"},
+				{Path: "examples/online-boutique/frontend.yaml"},
+				{Path: "examples/online-boutique/loadgenerator.yaml"},
+				{Path: "examples/online-boutique/paymentservice.yaml"},
+				{Path: "examples/online-boutique/productcatalogservice.yaml"},
+				{Path: "examples/online-boutique/recommendationservice.yaml"},
+				{Path: "examples/online-boutique/redis.yaml"},
+				{Path: "examples/online-boutique/shippingservice.yaml"},
+				{Path: "README.md"},
+			},
+		}
+		var marshalErr error
+		responseBody, marshalErr = json.Marshal(tree)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("mockTransport: failed to marshal tree: %w", marshalErr)
+		}
+	} else {
+		return nil, fmt.Errorf("unexpected mocked request: %s", req.URL.Path)
+	}
+
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(bytes.NewBuffer(responseBody)),
+		Header:     make(http.Header),
+	}, nil
+}
+
+func TestMain(m *testing.M) {
+	originalTransport := defaultHTTPClient.Transport
+	defaultHTTPClient.Transport = &mockTransport{}
+	code := m.Run()
+	defaultHTTPClient.Transport = originalTransport
+	os.Exit(code)
 }
 
 func newMockGitHubRepository(path string, isFile bool) *GitHubRepository {
@@ -34,10 +93,6 @@ func newMockGitHubRepository(path string, isFile bool) *GitHubRepository {
 		tree:   mockTree,
 	}
 }
-
-/*
-
-TODO: tests were commented out due to actual http calls ; http calls should be mocked.
 
 func TestScanRepository(t *testing.T) {
 	{
@@ -112,6 +167,7 @@ func TestGithubSetTree(t *testing.T) {
 		assert.Less(t, 0, len(gh.getTree().InnerTrees))
 	}
 }
+
 func TestGithubGetYamlFromTree(t *testing.T) {
 	{
 		gh := NewGitHubRepository()
@@ -138,7 +194,6 @@ func TestGithubGetYamlFromTree(t *testing.T) {
 		assert.Equal(t, 12, len(files))
 	}
 }
-*/
 
 func TestGithubParse(t *testing.T) {
 	{

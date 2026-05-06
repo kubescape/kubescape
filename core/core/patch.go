@@ -149,7 +149,7 @@ func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, 
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	ch := make(chan error)
+	ch := make(chan error, 1)
 	go func() {
 		ch <- patchWithContext(timeoutCtx, buildkitAddr, image, reportFile, patchedImageName, workingFolder, ignoreError, bkOpts)
 	}()
