@@ -221,7 +221,11 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 
 }
 
-// setConfigInputsGetter sets the config input getter - local file/github release/Kubescape Cloud API
+// setConfigInputsGetter sets the config input getter with the following precedence:
+//  1. Local file (--controls-config flag)
+//  2. Kubescape Cloud API (if accountID configured)
+//  3. ControlInput CRD in-cluster (if connected to cluster and CRD exists)
+//  4. Defaults from regolibrary GitHub releases
 func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
@@ -230,6 +234,13 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
 		return g
 	}
+
+	// Try to read control inputs from the ControlInput CRD in-cluster
+	if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
+		logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
+		return crdInputs
+	}
+
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}
