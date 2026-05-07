@@ -25,6 +25,7 @@ import (
 	"github.com/kubescape/opa-utils/resources"
 	"go.opentelemetry.io/otel"
 	"k8s.io/client-go/kubernetes"
+	"github.com/kubescape/kubescape/v3/core/pkg/anonymizer"
 )
 
 type componentInterfaces struct {
@@ -218,10 +219,19 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
 
+    /*logger.L().Info("hide flag value", helpers.String("hide", fmt.Sprintf("%v", scanInfo.Hide))) //used for debuging pipeline right now will be removed in suceeding PR */
+
+	if scanInfo.Hide { 
+		/* logger.L().Info("anonymizer hook triggered")  //used for debuging pipeline right now will be removed in suceeding phase */ 
+       if err := anonymizer.Apply(resultsHandling); err != nil {
+        logger.L().Warning("failed to hide sensitive fields", helpers.Error(err))
+       }
+    }
+
 	// if resultsHandling.GetRiskScore() > float32(scanInfo.FailThreshold) {
 	// 	return resultsHandling, fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", resultsHandling.GetRiskScore(), scanInfo.FailThreshold)
 	// }
-
+   
 	return resultsHandling, nil
 }
 
