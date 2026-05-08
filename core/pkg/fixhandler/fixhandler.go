@@ -79,7 +79,7 @@ func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 		return nil
 	}
 
-	return fmt.Errorf("unsupported scanning target. Supported scanning targets are: a local git repo, a directory or a file")
+	return fmt.Errorf("unsupported scanning target %d: the report must be generated from a local git repo, directory, or file scan. Run: kubescape scan <path> --format json --output report.json", scanningTarget)
 }
 
 func getLocalPath(report *reporthandlingv2.PostureReport) string {
