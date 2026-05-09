@@ -128,30 +128,62 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 	ksServer.s.AddResourceTemplate(configManifestTemplate, ksServer.ReadConfigurationResource)
 }
 
+// vulnManifestURI holds the parsed components of a vulnerability manifest resource URI.
+type vulnManifestURI struct {
+	namespace    string
+	manifestName string
+	cveID        string // empty for cve_list requests
+}
+
+// parseVulnManifestURI parses a kubescape://vulnerability-manifests/... URI into its components.
+// Valid forms:
+//
+//	kubescape://vulnerability-manifests/{namespace}/{manifest_name}/cve_list
+//	kubescape://vulnerability-manifests/{namespace}/{manifest_name}/cve_details/{cve_id}
+func parseVulnManifestURI(uri string) (*vulnManifestURI, error) {
+	const prefix = "kubescape://vulnerability-manifests/"
+	if !strings.HasPrefix(uri, prefix) {
+		return nil, fmt.Errorf("invalid URI: %s", uri)
+	}
+
+	parts := strings.Split(uri[len(prefix):], "/")
+	// cve_list:    {namespace}/{manifest_name}/cve_list          -> 3 parts
+	// cve_details: {namespace}/{manifest_name}/cve_details/{id}  -> 4 parts
+	if len(parts) != 3 && len(parts) != 4 {
+		return nil, fmt.Errorf("invalid URI: %s", uri)
+	}
+
+	namespace := parts[0]
+	manifestName := parts[1]
+	if namespace == "" || manifestName == "" {
+		return nil, fmt.Errorf("invalid URI: %s", uri)
+	}
+
+	action := parts[2]
+	parsed := &vulnManifestURI{namespace: namespace, manifestName: manifestName}
+	switch {
+	case len(parts) == 3 && action == "cve_list":
+		// no cveID needed
+	case len(parts) == 4 && action == "cve_details" && parts[3] != "":
+		parsed.cveID = parts[3]
+	default:
+		return nil, fmt.Errorf("invalid URI: %s", uri)
+	}
+
+	return parsed, nil
+}
+
 func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 	uri := request.Params.URI
-	// Validate the URI and check if it starts with kubescape://vulnerability-manifests/
-	if !strings.HasPrefix(uri, "kubescape://vulnerability-manifests/") {
-		return nil, fmt.Errorf("invalid URI: %s", uri)
+
+	parsed, err := parseVulnManifestURI(uri)
+	if err != nil {
+		return nil, err
 	}
 
-	// Verify that the URI is either the CVE list or CVE details
-	if !strings.HasSuffix(uri, "/cve_list") && !strings.Contains(uri, "/cve_details/") {
-		return nil, fmt.Errorf("invalid URI: %s", uri)
-	}
-
-	// Split the URI into namespace and manifest name
-	parts := strings.Split(uri, "/")
-	if len(parts) != 4 && len(parts) != 5 {
-		return nil, fmt.Errorf("invalid URI: %s", uri)
-	}
-
-	namespace := parts[1]
-	manifestName := parts[2]
-	cveID := ""
-	if len(parts) == 5 {
-		cveID = parts[3]
-	}
+	namespace := parsed.namespace
+	manifestName := parsed.manifestName
+	cveID := parsed.cveID
 
 	// Get the vulnerability manifest
 	manifest, err := ksServer.ksClient.VulnerabilityManifests(namespace).Get(ctx, manifestName, metav1.GetOptions{})
