@@ -899,7 +899,7 @@ func TestNewFixHandler_EmptyReportGUID(t *testing.T) {
 	// Regression test: a valid local scan report may have an empty reportGUID
 	// (PostureReportWithSeverity does not serialize reportGUID).
 	// NewFixHandler must not reject such reports based on ReportID alone.
-	reportJSON := `{"metadata":{"scanMetadata":{"scanningTarget":2},"contextMetadata":{"directoryContextMetadata":{"basePath":"testdata"}}},"generationTime":"2024-01-01T00:00:00Z"}`
+	reportJSON := `{"metadata":{"scanMetadata":{"scanningTarget":4},"targetMetadata":{"directoryContextMetadata":{"basePath":"testdata"}}},"generationTime":"2024-01-01T00:00:00Z"}`
 	tmpFile, err := os.CreateTemp("", "report-*.json")
 	assert.NoError(t, err)
 	defer os.Remove(tmpFile.Name())

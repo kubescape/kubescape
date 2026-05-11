@@ -120,6 +120,11 @@ func looksLikeKubescapeReport(raw []byte) bool {
 	if len(shape.Metadata) == 0 {
 		return false
 	}
+	// reject empty metadata object {}
+	var metaCheck map[string]json.RawMessage
+	if err := json.Unmarshal(shape.Metadata, &metaCheck); err != nil || len(metaCheck) == 0 {
+		return false
+	}
 	return len(shape.GenerationTime) > 0 ||
 		len(shape.SummaryDetails) > 0 ||
 		len(shape.Results) > 0 ||
