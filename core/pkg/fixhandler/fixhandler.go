@@ -120,13 +120,13 @@ func looksLikeKubescapeReport(raw []byte) bool {
 	if len(shape.Metadata) == 0 {
 		return false
 	}
-	// require kubescape-specific metadata: scanMetadata.scanningTarget must exist and be non-zero
+	// require kubescape-specific metadata: scanMetadata.scanningTarget must be present (use *int to distinguish absent from zero)
 	var metaShape struct {
 		ScanMetadata struct {
-			ScanningTarget int `json:"scanningTarget"`
+			ScanningTarget *int `json:"scanningTarget"`
 		} `json:"scanMetadata"`
 	}
-	if err := json.Unmarshal(shape.Metadata, &metaShape); err != nil || metaShape.ScanMetadata.ScanningTarget == 0 {
+	if err := json.Unmarshal(shape.Metadata, &metaShape); err != nil || metaShape.ScanMetadata.ScanningTarget == nil {
 		return false
 	}
 	return len(shape.GenerationTime) > 0 ||
