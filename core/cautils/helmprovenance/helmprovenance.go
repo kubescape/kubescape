@@ -31,6 +31,12 @@ type Provenance struct {
 	// ValuesPaths are dotted .Values.* keys statically referenced by the
 	// template (and by any partials it includes, transitively). Sorted,
 	// deduplicated. Empty when nothing could be statically traced.
+	//
+	// Caveat: segments are joined with ".", so an `index .Values` access with
+	// a key that itself contains a literal dot (e.g. {{ index .Values "foo.bar"
+	// "baz" }}) flattens to "foo.bar.baz" — indistinguishable from a nested
+	// path foo→bar→baz. Treat these strings as advisory pointers into
+	// values.yaml, not as a machine-parseable key path.
 	ValuesPaths []string
 	// TemplateLine is the 1-based line of the first apiVersion: occurrence
 	// in the source template; 0 when not found. Useful as a stable anchor
