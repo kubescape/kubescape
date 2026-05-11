@@ -138,6 +138,7 @@ type vulnManifestURI struct {
 // parseVulnManifestURI parses a kubescape://vulnerability-manifests/... URI into its components.
 // Valid forms:
 //
+//	kubescape://vulnerability-manifests/{namespace}/{manifest_name}                          (defaults to cve_list)
 //	kubescape://vulnerability-manifests/{namespace}/{manifest_name}/cve_list
 //	kubescape://vulnerability-manifests/{namespace}/{manifest_name}/cve_details/{cve_id}
 func parseVulnManifestURI(uri string) (*vulnManifestURI, error) {
@@ -147,9 +148,10 @@ func parseVulnManifestURI(uri string) (*vulnManifestURI, error) {
 	}
 
 	parts := strings.Split(uri[len(prefix):], "/")
+	// base:        {namespace}/{manifest_name}                   -> 2 parts (defaults to cve_list)
 	// cve_list:    {namespace}/{manifest_name}/cve_list          -> 3 parts
 	// cve_details: {namespace}/{manifest_name}/cve_details/{id}  -> 4 parts
-	if len(parts) != 3 && len(parts) != 4 {
+	if len(parts) < 2 || len(parts) > 4 {
 		return nil, fmt.Errorf("invalid URI: %s", uri)
 	}
 
@@ -159,8 +161,13 @@ func parseVulnManifestURI(uri string) (*vulnManifestURI, error) {
 		return nil, fmt.Errorf("invalid URI: %s", uri)
 	}
 
-	action := parts[2]
 	parsed := &vulnManifestURI{namespace: namespace, manifestName: manifestName}
+	if len(parts) == 2 {
+		// Base URI defaults to cve_list behavior
+		return parsed, nil
+	}
+
+	action := parts[2]
 	switch {
 	case len(parts) == 3 && action == "cve_list":
 		// no cveID needed

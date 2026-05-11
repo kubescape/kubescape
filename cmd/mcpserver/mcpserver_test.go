@@ -23,9 +23,10 @@ func TestParseVulnManifestURI(t *testing.T) {
 			wantErr: "invalid URI",
 		},
 		{
-			name:    "missing action suffix",
-			uri:     "kubescape://vulnerability-manifests/ns/manifest",
-			wantErr: "invalid URI",
+			name:         "base URI defaults to cve_list",
+			uri:          "kubescape://vulnerability-manifests/ns/manifest",
+			wantNS:       "ns",
+			wantManifest: "manifest",
 		},
 		{
 			name:         "valid cve_list URI",
@@ -41,8 +42,8 @@ func TestParseVulnManifestURI(t *testing.T) {
 			wantCVE:      "CVE-2024-1234",
 		},
 		{
-			name:    "too few parts after prefix",
-			uri:     "kubescape://vulnerability-manifests/ns/cve_list",
+			name:    "only namespace (too few parts)",
+			uri:     "kubescape://vulnerability-manifests/ns",
 			wantErr: "invalid URI",
 		},
 		{
