@@ -11,6 +11,9 @@ import (
 	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
@@ -653,4 +656,75 @@ func TestGetLocalPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths
+// verifies the partition that issue #1772 hinges on: a Helm-rendered
+// resource must (a) be excluded from the yq-based ResourceFixInfo path
+// — applying yq edits using rendered-YAML line numbers is the original bug
+// — and (b) surface as a HelmFixSuggestion carrying the .Values keys
+// statically traced from the source template, so the user can edit
+// values.yaml deliberately.
+func TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths(t *testing.T) {
+	failed := apis.StatusInfo{InnerStatus: apis.StatusFailed}
+
+	// Helm-source resource: must end up in HelmFixSuggestion, never in ResourceFixInfo.
+	helmObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "api"},
+	}
+	helmRes := &reporthandling.Resource{
+		Object: helmObj,
+		Source: &reporthandling.Source{
+			FileType:         reporthandling.SourceTypeHelmChart,
+			HelmPath:         "/charts/myapp",
+			HelmChartName:    "myapp",
+			HelmTemplateFile: "templates/deployment.yaml",
+			HelmValuesPaths:  []string{"image.tag", "replicaCount"},
+		},
+	}
+	// Resource ID is derived by the IMetadata middleware from Object, not
+	// from the ResourceID field — populate it via GetID() so buildResourcesMap
+	// keys match the result lookup.
+	resID := helmRes.GetID()
+
+	report := &reporthandlingv2.PostureReport{
+		Resources: []reporthandling.Resource{*helmRes},
+		Results: []resourcesresults.Result{{
+			ResourceID:  resID,
+			RawResource: helmRes,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+				ControlID: "C-0001",
+				Status:    failed,
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+					Name:   "rule-x",
+					Status: apis.StatusFailed,
+					Paths: []armotypes.PosturePaths{{
+						FixPath: armotypes.FixPath{
+							Path:  "spec.template.spec.containers[0].securityContext.runAsNonRoot",
+							Value: "true",
+						},
+					}},
+				}},
+			}},
+		}},
+	}
+
+	h, err := NewFixHandlerMock()
+	assert.NoError(t, err)
+	h.reportObj = report
+
+	rfi := h.PrepareResourcesToFix(context.TODO())
+	assert.Len(t, rfi, 0, "Helm-rendered resources must not enter the yq-based fix path")
+
+	suggestions := h.PrepareHelmSuggestions(context.TODO())
+	assert.Len(t, suggestions, 1)
+	s := suggestions[0]
+	assert.Equal(t, "myapp", s.ChartName)
+	assert.Equal(t, "/charts/myapp", s.ChartPath)
+	assert.Equal(t, "templates/deployment.yaml", s.TemplateFile)
+	assert.Equal(t, []string{"image.tag", "replicaCount"}, s.ValuesPaths)
+	assert.Len(t, s.FixPaths, 1)
+	assert.Equal(t, "true", s.FixPaths[0].Value)
 }

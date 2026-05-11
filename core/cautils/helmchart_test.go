@@ -196,6 +196,30 @@ func TestLoadResourcesFromHelmCharts_BadOverrideFailsFast(t *testing.T) {
 	assert.Contains(t, err.Error(), "Helm value overrides")
 }
 
+// TestLoadResourcesFromHelmCharts_AttachesProvenance confirms that the
+// helmprovenance package output is plumbed through LoadResourcesFromHelmCharts
+// and lands on the per-source Chart entry. This is the wiring the fix command
+// relies on to surface .Values guidance for Helm-rendered resources.
+func TestLoadResourcesFromHelmCharts_AttachesProvenance(t *testing.T) {
+	o, _ := os.Getwd()
+	chartPath := filepath.Join(filepath.Dir(o), "..", "examples", "helm_chart")
+
+	_, sourceToChart, err := LoadResourcesFromHelmCharts(context.TODO(), chartPath, HelmValueOptions{})
+	assert.NoError(t, err)
+
+	cronjobPath := filepath.Join(chartPath, "templates", "cronjob.yaml")
+	c, ok := sourceToChart[cronjobPath]
+	assert.True(t, ok, "expected provenance entry for cronjob.yaml")
+	assert.Equal(t, "templates/cronjob.yaml", c.Provenance.TemplateFile)
+	// cronjob.yaml uses .Values.schedule and .Values.image.* directly, plus
+	// includes from _helpers.tpl that read .Values.nameOverride etc.
+	assert.Contains(t, c.Provenance.ValuesPaths, "schedule")
+	assert.Contains(t, c.Provenance.ValuesPaths, "image.repository")
+	assert.Contains(t, c.Provenance.ValuesPaths, "image.tag")
+	// Helper-derived ref should be folded in via include resolution.
+	assert.Contains(t, c.Provenance.ValuesPaths, "nameOverride")
+}
+
 func TestMergeMaps_DeepMerge(t *testing.T) {
 	base := map[string]interface{}{
 		"image": map[string]interface{}{"repository": "base-repo", "tag": "default"},

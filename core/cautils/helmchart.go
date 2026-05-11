@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
@@ -123,6 +124,26 @@ func (hc *HelmChart) GetName() string {
 
 func (hc *HelmChart) GetDefaultValues() map[string]interface{} {
 	return hc.chart.Values
+}
+
+// Provenance returns per-template Helm provenance keyed by the same absolute
+// source path that GetWorkloads* uses for workloads, so callers can join the
+// two maps directly. Keys for templates that produced no workloads (e.g.
+// NOTES.txt, helpers) are still included; callers should ignore them.
+func (hc *HelmChart) Provenance() map[string]helmprovenance.Provenance {
+	raw := helmprovenance.Extract(hc.chart)
+	out := make(map[string]helmprovenance.Provenance, len(raw))
+	for enginePath, p := range raw {
+		// enginePath looks like "<chartName>/templates/foo.yaml" — drop
+		// the chart-name prefix and join under the chart's on-disk path,
+		// mirroring the conversion in GetWorkloadsWithOptions.
+		idx := strings.Index(enginePath, "/")
+		if idx == -1 {
+			continue
+		}
+		out[filepath.Join(hc.path, enginePath[idx:])] = p
+	}
+	return out
 }
 
 // GetWorkloadsWithDefaultValues renders chart template using the default values and returns a map of source file to its workloads
