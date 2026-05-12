@@ -10,13 +10,13 @@ var (
 	_ IExceptionsGetter = &CRDExceptionsGetter{}
 )
 
-// CRDExceptionsGetter retrieves posture exceptions from Kubernetes
+// CRDExceptionsGetter will retrieve posture exceptions from Kubernetes
 // SecurityException and ClusterSecurityException CRDs in the cluster.
 //
-// This getter currently acts as a structural skeleton. The full implementation
-// will use a Kubernetes dynamic client to list and convert CRD instances into
-// PostureExceptionPolicy objects when the SecurityException CRD has been
-// defined and registered (kubescape/kubescape#1982).
+// Currently a structural skeleton that always returns an empty slice.
+// The full implementation will use a Kubernetes dynamic client to list
+// and convert CRD instances into PostureExceptionPolicy objects when the
+// SecurityException CRD has been defined (kubescape/kubescape#1982).
 type CRDExceptionsGetter struct {
 	// client holds the Kubernetes dynamic client for querying
 	// SecurityException / ClusterSecurityException CRDs.
