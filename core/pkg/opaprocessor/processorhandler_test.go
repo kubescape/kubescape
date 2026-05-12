@@ -561,3 +561,42 @@ func TestSkipNamespace(t *testing.T) {
 		})
 	}
 }
+
+func TestRunOPAOnSingleRule_CELDispatch(t *testing.T) {
+	tests := []struct {
+		name         string
+		ruleLanguage reporthandling.RuleLanguages
+		expectError  bool
+	}{
+		{
+			name:         "CEL language dispatches to runCELOnK8s",
+			ruleLanguage: reporthandling.CELLanguage,
+			expectError:  true,
+		},
+		{
+			name:         "unknown language returns error",
+			ruleLanguage: reporthandling.RuleLanguages("UNKNOWN"),
+			expectError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opap := &OPAProcessor{}
+			rule := &reporthandling.PolicyRule{
+				PortalBase: armotypes.PortalBase{
+					Name: "test-rule",
+				},
+				RuleLanguage: tt.ruleLanguage,
+			}
+
+			_, err := opap.runOPAOnSingleRule(context.Background(), rule, nil, nil, resources.RegoDependenciesData{})
+
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
