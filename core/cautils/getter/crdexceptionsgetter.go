@@ -1,8 +1,6 @@
 package getter
 
 import (
-	"fmt"
-
 	"github.com/armosec/armoapi-go/armotypes"
 )
 
@@ -25,7 +23,7 @@ func (g *CRDExceptionsGetter) GetExceptions(clusterName string) ([]armotypes.Pos
 	_ = clusterName
 
 	if g == nil {
-		return nil, fmt.Errorf("CRDExceptionsGetter is nil")
+		return []armotypes.PostureExceptionPolicy{}, nil
 	}
 
 	return []armotypes.PostureExceptionPolicy{}, nil
