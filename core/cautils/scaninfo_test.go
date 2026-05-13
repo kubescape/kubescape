@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -130,6 +131,82 @@ func TestScanInfoFormats(t *testing.T) {
 			got := scanInfo.Formats()
 
 			assert.Equal(t, want, got)
+		})
+	}
+}
+
+func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
+	testCases := []struct {
+		name   string
+		format string
+		want   []string
+	}{
+		{
+			name:   "duplicate json",
+			format: "json,json",
+			want:   []string{"json"},
+		},
+		{
+			name:   "keeps first occurrence order",
+			format: "json,pdf,json,sarif,pdf",
+			want:   []string{"json", "pdf", "sarif"},
+		},
+		{
+			name:   "preserves whitespace as existing format value",
+			format: "json, json,json",
+			want:   []string{"json", " json"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{Format: tc.format}
+
+			assert.Equal(t, tc.want, scanInfo.Formats())
+		})
+	}
+}
+
+func TestScanInfoSetPolicyIdentifiers(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []PolicyIdentifier
+		policies []string
+		want     []PolicyIdentifier
+	}{
+		{
+			name:     "adds new policies",
+			policies: []string{"nsa", "mitre"},
+			want: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+				{Identifier: "mitre", Kind: apisv1.KindFramework},
+			},
+		},
+		{
+			name: "skips existing policy",
+			existing: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+			},
+			policies: []string{"nsa", "mitre"},
+			want: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+				{Identifier: "mitre", Kind: apisv1.KindFramework},
+			},
+		},
+		{
+			name:     "empty policy list leaves existing values",
+			existing: []PolicyIdentifier{{Identifier: "C-0001", Kind: apisv1.KindControl}},
+			want:     []PolicyIdentifier{{Identifier: "C-0001", Kind: apisv1.KindControl}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{PolicyIdentifier: tt.existing}
+
+			scanInfo.SetPolicyIdentifiers(tt.policies, apisv1.KindFramework)
+
+			assert.Equal(t, tt.want, scanInfo.PolicyIdentifier)
 		})
 	}
 }
