@@ -60,7 +60,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 			initLogger()
 			initLoggerLevel(cmd)
 			initEnvironment()
-			initCacheDir()
+			initCacheDir(cmd)
 		},
 	}
 

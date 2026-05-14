@@ -58,16 +58,28 @@ func initLoggerLevel(cmd *cobra.Command) {
 	}
 }
 
-func initCacheDir() {
-	if rootInfo.CacheDir != getter.DefaultLocalStore {
-		getter.DefaultLocalStore = rootInfo.CacheDir
-	} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
-		getter.DefaultLocalStore = cacheDir
-	} else {
-		return // using default cache dir location
+func initCacheDir(cmd *cobra.Command) {
+	cacheDirExplicit := false
+	if cmd != nil {
+		// Persistent flags are parsed on the root while traversing to the subcommand.
+		// cmd.Flag("cache-dir") on a child can be a merged copy that never gets Changed=true;
+		// the root flag holds the authoritative parse state (see cobra Traverse + ParseFlags).
+		r := cmd.Root()
+		if f := r.Flag("cache-dir"); f != nil {
+			cacheDirExplicit = f.Changed
+		} else if f := cmd.Flag("cache-dir"); f != nil {
+			cacheDirExplicit = f.Changed
+		}
 	}
-
-	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+	if !cacheDirExplicit {
+		if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
+			getter.DefaultLocalStore = cacheDir
+			logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+		}
+	} else {
+		getter.DefaultLocalStore = rootInfo.CacheDir
+		logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+	}
 }
 func initEnvironment() {
 	if rootInfo.DiscoveryServerURL == "" {
