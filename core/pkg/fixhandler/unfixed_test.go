@@ -203,7 +203,7 @@ func TestPrepareResourcesToFix_ClassifiesFixedAndUnfixed(t *testing.T) {
 
 	results := []resourcesresults.Result{
 		{
-			ResourceID: res.GetID(),
+			ResourceID:  res.GetID(),
 			RawResource: res,
 			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
 				// fixable
@@ -281,7 +281,7 @@ func TestPrepareResourcesToFix_SkipUserValuesReason(t *testing.T) {
 
 	results := []resourcesresults.Result{
 		{
-			ResourceID: res.GetID(),
+			ResourceID:  res.GetID(),
 			RawResource: res,
 			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
 				failedControl("C-0076", "Label usage",
@@ -306,7 +306,7 @@ func TestPrepareResourcesToFix_MissingFile(t *testing.T) {
 
 	results := []resourcesresults.Result{
 		{
-			ResourceID: res.GetID(),
+			ResourceID:  res.GetID(),
 			RawResource: res,
 			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
 				failedControl("C-0057", "Privileged",
@@ -332,7 +332,7 @@ func TestPrepareResourcesToFix_NonYamlSource(t *testing.T) {
 
 	results := []resourcesresults.Result{
 		{
-			ResourceID: res.GetID(),
+			ResourceID:  res.GetID(),
 			RawResource: res,
 			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
 				failedControl("C-0057", "Privileged",

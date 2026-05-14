@@ -31,8 +31,8 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 
 	patchCmd := &cobra.Command{
 		Use:     "patch --image <image>:<tag> [flags]",
-		Short:   "Patch container images with vulnerabilities",
-		Long:    `Patch command is for automatically patching images with vulnerabilities.`,
+		Short:   "Patch container images to fix known OS-level vulnerabilities",
+		Long:    `Automatically patch container images to remediate known OS-level vulnerabilities using Copa and BuildKit.`,
 		Example: patchCmdExamples,
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) != 0 {

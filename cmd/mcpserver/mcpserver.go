@@ -37,7 +37,7 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(listManifestsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool("list_vulnerability_manifests", request.Params.Arguments.(map[string]interface{}))
+		return ksServer.CallTool(ctx, "list_vulnerability_manifests", request.Params.Arguments.(map[string]interface{}))
 	})
 
 	listVulnerabilitiesTool := mcp.NewTool(
@@ -53,7 +53,7 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(listVulnerabilitiesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool("list_vulnerabilities_in_manifest", request.Params.Arguments.(map[string]interface{}))
+		return ksServer.CallTool(ctx, "list_vulnerabilities_in_manifest", request.Params.Arguments.(map[string]interface{}))
 	})
 
 	listVulnerabilityMatchesForCVE := mcp.NewTool(
@@ -73,7 +73,7 @@ func createVulnerabilityToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(listVulnerabilityMatchesForCVE, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool("list_vulnerability_matches_for_cve", request.Params.Arguments.(map[string]interface{}))
+		return ksServer.CallTool(ctx, "list_vulnerability_matches_for_cve", request.Params.Arguments.(map[string]interface{}))
 	})
 
 	vulnerabilityManifestTemplate := mcp.NewResourceTemplate(
@@ -98,7 +98,7 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(listConfigsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool("list_configuration_security_scan_manifests", request.Params.Arguments.(map[string]interface{}))
+		return ksServer.CallTool(ctx, "list_configuration_security_scan_manifests", request.Params.Arguments.(map[string]interface{}))
 	})
 
 	getConfigDetailsTool := mcp.NewTool(
@@ -114,7 +114,7 @@ func createConfigurationsToolsAndResources(ksServer *KubescapeMcpserver) {
 	)
 
 	ksServer.s.AddTool(getConfigDetailsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return ksServer.CallTool("get_configuration_security_scan_manifest", request.Params.Arguments.(map[string]interface{}))
+		return ksServer.CallTool(ctx, "get_configuration_security_scan_manifest", request.Params.Arguments.(map[string]interface{}))
 	})
 
 	configManifestTemplate := mcp.NewResourceTemplate(
@@ -253,7 +253,7 @@ func (ksServer *KubescapeMcpserver) ReadConfigurationResource(ctx context.Contex
 	}}, nil
 }
 
-func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]interface{}) (*mcp.CallToolResult, error) {
+func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (*mcp.CallToolResult, error) {
 	switch name {
 	case "list_vulnerability_manifests":
 		//namespace, ok := arguments["namespace"]
@@ -281,9 +281,9 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		var manifests *v1beta1.VulnerabilityManifestList
 		var err error
 		if labelSelector == "" {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
+			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
 		} else {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{
+			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
 				LabelSelector: labelSelector,
 			})
 		}
@@ -348,7 +348,7 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			return nil, fmt.Errorf("manifest_name must be a string")
 		}
-		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(context.Background(), manifestNameStr, metav1.GetOptions{})
+		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %s", err)
 		}
@@ -393,7 +393,7 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			return nil, fmt.Errorf("cve_id must be a string")
 		}
-		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(context.Background(), manifestNameStr, metav1.GetOptions{})
+		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get vulnerability manifest: %s", err)
 		}
@@ -424,7 +424,7 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			return nil, fmt.Errorf("namespace must be a string")
 		}
-		manifests, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).List(context.Background(), metav1.ListOptions{})
+		manifests, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -475,7 +475,7 @@ func (ksServer *KubescapeMcpserver) CallTool(name string, arguments map[string]i
 		if !ok {
 			return nil, fmt.Errorf("manifest_name must be a string")
 		}
-		manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).Get(context.Background(), manifestNameStr, metav1.GetOptions{})
+		manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("failed to get configuration manifest: %s", err)
 		}

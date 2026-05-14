@@ -293,8 +293,7 @@ func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 
 	deduped := dedupUnfixedControls(h.unfixedControls)
 	var sb strings.Builder
-	totalFailed := h.fixedControlsCount + len(h.unfixedControls)
-
+	totalFailed := h.fixedControlsCount + len(deduped)
 	verb := "Would auto-fix"
 	if phase == PhaseApplied {
 		verb = "Auto-fixed"

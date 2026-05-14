@@ -3,134 +3,102 @@ package anonymizer
 import (
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestAnonymizeContainerList(t *testing.T) {
-	tests := []struct {
-		name           string
-		key            string
-		obj            map[string]interface{}
-		expectChanged  bool
-		expectedLength int
-	}{
-		{
-			name: "regular containers",
-			key:  "containers",
-			obj: map[string]interface{}{
-				"containers": []corev1.Container{
-					{Name: "api", Image: "nginx:1.25"},
-					{Name: "worker", Image: "busybox:1.36"},
-				},
+func TestAnonymizeContainerList_AnonymizesNamesAndImages(t *testing.T) {
+	obj := map[string]interface{}{
+		"containers": []interface{}{
+			map[string]interface{}{
+				"name":  "my-secret-app",
+				"image": "private.registry.io/app:v1",
 			},
-			expectChanged:  true,
-			expectedLength: 2,
-		},
-		{
-			name: "init containers",
-			key:  "initContainers",
-			obj: map[string]interface{}{
-				"initContainers": []corev1.Container{
-					{Name: "setup", Image: "alpine:3.19"},
-				},
-			},
-			expectChanged:  true,
-			expectedLength: 1,
-		},
-		{
-			name: "missing key",
-			key:  "containers",
-			obj: map[string]interface{}{
-				"volumes": []string{"config"},
-			},
-		},
-		{
-			name: "wrong value type",
-			key:  "containers",
-			obj: map[string]interface{}{
-				"containers": []interface{}{
-					map[string]interface{}{"name": "api", "image": "nginx:1.25"},
-				},
+			map[string]interface{}{
+				"name":  "sidecar",
+				"image": "private.registry.io/sidecar:v1",
 			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mapping := NewMapping()
-			anonymizeContainerList(tt.obj, tt.key, mapping)
+	m := NewMapping()
+	anonymizeContainerList(obj, "containers", m)
 
-			rawContainers, ok := tt.obj[tt.key]
-			if !tt.expectChanged {
-				if ok {
-					_, typed := rawContainers.([]corev1.Container)
-					assert.False(t, typed)
-				}
-				return
-			}
-
-			containers, ok := rawContainers.([]corev1.Container)
-			assert.True(t, ok)
-			assert.Len(t, containers, tt.expectedLength)
-			for _, container := range containers {
-				assert.NotEmpty(t, container.Name)
-				assert.NotEmpty(t, container.Image)
-				assert.Regexp(t, "^ctr-[a-f0-9]{8}$", container.Name)
-				assert.Regexp(t, "^img-[a-f0-9]{8}$", container.Image)
-			}
-		})
-	}
+	containers, ok := obj["containers"].([]corev1.Container)
+	assert.True(t, ok, "after fix, containers must be []corev1.Container")
+	assert.Len(t, containers, 2)
+	assert.NotEqual(t, "my-secret-app", containers[0].Name)
+	assert.NotEqual(t, "private.registry.io/app:v1", containers[0].Image)
+	assert.NotEqual(t, "sidecar", containers[1].Name)
+	assert.NotEqual(t, "private.registry.io/sidecar:v1", containers[1].Image)
+	assert.Contains(t, containers[0].Name, "ctr-")
+	assert.Contains(t, containers[0].Image, "img-")
 }
 
-func TestAnonymizeEphemeralContainerList(t *testing.T) {
-	tests := []struct {
-		name          string
-		obj           map[string]interface{}
-		expectChanged bool
-	}{
-		{
-			name: "ephemeral containers",
-			obj: map[string]interface{}{
-				"ephemeralContainers": []corev1.EphemeralContainer{
-					{EphemeralContainerCommon: corev1.EphemeralContainerCommon{Name: "debugger", Image: "busybox:1.36"}},
-				},
-			},
-			expectChanged: true,
+func TestAnonymizeContainerMetadata_AnonymizesContainerNamesAndImages(t *testing.T) {
+	resource := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "my-pod",
+			"namespace": "default",
 		},
-		{
-			name: "wrong value type",
-			obj: map[string]interface{}{
-				"ephemeralContainers": []corev1.Container{
-					{Name: "debugger", Image: "busybox:1.36"},
+		"spec": map[string]interface{}{
+			"containers": []interface{}{
+				map[string]interface{}{
+					"name":  "secret-container",
+					"image": "private.io/app:v1",
 				},
 			},
 		},
-		{
-			name: "missing key",
-			obj:  map[string]interface{}{},
+	})
+
+	m := NewMapping()
+	anonymizeContainerMetadata(resource, m)
+
+	obj := resource.GetObject()
+	spec := obj["spec"].(map[string]interface{})
+	containers, ok := spec["containers"].([]corev1.Container)
+	assert.True(t, ok)
+	assert.Len(t, containers, 1)
+	assert.NotEqual(t, "secret-container", containers[0].Name)
+	assert.NotEqual(t, "private.io/app:v1", containers[0].Image)
+	assert.Contains(t, containers[0].Name, "ctr-")
+	assert.Contains(t, containers[0].Image, "img-")
+}
+
+func TestAnonymizeContainerList_MissingKey(t *testing.T) {
+	obj := map[string]interface{}{}
+	m := NewMapping()
+	anonymizeContainerList(obj, "containers", m)
+}
+
+func TestAnonymizeContainerList_NilValue(t *testing.T) {
+	obj := map[string]interface{}{"containers": nil}
+	m := NewMapping()
+	anonymizeContainerList(obj, "containers", m)
+}
+
+func TestAnonymizeEphemeralContainerList_AnonymizesNamesAndImages(t *testing.T) {
+	// Simulate runtime shape: []interface{} with map[string]interface{} items
+	obj := map[string]interface{}{
+		"ephemeralContainers": []interface{}{
+			map[string]interface{}{
+				"name":  "debug-container",
+				"image": "private.registry.io/debug:v1",
+			},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			mapping := NewMapping()
-			anonymizeEphemeralContainerList(tt.obj, "ephemeralContainers", mapping)
+	m := NewMapping()
+	anonymizeEphemeralContainerList(obj, "ephemeralContainers", m)
 
-			rawContainers, ok := tt.obj["ephemeralContainers"]
-			if !tt.expectChanged {
-				if ok {
-					_, typed := rawContainers.([]corev1.EphemeralContainer)
-					assert.False(t, typed)
-				}
-				return
-			}
-
-			containers, ok := rawContainers.([]corev1.EphemeralContainer)
-			assert.True(t, ok)
-			assert.Len(t, containers, 1)
-			assert.Regexp(t, "^ctr-[a-f0-9]{8}$", containers[0].Name)
-			assert.Regexp(t, "^img-[a-f0-9]{8}$", containers[0].Image)
-		})
-	}
+	containers, ok := obj["ephemeralContainers"].([]corev1.EphemeralContainer)
+	assert.True(t, ok, "after fix, ephemeral containers must be []corev1.EphemeralContainer")
+	assert.Len(t, containers, 1)
+	assert.NotEqual(t, "debug-container", containers[0].Name)
+	assert.NotEqual(t, "private.registry.io/debug:v1", containers[0].Image)
+	assert.Contains(t, containers[0].Name, "ctr-")
+	assert.Contains(t, containers[0].Image, "img-")
 }

@@ -1,6 +1,8 @@
 package anonymizer
 
 import (
+	"encoding/json"
+
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -48,8 +50,13 @@ func anonymizeContainerList(
 		return
 	}
 
-	containers, ok := rawContainers.([]corev1.Container)
-	if !ok {
+	data, err := json.Marshal(rawContainers)
+	if err != nil {
+		return
+	}
+
+	var containers []corev1.Container
+	if err := json.Unmarshal(data, &containers); err != nil {
 		return
 	}
 
@@ -57,7 +64,6 @@ func anonymizeContainerList(
 		if containers[i].Name != "" {
 			containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
 		}
-
 		if containers[i].Image != "" {
 			containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
 		}
@@ -76,8 +82,13 @@ func anonymizeEphemeralContainerList(
 		return
 	}
 
-	containers, ok := rawContainers.([]corev1.EphemeralContainer)
-	if !ok {
+	data, err := json.Marshal(rawContainers)
+	if err != nil {
+		return
+	}
+
+	var containers []corev1.EphemeralContainer
+	if err := json.Unmarshal(data, &containers); err != nil {
 		return
 	}
 
@@ -85,7 +96,6 @@ func anonymizeEphemeralContainerList(
 		if containers[i].Name != "" {
 			containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
 		}
-
 		if containers[i].Image != "" {
 			containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
 		}

@@ -28,6 +28,10 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 		}
 		anonymizeContainerMetadata(resource, mapping)
 
+		if len(session.LabelsToCopy) > 0 {
+			anonymizeResourceLabels(resource, session.LabelsToCopy, mapping)
+		}
+
 		newID := resource.GetID()
 		idMapping[oldID] = newID
 		newAllResources[newID] = resource
@@ -120,4 +124,20 @@ func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, 
 	}
 
 	return mapping.GetOrCreate(prefix, originalID)
+}
+
+func anonymizeResourceLabels(resource workloadinterface.IMetadata, labelsToCopy []string, mapping *Mapping) {
+	bw, ok := resource.(workloadinterface.IWorkload)
+	if !ok {
+		return
+	}
+	labels := bw.GetLabels()
+	if len(labels) == 0 {
+		return
+	}
+	for _, key := range labelsToCopy {
+		if val, exists := labels[key]; exists && val != "" {
+			bw.SetLabel(key, mapping.GetOrCreate("lbl", val))
+		}
+	}
 }

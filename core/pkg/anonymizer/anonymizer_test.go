@@ -225,3 +225,75 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 	_, inAttackTracks := session.ResourceAttackTracks[newID]
 	assert.True(t, inAttackTracks, "ResourceAttackTracks must use remapped ID as key")
 }
+
+func TestAnonymizeSession_LabelsToCopyAreAnonymized(t *testing.T) {
+	pod := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "my-pod",
+			"namespace": "default",
+			"labels": map[string]interface{}{
+				"team": "payments",
+				"env":  "production",
+			},
+		},
+	})
+
+	oldID := pod.GetID()
+	session := &cautils.OPASessionObj{
+		AllResources:         map[string]workloadinterface.IMetadata{oldID: pod},
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		LabelsToCopy:         []string{"team", "env"},
+	}
+
+	m := NewMapping()
+	anonymizeSession(session, m)
+
+	for _, r := range session.AllResources {
+		wl, ok := r.(workloadinterface.IWorkload)
+		assert.True(t, ok)
+		labels := wl.GetLabels()
+		assert.NotEqual(t, "payments", labels["team"], "label value team must be anonymized")
+		assert.NotEqual(t, "production", labels["env"], "label value env must be anonymized")
+		assert.NotEmpty(t, labels["team"], "label key must still exist")
+		assert.NotEmpty(t, labels["env"], "label key must still exist")
+	}
+}
+
+func TestAnonymizeSession_EmptyLabelsToCopy_LabelsUnchanged(t *testing.T) {
+	pod := workloadinterface.NewWorkloadObj(map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "my-pod",
+			"namespace": "default",
+			"labels": map[string]interface{}{
+				"team": "payments",
+			},
+		},
+	})
+
+	oldID := pod.GetID()
+	session := &cautils.OPASessionObj{
+		AllResources:         map[string]workloadinterface.IMetadata{oldID: pod},
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+		LabelsToCopy:         []string{},
+	}
+
+	m := NewMapping()
+	anonymizeSession(session, m)
+
+	for _, r := range session.AllResources {
+		wl, ok := r.(workloadinterface.IWorkload)
+		assert.True(t, ok)
+		labels := wl.GetLabels()
+		assert.Equal(t, "payments", labels["team"], "label must be unchanged when LabelsToCopy is empty")
+	}
+}

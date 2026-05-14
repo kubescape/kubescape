@@ -159,12 +159,16 @@ func (report *ReportEventReceiver) setResults(reportObj *reporthandlingv2.Postur
 		if results, ok := prioritizedResources[resourceID]; ok {
 			v.PrioritizedResource = &results
 		}
+		sourcePath := ""
+		if source := resource.GetSource(); source != nil {
+			sourcePath = source.RelativePath
+		}
 
 		r, err := json.Marshal(v)
 		if err != nil {
 			logger.L().Error("failed to marshal resource to JSON - skipping",
 				helpers.Error(err),
-				helpers.String("file", resource.GetSource().RelativePath),
+				helpers.String("file", sourcePath),
 			)
 			continue
 		}
@@ -206,11 +210,15 @@ func (report *ReportEventReceiver) setResources(reportObj *reporthandlingv2.Post
 		if r, ok := resourcesSource[resourceID]; ok {
 			resource.SetSource(&r)
 		}
+		sourcePath := ""
+		if source := resource.GetSource(); source != nil {
+			sourcePath = source.RelativePath
+		}
 		r, err := json.Marshal(resource)
 		if err != nil {
 			logger.L().Error("failed to marshal resource to JSON - skipping",
 				helpers.Error(err),
-				helpers.String("file", resource.GetSource().RelativePath),
+				helpers.String("file", sourcePath),
 			)
 			continue
 		}
