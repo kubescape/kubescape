@@ -41,6 +41,22 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
+				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, sarif")
+			}
+			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format != "" {
+				supported := []string{"pretty-printer", "json", "sarif"}
+				valid := false
+				for _, s := range supported {
+					if scanInfo.Format == s {
+						valid = true
+						break
+					}
+				}
+				if !valid {
+					return fmt.Errorf("invalid format %q, supported formats: pretty-printer, json, sarif", scanInfo.Format)
+				}
+			}
 			if err := shared.ValidateImageScanInfo(&scanInfo); err != nil {
 				return err
 			}
