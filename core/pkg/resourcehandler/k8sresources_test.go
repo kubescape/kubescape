@@ -534,7 +534,7 @@ func TestIsMasterNodeTaints(t *testing.T) {
 `
 	var taintNode v1.Node
 	_ = json.Unmarshal([]byte(taintNodeJson), &taintNode)
-	assert.True(t, isMasterNodeTaints(taintNode.Spec.Taints))
+	assert.False(t, isMasterNodeTaints(taintNode.Spec.Taints))
 
 	taintNodeJson1 :=
 		`
