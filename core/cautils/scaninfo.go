@@ -226,7 +226,11 @@ func (scanInfo *ScanInfo) setUseFrom() {
 func (scanInfo *ScanInfo) Formats() []string {
 	formatString := scanInfo.Format
 	if formatString != "" {
-		return unique(strings.Split(scanInfo.Format, ","))
+		parts := strings.Split(scanInfo.Format, ",")
+		for i, p := range parts {
+			parts[i] = strings.TrimSpace(p)
+		}
+		return unique(parts)
 	} else {
 		return []string{}
 	}

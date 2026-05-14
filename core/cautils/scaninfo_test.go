@@ -152,9 +152,9 @@ func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
 			want:   []string{"json", "pdf", "sarif"},
 		},
 		{
-			name:   "preserves whitespace as existing format value",
+			name:   "trims whitespace and deduplicates",
 			format: "json, json,json",
-			want:   []string{"json", " json"},
+			want:   []string{"json"},
 		},
 	}
 
