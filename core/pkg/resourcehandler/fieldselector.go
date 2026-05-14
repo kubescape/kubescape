@@ -69,9 +69,18 @@ func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	fieldSelectors := []string{}
 	for _, n := range strings.Split(is.namespace, FieldSelectorsSeparator) {
-		if n != "" {
-			fieldSelectors = append(fieldSelectors, getNamespacesSelector(resource.Resource, n, FieldSelectorsEqualsOperator))
+		if n == "" {
+			continue
 		}
+		sel := getNamespacesSelector(resource.Resource, n, FieldSelectorsEqualsOperator)
+		if sel == "" {
+			// Cluster-scoped target: per-namespace filtering is meaningless, so a
+			// single unfiltered query suffices. Returning one entry per namespace
+			// would cause pullSingleResource to LIST the full cluster-scoped
+			// collection N times and append duplicates to k8sResources[gvr].
+			return []string{""}
+		}
+		fieldSelectors = append(fieldSelectors, sel)
 	}
 	return fieldSelectors
 }
