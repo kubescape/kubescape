@@ -351,7 +351,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
 				qr := queryableResources[i]
-			failedQueries[qr.String()] = queryFailure{
+				failedQueries[qr.String()] = queryFailure{
 					gvr: queryableResources[i].GroupVersionResourceTriplet,
 					err: err,
 				}
@@ -397,12 +397,20 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, error) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(
+	resource *schema.GroupVersionResource,
+	labels map[string]string,
+	fields string,
+	fieldSelector IFieldSelector,
+) ([]unstructured.Unstructured, error) {
+
 	var resourceList []unstructured.Unstructured
-	// set labels
-	listOptions := metav1.ListOptions{}
+
 	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource)
+
 	for i := range fieldSelectors {
+		listOptions := metav1.ListOptions{}
+
 		if fieldSelectors[i] != "" {
 			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)
 		} else if fields != "" {
@@ -414,29 +422,53 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 			listOptions.LabelSelector = set.AsSelector().String()
 		}
 
-		// set dynamic object
 		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
 
-		// list resources
 		lenBefore := len(resourceList)
+
 		if err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			return clientResource.List(ctx, opts)
 		}).EachListItem(context.Background(), listOptions, func(obj runtime.Object) error {
+
 			uObject := obj.(*unstructured.Unstructured)
-			if k8sinterface.IsTypeWorkload(uObject.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObject.Object)) {
-				logger.L().Debug("Skipping resource with parent", helpers.String("resource", resource.String()), helpers.String("namespace", uObject.GetNamespace()), helpers.String("name", uObject.GetName()))
+
+			if k8sinterface.IsTypeWorkload(uObject.Object) &&
+				k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObject.Object)) {
+
+				logger.L().Debug(
+					"Skipping resource with parent",
+					helpers.String("resource", resource.String()),
+					helpers.String("namespace", uObject.GetNamespace()),
+					helpers.String("name", uObject.GetName()),
+				)
+
 				return nil
 			}
+
 			resourceList = append(resourceList, *obj.(*unstructured.Unstructured))
 			return nil
+
 		}); err != nil {
-			return nil, fmt.Errorf("failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w", resource, listOptions.LabelSelector, listOptions.FieldSelector, err)
+
+			return nil, fmt.Errorf(
+				"failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w",
+				resource,
+				listOptions.LabelSelector,
+				listOptions.FieldSelector,
+				err,
+			)
 		}
-		logger.L().Debug("Pulled resources", helpers.String("resource", resource.String()), helpers.String("fieldSelector", listOptions.FieldSelector), helpers.String("labelSelector", listOptions.LabelSelector), helpers.Int("count", len(resourceList)-lenBefore))
+
+		logger.L().Debug(
+			"Pulled resources",
+			helpers.String("resource", resource.String()),
+			helpers.String("fieldSelector", listOptions.FieldSelector),
+			helpers.String("labelSelector", listOptions.LabelSelector),
+			helpers.Int("count", len(resourceList)-lenBefore),
+		)
 	}
 
 	return resourceList, nil
-
 }
 func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterface.IMetadata {
 	var workloads []workloadinterface.IMetadata

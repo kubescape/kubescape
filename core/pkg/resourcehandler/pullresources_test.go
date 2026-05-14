@@ -19,12 +19,79 @@ import (
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 )
 
+type staticFieldSelector struct {
+	selectors []string
+}
+
+func (s *staticFieldSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
+	return s.selectors
+}
+func (s *staticFieldSelector) GetClusterScope(resource *schema.GroupVersionResource) bool {
+	return false
+}
+func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.T) {
+	var capturedSelectors []string
+
+	podList := &unstructured.UnstructuredList{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "PodList",
+		},
+	}
+
+	handler := newHandlerWithReactor(t, func(action k8stesting.Action) (bool, runtime.Object, error) {
+		listAction, ok := action.(k8stesting.ListAction)
+		require.True(t, ok)
+
+		capturedSelectors = append(
+			capturedSelectors,
+			listAction.GetListRestrictions().Fields.String(),
+		)
+
+		return true, podList, nil
+	})
+
+	resource := &schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "pods",
+	}
+
+	fieldSelector := &staticFieldSelector{
+		selectors: []string{
+			"metadata.namespace=test-ns",
+			"",
+		},
+	}
+
+	_, err := handler.pullSingleResource(
+		resource,
+		nil,
+		"",
+		fieldSelector,
+	)
+
+	require.NoError(t, err)
+
+	require.Len(t, capturedSelectors, 2)
+
+	assert.Equal(t,
+		"metadata.namespace=test-ns",
+		capturedSelectors[0],
+	)
+
+	assert.Equal(t,
+		"",
+		capturedSelectors[1],
+	)
+}
+
 // gvrToListKind registers the GVRs used in these tests so the fake dynamic
 // client doesn't panic when List is called on them.
 var testGVRToListKind = map[schema.GroupVersionResource]string{
 	{Group: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}: "ClusterRoleBindingList",
-	{Group: "", Version: "v1", Resource: "pods"}: "PodList",
-	{Group: "", Version: "v1", Resource: "somecrd"}:                                       "SomeCRDList",
+	{Group: "", Version: "v1", Resource: "pods"}:                                         "PodList",
+	{Group: "", Version: "v1", Resource: "somecrd"}:                                      "SomeCRDList",
 }
 
 // newHandlerWithReactor builds a K8sResourceHandler whose dynamic client
