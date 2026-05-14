@@ -1,7 +1,6 @@
 package anonymizer
 
 import (
-	"encoding/json"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -40,6 +39,16 @@ func anonymizePodSpecs(node interface{}, mapping *Mapping) {
 	}
 }
 
+func anonymizeContainerFields(container map[string]interface{}, mapping *Mapping) {
+	if name, ok := container["name"].(string); ok && name != "" {
+		container["name"] = mapping.GetOrCreate("ctr", name)
+	}
+
+	if image, ok := container["image"].(string); ok && image != "" {
+		container["image"] = mapping.GetOrCreate("img", image)
+	}
+}
+
 func anonymizeContainerList(
 	obj map[string]interface{},
 	key string,
@@ -50,26 +59,33 @@ func anonymizeContainerList(
 		return
 	}
 
-	data, err := json.Marshal(rawContainers)
-	if err != nil {
+	if containers, ok := rawContainers.([]corev1.Container); ok {
+		for i := range containers {
+			if containers[i].Name != "" {
+				containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+			}
+
+			if containers[i].Image != "" {
+				containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
+			}
+		}
+
+		obj[key] = containers
 		return
 	}
 
-	var containers []corev1.Container
-	if err := json.Unmarshal(data, &containers); err != nil {
-		return
-	}
+	if containers, ok := rawContainers.([]interface{}); ok {
+		for _, item := range containers {
+			container, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
 
-	for i := range containers {
-		if containers[i].Name != "" {
-			containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+			anonymizeContainerFields(container, mapping)
 		}
-		if containers[i].Image != "" {
-			containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
-		}
-	}
 
-	obj[key] = containers
+		obj[key] = containers
+	}
 }
 
 func anonymizeEphemeralContainerList(
@@ -82,24 +98,31 @@ func anonymizeEphemeralContainerList(
 		return
 	}
 
-	data, err := json.Marshal(rawContainers)
-	if err != nil {
+	if containers, ok := rawContainers.([]corev1.EphemeralContainer); ok {
+		for i := range containers {
+			if containers[i].Name != "" {
+				containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+			}
+
+			if containers[i].Image != "" {
+				containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
+			}
+		}
+
+		obj[key] = containers
 		return
 	}
 
-	var containers []corev1.EphemeralContainer
-	if err := json.Unmarshal(data, &containers); err != nil {
-		return
-	}
+	if containers, ok := rawContainers.([]interface{}); ok {
+		for _, item := range containers {
+			container, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
 
-	for i := range containers {
-		if containers[i].Name != "" {
-			containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+			anonymizeContainerFields(container, mapping)
 		}
-		if containers[i].Image != "" {
-			containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
-		}
-	}
 
-	obj[key] = containers
+		obj[key] = containers
+	}
 }
