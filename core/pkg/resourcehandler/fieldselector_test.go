@@ -55,4 +55,15 @@ func TestIncludeNamespacesSelectors(t *testing.T) {
 
 	manyNs := NewIncludeSelector("a,b,c,d,e")
 	assert.Equal(t, []string{""}, manyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "clusterroles"}))
+
+	// empty namespace string: no valid namespace to include, so result is empty
+	emptyNs := NewIncludeSelector("")
+	assert.Empty(t, emptyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}))
+
+	// malformed input with empty segments: empty segments are skipped
+	malformed := NewIncludeSelector("ns1,,ns3")
+	malformedSelectors := malformed.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
+	assert.Equal(t, 2, len(malformedSelectors))
+	assert.Equal(t, "metadata.namespace==ns1", malformedSelectors[0])
+	assert.Equal(t, "metadata.namespace==ns3", malformedSelectors[1])
 }
