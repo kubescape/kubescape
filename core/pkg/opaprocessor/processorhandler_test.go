@@ -561,3 +561,33 @@ func TestSkipNamespace(t *testing.T) {
 		})
 	}
 }
+
+func TestRunOPAOnSingleRule_CELDispatch(t *testing.T) {
+	opap := &OPAProcessor{}
+
+	t.Run("CEL language dispatches to runCELOnK8s", func(t *testing.T) {
+		rule := &reporthandling.PolicyRule{
+			PortalBase: armotypes.PortalBase{
+				Name: "test-rule",
+			},
+			RuleLanguage: reporthandling.CELLanguage,
+		}
+		_, err := opap.runOPAOnSingleRule(context.Background(), rule, nil, nil, resources.RegoDependenciesData{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "CEL rule evaluation not yet implemented",
+			"CEL dispatch should route to runCELOnK8s, not the default branch")
+	})
+
+	t.Run("unknown language returns default branch error", func(t *testing.T) {
+		rule := &reporthandling.PolicyRule{
+			PortalBase: armotypes.PortalBase{
+				Name: "test-rule",
+			},
+			RuleLanguage: reporthandling.RuleLanguages("UNKNOWN"),
+		}
+		_, err := opap.runOPAOnSingleRule(context.Background(), rule, nil, nil, resources.RegoDependenciesData{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not supported",
+			"unknown language should route to default error branch")
+	})
+}

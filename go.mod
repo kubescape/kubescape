@@ -614,3 +614,5 @@ replace github.com/anchore/stereoscope => github.com/matthyx/stereoscope v0.0.0-
 replace github.com/google/go-containerregistry => github.com/matthyx/go-containerregistry v0.0.0-20250916162850-293c5b36a9f8
 
 replace github.com/containerd/containerd => github.com/Retr0-Xd/containerd v0.0.0-20260322054632-16583c73e9b8
+
+replace github.com/kubescape/opa-utils => github.com/manmathbh/opa-utils v0.0.0-20260502165539-611d593717ae

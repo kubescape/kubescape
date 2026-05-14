@@ -1190,8 +1190,6 @@ github.com/kubescape/go-logger v0.0.28 h1:xulKTp9kOg3rD98sopFELQ6yZCHQoQXMDzteoS
 github.com/kubescape/go-logger v0.0.28/go.mod h1:YZHFjwGCDar1hP9OyBLE46oR7a0Y/Z/0FperDo8+9D0=
 github.com/kubescape/k8s-interface v0.0.209 h1:icdBpzSZsfBE4HYmKPbJuxIMWnhIGkixocbIQT4If7k=
 github.com/kubescape/k8s-interface v0.0.209/go.mod h1:WNYUG93aZ5kDmuaRKFLtVhp18Yc6EfaHdD1gLYtVTN4=
-github.com/kubescape/opa-utils v0.0.294 h1:d1nF6BMbiCq1VwqW9KSBQdvbnE3uTc+lBHAq6bHQOZQ=
-github.com/kubescape/opa-utils v0.0.294/go.mod h1:v+ZV4gEaP2Tpwv1ev1kJM7+habuNUUeC1BO2XvnrUfY=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520 h1:SqlwF8G+oFazeYmZQKoPczLEflBQpwpHCU8DoLLyfj8=
 github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520/go.mod h1:wuxMUSDzGUyWd25IJfBzEJ/Udmw2Vy7npj+MV3u3GrU=
 github.com/kubescape/regolibrary/v2 v2.0.1 h1:7lKj171gslgTbbcmmGVHk34AZNqxForOXZIINoQfdzQ=
@@ -1236,6 +1234,8 @@ github.com/magiconair/properties v1.8.10 h1:s31yESBquKXCV9a/ScB3ESkOjUYYv+X0rg8S
 github.com/magiconair/properties v1.8.10/go.mod h1:Dhd985XPs7jluiymwWYZ0G4Z61jb3vdS329zhj2hYo0=
 github.com/mailru/easyjson v0.0.0-20190312143242-1de009706dbe/go.mod h1:C1wdFJiN94OJF2b5HbByQZoLdCWB1Yqtg26g4irojpc=
 github.com/mailru/easyjson v0.7.7/go.mod h1:xzfreul335JAWq5oZzymOObrkdz5UnU4kGfJJLY9Nlc=
+github.com/manmathbh/opa-utils v0.0.0-20260502165539-611d593717ae h1:aFrSr3b1nna5yleY9yJwENQ2wKmk/SwPEj0byg+ORE8=
+github.com/manmathbh/opa-utils v0.0.0-20260502165539-611d593717ae/go.mod h1:v+ZV4gEaP2Tpwv1ev1kJM7+habuNUUeC1BO2XvnrUfY=
 github.com/mark3labs/mcp-go v0.29.0 h1:sH1NBcumKskhxqYzhXfGc201D7P76TVXiT0fGVhabeI=
 github.com/mark3labs/mcp-go v0.29.0/go.mod h1:rXqOudj/djTORU/ThxYx8fqEVj/5pvTuuebQ2RC7uk4=
 github.com/maruel/natural v1.1.1 h1:Hja7XhhmvEFhcByqDoHz9QZbkWey+COd9xWfCfn1ioo=

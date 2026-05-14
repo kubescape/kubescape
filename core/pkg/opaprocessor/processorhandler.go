@@ -377,6 +377,8 @@ func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reportha
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
 		return opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+	case reporthandling.CELLanguage:
+		return opap.runCELOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
 	default:
 		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
@@ -407,6 +409,10 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 	}
 
 	return results, nil
+}
+
+func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string, ruleRegoDependenciesData resources.RegoDependenciesData) ([]reporthandling.RuleResponse, error) {
+	return nil, fmt.Errorf("rule '%s': CEL rule evaluation not yet implemented", rule.Name)
 }
 
 func (opap *OPAProcessor) Print(ctx opaprint.Context, str string) error {
