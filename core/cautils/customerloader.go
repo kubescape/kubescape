@@ -436,19 +436,16 @@ func GetConfigMapNamespace() string {
 }
 
 func updateCredentials(configObj *ConfigObj, accountID, accessKey string) {
+	// Explicit flags take precedence over env vars; env vars are only applied as fallback.
 	if accessKey != "" {
 		configObj.AccessKey = accessKey
-	}
-
-	if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
+	} else if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
 		configObj.AccessKey = envAccessKey
 	}
 
 	if accountID != "" {
 		configObj.AccountID = accountID
-	}
-
-	if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
+	} else if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
 		configObj.AccountID = envAccountID
 	}
 }
