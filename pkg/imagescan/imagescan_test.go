@@ -1,9 +1,10 @@
 package imagescan
 
 import (
-	"strings"
+	"path/filepath"
 	"testing"
 
+	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -194,59 +195,58 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 
 func TestNewDefaultDBConfig(t *testing.T) {
 	tests := []struct {
-		name        string
-		grypeURL    string
-		wantURL     string
-		wantErr     bool
-		wantUpdate  bool
-		checkDBRoot bool
+		name       string
+		grypeURL   string
+		wantURL    string
+		wantErr    string
+		wantDir    string
+		wantUpdate bool
 	}{
 		{
-			name:        "Default URL when empty",
-			grypeURL:    "",
-			wantURL:     defaultGrypeListingURL,
-			wantErr:     false,
-			wantUpdate:  true,
-			checkDBRoot: true,
+			name:       "default config uses bundled database URL",
+			wantURL:    defaultGrypeListingURL,
+			wantDir:    filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate: true,
 		},
 		{
-			name:        "Custom HTTPS URL",
-			grypeURL:    "https://example.com/grype/db/listing.json",
-			wantURL:     "https://example.com/grype/db/listing.json",
-			wantErr:     false,
-			wantUpdate:  true,
-			checkDBRoot: true,
+			name:       "custom https URL overrides default",
+			grypeURL:   "https://example.com/grype/db/listing.json",
+			wantURL:    "https://example.com/grype/db/listing.json",
+			wantDir:    filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate: true,
 		},
 		{
-			name:       "Invalid scheme",
-			grypeURL:   "ftp://example.com/db/listing.json",
-			wantErr:    true,
-			wantUpdate: false,
+			name:       "custom http URL overrides default",
+			grypeURL:   "http://example.com/custom-db/listing.json",
+			wantURL:    "http://example.com/custom-db/listing.json",
+			wantDir:    filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate: true,
 		},
 		{
-			name:       "Invalid URL",
-			grypeURL:   "https://",
-			wantErr:    true,
-			wantUpdate: false,
+			name:     "custom URL without host is rejected",
+			grypeURL: "http:///custom-db/listing.json",
+			wantErr:  "invalid grype DB URL: missing host",
+		},
+		{
+			name:     "unsupported URL scheme is rejected",
+			grypeURL: "ftp://example.com/custom-db/listing.json",
+			wantErr:  "invalid scheme: ftp",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL)
-			if tt.wantErr {
+			if tt.wantErr != "" {
 				require.Error(t, err)
-				assert.Equal(t, tt.wantUpdate, shouldUpdate)
+				assert.EqualError(t, err, tt.wantErr)
 				return
 			}
 
 			require.NoError(t, err)
-			assert.Equal(t, tt.wantUpdate, shouldUpdate)
 			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
-			if tt.checkDBRoot {
-				assert.NotEmpty(t, installCfg.DBRootDir)
-				assert.True(t, strings.HasSuffix(installCfg.DBRootDir, defaultDBDirName))
-			}
+			assert.Equal(t, tt.wantDir, installCfg.DBRootDir)
+			assert.Equal(t, tt.wantUpdate, shouldUpdate)
 		})
 	}
 }
