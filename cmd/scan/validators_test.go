@@ -29,6 +29,11 @@ func Test_validateControlScanInfo(t *testing.T) {
 			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
 			shared.ErrUnknownSeverity,
 		},
+		{
+			"Submit with omit-raw-resources should be invalid",
+			&cautils.ScanInfo{Submit: true, OmitRawResources: true},
+			ErrOmitRawResourcesOrSubmit,
+		},
 	}
 
 	for _, tc := range testCases {
@@ -49,6 +54,8 @@ func Test_validateControlScanInfo(t *testing.T) {
 
 // Test_validateFrameworkScanInfo tests how scan info is validated for the `scan framework` command
 func Test_validateFrameworkScanInfo(t *testing.T) {
+	const validAccountID = "22019933-feac-4012-a8eb-e81461ba6655"
+
 	testCases := []struct {
 		Description string
 		ScanInfo    *cautils.ScanInfo
@@ -56,27 +63,57 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 	}{
 		{
 			"Empty severity should be valid for scan info",
-			&cautils.ScanInfo{FailThresholdSeverity: ""},
+			&cautils.ScanInfo{FailThresholdSeverity: "", AccountID: validAccountID},
 			nil,
 		},
 		{
 			"High severity should be valid for scan info",
-			&cautils.ScanInfo{FailThresholdSeverity: "High"},
+			&cautils.ScanInfo{FailThresholdSeverity: "High", AccountID: validAccountID},
 			nil,
 		},
 		{
 			"Unknown severity should be invalid for scan info",
-			&cautils.ScanInfo{FailThresholdSeverity: "Unknown"},
+			&cautils.ScanInfo{FailThresholdSeverity: "Unknown", AccountID: validAccountID},
 			shared.ErrUnknownSeverity,
 		},
 		{
 			"Security view should be invalid for scan info",
-			&cautils.ScanInfo{View: string(cautils.SecurityViewType)},
+			&cautils.ScanInfo{View: string(cautils.SecurityViewType), AccountID: validAccountID},
 			nil,
 		},
 		{
 			"Empty view should be valid for scan info",
-			&cautils.ScanInfo{},
+			&cautils.ScanInfo{AccountID: validAccountID},
+			nil,
+		},
+		{
+			"Submit with keep-local should be invalid",
+			&cautils.ScanInfo{Submit: true, Local: true, AccountID: validAccountID},
+			ErrKeepLocalOrSubmit,
+		},
+		{
+			"Submit with omit-raw-resources should be invalid",
+			&cautils.ScanInfo{Submit: true, OmitRawResources: true, AccountID: validAccountID},
+			ErrOmitRawResourcesOrSubmit,
+		},
+		{
+			"Fail threshold above 100 should be invalid",
+			&cautils.ScanInfo{FailThreshold: 101, AccountID: validAccountID},
+			ErrBadThreshold,
+		},
+		{
+			"Compliance threshold below 0 should be invalid",
+			&cautils.ScanInfo{ComplianceThreshold: -1, AccountID: validAccountID},
+			ErrBadThreshold,
+		},
+		{
+			"Coverage threshold above 100 should be invalid",
+			&cautils.ScanInfo{FailCoverageThreshold: 150, AccountID: validAccountID},
+			ErrBadThreshold,
+		},
+		{
+			"Invalid account ID should be rejected",
+			&cautils.ScanInfo{AccountID: "not-a-uuid"},
 			nil,
 		},
 	}
@@ -89,6 +126,13 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 
 				got := validateFrameworkScanInfo(tc.ScanInfo)
 
+				if tc.Description == "Invalid account ID should be rejected" {
+					if got == nil {
+						t.Errorf("got: %v, want: error", got)
+					}
+					return
+				}
+
 				if got != want {
 					t.Errorf("got: %v, want: %v", got, want)
 				}
@@ -96,6 +140,23 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 		)
 	}
 }
+
+	func Test_validateFrameworkScanInfo_SecurityViewMutatesToResourceView(t *testing.T) {
+		const validAccountID = "22019933-feac-4012-a8eb-e81461ba6655"
+
+		scanInfo := &cautils.ScanInfo{
+			View:      string(cautils.SecurityViewType),
+			AccountID: validAccountID,
+		}
+
+		err := validateFrameworkScanInfo(scanInfo)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if scanInfo.View != string(cautils.ResourceViewType) {
+			t.Fatalf("got view: %v, want: %v", scanInfo.View, string(cautils.ResourceViewType))
+		}
+	}
 
 func Test_validateCoverageThreshold(t *testing.T) {
 	testCases := []struct {
