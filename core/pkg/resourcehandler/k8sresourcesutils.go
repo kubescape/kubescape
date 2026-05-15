@@ -2,6 +2,7 @@ package resourcehandler
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
@@ -9,7 +10,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
-	"k8s.io/utils/strings/slices"
 )
 
 var (

@@ -2,10 +2,8 @@ package vap
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -629,28 +627,4 @@ func TestDownloadFileToStringTimeout(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "fast", result)
 	})
-}
-
-// captureStdout captures stdout output from a function and returns it as a string.
-func captureStdout(t *testing.T, fn func()) string {
-	t.Helper()
-
-	oldStdout := os.Stdout
-	r, w, err := os.Pipe()
-	require.NoError(t, err)
-	os.Stdout = w
-
-	outC := make(chan string)
-	go func() {
-		var buf strings.Builder
-		_, _ = io.Copy(&buf, r)
-		outC <- buf.String()
-	}()
-
-	fn()
-
-	w.Close()
-	os.Stdout = oldStdout
-
-	return <-outC
 }

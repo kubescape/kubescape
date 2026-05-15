@@ -211,8 +211,6 @@ func TestRemoveEphemeralContainersData_ClearsEnvFrom(t *testing.T) {
 	}
 }
 
-
-
 func TestRemoveContainersData_ClearsValueFrom(t *testing.T) {
 	containers := []corev1.Container{
 		{

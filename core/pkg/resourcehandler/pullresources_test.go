@@ -100,7 +100,7 @@ func newHandlerWithReactor(t *testing.T, reactor k8stesting.ReactionFunc) *K8sRe
 	t.Helper()
 	client := fakeclientset.NewClientset()
 	dynClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testGVRToListKind)
-	dynClient.Fake.PrependReactor("list", "*", reactor)
+	dynClient.PrependReactor("list", "*", reactor)
 
 	k8s := &k8sinterface.KubernetesApi{
 		KubernetesClient: client,
