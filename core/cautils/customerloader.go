@@ -165,7 +165,7 @@ func (lc *LocalConfig) UpdateCachedConfig() error {
 
 func (lc *LocalConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
 	}
 	return nil
 }
@@ -247,7 +247,7 @@ func (c *ClusterConfig) UpdateCachedConfig() error {
 
 func (c *ClusterConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
 	}
 	return nil
 }
