@@ -42,12 +42,13 @@ func NewHtmlPrinter() *HtmlPrinter {
 }
 
 func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if strings.TrimSpace(outputFile) == "" {
+	outputFile = strings.TrimSpace(outputFile)
+	if outputFile == "" {
 		// Raw HTML markup must never fall back to stdout on a TTY.
 		outputFile = htmlOutputFile + htmlOutputExt
 		logger.L().Info("no --output specified for html format; writing to default file",
 			helpers.String("filename", outputFile))
-	} else if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
+	} else if filepath.Ext(outputFile) != htmlOutputExt {
 		outputFile = outputFile + htmlOutputExt
 	}
 	hp.writer = printer.GetWriter(ctx, outputFile)
