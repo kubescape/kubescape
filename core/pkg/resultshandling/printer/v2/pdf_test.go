@@ -113,6 +113,13 @@ func TestSetWriter_Pdf(t *testing.T) {
 			outputFile: "   ",
 			expected:   "report.pdf",
 		},
+		{
+			// Surrounding whitespace must be trimmed before extension handling,
+			// otherwise we'd produce filenames like "  myfile  .pdf".
+			name:       "Surrounding whitespace is trimmed",
+			outputFile: "  myfile  ",
+			expected:   "myfile.pdf",
+		},
 	}
 
 	pp := NewPdfPrinter()

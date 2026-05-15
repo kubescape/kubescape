@@ -42,6 +42,11 @@ func TestSetWriter_Html(t *testing.T) {
 			outputFile: "   ",
 			expected:   "report.html",
 		},
+		{
+			name:       "Surrounding whitespace is trimmed",
+			outputFile: "  myfile  ",
+			expected:   "myfile.html",
+		},
 	}
 
 	hp := NewHtmlPrinter()
