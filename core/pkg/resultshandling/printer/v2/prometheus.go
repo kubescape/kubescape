@@ -43,7 +43,7 @@ func (pp *PrometheusPrinter) Score(score float32) {
 		score = 0
 	}
 
-	fmt.Printf("\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(pp.writer, "\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
 func (pp *PrometheusPrinter) generatePrometheusFormat(
