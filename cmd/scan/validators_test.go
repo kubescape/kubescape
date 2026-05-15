@@ -141,22 +141,22 @@ func Test_validateFrameworkScanInfo(t *testing.T) {
 	}
 }
 
-	func Test_validateFrameworkScanInfo_SecurityViewMutatesToResourceView(t *testing.T) {
-		const validAccountID = "22019933-feac-4012-a8eb-e81461ba6655"
+func Test_validateFrameworkScanInfo_SecurityViewMutatesToResourceView(t *testing.T) {
+	const validAccountID = "22019933-feac-4012-a8eb-e81461ba6655"
 
-		scanInfo := &cautils.ScanInfo{
-			View:      string(cautils.SecurityViewType),
-			AccountID: validAccountID,
-		}
-
-		err := validateFrameworkScanInfo(scanInfo)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if scanInfo.View != string(cautils.ResourceViewType) {
-			t.Fatalf("got view: %v, want: %v", scanInfo.View, string(cautils.ResourceViewType))
-		}
+	scanInfo := &cautils.ScanInfo{
+		View:      string(cautils.SecurityViewType),
+		AccountID: validAccountID,
 	}
+
+	err := validateFrameworkScanInfo(scanInfo)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if scanInfo.View != string(cautils.ResourceViewType) {
+		t.Fatalf("got view: %v, want: %v", scanInfo.View, string(cautils.ResourceViewType))
+	}
+}
 
 func Test_validateCoverageThreshold(t *testing.T) {
 	testCases := []struct {
