@@ -51,7 +51,9 @@ func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != htmlOutputExt {
 		outputFile = outputFile + htmlOutputExt
 	}
-	hp.writer = printer.GetWriter(ctx, outputFile)
+	// HTML must never fall back to stdout on file-create errors either
+	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+htmlOutputExt)
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {

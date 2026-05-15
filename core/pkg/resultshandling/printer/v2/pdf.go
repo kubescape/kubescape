@@ -45,7 +45,10 @@ func (pp *PdfPrinter) SetWriter(ctx context.Context, outputFile string) {
 	} else if filepath.Ext(outputFile) != pdfOutputExt {
 		outputFile = outputFile + pdfOutputExt
 	}
-	pp.writer = printer.GetWriter(ctx, outputFile)
+	// PDF must never fall back to stdout on file-create errors either
+	// (e.g. read-only cwd) — use the no-stdout-fallback helper, which
+	// falls back to a temp file rather than corrupting the TTY.
+	pp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+pdfOutputExt)
 }
 
 func (pp *PdfPrinter) Score(score float32) {
