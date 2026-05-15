@@ -181,6 +181,32 @@ func Test_validateCoverageThreshold(t *testing.T) {
 	}
 }
 
+func Test_validateThresholdsOnly_ComplianceAndFail(t *testing.T) {
+	testCases := []struct {
+		Description string
+		ScanInfo    *cautils.ScanInfo
+		Want        error
+	}{
+		{"Compliance threshold above 100 is out of range", &cautils.ScanInfo{ComplianceThreshold: 101}, ErrBadThreshold},
+		{"Compliance threshold below 0 is out of range", &cautils.ScanInfo{ComplianceThreshold: -1}, ErrBadThreshold},
+		{"Compliance threshold at 0 is valid", &cautils.ScanInfo{ComplianceThreshold: 0}, nil},
+		{"Compliance threshold at 100 is valid", &cautils.ScanInfo{ComplianceThreshold: 100}, nil},
+		{"Fail threshold above 100 is out of range", &cautils.ScanInfo{FailThreshold: 101}, ErrBadThreshold},
+		{"Fail threshold below 0 is out of range", &cautils.ScanInfo{FailThreshold: -1}, ErrBadThreshold},
+		{"Fail threshold at 0 is valid", &cautils.ScanInfo{FailThreshold: 0}, nil},
+		{"Fail threshold at 100 is valid", &cautils.ScanInfo{FailThreshold: 100}, nil},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			got := validateThresholdsOnly(tc.ScanInfo)
+			if got != tc.Want {
+				t.Errorf("got: %v, want: %v", got, tc.Want)
+			}
+		})
+	}
+}
+
 func Test_validateWorkloadIdentifier(t *testing.T) {
 	testCases := []struct {
 		Description string
