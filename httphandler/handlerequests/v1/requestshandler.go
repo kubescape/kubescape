@@ -217,6 +217,7 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 		} else {
 			logger.L().Info("scan result found", helpers.String("ID", resultsQueryParams.ScanID))
 			w.WriteHeader(http.StatusOK)
+			response.Type = utilsapisv1.ResultsV1ScanResponseType
 			response.Response = res
 
 			if !resultsQueryParams.KeepResults {

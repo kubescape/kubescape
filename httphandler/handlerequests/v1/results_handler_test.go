@@ -224,15 +224,13 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			wantKept:   false,
 		},
 		{
-			name:      "fallback resolves to latest, file MUST be preserved (KeepResults=false)",
+			name:       "fallback resolves to latest, file MUST be preserved (KeepResults=false)",
 			seedLatest: true,
 			writeFile:  true,
 			query:      "",
 			wantStatus: http.StatusOK,
-			// No wantType: the file is `{}` which unmarshals to an empty PostureReport;
-			// Results returns ResultsV1ScanResponseType only for non-error reads.
-			// The critical contract here is the file-preservation invariant, not the type.
-			wantKept: true,
+			wantType:   utilsapisv1.ResultsV1ScanResponseType,
+			wantKept:   true,
 		},
 		{
 			name:       "fallback resolves to latest, KeepResults=true also preserves",
@@ -240,6 +238,7 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			writeFile:  true,
 			query:      "?keep=true",
 			wantStatus: http.StatusOK,
+			wantType:   utilsapisv1.ResultsV1ScanResponseType,
 			wantKept:   true,
 		},
 		{
@@ -248,6 +247,7 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			writeFile:  true,
 			query:      "?id=" + validUUID,
 			wantStatus: http.StatusOK,
+			wantType:   utilsapisv1.ResultsV1ScanResponseType,
 			wantKept:   false,
 		},
 	}
