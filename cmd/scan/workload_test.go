@@ -12,10 +12,12 @@ import (
 )
 
 func TestSetWorkloadScanInfo(t *testing.T) {
-	test := []struct {
+	tests := []struct {
 		Description string
 		kind        string
 		name        string
+		namespace   string
+		filePath    string
 		want        *cautils.ScanInfo
 	}{
 		{
@@ -33,7 +35,8 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 						Kind:       v1.KindFramework,
 					},
 				},
-				ScanType: cautils.ScanTypeWorkload,
+				ScanType:   cautils.ScanTypeWorkload,
+				ScanImages: true,
 				ScanObject: &objectsenvelopes.ScanObject{
 					Kind: "Deployment",
 					Metadata: objectsenvelopes.ScanObjectMetadata{
@@ -42,17 +45,56 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 				},
 			},
 		},
+		{
+			Description: "Set workload scan info with namespace and file path",
+			kind:        "Pod",
+			name:        "api",
+			namespace:   "default",
+			filePath:    "manifests/pod.yaml",
+			want: &cautils.ScanInfo{
+				PolicyIdentifier: []cautils.PolicyIdentifier{
+					{
+						Identifier: "workloadscan",
+						Kind:       v1.KindFramework,
+					},
+					{
+						Identifier: "allcontrols",
+						Kind:       v1.KindFramework,
+					},
+				},
+				ScanType:   cautils.ScanTypeWorkload,
+				ScanImages: true,
+				ScanObject: &objectsenvelopes.ScanObject{
+					Kind: "Pod",
+					Metadata: objectsenvelopes.ScanObjectMetadata{
+						Name:      "api",
+						Namespace: "default",
+					},
+				},
+				InputPatterns: []string{"manifests/pod.yaml"},
+			},
+		},
 	}
 
-	for _, tc := range test {
+	for _, tc := range tests {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				scanInfo := &cautils.ScanInfo{}
+				prevNamespace := namespace
+				t.Cleanup(func() {
+					namespace = prevNamespace
+				})
+				namespace = tc.namespace
+
+				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath}
 				setWorkloadScanInfo(scanInfo, tc.kind, tc.name)
 
 				if scanInfo.ScanType != tc.want.ScanType {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanType, tc.want.ScanType)
+				}
+
+				if scanInfo.ScanImages != tc.want.ScanImages {
+					t.Errorf("got: %v, want: %v", scanInfo.ScanImages, tc.want.ScanImages)
 				}
 
 				if scanInfo.ScanObject.Kind != tc.want.ScanObject.Kind {
@@ -61,6 +103,16 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 
 				if scanInfo.ScanObject.Metadata.Name != tc.want.ScanObject.Metadata.Name {
 					t.Errorf("got: %v, want: %v", scanInfo.ScanObject.Metadata.Name, tc.want.ScanObject.Metadata.Name)
+				}
+
+				if scanInfo.ScanObject.Metadata.Namespace != tc.want.ScanObject.Metadata.Namespace {
+					t.Errorf("got: %v, want: %v", scanInfo.ScanObject.Metadata.Namespace, tc.want.ScanObject.Metadata.Namespace)
+				}
+
+				if tc.filePath == "" {
+					assert.Len(t, scanInfo.InputPatterns, 0)
+				} else {
+					assert.Equal(t, tc.want.InputPatterns, scanInfo.InputPatterns)
 				}
 
 				if len(scanInfo.PolicyIdentifier) != len(tc.want.PolicyIdentifier) {
@@ -85,12 +137,11 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	// Create a mock Kubescape interface
 	mockKubescape := &mocks.MockIKubescape{}
-	scanInfo := cautils.ScanInfo{
-		ChartPath: "temp",
-		FilePath:  "",
-	}
+	scanInfo := cautils.ScanInfo{}
 
 	cmd := getWorkloadCmd(mockKubescape, &scanInfo)
+	scanInfo.ChartPath = "temp"
+	scanInfo.FilePath = ""
 
 	// Verify the command name and short description
 	assert.Equal(t, "workload <kind>/<name> [`<glob pattern>`/`-`] [flags]", cmd.Use)
@@ -102,20 +153,38 @@ func TestGetWorkloadCmd_ChartPathAndFilePathEmpty(t *testing.T) {
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = cmd.Args(&cobra.Command{}, []string{"nginx"})
-	expectedErrorMessage = "invalid workload identifier"
+	expectedErrorMessage = "usage: --chart-path <chart path> --file-path <file path>"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 }
 
-func Test_parseWorkloadIdentifierString_Empty(t *testing.T) {
-	t.Run("empty identifier", func(t *testing.T) {
-		_, _, err := parseWorkloadIdentifierString("")
-		assert.Error(t, err)
-	})
+func Test_parseWorkloadIdentifierString_Invalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "empty identifier",
+			input: "",
+		},
+		{
+			name:  "too many segments",
+			input: "default/Deployment/nginx",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := parseWorkloadIdentifierString(tt.input)
+			assert.Error(t, err)
+		})
+	}
 }
 
-func Test_parseWorkloadIdentifierString_NoError(t *testing.T) {
+func Test_parseWorkloadIdentifierString_Valid(t *testing.T) {
 	t.Run("valid identifier", func(t *testing.T) {
-		_, _, err := parseWorkloadIdentifierString("default/Deployment")
+		kind, name, err := parseWorkloadIdentifierString("default/Deployment")
 		assert.NoError(t, err)
+		assert.Equal(t, "default", kind)
+		assert.Equal(t, "Deployment", name)
 	})
 }
