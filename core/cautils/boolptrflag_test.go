@@ -47,4 +47,6 @@ func TestBoolPtrFlag_Set(t *testing.T) {
 
 	assert.NoError(t, flag.Set("unknown"))
 	assert.False(t, flag.GetBool())
+	assert.NotNil(t, flag.Get())
+	assert.Equal(t, "false", flag.String())
 }
