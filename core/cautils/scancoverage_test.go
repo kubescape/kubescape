@@ -50,12 +50,12 @@ func TestBuildScanCoverage_NoResourceMap(t *testing.T) {
 
 func TestBuildScanCoverage_AllGVRsFailedControlNotEvaluated(t *testing.T) {
 	infoMap := map[string]apis.StatusInfo{
-		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
+		"networking.k8s.io/v1/networkpolicies":      {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
 		"rbac.authorization.k8s.io/v1/clusterroles": {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
 	}
 	resourceToControlsMap := map[string][]string{
-		"networking.k8s.io/v1/networkpolicies":          {"C-0001", "C-0002"},
-		"rbac.authorization.k8s.io/v1/clusterroles":     {"C-0002"},
+		"networking.k8s.io/v1/networkpolicies":      {"C-0001", "C-0002"},
+		"rbac.authorization.k8s.io/v1/clusterroles": {"C-0002"},
 	}
 	coverage := BuildScanCoverage(infoMap, resourceToControlsMap, nil)
 
@@ -76,9 +76,9 @@ func TestBuildScanCoverage_IgnoresResourceLevelEvalSkips(t *testing.T) {
 	// (e.g. "apps/v1/Deployment/default/my-app") as keys. These must NOT be
 	// surfaced as failed GVR pulls.
 	infoMap := map[string]apis.StatusInfo{
-		"networking.k8s.io/v1/networkpolicies":  {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
-		"apps/v1/Deployment/default/my-app":     {InnerStatus: apis.StatusSkipped, InnerInfo: "rego eval failed"},
-		"apps/v1/Deployment/default/other-app":  {InnerStatus: apis.StatusSkipped, InnerInfo: "rego eval failed"},
+		"networking.k8s.io/v1/networkpolicies": {InnerStatus: apis.StatusSkipped, InnerInfo: "RBAC denied"},
+		"apps/v1/Deployment/default/my-app":    {InnerStatus: apis.StatusSkipped, InnerInfo: "rego eval failed"},
+		"apps/v1/Deployment/default/other-app": {InnerStatus: apis.StatusSkipped, InnerInfo: "rego eval failed"},
 	}
 	resourceToControlsMap := map[string][]string{
 		"networking.k8s.io/v1/networkpolicies": {"C-0001"},
