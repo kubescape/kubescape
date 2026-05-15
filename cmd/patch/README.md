@@ -48,6 +48,7 @@ The patch command can be run in 2 ways:
 | -t, --tag      | Tag of the resultant patched image                     | No       | image_name-patched                  |
 | --timeout      | Timeout for the patching process                       | No       | 5m                                  |
 | --ignore-errors| Ignore errors during patching                          | No       | false                               |
+| --push         | Push the patched image to the source registry          | No       | false                               |
 | -u, --username | Username for the image registry login                  | No       |                                     |
 | -p, --password | Password for the image registry login                  | No       |                                     |
 | -f, --format   | Output file format.                                    | No       |                                     |
@@ -134,6 +135,14 @@ We will demonstrate how to use the patch command with an example of [nginx](http
     * Run with '--verbose'/'-v' flag for detailed vulnerabilities view
     * Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator
     ```
+
+## Pushing to a registry
+
+By default, `kubescape patch` only loads the patched image into the local image store — it does **not** push to a registry. Pass `--push` to also push the patched image to the source registry (registry credentials can be provided via `--username` / `--password`, or picked up from your Docker credential store).
+
+```bash
+kubescape patch -i myregistry.example.com/team/app:1.2.3 --push
+```
 
 ## Limitations
 

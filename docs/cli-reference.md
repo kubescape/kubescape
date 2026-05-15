@@ -254,6 +254,7 @@ kubescape patch [flags]
 | `-a, --addr <addr>` | BuildKit daemon address | `unix:///run/buildkit/buildkitd.sock` |
 | `--timeout <duration>` | Patching timeout | `5m` |
 | `--ignore-errors` | Continue on errors | `false` |
+| `--push` | Push the patched image to the source registry | `false` |
 | `-u, --username <user>` | Registry username | - |
 | `-p, --password <pass>` | Registry password | - |
 | `-f, --format <format>` | Output format: `pretty-printer`, `json`, `sarif` | - |
@@ -274,7 +275,12 @@ sudo kubescape patch --image nginx:1.22 --tag nginx:1.22-fixed
 
 # Verbose output
 sudo kubescape patch --image nginx:1.22 -v
+
+# Also push the patched image back to the source registry
+sudo kubescape patch --image myregistry.example.com/team/app:1.2.3 --push
 ```
+
+> By default the patched image is only loaded into the local image store. Pass `--push` if you also want it pushed to the source registry.
 
 ---
 
