@@ -161,7 +161,7 @@ func Test_CreatePortForwarder(t *testing.T) {
 				K8SConfig: &rest.Config{
 					Host: "any",
 				},
-				Context: context.TODO(),
+				Context: context.Background(),
 			}
 
 			operatorPod := v1.Pod{
@@ -202,7 +202,7 @@ func Test_GetPortForwardLocalhost(t *testing.T) {
 				K8SConfig: &rest.Config{
 					Host: "any",
 				},
-				Context: context.TODO(),
+				Context: context.Background(),
 			}
 
 			operatorPod := v1.Pod{

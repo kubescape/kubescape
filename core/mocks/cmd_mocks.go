@@ -11,7 +11,7 @@ import (
 type MockIKubescape struct{}
 
 func (m *MockIKubescape) Context() context.Context {
-	return context.TODO()
+	return context.Background()
 }
 
 func (m *MockIKubescape) Scan(_ *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {

@@ -31,7 +31,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(context.TODO(), onlineBoutiquePath(), "")
+	workloads := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "")
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -45,7 +45,7 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads, sourceToChartName, err := LoadResourcesFromHelmCharts(context.TODO(), helmChartPath(), HelmValueOptions{})
+	sourceToWorkloads, sourceToChartName, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
 	assert.NoError(t, err)
 	assert.Equal(t, 6, len(sourceToWorkloads))
 

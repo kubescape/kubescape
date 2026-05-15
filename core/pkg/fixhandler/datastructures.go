@@ -16,6 +16,13 @@ type FixHandler struct {
 	fixInfo       *metav1.FixInfo
 	reportObj     *reporthandlingv2.PostureReport
 	localBasePath string
+
+	// unfixedControls is populated by PrepareResourcesToFix with every failed
+	// (resource, control) tuple that the fixer cannot or will not auto-remediate.
+	unfixedControls []UnfixedControl
+	// fixedControlsCount is the number of failed (resource, control) tuples that
+	// produced at least one yaml expression to apply.
+	fixedControlsCount int
 }
 
 // ResourceFixInfo is a struct that holds the information about the resource that needs to be fixed
@@ -35,11 +42,24 @@ type ResourceFixInfo struct {
 // values.yaml deliberately.
 type HelmFixSuggestion struct {
 	Resource     *reporthandling.Resource
-	ChartPath    string                // on-disk chart root (Source.HelmPath)
-	ChartName    string                // Source.HelmChartName
-	TemplateFile string                // chart-relative, e.g. "templates/deployment.yaml"
-	ValuesPaths  []string              // candidate dotted .Values.* keys referenced by the template; may be empty
-	FixPaths     []armotypes.FixPath   // rule-suggested rendered-YAML edits, for the user to translate into values.yaml
+	ChartPath    string              // on-disk chart root (Source.HelmPath)
+	ChartName    string              // Source.HelmChartName
+	TemplateFile string              // chart-relative, e.g. "templates/deployment.yaml"
+	ValuesPaths  []string            // candidate dotted .Values.* keys referenced by the template; may be empty
+	FixPaths     []armotypes.FixPath // rule-suggested rendered-YAML edits, for the user to translate into values.yaml
+}
+
+// UnfixedControl describes a failed (resource, control) tuple for which `kubescape fix`
+// did not produce an automatic remediation. The user must address these manually.
+type UnfixedControl struct {
+	ControlID    string
+	ControlName  string
+	ResourceName string
+	ResourceKind string
+	FilePath     string
+	// Reason is a short, user-facing explanation of why this control was not auto-fixed
+	// (e.g. "no auto-fix available", "skipped: file not found", "skipped: not a YAML source").
+	Reason string
 }
 
 // NodeInfo holds extra information about the node

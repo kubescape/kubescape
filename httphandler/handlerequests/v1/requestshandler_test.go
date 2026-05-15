@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -86,3 +87,28 @@ func TestScan(t *testing.T) {
 // 		assert.Equal(t, "aaaaaaaaaa", req.scanRequest.Account)
 // 	}
 // }
+
+func TestResultsDeleteAll(t *testing.T) {
+	h := NewHTTPHandler(false)
+
+	rq := httptest.NewRequest("DELETE", "/results?all=true", nil)
+	w := httptest.NewRecorder()
+
+	h.Results(w, rq)
+	rs := w.Result()
+	
+	if rs.StatusCode != http.StatusOK {
+		t.Errorf("Expected StatusOK (200), got %v", rs.StatusCode)
+	}
+
+	// Also verify that a normal DELETE without all=true and no ScanID fails
+	rq = httptest.NewRequest("DELETE", "/results", nil)
+	w = httptest.NewRecorder()
+
+	h.Results(w, rq)
+	rs = w.Result()
+	
+	if rs.StatusCode != http.StatusBadRequest {
+		t.Errorf("Expected StatusBadRequest (400) for missing ScanID, got %v", rs.StatusCode)
+	}
+}

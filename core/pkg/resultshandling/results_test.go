@@ -51,7 +51,7 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
-	err := rh.HandleResults(context.TODO(), &cautils.ScanInfo{})
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
 	assert.NoError(t, err)
 
 	want := 1
@@ -117,7 +117,7 @@ func TestValidatePrinter(t *testing.T) {
 			name:      "junit format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.JunitResultFormat,
-			expectErr: errors.New("format \"junit\"is not supported for image scanning"),
+			expectErr: errors.New("format \"junit\" is not supported for image scanning"),
 		},
 		{
 			name:      "sarif format for image scan should not return error",
@@ -135,13 +135,13 @@ func TestValidatePrinter(t *testing.T) {
 			name:      "html format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.HtmlFormat,
-			expectErr: errors.New("format \"html\"is not supported for image scanning"),
+			expectErr: errors.New("format \"html\" is not supported for image scanning"),
 		},
 		{
 			name:      "prometheus format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.PrometheusFormat,
-			expectErr: errors.New("format \"prometheus\"is not supported for image scanning"),
+			expectErr: errors.New("format \"prometheus\" is not supported for image scanning"),
 		},
 		{
 			name:        "sarif format for cluster context should return error",
@@ -167,11 +167,23 @@ func TestValidatePrinter(t *testing.T) {
 			format:      printer.SARIFFormat,
 			expectErr:   nil,
 		},
+		{
+			name:      "pdf format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.PdfFormat,
+			expectErr: errors.New("format \"pdf\" is not supported for image scanning"),
+		},
+		{
+			name:      "pdf format for cluster scan should not return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.PdfFormat,
+			expectErr: nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format)
+			_, got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format)
 
 			assert.Equal(t, tt.expectErr, got)
 		})

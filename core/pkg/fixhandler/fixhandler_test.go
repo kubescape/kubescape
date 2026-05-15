@@ -208,7 +208,7 @@ func TestApplyFixKeepsFormatting(t *testing.T) {
 			expression := tc.yamlExpression
 
 			fileAsString := string(input)
-			got, _ := ApplyFixToContent(context.TODO(), fileAsString, expression)
+			got, _ := ApplyFixToContent(context.Background(), fileAsString, expression)
 
 			assert.Equalf(
 				t, want, got,

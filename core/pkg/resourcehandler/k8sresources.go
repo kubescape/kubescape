@@ -89,6 +89,11 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	// pull k8s resources
 	k8sResourcesMap, allResources, failedQueries := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
+
+	// Record failed GVR statuses before any early return so BuildScanCoverage
+	// has data even when every pull fails (severe RBAC restrictions).
+	recordFailedQueryStatuses(failedQueries, k8sResourcesMap, sessionObj.InfoMap)
+
 	if len(allResources) == 0 && len(failedQueries) > 0 {
 		// Every query failed — nothing was collected; treat as fatal.
 		var combined []string
@@ -102,7 +107,6 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		logger.L().Ctx(ctx).Warning("failed to pull resource type",
 			helpers.String("gvr", f.gvr), helpers.Error(f.err))
 	}
-	recordFailedQueryStatuses(failedQueries, k8sResourcesMap, sessionObj.InfoMap)
 
 	// add single resource to k8s resources map (for single resource scan)
 	if !scanInfo.IsDeletedScanObject {
@@ -347,7 +351,7 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		if err != nil {
 			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
 				qr := queryableResources[i]
-			failedQueries[qr.String()] = queryFailure{
+				failedQueries[qr.String()] = queryFailure{
 					gvr: queryableResources[i].GroupVersionResourceTriplet,
 					err: err,
 				}
@@ -385,16 +389,28 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 		if len(k8sResources[f.gvr]) > 0 {
 			continue
 		}
-		cautils.SetInfoMapForResources(f.err.Error(), []string{f.gvr}, infoMap)
+		infoMap[f.gvr] = apis.StatusInfo{
+			InnerInfo:   f.err.Error(),
+			InnerStatus: apis.StatusSkipped,
+			SubStatus:   apis.SubStatusNotEvaluated,
+		}
 	}
 }
 
-func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, error) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(
+	resource *schema.GroupVersionResource,
+	labels map[string]string,
+	fields string,
+	fieldSelector IFieldSelector,
+) ([]unstructured.Unstructured, error) {
+
 	var resourceList []unstructured.Unstructured
-	// set labels
-	listOptions := metav1.ListOptions{}
+
 	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource)
+
 	for i := range fieldSelectors {
+		listOptions := metav1.ListOptions{}
+
 		if fieldSelectors[i] != "" {
 			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)
 		} else if fields != "" {
@@ -406,29 +422,53 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 			listOptions.LabelSelector = set.AsSelector().String()
 		}
 
-		// set dynamic object
 		clientResource := k8sHandler.k8s.DynamicClient.Resource(*resource)
 
-		// list resources
 		lenBefore := len(resourceList)
+
 		if err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			return clientResource.List(ctx, opts)
 		}).EachListItem(context.Background(), listOptions, func(obj runtime.Object) error {
+
 			uObject := obj.(*unstructured.Unstructured)
-			if k8sinterface.IsTypeWorkload(uObject.Object) && k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObject.Object)) {
-				logger.L().Debug("Skipping resource with parent", helpers.String("resource", resource.String()), helpers.String("namespace", uObject.GetNamespace()), helpers.String("name", uObject.GetName()))
+
+			if k8sinterface.IsTypeWorkload(uObject.Object) &&
+				k8sinterface.WorkloadHasParent(workloadinterface.NewWorkloadObj(uObject.Object)) {
+
+				logger.L().Debug(
+					"Skipping resource with parent",
+					helpers.String("resource", resource.String()),
+					helpers.String("namespace", uObject.GetNamespace()),
+					helpers.String("name", uObject.GetName()),
+				)
+
 				return nil
 			}
+
 			resourceList = append(resourceList, *obj.(*unstructured.Unstructured))
 			return nil
+
 		}); err != nil {
-			return nil, fmt.Errorf("failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w", resource, listOptions.LabelSelector, listOptions.FieldSelector, err)
+
+			return nil, fmt.Errorf(
+				"failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w",
+				resource,
+				listOptions.LabelSelector,
+				listOptions.FieldSelector,
+				err,
+			)
 		}
-		logger.L().Debug("Pulled resources", helpers.String("resource", resource.String()), helpers.String("fieldSelector", listOptions.FieldSelector), helpers.String("labelSelector", listOptions.LabelSelector), helpers.Int("count", len(resourceList)-lenBefore))
+
+		logger.L().Debug(
+			"Pulled resources",
+			helpers.String("resource", resource.String()),
+			helpers.String("fieldSelector", listOptions.FieldSelector),
+			helpers.String("labelSelector", listOptions.LabelSelector),
+			helpers.Int("count", len(resourceList)-lenBefore),
+		)
 	}
 
 	return resourceList, nil
-
 }
 func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterface.IMetadata {
 	var workloads []workloadinterface.IMetadata
@@ -487,7 +527,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 }
 
 func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
-	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
 	scheduableNodes := v1.NodeList{}
 	if nodesList != nil {
 		for _, node := range nodesList.Items {

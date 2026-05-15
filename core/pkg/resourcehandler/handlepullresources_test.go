@@ -85,12 +85,12 @@ func Test_CollectResources(t *testing.T) {
 	}
 
 	assert.NotPanics(t, func() {
-		CollectResources(context.TODO(), resourceHandler, objSession, &cautils.ScanInfo{})
+		CollectResources(context.Background(), resourceHandler, objSession, &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on cluster scan !")
 
 	assert.NotPanics(t, func() {
 		objSession.Metadata.ScanMetadata.ScanningTarget = reportv2.File
-		CollectResources(context.TODO(), resourceHandler, objSession, &cautils.ScanInfo{})
+		CollectResources(context.Background(), resourceHandler, objSession, &cautils.ScanInfo{})
 	}, "Cluster named .*eks.* without a cloud config panics on non-cluster scan !")
 
 }

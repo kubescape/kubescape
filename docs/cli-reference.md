@@ -256,7 +256,7 @@ kubescape patch [flags]
 | `--ignore-errors` | Continue on errors | `false` |
 | `-u, --username <user>` | Registry username | - |
 | `-p, --password <pass>` | Registry password | - |
-| `-f, --format <format>` | Output format | - |
+| `-f, --format <format>` | Output format: `pretty-printer`, `json`, `sarif` | - |
 | `-o, --output <path>` | Output file | stdout |
 | `-v, --verbose` | Verbose output | `false` |
 

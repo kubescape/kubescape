@@ -33,7 +33,7 @@ func TestGetVersionCmd(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			versioncheck.BuildNumber = tt.buildNumber
 
-			ks := core.NewKubescape(context.TODO())
+			ks := core.NewKubescape(context.Background())
 			if cmd := GetVersionCmd(ks, tt.buildNumber, "", ""); cmd != nil {
 				buf := bytes.NewBufferString("")
 				cmd.SetOut(buf)

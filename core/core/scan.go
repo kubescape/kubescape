@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/pkg/anonymizer"
 	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
@@ -110,17 +111,27 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) []printer.IPrinter {
 	formats := scanInfo.Formats()
-
+	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
-		if err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format); err != nil {
+		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
+		if err != nil {
 			logger.L().Ctx(ctx).Fatal(err.Error())
+		}
+
+		if usesPrettyPrinter && containPrettyPrinter {
+			continue
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
 		printerHandler.SetWriter(ctx, scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
+
+		if usesPrettyPrinter {
+			containPrettyPrinter = true
+		}
 	}
+
 	return outputPrinters
 }
 
@@ -218,9 +229,12 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
 
-	// if resultsHandling.GetRiskScore() > float32(scanInfo.FailThreshold) {
-	// 	return resultsHandling, fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", resultsHandling.GetRiskScore(), scanInfo.FailThreshold)
-	// }
+	if scanInfo.Hide {
+		/* logger.L().Info("anonymizer hook triggered")  //used for debuging pipeline right now will be removed in suceeding phase */
+		if err := anonymizer.Apply(resultsHandling); err != nil {
+			logger.L().Warning("failed to hide sensitive fields", helpers.Error(err))
+		}
+	}
 
 	return resultsHandling, nil
 }

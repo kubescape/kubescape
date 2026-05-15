@@ -18,8 +18,8 @@ func TestGetPatchCmd(t *testing.T) {
 
 	// Verify the command name and short description
 	assert.Equal(t, "patch --image <image>:<tag> [flags]", cmd.Use)
-	assert.Equal(t, "Patch container images with vulnerabilities", cmd.Short)
-	assert.Equal(t, "Patch command is for automatically patching images with vulnerabilities.", cmd.Long)
+	assert.Equal(t, "Patch container images to fix known OS-level vulnerabilities", cmd.Short)
+	assert.Equal(t, "Automatically patch container images to remediate known OS-level vulnerabilities using Copa and BuildKit.", cmd.Long)
 	assert.Equal(t, patchCmdExamples, cmd.Example)
 
 	err := cmd.Args(&cobra.Command{}, []string{})

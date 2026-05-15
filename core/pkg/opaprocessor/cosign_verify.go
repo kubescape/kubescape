@@ -72,7 +72,7 @@ func verify(img string, key string) (bool, error) {
 		return false, fmt.Errorf("getting Rekor public keys: %w", err)
 	}
 
-	_, _, err = cosign.VerifyImageSignatures(context.TODO(), ref, co)
+	_, _, err = cosign.VerifyImageSignatures(context.Background(), ref, co)
 	if err != nil {
 		return false, fmt.Errorf("verifying signature: %w", err)
 	}

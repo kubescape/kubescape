@@ -25,15 +25,21 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSess
 		setCloudMetadata(opaSessionObj, rsrcHandler.GetCloudProvider())
 	}
 
-	resourcesMap, allResources, externalResources, excludedRulesMap, err := rsrcHandler.GetResources(ctx, opaSessionObj, scanInfo)
-	if err != nil {
-		return err
-	}
+	resourcesMap, allResources, externalResources, excludedRulesMap, getErr := rsrcHandler.GetResources(ctx, opaSessionObj, scanInfo)
 
+	// Assign maps and build coverage before returning any error: GetResources
+	// mutates opaSessionObj.InfoMap and ResourceToControlsMap even on the
+	// all-pulls-failed path, so coverage data is available here regardless of
+	// whether getErr is set.
 	opaSessionObj.K8SResources = resourcesMap
 	opaSessionObj.AllResources = allResources
 	opaSessionObj.ExternalResources = externalResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
+	opaSessionObj.ScanCoverage = cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap)
+
+	if getErr != nil {
+		return getErr
+	}
 
 	if len(opaSessionObj.K8SResources) == 0 && len(opaSessionObj.ExternalResources) == 0 || len(opaSessionObj.AllResources) == 0 {
 		return fmt.Errorf("no resources found to scan")

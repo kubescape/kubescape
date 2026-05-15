@@ -132,14 +132,16 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 	}
 }
 
-func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string) error {
+func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string) (bool, error) {
 	if scanType == cautils.ScanTypeImage {
 		// supported types for image scanning
 		switch printFormat {
-		case printer.JsonFormat, printer.PrettyFormat, printer.SARIFFormat:
-			return nil
+		case printer.JsonFormat, printer.SARIFFormat:
+			return false, nil
+		case printer.PrettyFormat:
+			return true, nil
 		default:
-			return fmt.Errorf("format \"%s\"is not supported for image scanning", printFormat)
+			return false, fmt.Errorf("format \"%s\" is not supported for image scanning", printFormat)
 		}
 	}
 
@@ -147,11 +149,16 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		// supported types for SARIF
 		switch scanContext {
 		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
-			return nil
+			return false, nil
 		default:
-			return fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
+			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
 		}
 	}
 
-	return nil
+	switch printFormat {
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat:
+		return false, nil
+	default:
+		return true, nil
+	}
 }

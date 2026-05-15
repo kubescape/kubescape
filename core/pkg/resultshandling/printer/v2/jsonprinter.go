@@ -120,10 +120,10 @@ func printConfigurationsScanning(opaSessionObj *cautils.OPASessionObj, imageScan
 		opaSessionObj.Report.SummaryDetails.Vulnerabilities.Images = imageScanSummary.Images
 	}
 
-	// Convert to PostureReportWithSeverity to add severity field to controls
-	// and extract specified labels from workloads
+	// Convert to PostureReportWithSeverity to add severity field to controls,
+	// extract specified labels from workloads, and attach scan coverage gaps.
 	finalizedReport := FinalizeResults(opaSessionObj)
-	reportWithSeverity := ConvertToPostureReportWithSeverityAndLabels(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources)
+	reportWithSeverity := ConvertToPostureReportWithSeverityLabelsAndCoverage(finalizedReport, opaSessionObj.LabelsToCopy, opaSessionObj.AllResources, &opaSessionObj.ScanCoverage)
 
 	r, err := json.Marshal(reportWithSeverity)
 	if err != nil {

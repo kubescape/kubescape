@@ -107,7 +107,7 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || inputs.skip_publish != true
         uses: rajatjindal/krew-release-bot@3d9faef30a82761d610544f62afddca00993eef9 # v0.0.47
         with:
-          krew_template_file: .krew.yaml
+          krew_template_file: dist/krew/kubescape.yaml
 
       - name: List collected system-test results (debug)
         if: always()

@@ -86,15 +86,16 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 
 	// get exceptions
 	if exceptions, err = policyHandler.getExceptions(); err != nil {
-		logger.L().Ctx(ctx).StopError("failed to load exceptions", helpers.Error(err))
+		logger.L().Ctx(ctx).StopError("Failed to load exceptions", helpers.Error(err))
 	} else {
 		logger.L().StopSuccess("Loaded exceptions")
 	}
+
 	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
 	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
-		logger.L().Ctx(ctx).StopError("failed to load account configurations", helpers.Error(err))
+		logger.L().Ctx(ctx).StopError("Failed to load account configurations", helpers.Error(err))
 	} else {
 		logger.L().StopSuccess("Loaded account configurations")
 	}

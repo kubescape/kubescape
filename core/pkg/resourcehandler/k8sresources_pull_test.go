@@ -124,10 +124,10 @@ func TestGetResources_SurfacesMissingGVRFailuresInInfoMap(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.TODO(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
-	_, _, _, _, err := handler.GetResources(context.TODO(), sessionObj, scanInfo)
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	assert.NoError(t, err)
 
 	info, ok := sessionObj.InfoMap["core/v1/secrets"]
@@ -153,10 +153,10 @@ func TestGetResources_FailsWhenAllQueriesFail(t *testing.T) {
 	framework.Controls = append(framework.Controls, control)
 
 	scanInfo := &cautils.ScanInfo{}
-	sessionObj := cautils.NewOPASessionObj(context.TODO(), nil, nil, scanInfo)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
 	sessionObj.Policies = append(sessionObj.Policies, *framework)
 
-	_, _, _, _, err := handler.GetResources(context.TODO(), sessionObj, scanInfo)
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	assert.ErrorContains(t, err, "failed to pull any Kubernetes resources")
 	assert.ErrorContains(t, err, "simulated API failure")
 }

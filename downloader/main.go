@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	ctx := context.TODO()
+	ctx := context.Background()
 	ks := core.NewKubescape(ctx)
 	downloads := []metav1.DownloadInfo{
 		{Target: "artifacts"},                         // download all artifacts

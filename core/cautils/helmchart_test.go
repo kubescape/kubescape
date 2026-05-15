@@ -169,7 +169,7 @@ func TestLoadResourcesFromHelmCharts_WithOverrides(t *testing.T) {
 	opts := HelmValueOptions{
 		Values: []string{"image.pullPolicy=Never"},
 	}
-	sourceToWorkloads, _, err := LoadResourcesFromHelmCharts(context.TODO(), chartPath, opts)
+	sourceToWorkloads, _, err := LoadResourcesFromHelmCharts(context.Background(), chartPath, opts)
 	assert.NoError(t, err)
 
 	cronjobPath := filepath.Join(chartPath, "templates", "cronjob.yaml")
@@ -191,7 +191,7 @@ func TestLoadResourcesFromHelmCharts_BadOverrideFailsFast(t *testing.T) {
 	opts := HelmValueOptions{
 		ValueFiles: []string{"/nonexistent/values.yaml"},
 	}
-	_, _, err := LoadResourcesFromHelmCharts(context.TODO(), chartPath, opts)
+	_, _, err := LoadResourcesFromHelmCharts(context.Background(), chartPath, opts)
 	assert.Error(t, err, "expected fail-fast on missing -f file")
 	assert.Contains(t, err.Error(), "Helm value overrides")
 }

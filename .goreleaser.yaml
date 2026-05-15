@@ -136,6 +136,9 @@ krews:
     homepage: https://kubescape.io/
     description: It includes risk analysis, security compliance, and misconfiguration scanning with an easy-to-use CLI interface, flexible output formats, and automated scanning capabilities.
     short_description: Scan resources and cluster configs against security frameworks.
+    caveats: |
+      Requires kubectl and basic knowledge of Kubernetes.
+      Run 'kubescape scan' to scan your Kubernetes cluster or manifests.
 
 release:
   draft: false

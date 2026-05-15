@@ -5,7 +5,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/meta"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/spf13/cobra"
@@ -24,10 +23,7 @@ func getSetCmd(ks meta.IKubescape) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := ks.SetCachedConfig(setConfig); err != nil {
-				logger.L().Fatal(err.Error())
-			}
-			return nil
+			return ks.SetCachedConfig(setConfig)
 		},
 	}
 	return configSetCmd
@@ -55,23 +51,36 @@ func stringKeysToSlice(m map[string]func(*metav1.SetConfig, string)) []string {
 }
 
 func parseSetArgs(args []string) (*metav1.SetConfig, error) {
-	var key string
-	var value string
-	if len(args) == 1 {
-		if keyValue := strings.Split(args[0], "="); len(keyValue) == 2 {
-			key = keyValue[0]
-			value = keyValue[1]
-		}
-	} else if len(args) == 2 {
-		key = args[0]
-		value = args[1]
-	}
-	setConfig := &metav1.SetConfig{}
+	supported := strings.Join(stringKeysToSlice(supportConfigSet), "/")
 
+	var key, value string
+	switch len(args) {
+	case 0:
+		return nil, fmt.Errorf("missing arguments: expected KEY=VALUE or KEY VALUE; supported keys: %s", supported)
+	case 1:
+		parts := strings.SplitN(args[0], "=", 2)
+		if len(parts) != 2 {
+			return nil, fmt.Errorf("invalid argument %q: expected KEY=VALUE or two arguments KEY VALUE; supported keys: %s", args[0], supported)
+		}
+		key = strings.TrimSpace(parts[0])
+		if key == "" {
+			return nil, fmt.Errorf("invalid argument %q: key cannot be empty", args[0])
+		}
+		value = parts[1]
+	case 2:
+		key = strings.TrimSpace(args[0])
+		if key == "" {
+			return nil, fmt.Errorf("invalid arguments: key cannot be empty")
+		}
+		value = args[1]
+	default:
+		return nil, fmt.Errorf("too many arguments: expected KEY=VALUE or KEY VALUE; supported keys: %s", supported)
+	}
+
+	setConfig := &metav1.SetConfig{}
 	if setConfigFunc, ok := supportConfigSet[key]; ok {
 		setConfigFunc(setConfig, value)
-	} else {
-		return setConfig, fmt.Errorf("key '%s' unknown . supported: %s", key, strings.Join(stringKeysToSlice(supportConfigSet), "/"))
+		return setConfig, nil
 	}
-	return setConfig, nil
+	return setConfig, fmt.Errorf("key %q unknown; supported: %s", key, supported)
 }

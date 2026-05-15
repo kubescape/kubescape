@@ -203,7 +203,7 @@ func TestProcessResourcesResult(t *testing.T) {
 
 	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false)
 	opap.AllPolicies = policies
-	opap.Process(context.TODO(), policies, nil)
+	opap.Process(context.Background(), policies, nil)
 
 	assert.Equal(t, 1, len(opaSessionObj.ResourcesResult))
 	res := opaSessionObj.ResourcesResult[deployment.GetID()]
@@ -214,7 +214,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	assert.False(t, res.GetStatus(nil).IsPassed())
 	assert.Equal(t, deployment.GetID(), opaSessionObj.ResourcesResult[deployment.GetID()].ResourceID)
 
-	opap.updateResults(context.TODO())
+	opap.updateResults(context.Background())
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
 	assert.Equal(t, 2, res.ListControlsIDs(nil).Len())
 	assert.Equal(t, 1, res.ListControlsIDs(nil).Failed())
@@ -244,7 +244,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	assert.True(t, summaryDetails.GetStatus().IsFailed())
 
 	opaSessionObj.Exceptions = []armotypes.PostureExceptionPolicy{*mocks.MockExceptionAllKinds(&armotypes.PosturePolicy{FrameworkName: frameworks[0].Name})}
-	opap.updateResults(context.TODO())
+	opap.updateResults(context.Background())
 
 	res = opaSessionObj.ResourcesResult[deployment.GetID()]
 	assert.Equal(t, 2, res.ListControlsIDs(nil).Len())

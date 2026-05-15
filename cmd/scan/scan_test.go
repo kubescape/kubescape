@@ -375,3 +375,35 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, "Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.", cmd.Long)
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
+
+// coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we
+// can test it without triggering os.Exit.
+func coverageWouldFail(notEvaluated, totalControls int, threshold float32) bool {
+	if threshold <= 0 || totalControls == 0 {
+		return false
+	}
+	pct := float32(totalControls-notEvaluated) / float32(totalControls) * 100
+	return pct < threshold
+}
+
+func Test_enforceCoverageThreshold(t *testing.T) {
+	tests := []struct {
+		name          string
+		notEvaluated  int
+		totalControls int
+		threshold     float32
+		wantFail      bool
+	}{
+		{"threshold disabled (0) never fails", 10, 10, 0, false},
+		{"all controls evaluated passes", 0, 10, 80, false},
+		{"coverage exactly at threshold passes", 2, 10, 80, false},
+		{"coverage below threshold fails", 5, 10, 80, true},
+		{"zero total controls never fails", 0, 0, 50, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantFail, coverageWouldFail(tt.notEvaluated, tt.totalControls, tt.threshold))
+		})
+	}
+}

@@ -81,9 +81,10 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// edit results
 	opap.updateResults(ctx)
 
-	//TODO: review this location
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
-	_ = scorewrapper.Calculate(score.EPostureReportV2)
+	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
+	}
 
 	return processErr
 }

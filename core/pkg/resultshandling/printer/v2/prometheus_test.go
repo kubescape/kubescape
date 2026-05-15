@@ -74,20 +74,17 @@ func TestScore(t *testing.T) {
 		},
 	}
 
-	promPrinter := NewPrometheusPrinter(false)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Redirect stdout to a buffer
-			rescueStdout := os.Stdout
+			// Score() must write to pp.writer, not stdout
 			r, w, _ := os.Pipe()
-			os.Stdout = w
+			promPrinter := NewPrometheusPrinter(false)
+			promPrinter.writer = w
 
 			promPrinter.Score(tt.score)
 
 			w.Close()
 			got, _ := io.ReadAll(r)
-			os.Stdout = rescueStdout
 			assert.Equal(t, tt.want, string(got))
 		})
 	}

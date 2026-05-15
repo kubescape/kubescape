@@ -15,7 +15,7 @@ func TestSetContextMetadata(t *testing.T) {
 	{
 		ctx := reporthandlingv2.ContextMetadata{}
 		scanInfo := &ScanInfo{}
-		scanInfo.setContextMetadata(context.TODO(), &ctx)
+		scanInfo.setContextMetadata(context.Background(), &ctx)
 
 		assert.NotNil(t, ctx.ClusterContextMetadata)
 		assert.Nil(t, ctx.DirectoryContextMetadata)

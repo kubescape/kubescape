@@ -120,6 +120,7 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				logger.L().Fatal("scan compliance-score is below permitted threshold", helpers.String("compliance score", fmt.Sprintf("%.2f", results.GetComplianceScore())), helpers.String("compliance-threshold", fmt.Sprintf("%.2f", scanInfo.ComplianceThreshold)))
 			}
 			enforceSeverityThresholds(results.GetResults().SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
+			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetResults().SummaryDetails.Controls), scanInfo)
 
 			return nil
 		},
@@ -131,7 +132,7 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
 
 	if scanInfo.Submit && scanInfo.OmitRawResources {
-		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+		return ErrOmitRawResourcesOrSubmit
 	}
 
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {

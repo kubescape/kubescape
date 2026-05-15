@@ -121,3 +121,90 @@ func TestIsAirGappedMode(t *testing.T) {
 		})
 	}
 }
+
+func TestGetOutputPrintersDeduplicatesPrettyPrinterFallback(t *testing.T) {
+	tests := []struct {
+		name        string
+		scanType    cautils.ScanTypes
+		format      string
+		expectedLen int
+	}{
+		{
+			name:        "cluster scan: pretty-printer and invalid format should create single pretty-printer",
+			scanType:    cautils.ScanTypeCluster,
+			format:      "pretty-printer,abc",
+			expectedLen: 1,
+		},
+		{
+			name:        "cluster scan: multiple invalid formats should create single pretty-printer",
+			scanType:    cautils.ScanTypeCluster,
+			format:      "abc,def,ghi",
+			expectedLen: 1,
+		},
+
+		{
+			name:        "repo scan: pretty-printer and invalid format should create single pretty-printer",
+			scanType:    cautils.ScanTypeRepo,
+			format:      "pretty-printer,abc",
+			expectedLen: 1,
+		},
+		{
+			name:        "repo scan: multiple invalid formats should create single pretty-printer",
+			scanType:    cautils.ScanTypeRepo,
+			format:      "abc,def,ghi",
+			expectedLen: 1,
+		},
+
+		{
+			name:        "framework scan: pretty-printer and invalid format should create single pretty-printer",
+			scanType:    cautils.ScanTypeFramework,
+			format:      "pretty-printer,abc",
+			expectedLen: 1,
+		},
+		{
+			name:        "framework scan: multiple invalid formats should create single pretty-printer",
+			scanType:    cautils.ScanTypeFramework,
+			format:      "abc,def,ghi",
+			expectedLen: 1,
+		},
+
+		{
+			name:        "control scan: pretty-printer and invalid format should create single pretty-printer",
+			scanType:    cautils.ScanTypeControl,
+			format:      "pretty-printer,abc",
+			expectedLen: 1,
+		},
+		{
+			name:        "control scan: multiple invalid formats should create single pretty-printer",
+			scanType:    cautils.ScanTypeControl,
+			format:      "abc,def,ghi",
+			expectedLen: 1,
+		},
+
+		{
+			name:        "workload scan: pretty-printer and invalid format should create single pretty-printer",
+			scanType:    cautils.ScanTypeWorkload,
+			format:      "pretty-printer,abc",
+			expectedLen: 1,
+		},
+		{
+			name:        "workload scan: multiple invalid formats should create single pretty-printer",
+			scanType:    cautils.ScanTypeWorkload,
+			format:      "abc,def,ghi",
+			expectedLen: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &cautils.ScanInfo{
+				Format:   tt.format,
+				ScanType: tt.scanType,
+			}
+
+			got := GetOutputPrinters(scanInfo, context.Background(), "test-cluster")
+
+			assert.Len(t, got, tt.expectedLen)
+		})
+	}
+}

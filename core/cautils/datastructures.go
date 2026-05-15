@@ -61,6 +61,7 @@ type OPASessionObj struct {
 	Metadata              *reporthandlingv2.Metadata
 	InfoMap               map[string]apis.StatusInfo         // Map errors of resources to StatusInfo
 	ResourceToControlsMap map[string][]string                // map[<apigroup/apiversion/resource>] = [<control_IDs>]
+	ScanCoverage          ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
 	SessionID             string                             // SessionID
 	Policies              []reporthandling.Framework         // list of frameworks to scan
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results

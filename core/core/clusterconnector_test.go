@@ -43,7 +43,7 @@ func Test_getOperatorPod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			k8sClient := k8sinterface.KubernetesApi{
 				KubernetesClient: fake.NewClientset(),
-				Context:          context.TODO(),
+				Context:          context.Background(),
 			}
 
 			var createdOperatorPod *v1.Pod

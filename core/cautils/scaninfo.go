@@ -108,6 +108,7 @@ type ScanInfo struct {
 	UseDefault            bool                         // Load framework from cached file (instead of download). Use when running offline
 	UseArtifactsFrom      string                       // Load artifacts from local path. Use when running offline
 	VerboseMode           bool                         // Display all the input resources and not only failed resources
+	Hide                  bool                         // Hide sensitive identifiers (names, namespaces, images) in results
 	View                  string                       //
 	Format                string                       // Format results (table, json, junit ...)
 	Output                string                       // Store results in an output file, Output file name
@@ -120,6 +121,7 @@ type ScanInfo struct {
 	FailThreshold         float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
+	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	Submit                bool                         // Submit results to Kubescape Cloud BE
 	ScanID                string                       // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
@@ -224,10 +226,24 @@ func (scanInfo *ScanInfo) setUseFrom() {
 func (scanInfo *ScanInfo) Formats() []string {
 	formatString := scanInfo.Format
 	if formatString != "" {
-		return strings.Split(scanInfo.Format, ",")
+		return unique(strings.Split(scanInfo.Format, ","))
 	} else {
 		return []string{}
 	}
+}
+
+func unique(items []string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+
+	for _, item := range items {
+		if !seen[item] {
+			seen[item] = true
+			result = append(result, item)
+		}
+	}
+
+	return result
 }
 
 func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {

@@ -81,7 +81,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 		{
 			name: "Test GetExceptionsGetter all empty",
 			args: args{
-				ctx:                    context.TODO(),
+				ctx:                    context.Background(),
 				useExceptions:          "",
 				accountID:              "",
 				downloadReleasedPolicy: nil,
@@ -91,7 +91,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 		{
 			name: "Test GetExceptionsGetter empty useExceptions",
 			args: args{
-				ctx:                    context.TODO(),
+				ctx:                    context.Background(),
 				useExceptions:          "",
 				accountID:              "",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
@@ -101,7 +101,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 		{
 			name: "Test GetExceptionsGetter with useExceptions and empty accountID",
 			args: args{
-				ctx:                    context.TODO(),
+				ctx:                    context.Background(),
 				useExceptions:          "true",
 				accountID:              "",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
@@ -111,7 +111,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 		{
 			name: "Test GetExceptionsGetter with useExceptions and filled accountID",
 			args: args{
-				ctx:                    context.TODO(),
+				ctx:                    context.Background(),
 				useExceptions:          "true",
 				accountID:              "123456789012",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
@@ -121,7 +121,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 		{
 			name: "Test GetExceptionsGetter with accountID",
 			args: args{
-				ctx:                    context.TODO(),
+				ctx:                    context.Background(),
 				useExceptions:          "",
 				accountID:              "123456789012",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
@@ -211,7 +211,7 @@ func Test_getUIPrinter(t *testing.T) {
 		{
 			name: "Test getUIPrinter PrettyPrinter",
 			args: args{
-				ctx:           context.TODO(),
+				ctx:           context.Background(),
 				verboseMode:   scanInfo.VerboseMode,
 				formatVersion: scanInfo.FormatVersion,
 				printAttack:   scanInfo.PrintAttackTree,
@@ -229,7 +229,7 @@ func Test_getUIPrinter(t *testing.T) {
 		{
 			name: "Test getUIPrinter SilentPrinter",
 			args: args{
-				ctx:           context.TODO(),
+				ctx:           context.Background(),
 				verboseMode:   scanInfo.VerboseMode,
 				formatVersion: scanInfo.FormatVersion,
 				printAttack:   scanInfo.PrintAttackTree,

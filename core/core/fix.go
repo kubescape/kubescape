@@ -35,6 +35,9 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	handler.PrintHelmSuggestions(helmSuggestions)
 
 	if len(resourcesToFix) == 0 {
+		logger.L().Info(noResourcesToFix)
+		// Even with nothing to auto-fix, surface controls that still need manual remediation.
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		return nil
 	}
 
@@ -42,16 +45,40 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 
 	if fixInfo.DryRun {
 		logger.L().Info(noChangesApplied)
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		return nil
 	}
 
 	if !fixInfo.NoConfirm && !userConfirmed() {
 		logger.L().Info(noChangesApplied)
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
 		return nil
 	}
 
+	plannedFiles := make(map[string]bool, len(resourcesToFix))
+	for _, r := range resourcesToFix {
+		plannedFiles[r.FilePath] = true
+	}
+	plannedFilesCount := len(plannedFiles)
+
 	updatedFilesCount, errors := handler.ApplyChanges(ks.Context(), resourcesToFix)
-	logger.L().Info(fmt.Sprintf("Fixed resources in %d files.", updatedFilesCount))
+	plannedControls := handler.FixedControlsCount()
+	totalFailed := plannedControls + len(handler.UnfixedControls())
+
+	// "Auto-fixed" is only honest when every planned file actually wrote.
+	// Otherwise (apply errors, partial writes) we report planning numbers and
+	// flag the discrepancy.
+	fullySucceeded := updatedFilesCount == plannedFilesCount && len(errors) == 0
+	if fullySucceeded {
+		logger.L().Info(fmt.Sprintf("Fixed %d of %d flagged control instances across %d file(s).",
+			plannedControls, totalFailed, updatedFilesCount))
+		handler.PrintUnfixedControls(fixhandler.PhaseApplied)
+	} else {
+		logger.L().Info(fmt.Sprintf(
+			"Planned fixes for %d of %d flagged control instances across %d file(s); applied to %d file(s) — the remaining files errored, see warnings below.",
+			plannedControls, totalFailed, plannedFilesCount, updatedFilesCount))
+		handler.PrintUnfixedControls(fixhandler.PhasePlanned)
+	}
 
 	if len(errors) > 0 {
 		for _, err := range errors {

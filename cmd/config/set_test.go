@@ -11,6 +11,15 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// setCachedConfigErr implements SetCachedConfig failure for RunE error propagation tests.
+type setCachedConfigErr struct {
+	mocks.MockIKubescape
+}
+
+func (setCachedConfigErr) SetCachedConfig(*metav1.SetConfig) error {
+	return fmt.Errorf("persist failed")
+}
+
 func TestGetSetCmd(t *testing.T) {
 	// Create a mock Kubescape interface
 	mockKubescape := &mocks.MockIKubescape{}
@@ -28,8 +37,14 @@ func TestGetSetCmd(t *testing.T) {
 	assert.Nil(t, err)
 
 	err = configSetCmd.RunE(&cobra.Command{}, []string{})
-	expectedErrorMessage := "key '' unknown . supported: accessKey/accountID/cloudAPIURL/cloudReportURL"
-	assert.Equal(t, expectedErrorMessage, err.Error())
+	assert.ErrorContains(t, err, "missing arguments")
+	assert.ErrorContains(t, err, "supported keys:")
+}
+
+func TestGetSetCmd_SetCachedConfigReturnsError(t *testing.T) {
+	cmd := getSetCmd(&setCachedConfigErr{})
+	err := cmd.RunE(&cobra.Command{}, []string{"accountID=value1"})
+	assert.EqualError(t, err, "persist failed")
 }
 
 // Should return a slice of keys when given a non-empty map
@@ -47,13 +62,10 @@ func TestStringKeysToSlice(t *testing.T) {
 func TestParseSetArgs_InvalidFormat(t *testing.T) {
 	args := []string{"key"}
 	setConfig, err := parseSetArgs(args)
-	assert.Equal(t, "", setConfig.Account)
-	assert.Equal(t, "", setConfig.AccessKey)
-	assert.Equal(t, "", setConfig.CloudReportURL)
-	assert.Equal(t, "", setConfig.CloudAPIURL)
-
-	expectedErrorMessage := fmt.Sprintf("key '' unknown . supported: %s", strings.Join(stringKeysToSlice(supportConfigSet), "/"))
-	assert.Equal(t, expectedErrorMessage, err.Error())
+	assert.Nil(t, setConfig)
+	assert.ErrorContains(t, err, "invalid argument")
+	assert.ErrorContains(t, err, "key")
+	assert.ErrorContains(t, err, "supported keys:")
 }
 
 func TestParseSetArgs_AccessKey(t *testing.T) {
@@ -77,5 +89,11 @@ func TestParseSetArgs_Single(t *testing.T) {
 func TestParseSetArgs_InvalidKey(t *testing.T) {
 	args := []string{"invalidKey=value1"}
 	_, err := parseSetArgs(args)
-	assert.Equal(t, "key 'invalidKey' unknown . supported: accessKey/accountID/cloudAPIURL/cloudReportURL", err.Error())
+	assert.EqualError(t, err, `key "invalidKey" unknown; supported: accessKey/accountID/cloudAPIURL/cloudReportURL`)
+}
+
+func TestParseSetArgs_TooManyArgs(t *testing.T) {
+	_, err := parseSetArgs([]string{"accountID", "v", "extra"})
+	assert.ErrorContains(t, err, "too many arguments")
+	assert.ErrorContains(t, err, "supported keys:")
 }

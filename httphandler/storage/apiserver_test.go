@@ -87,8 +87,11 @@ func Test_getControlsMapFromResult(t *testing.T) {
 		},
 	}
 
-	actual := getControlsMapFromResult(context.TODO(), &scanResult, controlSummaries)
+	actual := getControlsMapFromResult(context.Background(), &scanResult, controlSummaries)
 	assert.Len(t, actual, len(scanResult.AssociatedControls))
+	if assert.Len(t, actual["C-002"].Rules, 1) {
+		assert.Equal(t, []string{"resource-1"}, actual["C-002"].Rules[0].RelatedResourcesIDs)
+	}
 }
 
 type FakeMetadata struct {

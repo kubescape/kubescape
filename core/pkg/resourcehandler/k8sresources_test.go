@@ -608,7 +608,7 @@ func TestSetMapNamespaceToNumOfResources(t *testing.T) {
 	}
 
 	sessionObj := cautils.NewOPASessionObjMock()
-	setMapNamespaceToNumOfResources(context.TODO(), allResources, sessionObj)
+	setMapNamespaceToNumOfResources(context.Background(), allResources, sessionObj)
 	expected := map[string]int{
 		"kube-system": 1,
 		"armo-system": 3,

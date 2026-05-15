@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestClusterScan_GenerateCountingCategoryRow(t *testing.T) {
@@ -87,4 +89,16 @@ func TestClusterScan_GenerateTableNextSteps(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestNewClusterPrinter(t *testing.T) {
+	cp := NewClusterPrinter()
+	assert.NotNil(t, cp)
+}
+
+func TestClusterPrinter_PrintSummaryTable_NoOp(t *testing.T) {
+	cp := NewClusterPrinter()
+	assert.NotPanics(t, func() {
+		cp.PrintSummaryTable(nil, nil, nil)
+	}, "PrintSummaryTable should be a no-op and never panic")
 }
