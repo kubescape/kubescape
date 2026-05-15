@@ -204,14 +204,13 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 	const validUUID = "11111111-2222-3333-4444-555555555555"
 
 	type tc struct {
-		name        string
-		seedLatest  bool   // call setBusy/setNotBusy so latestID == validUUID
-		writeFile   bool   // create the result file on disk
-		query       string // query string appended to /results
-		wantStatus  int
-		wantType    utilsapisv1.ScanResponseType
-		wantKept    bool // must the file still exist after the call?
-		wantBodyMsg string
+		name       string
+		seedLatest bool                         // call setBusy/setNotBusy so latestID == validUUID
+		writeFile  bool                         // create the result file on disk
+		query      string                       // query string appended to /results
+		wantStatus int
+		wantType   utilsapisv1.ScanResponseType // zero value means "don't assert type"
+		wantKept   bool                         // must the file still exist after the call?
 	}
 
 	cases := []tc{
@@ -225,12 +224,14 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			wantKept:   false,
 		},
 		{
-			name:       "fallback resolves to latest, file MUST be preserved (KeepResults=false)",
+			name:      "fallback resolves to latest, file MUST be preserved (KeepResults=false)",
 			seedLatest: true,
 			writeFile:  true,
 			query:      "",
 			wantStatus: http.StatusOK,
-			// isLatestFallback path: KeepResults defaulted false, but file must remain.
+			// No wantType: the file is `{}` which unmarshals to an empty PostureReport;
+			// Results returns ResultsV1ScanResponseType only for non-error reads.
+			// The critical contract here is the file-preservation invariant, not the type.
 			wantKept: true,
 		},
 		{
@@ -274,6 +275,16 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 			if w.Result().StatusCode != c.wantStatus {
 				t.Errorf("status = %d; want %d (body=%q)",
 					w.Result().StatusCode, c.wantStatus, w.Body.String())
+			}
+
+			// Assert response type when the case specifies one. This verifies
+			// the API contract (e.g. ErrorScanResponseType on 400) so callers
+			// that switch on Type rather than status code also behave correctly.
+			if c.wantType != "" {
+				resp := decodeResultsResponse(t, w)
+				if resp.Type != c.wantType {
+					t.Errorf("response.Type = %q; want %q", resp.Type, c.wantType)
+				}
 			}
 
 			// Critical assertion: the isLatestFallback branch protects the
