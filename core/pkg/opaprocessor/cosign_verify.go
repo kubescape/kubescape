@@ -43,7 +43,7 @@ type VerifyCommand struct {
 }
 
 // Exec runs the verification command
-func verify(img string, key string) (bool, error) {
+func verify(ctx context.Context, img string, key string) (bool, error) {
 
 	co := &cosign.CheckOpts{}
 	var ociremoteOpts []ociremote.Option
@@ -67,12 +67,12 @@ func verify(img string, key string) (bool, error) {
 		return false, fmt.Errorf("resolving attachment type %s for image %s: %w", attachment, img, err)
 	}
 
-	co.RekorPubKeys, err = cosign.GetRekorPubs(context.Background())
+	co.RekorPubKeys, err = cosign.GetRekorPubs(ctx)
 	if err != nil {
 		return false, fmt.Errorf("getting Rekor public keys: %w", err)
 	}
 
-	_, _, err = cosign.VerifyImageSignatures(context.Background(), ref, co)
+	_, _, err = cosign.VerifyImageSignatures(ctx, ref, co)
 	if err != nil {
 		return false, fmt.Errorf("verifying signature: %w", err)
 	}

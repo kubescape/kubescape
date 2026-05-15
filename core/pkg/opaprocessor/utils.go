@@ -78,7 +78,7 @@ var cosignVerifySignatureDefinition = func(bctx rego.BuiltinContext, a, b *ast.T
 	}
 	// Replace double backslashes with single backslashes
 	bbStr := strings.ReplaceAll(string(bStr), "\\n", "\n")
-	result, err := verify(string(aStr), bbStr)
+	result, err := verify(bctx.Context, string(aStr), bbStr)
 	if err != nil {
 		// Do not change this log from debug level. We might find a lot of images without signature
 		logger.L().Debug("failed to verify signature", helpers.String("image", string(aStr)), helpers.String("key", string(bStr)), helpers.Error(err))
@@ -96,7 +96,7 @@ var cosignHasSignatureDefinition = func(bctx rego.BuiltinContext, a *ast.Term) (
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter type: %v", err)
 	}
-	return ast.BooleanTerm(has_signature(string(aStr))), nil
+	return ast.BooleanTerm(has_signature(bctx.Context, string(aStr))), nil
 }
 
 var imageNameNormalizeDeclaration = &rego.Function{

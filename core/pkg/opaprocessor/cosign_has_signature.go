@@ -7,12 +7,12 @@ import (
 	"github.com/sigstore/cosign/v3/pkg/cosign"
 )
 
-func has_signature(img string) bool {
+func has_signature(ctx context.Context, img string) bool {
 	ref, err := name.ParseReference(img)
 	if err != nil {
 		return false
 	}
-	sins, err := cosign.FetchSignaturesForReference(context.Background(), ref)
+	sins, err := cosign.FetchSignaturesForReference(ctx, ref)
 
 	if err != nil {
 		return false
