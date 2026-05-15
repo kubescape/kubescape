@@ -5,8 +5,8 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
+	"github.com/stretchr/testify/assert"
 )
 
 // redirectHome redirects HOME to a temp dir for the duration of the test.
@@ -107,6 +107,7 @@ func TestDeleteCachedConfig(t *testing.T) {
 	assert.NoError(t, err)
 
 	output := buf.String()
+	// DeleteCachedConfig only clears Account and AccessKey; URL fields are intentionally not asserted
 	assert.NotContains(t, output, "to-delete-account")
 	assert.NotContains(t, output, "to-delete-key")
 }
