@@ -127,7 +127,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		// wait for scan to complete
 		response = <-scanRequestParams.resp
 
-		if scanRequestParams.scanQueryParams.KeepResults {
+		if !scanRequestParams.scanQueryParams.KeepResults {
 			// delete results after returning
 			logger.L().Debug("deleting results", helpers.String("ID", scanID))
 			removeResultsFile(scanID)
