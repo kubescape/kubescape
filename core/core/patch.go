@@ -105,7 +105,7 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 		disableCopaLogger()
 	}
 
-	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.BuildKitOpts); err != nil {
+	if err = copaPatch(ks.Context(), patchInfo.Timeout, patchInfo.BuildkitAddress, patchInfo.Image, fileName, patchedImageName, "", patchInfo.IgnoreError, patchInfo.Push, patchInfo.BuildKitOpts); err != nil {
 		return false, err
 	}
 
@@ -162,13 +162,13 @@ func disableCopaLogger() {
 
 // copaPatch is a slightly modified copy of the Patch function from the original "project-copacetic/copacetic" repo
 // https://github.com/project-copacetic/copacetic/blob/main/pkg/patch/patch.go
-func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, bkOpts buildkit.Opts) error {
+func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError, push bool, bkOpts buildkit.Opts) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	ch := make(chan error, 1)
 	go func() {
-		ch <- patchWithContext(timeoutCtx, buildkitAddr, image, reportFile, patchedImageName, workingFolder, ignoreError, bkOpts)
+		ch <- patchWithContext(timeoutCtx, buildkitAddr, image, reportFile, patchedImageName, workingFolder, ignoreError, push, bkOpts)
 	}()
 
 	select {
@@ -184,7 +184,7 @@ func copaPatch(ctx context.Context, timeout time.Duration, buildkitAddr, image, 
 	}
 }
 
-func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError bool, bkOpts buildkit.Opts) error {
+func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patchedImageName, workingFolder string, ignoreError, push bool, bkOpts buildkit.Opts) error {
 	// Ensure working folder exists for call to InstallUpdates
 	if workingFolder == "" {
 		var err error
@@ -221,14 +221,17 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	dockerConfig := config.LoadDefaultConfigFile(os.Stderr)
 	cfg := authprovider.DockerAuthProviderConfig{AuthConfigProvider: authprovider.LoadAuthConfig(dockerConfig)}
 	attachable := []session.Attachable{authprovider.NewDockerAuthProvider(cfg)}
+	exportAttrs := map[string]string{
+		"name": patchedImageName,
+	}
+	if push {
+		exportAttrs["push"] = "true"
+	}
 	solveOpt := client.SolveOpt{
 		Exports: []client.ExportEntry{
 			{
-				Type: client.ExporterImage,
-				Attrs: map[string]string{
-					"name": patchedImageName,
-					"push": "true",
-				},
+				Type:  client.ExporterImage,
+				Attrs: exportAttrs,
 			},
 		},
 		Frontend: "",         // i.e. we are passing in the llb.Definition directly
