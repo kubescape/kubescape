@@ -256,10 +256,12 @@ func (ksServer *KubescapeMcpserver) ReadConfigurationResource(ctx context.Contex
 func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, arguments map[string]interface{}) (*mcp.CallToolResult, error) {
 	switch name {
 	case "list_vulnerability_manifests":
-		//namespace, ok := arguments["namespace"]
-		//if !ok {
-		//	namespace = ""
-		//}
+		namespace := metav1.NamespaceAll
+		if ns, ok := arguments["namespace"]; ok {
+			if nsStr, ok := ns.(string); ok && nsStr != "" {
+				namespace = nsStr
+			}
+		}
 		level, ok := arguments["level"]
 		if !ok {
 			level = "both"
@@ -281,9 +283,9 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		var manifests *v1beta1.VulnerabilityManifestList
 		var err error
 		if labelSelector == "" {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(ctx, metav1.ListOptions{})
+			manifests, err = ksServer.ksClient.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{})
 		} else {
-			manifests, err = ksServer.ksClient.VulnerabilityManifests(metav1.NamespaceAll).List(ctx, metav1.ListOptions{
+			manifests, err = ksServer.ksClient.VulnerabilityManifests(namespace).List(ctx, metav1.ListOptions{
 				LabelSelector: labelSelector,
 			})
 		}
