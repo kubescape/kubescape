@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -336,6 +337,11 @@ type queryFailure struct {
 	err error
 }
 
+// maxParallelResourcePulls limits the number of concurrent K8s API List calls
+// issued by pullResources. This avoids overwhelming small API servers while
+// still providing a significant speedup on clusters with many resource types.
+const maxParallelResourcePulls = 8
+
 func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]queryFailure) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
@@ -344,34 +350,60 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	// one selector variant is never suppressed by a success on a different variant
 	// for the same raw GVR.
 	failedQueries := map[string]queryFailure{}
-	for i := range queryableResources {
-		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(queryableResources[i].GroupVersionResourceTriplet)
-		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors, globalFieldSelectors)
-		if err != nil {
-			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
-				qr := queryableResources[i]
-				failedQueries[qr.String()] = queryFailure{
-					gvr: queryableResources[i].GroupVersionResourceTriplet,
-					err: err,
-				}
-			}
-			continue
-		}
-		// store result as []map[string]interface{}
-		metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
-		for i := range metaObjs {
-			allResources[metaObjs[i].GetID()] = metaObjs[i]
-		}
 
-		key := queryableResources[i].GroupVersionResourceTriplet
-		if _, ok := k8sResources[key]; !ok {
-			k8sResources[key] = workloadinterface.ListMetaIDs(metaObjs)
-		} else {
-			k8sResources[key] = append(k8sResources[key], workloadinterface.ListMetaIDs(metaObjs)...)
-		}
+	var (
+		mu sync.Mutex
+		wg sync.WaitGroup
+	)
+
+	// sem is a counting semaphore that bounds the number of in-flight API
+	// calls so we don't overload the kube-apiserver on smaller clusters.
+	sem := make(chan struct{}, maxParallelResourcePulls)
+
+	for key := range queryableResources {
+		qr := queryableResources[key]
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
+			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
+			result, err := k8sHandler.pullSingleResource(&gvr, nil, qr.FieldSelectors, globalFieldSelectors)
+
+			if err != nil {
+				if !strings.Contains(err.Error(), "the server could not find the requested resource") {
+					mu.Lock()
+					failedQueries[qr.String()] = queryFailure{
+						gvr: qr.GroupVersionResourceTriplet,
+						err: err,
+					}
+					mu.Unlock()
+				}
+				return
+			}
+
+			// Convert API results outside the critical section — these
+			// functions operate only on the local result slice.
+			metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
+			ids := workloadinterface.ListMetaIDs(metaObjs)
+
+			mu.Lock()
+			for j := range metaObjs {
+				allResources[metaObjs[j].GetID()] = metaObjs[j]
+			}
+			gvrKey := qr.GroupVersionResourceTriplet
+			if _, ok := k8sResources[gvrKey]; !ok {
+				k8sResources[gvrKey] = ids
+			} else {
+				k8sResources[gvrKey] = append(k8sResources[gvrKey], ids...)
+			}
+			mu.Unlock()
+		}()
 	}
 
+	wg.Wait()
 	return k8sResources, allResources, failedQueries
 }
 
