@@ -138,11 +138,15 @@ We will demonstrate how to use the patch command with an example of [nginx](http
 
 ## Pushing to a registry
 
-By default, `kubescape patch` only loads the patched image into the local image store — it does **not** push to a registry. Pass `--push` to also push the patched image to the source registry (registry credentials can be provided via `--username` / `--password`, or picked up from your Docker credential store).
+By default, `kubescape patch` only loads the patched image into your **local Docker image store** — it does **not** push to a registry. Under the hood, BuildKit's `ExporterDocker` writes an OCI tarball that is streamed into `docker load`, so the patched tag appears in `docker images` immediately and is available for the post-patch re-scan. The `docker` CLI must therefore be on `PATH` for the default path; if it isn't, kubescape will fail fast with a clear error directing you to `--push`.
+
+Pass `--push` to push the patched image to the source registry instead. Credentials can be provided via `--username` / `--password`, or are picked up from your Docker credential store.
 
 ```bash
 kubescape patch -i myregistry.example.com/team/app:1.2.3 --push
 ```
+
+> **Note:** when used with `--push`, BuildKit uploads the patched image directly to the registry; the image is not necessarily added to your local Docker image store in that mode. Pass `--push` only if you have push access to the source registry — otherwise you will see an `insufficient_scope: authorization failed` error.
 
 ## Limitations
 
