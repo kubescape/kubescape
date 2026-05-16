@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"time"
@@ -37,6 +39,7 @@ import (
 	"github.com/project-copacetic/copacetic/pkg/utils"
 	"github.com/quay/claircore/osrelease"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -221,19 +224,14 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	dockerConfig := config.LoadDefaultConfigFile(os.Stderr)
 	cfg := authprovider.DockerAuthProviderConfig{AuthConfigProvider: authprovider.LoadAuthConfig(dockerConfig)}
 	attachable := []session.Attachable{authprovider.NewDockerAuthProvider(cfg)}
-	exportAttrs := map[string]string{
-		"name": patchedImageName,
+
+	exportEntry, pipeR, err := buildPatchExport(push, patchedImageName)
+	if err != nil {
+		return err
 	}
-	if push {
-		exportAttrs["push"] = "true"
-	}
+
 	solveOpt := client.SolveOpt{
-		Exports: []client.ExportEntry{
-			{
-				Type:  client.ExporterImage,
-				Attrs: exportAttrs,
-			},
-		},
+		Exports:  []client.ExportEntry{exportEntry},
 		Frontend: "",         // i.e. we are passing in the llb.Definition directly
 		Session:  attachable, // used for authprovider, sshagentprovider and secretprovider
 	}
@@ -242,7 +240,7 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 		return fmt.Errorf("copa: error reading source policy :: %w", err)
 	}
 
-	_, err = bkClient.Build(ctx, solveOpt, copaProduct, func(ctx context.Context, c gwclient.Client) (*gwclient.Result, error) {
+	buildFn := func(ctx context.Context, c gwclient.Client) (*gwclient.Result, error) {
 		// Configure buildctl/client for use by package manager
 		config, err := buildkit.InitializeBuildkitConfig(ctx, c, image)
 		if err != nil {
@@ -334,9 +332,82 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			}
 		}
 		return res, nil
-	}, nil)
+	}
 
-	return err
+	eg, egCtx := errgroup.WithContext(ctx)
+	eg.Go(func() error {
+		_, buildErr := bkClient.Build(egCtx, solveOpt, copaProduct, buildFn, nil)
+		// If the pipe writer is still open (e.g. build failed before producing output),
+		// unblock the docker-load reader by closing the read end.
+		if pipeR != nil {
+			_ = pipeR.CloseWithError(buildErr)
+		}
+		return buildErr
+	})
+	if pipeR != nil {
+		eg.Go(func() error {
+			return dockerLoad(egCtx, pipeR)
+		})
+	}
+	return eg.Wait()
+}
+
+// lookPath is exec.LookPath, indirected so the docker-CLI preflight in
+// buildPatchExport can be exercised in unit tests without depending on the
+// test host's PATH.
+var lookPath = exec.LookPath
+
+// buildPatchExport selects the buildkit export entry for the patched image.
+//
+// When push is true, the patched image is pushed directly to the source
+// registry via ExporterImage with the buildkit "push" attribute. When push
+// is false (the default), the image is streamed through `docker load` via
+// ExporterDocker so it lands in the user's docker image store — this is the
+// only path that holds the "loaded into the local image store" contract
+// regardless of whether dockerd is configured to share a containerd store
+// with buildkit; ExporterImage would otherwise land in buildkit's worker
+// namespace and be invisible to dockerd on the standalone `sudo buildkitd`
+// flow. See:
+// https://github.com/moby/buildkit?tab=readme-ov-file#containerd-image-store
+//
+// In the no-push branch the caller is expected to read the returned pipeR
+// concurrently (via dockerLoad). If push is true the pipeR is nil.
+func buildPatchExport(push bool, patchedImageName string) (client.ExportEntry, *io.PipeReader, error) {
+	if push {
+		return client.ExportEntry{
+			Type: client.ExporterImage,
+			Attrs: map[string]string{
+				"name": patchedImageName,
+				"push": "true",
+			},
+		}, nil, nil
+	}
+	if _, err := lookPath("docker"); err != nil {
+		return client.ExportEntry{}, nil, fmt.Errorf(
+			"docker CLI not found on PATH: required to load the patched image locally; "+
+				"pass --push to push to a registry instead: %w", err)
+	}
+	pipeR, pipeW := io.Pipe()
+	return client.ExportEntry{
+		Type:  client.ExporterDocker,
+		Attrs: map[string]string{"name": patchedImageName},
+		Output: func(_ map[string]string) (io.WriteCloser, error) {
+			return pipeW, nil
+		},
+	}, pipeR, nil
+}
+
+// dockerLoad streams an OCI tarball from r into `docker load`. Used for the
+// default (non-push) export path so the patched image lands in the user's
+// docker image store and is resolvable by the post-patch re-scan.
+func dockerLoad(ctx context.Context, r io.Reader) error {
+	cmd := exec.CommandContext(ctx, "docker", "load")
+	cmd.Stdin = r
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker load failed: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func getOSType(ctx context.Context, osreleaseBytes []byte) (string, error) {
