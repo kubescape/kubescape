@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/go-logger/helpers"
-
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/spf13/cobra"
@@ -99,6 +99,42 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 		initLoggerLevel(versionCmd)
 
 		assert.Equal(t, helpers.InfoLevel.String(), rootInfo.Logger)
+	})
+}
+
+func TestInitLoggerNameFallback(t *testing.T) {
+	t.Run("terminal uses iconlogger", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		prevIsTerminal := isTerminal
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+			isTerminal = prevIsTerminal
+		})
+
+		rootInfo.LoggerName = ""
+		t.Setenv("KS_LOGGER_NAME", "")
+		isTerminal = func(uintptr) bool { return true }
+
+		initLogger()
+
+		assert.Equal(t, iconlogger.LoggerName, rootInfo.LoggerName)
+	})
+
+	t.Run("non-terminal uses zaplogger", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		prevIsTerminal := isTerminal
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+			isTerminal = prevIsTerminal
+		})
+
+		rootInfo.LoggerName = ""
+		t.Setenv("KS_LOGGER_NAME", "")
+		isTerminal = func(uintptr) bool { return false }
+
+		initLogger()
+
+		assert.Equal(t, zaplogger.LoggerName, rootInfo.LoggerName)
 	})
 }
 
