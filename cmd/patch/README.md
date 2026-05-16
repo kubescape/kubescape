@@ -48,6 +48,7 @@ The patch command can be run in 2 ways:
 | -t, --tag      | Tag of the resultant patched image                     | No       | image_name-patched                  |
 | --timeout      | Timeout for the patching process                       | No       | 5m                                  |
 | --ignore-errors| Ignore errors during patching                          | No       | false                               |
+| --push         | Push the patched image to the source registry          | No       | false                               |
 | -u, --username | Username for the image registry login                  | No       |                                     |
 | -p, --password | Password for the image registry login                  | No       |                                     |
 | -f, --format   | Output file format.                                    | No       |                                     |
@@ -134,6 +135,18 @@ We will demonstrate how to use the patch command with an example of [nginx](http
     * Run with '--verbose'/'-v' flag for detailed vulnerabilities view
     * Install Kubescape in your cluster for continuous monitoring and a full vulnerability report: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator
     ```
+
+## Pushing to a registry
+
+By default, `kubescape patch` only loads the patched image into your **local Docker image store** — it does **not** push to a registry. Under the hood, BuildKit's `ExporterDocker` writes an OCI tarball that is streamed into `docker load`, so the patched tag appears in `docker images` immediately and is available for the post-patch re-scan. The `docker` CLI must therefore be on `PATH` for the default path; if it isn't, kubescape will fail fast with a clear error directing you to `--push`.
+
+Pass `--push` to push the patched image to the source registry instead. Credentials can be provided via `--username` / `--password`, or are picked up from your Docker credential store.
+
+```bash
+kubescape patch -i myregistry.example.com/team/app:1.2.3 --push
+```
+
+> **Note:** when used with `--push`, BuildKit uploads the patched image directly to the registry; the image is not necessarily added to your local Docker image store in that mode. Pass `--push` only if you have push access to the source registry — otherwise you will see an `insufficient_scope: authorization failed` error.
 
 ## Limitations
 
