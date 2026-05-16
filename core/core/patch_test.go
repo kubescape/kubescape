@@ -8,6 +8,62 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestBuildPatchedImageName guards the fix for kubescape/kubescape#2189: the
+// patched image must be exported under its canonical reference so containerd
+// registers it under docker.io/library/... and docker/grype can resolve it
+// locally.
+func TestBuildPatchedImageName(t *testing.T) {
+	tests := []struct {
+		name       string
+		image      string
+		patchedTag string
+		expected   string
+		wantErr    bool
+	}{
+		{
+			name:       "official docker hub image expands to docker.io/library",
+			image:      "nginx:1.23",
+			patchedTag: "1.23-patched",
+			expected:   "docker.io/library/nginx:1.23-patched",
+		},
+		{
+			name:       "fully qualified official image",
+			image:      "docker.io/library/nginx:1.23",
+			patchedTag: "1.23-patched",
+			expected:   "docker.io/library/nginx:1.23-patched",
+		},
+		{
+			name:       "docker hub user image",
+			image:      "myuser/myapp:v1",
+			patchedTag: "v1-patched",
+			expected:   "docker.io/myuser/myapp:v1-patched",
+		},
+		{
+			name:       "private registry image preserves host",
+			image:      "quay.io/foo/bar:1.0",
+			patchedTag: "1.0-patched",
+			expected:   "quay.io/foo/bar:1.0-patched",
+		},
+		{
+			name:    "invalid reference returns error",
+			image:   "Invalid Image!!",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := buildPatchedImageName(tt.image, tt.patchedTag)
+			if tt.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expected, got)
+		})
+	}
+}
+
 func TestGetOSType(t *testing.T) {
 	tests := []struct {
 		name          string

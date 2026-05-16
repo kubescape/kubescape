@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -224,6 +225,40 @@ func TestNewDefaultDBConfig(t *testing.T) {
 			name:     "unsupported URL scheme is rejected",
 			grypeURL: "ftp://example.com/custom-db/listing.json",
 			wantErr:  "invalid scheme: ftp",
+		name        string
+		grypeURL    string
+		wantURL     string
+		wantErr     bool
+		wantUpdate  bool
+		checkDBRoot bool
+	}{
+		{
+			name:        "Default URL when empty",
+			grypeURL:    "",
+			wantURL:     defaultGrypeListingURL,
+			wantErr:     false,
+			wantUpdate:  true,
+			checkDBRoot: true,
+		},
+		{
+			name:        "Custom HTTPS URL",
+			grypeURL:    "https://example.com/grype/db/listing.json",
+			wantURL:     "https://example.com/grype/db/listing.json",
+			wantErr:     false,
+			wantUpdate:  true,
+			checkDBRoot: true,
+		},
+		{
+			name:       "Invalid scheme",
+			grypeURL:   "ftp://example.com/db/listing.json",
+			wantErr:    true,
+			wantUpdate: false,
+		},
+		{
+			name:       "Invalid URL",
+			grypeURL:   "https://",
+			wantErr:    true,
+			wantUpdate: false,
 		},
 	}
 
@@ -233,6 +268,9 @@ func TestNewDefaultDBConfig(t *testing.T) {
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.EqualError(t, err, tt.wantErr)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, tt.wantUpdate, shouldUpdate)
 				return
 			}
 
@@ -240,6 +278,12 @@ func TestNewDefaultDBConfig(t *testing.T) {
 			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
 			assert.Equal(t, tt.wantDir, installCfg.DBRootDir)
 			assert.Equal(t, tt.wantUpdate, shouldUpdate)
+			assert.Equal(t, tt.wantUpdate, shouldUpdate)
+			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
+			if tt.checkDBRoot {
+				assert.NotEmpty(t, installCfg.DBRootDir)
+				assert.True(t, strings.HasSuffix(installCfg.DBRootDir, defaultDBDirName))
+			}
 		})
 	}
 }

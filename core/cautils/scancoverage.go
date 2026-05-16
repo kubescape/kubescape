@@ -13,12 +13,27 @@ import (
 type ScanCoverage struct {
 	FailedGVRPulls       []FailedGVRPull       `json:"failedGVRPulls,omitempty"`
 	NotEvaluatedControls []NotEvaluatedControl `json:"notEvaluatedControls,omitempty"`
+	// PartialGVRPulls records per-selector LIST failures for GVRs that had at
+	// least one successful query. Controls are still evaluated against the
+	// partial data, but this field surfaces the gap so operators and CI/CD
+	// pipelines can detect incomplete scans without a false-green result.
+	PartialGVRPulls []PartialGVRPull `json:"partialGVRPulls,omitempty"`
 }
 
 // FailedGVRPull records a single GVR whose resources could not be collected.
 type FailedGVRPull struct {
 	GVR   string `json:"gvr"`
 	Error string `json:"error"`
+}
+
+// PartialGVRPull records a LIST failure scoped to a specific field selector
+// (e.g. a namespace or name selector) for a GVR that was otherwise partially
+// collected. Unlike FailedGVRPull, other queries for the same GVR succeeded,
+// so controls are evaluated against an incomplete resource set.
+type PartialGVRPull struct {
+	GVR      string `json:"gvr"`
+	Selector string `json:"selector"`
+	Error    string `json:"error"`
 }
 
 // NotEvaluatedControl records a control that was skipped because every GVR it
@@ -28,8 +43,8 @@ type NotEvaluatedControl struct {
 	MissingGVRs []string `json:"missingGVRs"`
 }
 
-// BuildScanCoverage derives a ScanCoverage from the InfoMap and
-// ResourceToControlsMap on the session object.
+// BuildScanCoverage derives a ScanCoverage from the InfoMap,
+// ResourceToControlsMap, and any partial GVR pull failures on the session.
 //
 // A control is considered NotEvaluated when every GVR listed in
 // ResourceToControlsMap for that control appears in InfoMap as a pull failure.
@@ -39,8 +54,13 @@ type NotEvaluatedControl struct {
 // string) AND resource-level OPA evaluation skips (keyed by resource ID). To
 // avoid surfacing per-resource eval skips as GVR pull failures, only InfoMap
 // entries whose key is also a key in ResourceToControlsMap are considered.
-func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string) ScanCoverage {
-	coverage := ScanCoverage{}
+//
+// partialPulls carries per-selector LIST failures for GVRs that were partially
+// collected; they are included as-is in ScanCoverage.PartialGVRPulls.
+func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, partialPulls []PartialGVRPull) ScanCoverage {
+	coverage := ScanCoverage{
+		PartialGVRPulls: partialPulls,
+	}
 
 	if len(infoMap) == 0 || len(resourceToControlsMap) == 0 {
 		return coverage
