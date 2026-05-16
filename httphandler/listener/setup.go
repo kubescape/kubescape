@@ -102,7 +102,7 @@ func SetupHTTPListener(ctx context.Context) error {
 	// Block until a termination signal or a listener error.
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
-
+	defer signal.Stop(sigCh)
 	select {
 	case sig := <-sigCh:
 		logger.L().Info("received shutdown signal, draining in-flight requests",
