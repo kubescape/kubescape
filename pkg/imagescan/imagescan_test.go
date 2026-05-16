@@ -220,6 +220,23 @@ func TestValidateDBLoad(t *testing.T) {
 		{
 			name:   "valid status passes",
 			status: &vulnerability.ProviderStatus{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDBLoad(tt.loadErr, tt.status)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
 func TestNewDefaultDBConfig(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -256,14 +273,6 @@ func TestNewDefaultDBConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateDBLoad(tt.loadErr, tt.status)
-			if tt.wantErr == "" {
-				require.NoError(t, err)
-				return
-			}
-
-			require.Error(t, err)
-			assert.EqualError(t, err, tt.wantErr)
 			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL)
 			if tt.wantErr != "" {
 				require.Error(t, err)
