@@ -15,6 +15,7 @@ import (
 	"github.com/anchore/grype/grype/presenter/models"
 	copaGrype "github.com/anubhav06/copa-grype/grype"
 	"github.com/containerd/platforms"
+	"github.com/distribution/reference"
 	"github.com/docker/buildx/build"
 	"github.com/docker/cli/cli/config"
 	"github.com/kubescape/go-logger"
@@ -94,7 +95,10 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 
 	// ===================== Patch the image using copacetic =====================
 	logger.L().Start("Patching image...")
-	patchedImageName := fmt.Sprintf("%s:%s", patchInfo.ImageName, patchInfo.PatchedImageTag)
+	patchedImageName, err := buildPatchedImageName(patchInfo.Image, patchInfo.PatchedImageTag)
+	if err != nil {
+		return false, err
+	}
 
 	sout, serr := os.Stdout, os.Stderr
 	if logger.L().GetLevel() != "debug" {
@@ -135,6 +139,19 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	resultsHandler.ImageScanData = []cautils.ImageScanData{*scanResultsPatched}
 
 	return svc.ExceedsSeverityThreshold(imagescan.ParseSeverity(scanInfo.FailThresholdSeverity), scanResultsPatched.Matches), resultsHandler.HandleResults(ks.Context(), scanInfo)
+}
+
+// buildPatchedImageName returns the canonical "<name>:<tag>" used as the buildkit
+// export name for the patched image. Using the canonical reference (e.g.
+// docker.io/library/nginx) ensures containerd registers the patched image under
+// the prefix docker's resolver and grype's docker-provider expect; without it,
+// the patched image is unresolvable locally — see kubescape/kubescape#2189.
+func buildPatchedImageName(image, patchedTag string) (string, error) {
+	ref, err := reference.ParseNormalizedNamed(image)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse image reference %q: %w", image, err)
+	}
+	return fmt.Sprintf("%s:%s", ref.Name(), patchedTag), nil
 }
 
 func disableCopaLogger() {

@@ -2,6 +2,7 @@ package imagescan
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/anchore/grype/grype/vulnerability"
@@ -218,6 +219,42 @@ func TestValidateDBLoad(t *testing.T) {
 		{
 			name:   "valid status passes",
 			status: &vulnerability.ProviderStatus{},
+func TestNewDefaultDBConfig(t *testing.T) {
+	tests := []struct {
+		name        string
+		grypeURL    string
+		wantURL     string
+		wantErr     bool
+		wantUpdate  bool
+		checkDBRoot bool
+	}{
+		{
+			name:        "Default URL when empty",
+			grypeURL:    "",
+			wantURL:     defaultGrypeListingURL,
+			wantErr:     false,
+			wantUpdate:  true,
+			checkDBRoot: true,
+		},
+		{
+			name:        "Custom HTTPS URL",
+			grypeURL:    "https://example.com/grype/db/listing.json",
+			wantURL:     "https://example.com/grype/db/listing.json",
+			wantErr:     false,
+			wantUpdate:  true,
+			checkDBRoot: true,
+		},
+		{
+			name:       "Invalid scheme",
+			grypeURL:   "ftp://example.com/db/listing.json",
+			wantErr:    true,
+			wantUpdate: false,
+		},
+		{
+			name:       "Invalid URL",
+			grypeURL:   "https://",
+			wantErr:    true,
+			wantUpdate: false,
 		},
 	}
 
@@ -231,6 +268,20 @@ func TestValidateDBLoad(t *testing.T) {
 
 			require.Error(t, err)
 			assert.EqualError(t, err, tt.wantErr)
+			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL)
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Equal(t, tt.wantUpdate, shouldUpdate)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantUpdate, shouldUpdate)
+			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
+			if tt.checkDBRoot {
+				assert.NotEmpty(t, installCfg.DBRootDir)
+				assert.True(t, strings.HasSuffix(installCfg.DBRootDir, defaultDBDirName))
+			}
 		})
 	}
 }

@@ -5,8 +5,8 @@ import (
 
 	"github.com/kubescape/go-logger/helpers"
 
-	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/go-logger/zaplogger"
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/assert"
 )

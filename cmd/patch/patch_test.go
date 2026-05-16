@@ -67,3 +67,28 @@ func Test_validateImagePatchInfo_Image(t *testing.T) {
 	err := validateImagePatchInfo(patchInfo)
 	assert.Nil(t, err)
 }
+
+func Test_validateImagePatchInfo_DefaultsTagAndPatchedTag(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image: "nginx",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "docker.io/library/nginx:latest", patchInfo.Image)
+	assert.Equal(t, "latest", patchInfo.ImageTag)
+	assert.Equal(t, "latest-patched", patchInfo.PatchedImageTag)
+	assert.Equal(t, "nginx", patchInfo.ImageName)
+}
+
+func Test_validateImagePatchInfo_DigestOnlyReturnsError(t *testing.T) {
+	patchInfo := &metav1.PatchInfo{
+		Image: "nginx@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+
+	err := validateImagePatchInfo(patchInfo)
+
+	assert.Error(t, err)
+	assert.Equal(t, "unexpected error while parsing image tag", err.Error())
+}
