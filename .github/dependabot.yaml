@@ -21,3 +21,4 @@ updates:
       prefix: "ci"
     labels:
       - "dependencies"
+      
