@@ -3,17 +3,17 @@
 
 version: 2
 updates:
-  - package-ecosystem: "gomod"
+   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "gomod"
+    - package-ecosystem: "gomod"
     directory: "/httphandler"
     schedule:
       interval: "weekly"
 
-  - package-ecosystem: "github-actions"
+    - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
@@ -21,4 +21,3 @@ updates:
       prefix: "ci"
     labels:
       - "dependencies"
-      
