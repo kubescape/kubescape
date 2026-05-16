@@ -250,3 +250,17 @@ func TestNewDefaultDBConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestDefaultMatcherConfig(t *testing.T) {
+	cfg := defaultMatcherConfig()
+	assert.Equal(t, "https://search.maven.org/solrsearch/select", cfg.Java.ExternalSearchConfig.MavenBaseURL)
+	assert.False(t, cfg.Java.UseCPEs)
+	assert.False(t, cfg.Ruby.UseCPEs)
+	assert.False(t, cfg.Python.UseCPEs)
+	assert.False(t, cfg.Dotnet.UseCPEs)
+	assert.False(t, cfg.Javascript.UseCPEs)
+	assert.False(t, cfg.Golang.UseCPEs)
+	assert.True(t, cfg.Golang.AlwaysUseCPEForStdlib)
+	assert.False(t, cfg.Golang.AllowMainModulePseudoVersionComparison)
+	assert.True(t, cfg.Stock.UseCPEs)
+}
