@@ -188,3 +188,16 @@ func TestFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestContains(t *testing.T) {
+	scanInfo := &ScanInfo{
+		PolicyIdentifier: []PolicyIdentifier{
+			{Identifier: "c-0012", Kind: "Control"},
+			{Identifier: "nsa", Kind: "Framework"},
+		},
+	}
+
+	assert.True(t, scanInfo.contains("c-0012"))
+	assert.True(t, scanInfo.contains("nsa"))
+	assert.False(t, scanInfo.contains("non-existent"))
+}
