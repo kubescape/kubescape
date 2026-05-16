@@ -1,6 +1,7 @@
 package imagescan
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -191,6 +192,49 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	require.NoError(t, err)
 	defer svcWithoutDefault.Close()
 	assert.False(t, svcWithoutDefault.useDefaultMatchers)
+}
+
+func TestValidateDBLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadErr error
+		status  *vulnerability.ProviderStatus
+		wantErr string
+	}{
+		{
+			name:    "load error is wrapped",
+			loadErr: errors.New("boom"),
+			wantErr: "failed to load vulnerability db: boom",
+		},
+		{
+			name:    "nil status is rejected",
+			wantErr: "unable to determine the status of the vulnerability db",
+		},
+		{
+			name: "status error is wrapped",
+			status: &vulnerability.ProviderStatus{
+				Error: errors.New("status failure"),
+			},
+			wantErr: "db could not be loaded: status failure",
+		},
+		{
+			name:   "valid status passes",
+			status: &vulnerability.ProviderStatus{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDBLoad(tt.loadErr, tt.status)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestNewDefaultDBConfig(t *testing.T) {
