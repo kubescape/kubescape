@@ -181,7 +181,7 @@ func downloadFileToString(url string, timeout time.Duration) (string, error) {
 	client := &http.Client{
 		Timeout: timeout,
 	}
-	response, err := client.Get(url) //nolint:gosec
+	response, err := client.Get(url)
 	if err != nil {
 		return "", err // Return an empty string and the error if the request fails
 	}
@@ -208,7 +208,7 @@ func writeOutput(content string, outputFile string) error {
 		if err := os.MkdirAll(filepath.Dir(outputFile), 0755); err != nil {
 			return err
 		}
-		return os.WriteFile(outputFile, []byte(content), 0644)
+		return os.WriteFile(outputFile, []byte(content), 0600)
 	}
 	fmt.Print(content)
 	return nil

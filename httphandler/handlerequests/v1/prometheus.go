@@ -1,7 +1,6 @@
 package v1
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,7 +15,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
-	"go.opentelemetry.io/otel/trace"
 )
 
 // MetricsQueryParams query params for metrics endpoint
@@ -57,7 +55,7 @@ func (handler *HTTPHandler) Metrics(w http.ResponseWriter, r *http.Request) {
 		},
 		scanInfo: scanInfo,
 		scanID:   scanID,
-		ctx:      trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context())),
+		ctx:      r.Context(),
 		resp:     make(chan *utilsmetav1.Response, 1),
 	}
 

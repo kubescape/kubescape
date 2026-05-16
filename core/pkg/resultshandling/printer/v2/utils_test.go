@@ -9,9 +9,16 @@ import (
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func minimalPostureReport() *reporthandlingv2.PostureReport {
+	return &reporthandlingv2.PostureReport{}
+}
 
 func TestExtractCVEs(t *testing.T) {
 	tests := []struct {
@@ -882,4 +889,42 @@ func TestExtractResourceLabels(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConvertToPostureReport_PartialOnlyCoverageAttached verifies that a
+// ScanCoverage containing only PartialGVRPulls (no whole-GVR failures, no
+// NotEvaluatedControls) is still attached to the serialized report. Prior to
+// the fix, the guard only checked FailedGVRPulls and NotEvaluatedControls, so
+// a partial-only scan would produce a JSON/API response with no scanCoverage
+// field at all — hiding the incomplete-data condition from consumers.
+func TestConvertToPostureReport_PartialOnlyCoverageAttached(t *testing.T) {
+	coverage := &cautils.ScanCoverage{
+		PartialGVRPulls: []cautils.PartialGVRPull{
+			{GVR: "/v1/pods", Selector: "metadata.namespace=prod", Error: "forbidden for prod"},
+		},
+	}
+
+	result := ConvertToPostureReportWithSeverityLabelsAndCoverage(nil, nil, nil, coverage)
+	require.Nil(t, result, "nil report should return nil")
+
+	// Use a minimal non-nil report so we can inspect the ScanCoverage field.
+	result = ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		minimalPostureReport(),
+		nil, nil, coverage,
+	)
+	require.NotNil(t, result)
+	require.NotNil(t, result.ScanCoverage, "ScanCoverage must be attached when PartialGVRPulls is non-empty")
+	assert.Len(t, result.ScanCoverage.PartialGVRPulls, 1)
+	assert.Equal(t, "/v1/pods", result.ScanCoverage.PartialGVRPulls[0].GVR)
+}
+
+// TestConvertToPostureReport_NilCoverageNotAttached verifies that a nil
+// coverage pointer (clean scan) produces a nil ScanCoverage in the output.
+func TestConvertToPostureReport_NilCoverageNotAttached(t *testing.T) {
+	result := ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		minimalPostureReport(),
+		nil, nil, nil,
+	)
+	require.NotNil(t, result)
+	assert.Nil(t, result.ScanCoverage)
 }

@@ -47,6 +47,39 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 
 }
 
+// GetWriterNoStdoutFallback opens outputFile for writing for formats whose
+// output (binary, markup) would corrupt a TTY if dumped to stdout. On any
+// failure to open the requested file it falls back to a uniquely-named file
+// under os.TempDir() using tempPattern (e.g. "kubescape-report-*.pdf"). Only
+// if even that fails does it return os.DevNull — it never returns os.Stdout.
+func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
+	if outputFile != "" {
+		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err == nil {
+			if f, err := os.Create(outputFile); err == nil {
+				return f
+			} else {
+				logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to open file for writing, reason: %s", err.Error()))
+			}
+		} else {
+			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create directory, reason: %s", err.Error()))
+		}
+	}
+	if tmp, err := os.CreateTemp("", tempPattern); err == nil {
+		logger.L().Ctx(ctx).Warning("could not write to requested output path; falling back to temp file",
+			helpers.String("filename", tmp.Name()))
+		return tmp
+	} else {
+		logger.L().Ctx(ctx).Error(fmt.Sprintf("failed to create temp output file, reason: %s", err.Error()))
+	}
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		// os.DevNull should always be openable; if not, fall back to a closed
+		// file rather than stdout so the TTY stays clean.
+		return os.NewFile(0, os.DevNull)
+	}
+	return devNull
+}
+
 func LogOutputFile(fileName string) {
 	if fileName != os.Stdout.Name() && fileName != os.Stderr.Name() && fileName != os.DevNull {
 		logger.L().Success("Scan results saved", helpers.String("filename", fileName))

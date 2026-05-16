@@ -7,11 +7,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	giturls "github.com/chainguard-dev/git-urls"
-	"k8s.io/utils/strings/slices"
 )
 
 type IRepository interface {
