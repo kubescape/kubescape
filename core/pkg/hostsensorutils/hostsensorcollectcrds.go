@@ -24,7 +24,7 @@ func (hsh *HostSensorHandler) getCRDResources(ctx context.Context, resourceType 
 	// List CRD resources
 	items, err := hsh.listCRDResources(ctx, pluralName, resourceType.String())
 	if err != nil {
-		logger.L().Ctx(ctx).Error("failed to list CRD resources", 
+		logger.L().Ctx(ctx).Error("failed to list CRD resources",
 			helpers.String("kind", resourceType.String()),
 			helpers.String("plural", pluralName),
 			helpers.Error(err))
