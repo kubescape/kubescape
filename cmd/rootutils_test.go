@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/go-logger/helpers"
-
+	"github.com/kubescape/go-logger/iconlogger"
 	"github.com/kubescape/go-logger/zaplogger"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/spf13/cobra"
@@ -100,6 +100,23 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 
 		assert.Equal(t, helpers.InfoLevel.String(), rootInfo.Logger)
 	})
+}
+
+func TestInitLogger_KSLoggerNameEnv(t *testing.T) {
+	prevLoggerName := rootInfo.LoggerName
+	prevIsTerminal := isTerminal
+	t.Cleanup(func() {
+		rootInfo.LoggerName = prevLoggerName
+		isTerminal = prevIsTerminal
+	})
+
+	rootInfo.LoggerName = ""
+	t.Setenv("KS_LOGGER_NAME", iconlogger.LoggerName)
+	isTerminal = func(uintptr) bool { return false }
+
+	initLogger()
+
+	assert.Equal(t, iconlogger.LoggerName, rootInfo.LoggerName)
 }
 
 // testCmdWithCacheDirFlag mirrors root: cache-dir on PersistentFlags, bound to rootInfo.CacheDir.
