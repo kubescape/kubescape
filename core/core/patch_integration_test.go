@@ -177,7 +177,8 @@ func requireSourceImageOrSkip(t *testing.T, src string) {
 func registryTags(t *testing.T, registry, repo string) []string {
 	t.Helper()
 	url := fmt.Sprintf("http://%s/v2/%s/tags/list", registry, repo)
-	resp, err := http.Get(url)
+	c := &http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Get(url)
 	if err != nil {
 		t.Fatalf("registry tag list GET failed: %v", err)
 	}
