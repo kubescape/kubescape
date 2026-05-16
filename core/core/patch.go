@@ -285,10 +285,12 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 			}
 		}
 
-		// Export the patched image state based on the requested output mode
+		// Validate the requested output mode before continuing. OCI export requires
+		// exporter configuration and an explicit output destination, which are not
+		// implemented in this flow yet.
 		switch outputMode {
 		case ksmetav1.PatchOutputModeOCI:
-			log.Infof("Exporting patched image as OCI")
+			return nil, fmt.Errorf("OCI output mode is not implemented")
 		default:
 			log.Infof("Exporting patched image to Docker daemon")
 		}
