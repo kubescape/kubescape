@@ -93,7 +93,7 @@ func itoa(i int) string {
 func writeManifest(t *testing.T, dir, name, body string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)
-	if err := os.WriteFile(p, []byte(body), 0644); err != nil {
+	if err := os.WriteFile(p, []byte(body), 0600); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	return p
@@ -524,7 +524,7 @@ func TestNewFixHandler_AcceptsValidReport(t *testing.T) {
 	b, err := json.Marshal(report)
 	assert.NoError(t, err)
 	reportFile := filepath.Join(dir, "scan.json")
-	assert.NoError(t, os.WriteFile(reportFile, b, 0644))
+	assert.NoError(t, os.WriteFile(reportFile, b, 0600))
 
 	h, err := NewFixHandler(&metav1.FixInfo{ReportFile: reportFile})
 	assert.NoError(t, err)
