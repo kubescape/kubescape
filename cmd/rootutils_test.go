@@ -218,3 +218,62 @@ func TestInitCacheDir_KSCacheDirPrecedence(t *testing.T) {
 		assert.Equal(t, defaultVal, getter.DefaultLocalStore)
 	})
 }
+
+func TestInitLogger_KSLoggerNameEnv(t *testing.T) {
+	t.Run("env sets logger name when empty", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+		})
+
+		rootInfo.LoggerName = ""
+		t.Setenv("KS_LOGGER_NAME", "custom-logger")
+
+		initLogger()
+
+		assert.Equal(t, "custom-logger", rootInfo.LoggerName)
+	})
+
+	t.Run("existing logger name wins over env", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+		})
+
+		rootInfo.LoggerName = zaplogger.LoggerName
+		t.Setenv("KS_LOGGER_NAME", "custom-logger")
+
+		initLogger()
+
+		assert.Equal(t, zaplogger.LoggerName, rootInfo.LoggerName)
+	})
+
+	t.Run("existing logger name stays when env empty", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+		})
+
+		rootInfo.LoggerName = zaplogger.LoggerName
+		t.Setenv("KS_LOGGER_NAME", "")
+
+		initLogger()
+
+		assert.Equal(t, zaplogger.LoggerName, rootInfo.LoggerName)
+	})
+
+	t.Run("env applies after logger name cleared", func(t *testing.T) {
+		prevLoggerName := rootInfo.LoggerName
+		t.Cleanup(func() {
+			rootInfo.LoggerName = prevLoggerName
+		})
+
+		rootInfo.LoggerName = zaplogger.LoggerName
+		t.Setenv("KS_LOGGER_NAME", "custom-logger")
+		rootInfo.LoggerName = ""
+
+		initLogger()
+
+		assert.Equal(t, "custom-logger", rootInfo.LoggerName)
+	})
+}
