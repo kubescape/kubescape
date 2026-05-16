@@ -115,7 +115,11 @@ func (ks *Kubescape) Patch(patchInfo *ksmetav1.PatchInfo, scanInfo *cautils.Scan
 	// Restore the output streams
 	os.Stdout, os.Stderr = sout, serr
 
-	logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded image: %s", patchedImageName))
+	if patchInfo.Push {
+		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Pushed: %s", patchedImageName))
+	} else {
+		logger.L().StopSuccess(fmt.Sprintf("Patched image successfully. Loaded locally: %s", patchedImageName))
+	}
 
 	// ===================== Re-scan the image =====================
 
@@ -337,9 +341,11 @@ func patchWithContext(ctx context.Context, buildkitAddr, image, reportFile, patc
 	eg, egCtx := errgroup.WithContext(ctx)
 	eg.Go(func() error {
 		_, buildErr := bkClient.Build(egCtx, solveOpt, copaProduct, buildFn, nil)
-		// If the pipe writer is still open (e.g. build failed before producing output),
-		// unblock the docker-load reader by closing the read end.
-		if pipeR != nil {
+		// On error, unblock the docker-load reader so eg.Wait() can return.
+		// On success the writer has already been closed by buildkit and the
+		// pipe has been fully drained — closing pipeR here would race with
+		// the exec-copy goroutine still draining into `docker load`'s stdin.
+		if buildErr != nil && pipeR != nil {
 			_ = pipeR.CloseWithError(buildErr)
 		}
 		return buildErr
