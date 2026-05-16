@@ -1,6 +1,7 @@
 package fixhandler
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -19,25 +20,21 @@ func TestDecodeDocumentRoots(t *testing.T) {
 			name:      "single document",
 			input:     "apiVersion: v1\nkind: Pod\n",
 			wantCount: 1,
-			wantErr:   false,
 		},
 		{
 			name:      "two documents separated by ---",
 			input:     "apiVersion: v1\nkind: Pod\n---\napiVersion: v1\nkind: Service\n",
 			wantCount: 2,
-			wantErr:   false,
 		},
 		{
 			name:      "empty string",
 			input:     "",
 			wantCount: 0,
-			wantErr:   false,
 		},
 		{
-			name:      "invalid yaml",
-			input:     ":\n  :\n    - :\n  [invalid",
-			wantCount: 0,
-			wantErr:   true,
+			name:    "invalid yaml",
+			input:   "metadata:\n  name: test\n  bad: [",
+			wantErr: true,
 		},
 	}
 
@@ -45,11 +42,12 @@ func TestDecodeDocumentRoots(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			nodes, err := decodeDocumentRoots(tt.input)
 			if tt.wantErr {
-				assert.Error(t, err)
-			} else {
-				assert.NoError(t, err)
-				assert.Len(t, nodes, tt.wantCount)
+				require.Error(t, err)
+				return
 			}
+
+			require.NoError(t, err)
+			assert.Len(t, nodes, tt.wantCount)
 		})
 	}
 }
@@ -113,7 +111,6 @@ func TestFlattenWithDFS(t *testing.T) {
 		}
 		result := flattenWithDFS(node)
 		require.NotNil(t, result)
-		// Root (mapping) + 2 children (key, value) = 3 nodes
 		assert.Len(t, *result, 3)
 		assert.Equal(t, yaml.MappingNode, (*result)[0].node.Kind)
 		assert.Equal(t, "key", (*result)[1].node.Value)
@@ -130,24 +127,72 @@ func TestFlattenWithDFS(t *testing.T) {
 		}
 		result := flattenWithDFS(node)
 		require.NotNil(t, result)
-		// Root (sequence) + 2 children = 3 nodes
 		assert.Len(t, *result, 3)
 	})
 
-	t.Run("parent references are set correctly", func(t *testing.T) {
-		parent := &yaml.Node{
-			Kind: yaml.MappingNode,
-			Content: []*yaml.Node{
-				{Kind: yaml.ScalarNode, Value: "key"},
-				{Kind: yaml.ScalarNode, Value: "value"},
-			},
-		}
-		result := flattenWithDFS(parent)
+	t.Run("parent references and indexes are set correctly", func(t *testing.T) {
+		var root yaml.Node
+		require.NoError(t, yaml.Unmarshal([]byte("metadata:\n  name: demo\nspec:\n  replicas: 2\n"), &root))
+
+		result := flattenWithDFS(&root)
 		require.NotNil(t, result)
-		// First node (root) has no parent
+		require.GreaterOrEqual(t, len(*result), 7)
+		assert.Same(t, &root, (*result)[0].node)
 		assert.Nil(t, (*result)[0].parent)
-		// Children reference the root as their parent
-		assert.Equal(t, parent, (*result)[1].parent)
-		assert.Equal(t, parent, (*result)[2].parent)
+		assert.Equal(t, 0, (*result)[0].index)
+		assert.Same(t, &root, (*result)[1].parent)
+		assert.Equal(t, 0, (*result)[1].index)
 	})
+}
+
+func TestGetFixedNodes(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		expression string
+		assert     func(t *testing.T, got []yaml.Node)
+		wantError  bool
+	}{
+		{
+			name:       "updates scalar value",
+			input:      "spec:\n  replicas: 1\n",
+			expression: ".spec.replicas = 3",
+			assert: func(t *testing.T, got []yaml.Node) {
+				require.Len(t, got, 1)
+				var out map[string]map[string]int
+				require.NoError(t, got[0].Decode(&out))
+				assert.Equal(t, 3, out["spec"]["replicas"])
+			},
+		},
+		{
+			name:       "adds mapping key",
+			input:      "metadata:\n  name: demo\n",
+			expression: ".metadata.namespace = \"default\"",
+			assert: func(t *testing.T, got []yaml.Node) {
+				require.Len(t, got, 1)
+				var out map[string]map[string]string
+				require.NoError(t, got[0].Decode(&out))
+				assert.Equal(t, "default", out["metadata"]["namespace"])
+			},
+		},
+		{
+			name:       "invalid expression",
+			input:      "kind: Pod\n",
+			expression: ".kind = ",
+			wantError:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := getFixedNodes(context.Background(), tt.input, tt.expression)
+			if tt.wantError {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			tt.assert(t, got)
+		})
+	}
 }
