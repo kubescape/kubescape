@@ -44,6 +44,7 @@ func Test_normalize_name(t *testing.T) {
 			name, err := NormalizeImageName(tt.img)
 			if tt.wantErr {
 				assert.Error(t, err)
+				assert.Equal(t, tt.want, name, "expected empty name on error")
 			} else {
 				assert.NoError(t, err)
 				assert.Equal(t, tt.want, name, tt.name)
