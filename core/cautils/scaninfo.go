@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -73,12 +74,11 @@ func (bpf *BoolPtrFlag) SetBool(val bool) {
 }
 
 func (bpf *BoolPtrFlag) Set(val string) error {
-	switch val {
-	case "true":
-		bpf.SetBool(true)
-	case "false":
-		bpf.SetBool(false)
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return err
 	}
+	bpf.SetBool(parsed)
 	return nil
 }
 
