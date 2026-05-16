@@ -100,6 +100,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
+
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
 // into the cautils.HelmValueOptions used by chart rendering.
 func helmValueOptionsFromScanInfo(scanInfo *cautils.ScanInfo) cautils.HelmValueOptions {
