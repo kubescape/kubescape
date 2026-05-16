@@ -13,7 +13,6 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	utilsapisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	utilsmetav1 "github.com/kubescape/opa-utils/httpserver/meta/v1"
-	"go.opentelemetry.io/otel/trace"
 )
 
 var OutputDir = "./results/"
@@ -102,7 +101,7 @@ func (handler *HTTPHandler) Scan(w http.ResponseWriter, r *http.Request) {
 		handler.writeError(w, err, "")
 		return
 	}
-	scanRequestParams.ctx = trace.ContextWithSpanContext(context.Background(), trace.SpanContextFromContext(r.Context()))
+	scanRequestParams.ctx = context.WithoutCancel(r.Context())
 
 	if handler.offline {
 		scanRequestParams.scanInfo.UseDefault = true
