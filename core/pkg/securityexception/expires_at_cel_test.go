@@ -7,16 +7,17 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// expiresAtRuleValid mirrors the CEL validation rule for the expiresAt field:
+// expiresAtRuleValid mirrors the CEL validation rule for the expiresAt field.
+// The CRD rule uses optionalOldSelf: true so it fires on both CREATE and UPDATE:
 //
-//	!has(self.spec.expiresAt)
-//	  || (has(oldSelf.spec.expiresAt) && oldSelf.spec.expiresAt == self.spec.expiresAt)
-//	  || timestamp(self.spec.expiresAt) > now()
+//	!has(self.expiresAt)
+//	  || (oldSelf.hasValue() && has(oldSelf.value().expiresAt) && oldSelf.value().expiresAt == self.expiresAt)
+//	  || timestamp(self.expiresAt) > now()
 //
 // Parameters:
 //
 //	expiresAt  – the new value of spec.expiresAt; nil means the field is absent.
-//	oldExpires – the previous value of spec.expiresAt; nil means absent or this is a create.
+//	oldExpires – the previous value; nil means this is a CREATE or the field was absent on the old object.
 //	now        – the current timestamp used for comparison.
 func expiresAtRuleValid(expiresAt *time.Time, oldExpires *time.Time, now time.Time) bool {
 	// Field absent → always valid.

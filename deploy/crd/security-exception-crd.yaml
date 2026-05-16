@@ -33,8 +33,9 @@ spec:
               x-kubernetes-validations:
                 - rule: >-
                     !has(self.expiresAt)
-                    || (has(oldSelf.expiresAt) && oldSelf.expiresAt == self.expiresAt)
+                    || (oldSelf.hasValue() && has(oldSelf.value().expiresAt) && oldSelf.value().expiresAt == self.expiresAt)
                     || timestamp(self.expiresAt) > now()
+                  optionalOldSelf: true
                   message: "expiresAt must be in the future when newly set or changed"
               properties:
                 author:
