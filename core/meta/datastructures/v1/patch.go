@@ -6,6 +6,12 @@ import (
 	"github.com/project-copacetic/copacetic/pkg/buildkit"
 )
 
+// Output mode constants for patched image export
+const (
+	PatchOutputModeDockerDaemon = "docker"
+	PatchOutputModeOCI          = "oci"
+)
+
 type PatchInfo struct {
 	Image           string        // image to be patched
 	PatchedImageTag string        // can be empty, if empty then the image tag will be patched with the latest tag
@@ -20,6 +26,7 @@ type PatchInfo struct {
 	Password string // password for registry login
 
 	// registry.com/namespace/<image-name>:<image-tag>
-	ImageName string // image name
-	ImageTag  string // image tag
+	ImageName  string // image name
+	ImageTag   string // image tag
+	OutputMode string // output mode: "docker" (default) or "oci"
 }
