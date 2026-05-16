@@ -732,7 +732,7 @@ type mockCounters struct {
 
 func (m mockCounters) Failed() int   { return m.failed }
 func (m mockCounters) Skipped() int  { return m.skipped }
-func (m mockCounters) Passed() int   { return m.passed }
+func (m mockCounters) Passed() int   { return m.passed + m.excluded }
 func (m mockCounters) Excluded() int { return m.excluded }
 func (m mockCounters) All() int      { return m.failed + m.skipped + m.passed + m.excluded }
 
@@ -763,9 +763,9 @@ func TestIsEmptyResources(t *testing.T) {
 			want:     false,
 		},
 		{
-			name:     "one excluded — empty (excluded does not count as a result)",
+			name:     "one excluded — not empty (excluded counts as passed)",
 			counters: mockCounters{excluded: 1},
-			want:     true,
+			want:     false,
 		},
 		{
 			name:     "mixed non-zero — not empty",

@@ -182,7 +182,7 @@ func getIgnoredMatches(vulnerabilityExceptions []string, vp vulnerability.Provid
 
 // Filter the remaining matches based on severity exceptions.
 func filterMatchesBasedOnSeverity(severityExceptions []string, remainingMatches match.Matches, vp vulnerability.Provider) match.Matches {
-	if severityExceptions == nil {
+	if len(severityExceptions) == 0 {
 		return remainingMatches
 	}
 

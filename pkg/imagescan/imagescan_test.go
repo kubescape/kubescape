@@ -273,6 +273,11 @@ func TestFilterMatchesBasedOnSeverity(t *testing.T) {
 		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
 	})
 
+	t.Run("empty severity exceptions keep all matches", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity([]string{}, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
+	})
+
 	t.Run("excluded severities are removed and metadata errors are skipped", func(t *testing.T) {
 		filtered := filterMatchesBasedOnSeverity([]string{"HIGH"}, remainingMatches, provider)
 		assert.ElementsMatch(t, []string{"CVE-medium"}, matchIDs(filtered))
