@@ -1,5 +1,10 @@
 name: a-pr-scanner
-permissions: read-all
+permissions:
+  contents: read
+  checks: read
+  actions: read
+  packages: read
+  pull-requests: read
 on:
   workflow_call:
     inputs:

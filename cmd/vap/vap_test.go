@@ -387,6 +387,44 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("valid control ID resolves policy name", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0016"})
+		err := cmd.Execute()
+		assert.NoError(t, err)
+	})
+
+	t.Run("lowercase control ID resolves policy name", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "c-0016"})
+		err := cmd.Execute()
+		assert.NoError(t, err)
+	})
+
+	t.Run("unsupported control ID", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-9999"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "unsupported control ID")
+	})
+
+	t.Run("policy and control are mutually exclusive", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--policy", "kubescape-c-0016-allow-privilege-escalation", "--control", "C-0016"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "only one of --policy or --control")
+	})
+
+	t.Run("policy or control is required", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "either --policy or --control")
+	})
+
 	t.Run("invalid binding name", func(t *testing.T) {
 		cmd := getCreatePolicyBindingCmd()
 		cmd.SetArgs([]string{"--name", "INVALID-name", "--policy", "c-0016"})
@@ -468,6 +506,10 @@ func TestGetCreatePolicyBindingCmd(t *testing.T) {
 	require.NotNil(t, policyFlag)
 	assert.Equal(t, "p", policyFlag.Shorthand)
 
+	controlFlag := cmd.Flags().Lookup("control")
+	require.NotNil(t, controlFlag)
+	assert.Equal(t, "c", controlFlag.Shorthand)
+
 	namespaceFlag := cmd.Flags().Lookup("namespace")
 	require.NotNil(t, namespaceFlag)
 
@@ -481,6 +523,60 @@ func TestGetCreatePolicyBindingCmd(t *testing.T) {
 	paramRefFlag := cmd.Flags().Lookup("parameter-reference")
 	require.NotNil(t, paramRefFlag)
 	assert.Equal(t, "r", paramRefFlag.Shorthand)
+}
+
+func TestResolvePolicyName(t *testing.T) {
+	tests := []struct {
+		name       string
+		policyName string
+		controlID  string
+		want       string
+		wantErr    string
+	}{
+		{
+			name:       "policy name is returned as-is",
+			policyName: "kubescape-c-0016-allow-privilege-escalation",
+			want:       "kubescape-c-0016-allow-privilege-escalation",
+		},
+		{
+			name:      "control ID resolves to library policy",
+			controlID: "C-0016",
+			want:      "kubescape-c-0016-allow-privilege-escalation",
+		},
+		{
+			name:      "lowercase control ID resolves",
+			controlID: "c-0016",
+			want:      "kubescape-c-0016-allow-privilege-escalation",
+		},
+		{
+			name:    "neither policy nor control",
+			wantErr: "either --policy or --control",
+		},
+		{
+			name:       "both policy and control",
+			policyName: "kubescape-c-0016-allow-privilege-escalation",
+			controlID:  "C-0016",
+			wantErr:    "only one of --policy or --control",
+		},
+		{
+			name:      "unsupported control",
+			controlID: "C-9999",
+			wantErr:   "unsupported control ID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolvePolicyName(tt.policyName, tt.controlID)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }
 
 func TestGetVapHelperCmd(t *testing.T) {
@@ -554,10 +650,11 @@ func TestCreatePolicyBindingCmdRequiredFlags(t *testing.T) {
 
 	policyFlag := cmd.Flags().Lookup("policy")
 	require.NotNil(t, policyFlag)
-	annotations = policyFlag.Annotations
-	require.NotNil(t, annotations)
-	_, isRequired = annotations[cobra.BashCompOneRequiredFlag]
-	assert.True(t, isRequired, "policy flag should be marked as required")
+	assert.Nil(t, policyFlag.Annotations[cobra.BashCompOneRequiredFlag])
+
+	controlFlag := cmd.Flags().Lookup("control")
+	require.NotNil(t, controlFlag)
+	assert.Nil(t, controlFlag.Annotations[cobra.BashCompOneRequiredFlag])
 }
 
 func TestDeployLibraryCmdTimeoutFlag(t *testing.T) {
