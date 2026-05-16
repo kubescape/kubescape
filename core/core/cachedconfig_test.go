@@ -2,28 +2,25 @@ package core
 
 import (
 	"bytes"
-	"os"
 	"testing"
 
+	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/stretchr/testify/assert"
 )
 
-// redirectHome redirects HOME to a temp dir for the duration of the test.
-// This prevents SetCachedConfig / DeleteCachedConfig from touching the
-// real ~/.kubescape on the developer's or CI machine.
-func redirectHome(t *testing.T) {
+func redirectStore(t *testing.T) {
 	t.Helper()
 	tmpDir := t.TempDir()
-	origHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
+	prevStore := getter.DefaultLocalStore
+	getter.DefaultLocalStore = tmpDir
 	t.Cleanup(func() {
-		os.Setenv("HOME", origHome)
+		getter.DefaultLocalStore = prevStore
 	})
 }
 
 func TestSetCachedConfig_AllFields(t *testing.T) {
-	redirectHome(t)
+	redirectStore(t)
 
 	ks := &Kubescape{}
 	setConfig := &metav1.SetConfig{
@@ -49,7 +46,7 @@ func TestSetCachedConfig_AllFields(t *testing.T) {
 }
 
 func TestSetCachedConfig_EmptyFields(t *testing.T) {
-	redirectHome(t)
+	redirectStore(t)
 
 	ks := &Kubescape{}
 
@@ -84,7 +81,7 @@ func TestSetCachedConfig_EmptyFields(t *testing.T) {
 }
 
 func TestDeleteCachedConfig(t *testing.T) {
-	redirectHome(t)
+	redirectStore(t)
 
 	ks := &Kubescape{}
 
