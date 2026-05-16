@@ -8,7 +8,7 @@ updates:
     schedule:
       interval: "weekly"
 
- - package-ecosystem: "gomod"
+  - package-ecosystem: "gomod"
     directory: "/httphandler"
     schedule:
       interval: "weekly"
