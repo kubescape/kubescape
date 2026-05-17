@@ -3,6 +3,7 @@ package imagescan
 import (
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -300,4 +301,56 @@ func TestDefaultMatcherConfig(t *testing.T) {
 	assert.True(t, cfg.Golang.AlwaysUseCPEForStdlib)
 	assert.False(t, cfg.Golang.AllowMainModulePseudoVersionComparison)
 	assert.True(t, cfg.Stock.UseCPEs)
+}
+
+func TestNewDefaultDBConfig_SanitizationHarden(t *testing.T) {
+	tests := []struct {
+		name        string
+		inputURL    string
+		wantHost    string
+		wantDefault bool
+		wantErr     bool
+	}{
+		{
+			name:        "valid URL with leading trailing spaces",
+			inputURL:    "  https://custom-registry.io/db   ",
+			wantHost:    "custom-registry.io",
+			wantDefault: false,
+			wantErr:     false,
+		},
+		{
+			name:        "valid URL with trailing newline",
+			inputURL:    "https://custom-registry.io/db\n",
+			wantHost:    "custom-registry.io",
+			wantDefault: false,
+			wantErr:     false,
+		},
+		{
+			name:        "whitespace only input falls back to default",
+			inputURL:    "   ",
+			wantDefault: true,
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			distCfg, _, _, err := NewDefaultDBConfig(tt.inputURL)
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("NewDefaultDBConfig() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.wantDefault {
+				if distCfg.LatestURL != defaultGrypeListingURL {
+					t.Fatalf("expected default URL %q, got %q", defaultGrypeListingURL, distCfg.LatestURL)
+				}
+				return
+			}
+
+			if !strings.Contains(distCfg.LatestURL, tt.wantHost) {
+				t.Fatalf("expected URL to contain host %q, got %q", tt.wantHost, distCfg.LatestURL)
+			}
+		})
+	}
 }
