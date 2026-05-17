@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 )
@@ -116,6 +117,7 @@ func (c *CRDExceptionsGetter) getCRDExceptions() ([]armotypes.PostureExceptionPo
 			continue
 		}
 		policies = append(policies, *policy)
+		go emitMatchEvent(ctx, c.dynamicClient, item.GetNamespace(), item.GetName(), firstControlID(policy))
 	}
 
 	// Read cluster-scoped ClusterSecurityExceptions
@@ -139,6 +141,7 @@ func (c *CRDExceptionsGetter) getCRDExceptions() ([]armotypes.PostureExceptionPo
 			continue
 		}
 		policies = append(policies, *policy)
+		go emitMatchEvent(ctx, c.dynamicClient, item.GetNamespace(), item.GetName(), firstControlID(policy))
 	}
 
 	return policies, nil
@@ -278,4 +281,61 @@ func isExpired(policy *armotypes.PostureExceptionPolicy) bool {
 		return false
 	}
 	return time.Now().UTC().After(policy.ExpirationDate.UTC())
+}
+
+// emitMatchEvent emits a Kubernetes Event on the SecurityException resource
+// when it is matched during a scan. This provides observability — users can
+// run `kubectl get events` to see which exceptions were applied in each scan.
+func emitMatchEvent(ctx context.Context, dynamicClient dynamic.Interface, namespace, name, controlID string) {
+	eventsGVR := schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "events",
+	}
+
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	now := metav1.Now()
+	event := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Event",
+		"metadata": map[string]interface{}{
+			"generateName": "security-exception-matched-",
+			"namespace":    namespace,
+		},
+		"involvedObject": map[string]interface{}{
+			"apiVersion": "kubescape.io/v1beta1",
+			"kind":       "SecurityException",
+			"name":       name,
+			"namespace":  namespace,
+		},
+		"reason":  "ExceptionMatched",
+		"message": fmt.Sprintf("SecurityException matched during scan: control %s excepted", controlID),
+		"type":    "Normal",
+		"firstTimestamp": now.UTC().Format(time.RFC3339),
+		"lastTimestamp":  now.UTC().Format(time.RFC3339),
+		"count":          int64(1),
+		"source": map[string]interface{}{
+			"component": "kubescape",
+		},
+	}
+
+	_, err := dynamicClient.Resource(eventsGVR).
+		Namespace(namespace).
+		Create(ctx, &unstructured.Unstructured{Object: event}, metav1.CreateOptions{})
+	if err != nil {
+		logger.L().Warning("CRDExceptionsGetter: failed to emit match event",
+			helpers.String("name", name),
+			helpers.Error(err))
+	}
+}
+
+// firstControlID returns the first control ID from a policy for event labeling.
+func firstControlID(policy *armotypes.PostureExceptionPolicy) string {
+	if len(policy.PosturePolicies) > 0 {
+		return policy.PosturePolicies[0].ControlID
+	}
+	return "unknown"
 }
