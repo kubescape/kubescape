@@ -1,6 +1,7 @@
 package printer
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -319,4 +320,54 @@ func TestMetrics_String(t *testing.T) {
 			assert.Equal(t, tt.expectedMetrics, actual)
 		})
 	}
+}
+
+func TestMetrics_String_MultiItem_NoDuplicateHeaders(t *testing.T) {
+	// Verifies that # HELP and # TYPE headers are emitted exactly once
+	// per metric family even when multiple frameworks/controls/resources exist.
+	m := Metrics{
+		listFrameworks: []mFrameworkComplianceScore{
+			{frameworkName: "Framework A", complianceScore: 80, resourcesCountFailed: 5},
+			{frameworkName: "Framework B", complianceScore: 60, resourcesCountFailed: 10},
+		},
+		listControls: []mControlComplianceScore{
+			{controlName: "Control A", severity: "high", link: "https://link-a.com", complianceScore: 50},
+			{controlName: "Control B", severity: "low", link: "https://link-b.com", complianceScore: 90},
+		},
+		listResources: []mResources{
+			{name: "Resource A", namespace: "ns1", apiVersion: "v1", kind: "Pod", controlsCountFailed: 2},
+			{name: "Resource B", namespace: "ns2", apiVersion: "v1", kind: "Pod", controlsCountFailed: 4},
+		},
+	}
+
+	output := m.String()
+	lines := strings.Split(output, "\n")
+
+	// count occurrences of each HELP line
+	helpCount := map[string]int{}
+	for _, line := range lines {
+		if strings.HasPrefix(line, "# HELP ") {
+			fields := strings.Fields(line)
+			if len(fields) >= 3 {
+				helpCount[fields[2]]++
+			}
+		}
+	}
+
+	// every metric family must have exactly one HELP header
+	for metricName, count := range helpCount {
+		assert.Equal(t, 1, count, "metric family %q has %d # HELP lines, want exactly 1", metricName, count)
+	}
+
+	// verify both framework series are present
+	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Framework A\"} 80")
+	assert.Contains(t, output, "kubescape_framework_complianceScore{name=\"Framework B\"} 60")
+
+	// verify both control series are present
+	assert.Contains(t, output, "kubescape_control_complianceScore{name=\"Control A\",severity=\"high\",link=\"https://link-a.com\"} 50")
+	assert.Contains(t, output, "kubescape_control_complianceScore{name=\"Control B\",severity=\"low\",link=\"https://link-b.com\"} 90")
+
+	// verify both resource series are present
+	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns1\",name=\"Resource A\"} 2")
+	assert.Contains(t, output, "kubescape_resource_count_controls_failed{apiVersion=\"v1\",kind=\"Pod\",namespace=\"ns2\",name=\"Resource B\"} 4")
 }

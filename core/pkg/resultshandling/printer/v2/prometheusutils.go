@@ -204,17 +204,19 @@ func emitMetricFamily(lines []string) string {
 }
 
 func (m *Metrics) String() string {
-	r := emitMetricFamily(m.rs.metrics())
+	// collect all metric lines first, then emit headers once per family
+	var all []string
+	all = append(all, m.rs.metrics()...)
 	for i := range m.listFrameworks {
-		r += emitMetricFamily(m.listFrameworks[i].metrics())
+		all = append(all, m.listFrameworks[i].metrics()...)
 	}
 	for i := range m.listControls {
-		r += emitMetricFamily(m.listControls[i].metrics())
+		all = append(all, m.listControls[i].metrics()...)
 	}
 	for i := range m.listResources {
-		r += emitMetricFamily(m.listResources[i].metrics())
+		all = append(all, m.listResources[i].metrics()...)
 	}
-	return r
+	return emitMetricFamily(all)
 }
 
 type mComplianceScore struct {
