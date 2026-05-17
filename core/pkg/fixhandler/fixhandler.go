@@ -245,6 +245,10 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	return resourcesToFix
 }
 
+func isAbsolutePath(path string) bool {
+	return filepath.IsAbs(path)
+}
+
 func resolveResourcePath(basePath, resourcePath string) string {
 	if isAbsolutePath(resourcePath) {
 		return resourcePath

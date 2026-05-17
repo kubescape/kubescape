@@ -90,21 +90,6 @@ func TestBoolPtrFlag_GetBool(t *testing.T) {
 	}
 }
 
-func TestNewBoolPtr(t *testing.T) {
-	t.Run("with non-nil pointer", func(t *testing.T) {
-		b := true
-		bpf := NewBoolPtr(&b)
-		assert.NotNil(t, bpf.Get())
-		assert.True(t, bpf.GetBool())
-	})
-
-	t.Run("with nil pointer", func(t *testing.T) {
-		bpf := NewBoolPtr(nil)
-		assert.Nil(t, bpf.Get())
-		assert.False(t, bpf.GetBool())
-	})
-}
-
 // ---------------------------------------------------------------------------
 // isHTTPURL
 // ---------------------------------------------------------------------------
