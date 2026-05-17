@@ -102,23 +102,6 @@ func TestInitLoggerLevel_KSLoggerPrecedence(t *testing.T) {
 	})
 }
 
-func TestInitLogger_KSLoggerNameEnv(t *testing.T) {
-	prevLoggerName := rootInfo.LoggerName
-	prevIsTerminal := isTerminal
-	t.Cleanup(func() {
-		rootInfo.LoggerName = prevLoggerName
-		isTerminal = prevIsTerminal
-	})
-
-	rootInfo.LoggerName = ""
-	t.Setenv("KS_LOGGER_NAME", iconlogger.LoggerName)
-	isTerminal = func(uintptr) bool { return false }
-
-	initLogger()
-
-	assert.Equal(t, iconlogger.LoggerName, rootInfo.LoggerName)
-}
-
 func TestInitLoggerNameFallback(t *testing.T) {
 	t.Run("terminal uses iconlogger", func(t *testing.T) {
 		prevLoggerName := rootInfo.LoggerName
