@@ -105,6 +105,9 @@ func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata,
 			index, _ := strconv.Atoi(match[1])
 			wl := workloadinterface.NewWorkloadObj(resource.GetObject())
 			containers, _ := wl.GetContainers()
+			if index >= len(containers) {
+				continue
+			}
 			containerName := containers[index].Name
 			(*paths)[i] = (*paths)[i] + " (" + containerName + ")"
 		}
