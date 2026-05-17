@@ -55,7 +55,7 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 
 	m := &Metrics{}
 	m.setComplianceScores(summaryDetails)
-	// m.setResourcesCounters(resources, results)
+	m.setResourcesCounters(resources, results)
 
 	return m
 }

@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 type metricsName string
@@ -253,11 +255,11 @@ type mFrameworkComplianceScore struct {
 }
 
 type mResources struct {
-	name       string
-	namespace  string
-	apiVersion string
-	kind       string
-	// controlsCountPassed   int // unused
+	name                 string
+	namespace            string
+	apiVersion           string
+	kind                 string
+	controlsCountPassed  int
 	controlsCountFailed  int
 	controlsCountSkipped int
 }
@@ -318,7 +320,6 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 	}
 }
 
-/* unused for now
 // return -> (passed, skipped, failed)
 func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, int) {
 	failed := 0
@@ -363,4 +364,3 @@ func (m *Metrics) setResourcesCounters(
 	}
 
 }
-*/
