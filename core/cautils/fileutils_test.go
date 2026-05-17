@@ -230,4 +230,6 @@ func TestIsFileAndIsDir(t *testing.T) {
 	nonExistent := filepath.Join(tempDir, "non-existent-path")
 	assert.False(t, isFile(nonExistent))
 	assert.False(t, isDir(nonExistent))
+	assert.False(t, isFile("non-existent-path"))
+	assert.False(t, isDir("non-existent-path"))
 }
