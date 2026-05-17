@@ -21,6 +21,10 @@ func redirectStore(t *testing.T) {
 
 func TestSetCachedConfig_AllFields(t *testing.T) {
 	redirectStore(t)
+	t.Setenv("KS_ACCOUNT_ID", "")
+	t.Setenv("KS_ACCESS_KEY", "")
+	t.Setenv("KS_CLOUD_API_URL", "")
+	t.Setenv("KS_CLOUD_REPORT_URL", "")
 
 	ks := &Kubescape{}
 	setConfig := &metav1.SetConfig{
@@ -47,6 +51,10 @@ func TestSetCachedConfig_AllFields(t *testing.T) {
 
 func TestSetCachedConfig_EmptyFields(t *testing.T) {
 	redirectStore(t)
+	t.Setenv("KS_ACCOUNT_ID", "")
+	t.Setenv("KS_ACCESS_KEY", "")
+	t.Setenv("KS_CLOUD_API_URL", "")
+	t.Setenv("KS_CLOUD_REPORT_URL", "")
 
 	ks := &Kubescape{}
 
@@ -59,7 +67,7 @@ func TestSetCachedConfig_EmptyFields(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	// Step 2: apply empty fields — should NOT overwrite existing values
+	// Step 2: apply empty fields - should NOT overwrite existing values
 	err = ks.SetCachedConfig(&metav1.SetConfig{
 		Account:        "",
 		AccessKey:      "",
@@ -82,6 +90,10 @@ func TestSetCachedConfig_EmptyFields(t *testing.T) {
 
 func TestDeleteCachedConfig(t *testing.T) {
 	redirectStore(t)
+	t.Setenv("KS_ACCOUNT_ID", "")
+	t.Setenv("KS_ACCESS_KEY", "")
+	t.Setenv("KS_CLOUD_API_URL", "")
+	t.Setenv("KS_CLOUD_REPORT_URL", "")
 
 	ks := &Kubescape{}
 
