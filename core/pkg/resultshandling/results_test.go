@@ -363,3 +363,4 @@ func TestGetComplianceScoreAndRiskScoreAreIndependent(t *testing.T) {
 	assert.Equal(t, float32(40.0), rh.GetRiskScore())
 	assert.NotEqual(t, rh.GetComplianceScore(), rh.GetRiskScore())
 }
+

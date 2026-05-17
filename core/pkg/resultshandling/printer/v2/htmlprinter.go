@@ -169,3 +169,9 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 
 	return ctlResults
 }
+
+func (p *HtmlPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}

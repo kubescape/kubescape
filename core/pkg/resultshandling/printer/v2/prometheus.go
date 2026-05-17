@@ -74,3 +74,9 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 	}
 	printer.LogOutputFile(pp.writer.Name())
 }
+
+func (p *PrometheusPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}

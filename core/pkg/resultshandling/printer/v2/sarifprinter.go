@@ -426,3 +426,9 @@ func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 	acJson, _ := json.Marshal(artifactChange)
 	return sha256.Sum256(acJson)
 }
+
+func (p *SARIFPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}

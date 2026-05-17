@@ -307,3 +307,9 @@ func properties(complianceScore float32) []JUnitProperty {
 		},
 	}
 }
+
+func (p *JunitPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}

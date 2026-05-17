@@ -81,13 +81,15 @@ func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.S
 	rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
 
 	rh.UiPrinter.PrintNextSteps()
+	closePrinter(rh.UiPrinter)
 
 	// Then print to output files
-	for _, printer := range rh.PrinterObjs {
-		printer.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
+	for _, p := range rh.PrinterObjs {
+		p.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
 		if rh.ScanData != nil {
-			printer.Score(rh.GetComplianceScore())
+			p.Score(rh.GetComplianceScore())
 		}
+		closePrinter(p)
 	}
 
 	// We should submit only after printing results, so a user can see
@@ -160,5 +162,16 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		return false, nil
 	default:
 		return true, nil
+	}
+}
+
+// closePrinter closes p's output writer if p implements the optional
+// printerCloser interface. This avoids widening the public IPrinter interface.
+func closePrinter(p printer.IPrinter) {
+	type printerCloser interface {
+		CloseWriter()
+	}
+	if c, ok := p.(printerCloser); ok {
+		c.CloseWriter()
 	}
 }
