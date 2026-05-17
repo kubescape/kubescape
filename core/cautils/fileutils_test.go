@@ -9,6 +9,7 @@ import (
 
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func onlineBoutiquePath() string {
@@ -212,5 +213,20 @@ func TestGetFileFormat(t *testing.T) {
 			assert.Equal(t, tt.want, getFileFormat(tt.path))
 		})
 	}
+}
 
+func TestIsFileAndIsDir(t *testing.T) {
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "test_file.txt")
+	err := os.WriteFile(tempFile, []byte("test"), 0644)
+	require.NoError(t, err)
+
+	assert.True(t, isDir(tempDir))
+	assert.False(t, isFile(tempDir))
+
+	assert.True(t, isFile(tempFile))
+	assert.False(t, isDir(tempFile))
+
+	assert.False(t, isFile("non-existent-path"))
+	assert.False(t, isDir("non-existent-path"))
 }

@@ -73,7 +73,7 @@ func writeTestTLSFiles(t *testing.T) (string, string) {
 	require.NoError(t, os.WriteFile(keyFile, keyPEM, 0o600))
 
 	return certFile, keyFile
-import "testing"
+}
 
 func TestGetPort(t *testing.T) {
 	t.Run("returns env var when set", func(t *testing.T) {

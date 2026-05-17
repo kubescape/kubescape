@@ -2,12 +2,7 @@ package imagescan
 
 import (
 	"errors"
-	"testing"
-
-	"github.com/anchore/grype/grype/match"
-	grypepkg "github.com/anchore/grype/grype/pkg"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -252,41 +247,49 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	assert.False(t, svcWithoutDefault.useDefaultMatchers)
 }
 
-func TestFilterMatchesBasedOnSeverity(t *testing.T) {
-	provider := stubVulnerabilityProvider{
-		metadataByID: map[string]*vulnerability.Metadata{
-			"CVE-high": {
-				Severity: "high",
-			},
-			"CVE-medium": {
-				Severity: "medium",
-			},
+func TestValidateDBLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadErr error
+		status  *vulnerability.ProviderStatus
+		wantErr string
+	}{
+		{
+			name:    "load error is wrapped",
+			loadErr: errors.New("boom"),
+			wantErr: "failed to load vulnerability db: boom",
 		},
-		errByID: map[string]error{
-			"CVE-error": errors.New("lookup failed"),
+		{
+			name:    "nil status is rejected",
+			wantErr: "unable to determine the status of the vulnerability db",
+		},
+		{
+			name: "status error is wrapped",
+			status: &vulnerability.ProviderStatus{
+				Error: errors.New("status failure"),
+			},
+			wantErr: "db could not be loaded: status failure",
+		},
+		{
+			name:   "valid status passes",
+			status: &vulnerability.ProviderStatus{},
 		},
 	}
 
-	remainingMatches := match.NewMatches(
-		makeTestMatch("CVE-high"),
-		makeTestMatch("CVE-medium"),
-		makeTestMatch("CVE-error"),
-	)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDBLoad(tt.loadErr, tt.status)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
 
-	t.Run("nil severity exceptions keep all matches", func(t *testing.T) {
-		filtered := filterMatchesBasedOnSeverity(nil, remainingMatches, provider)
-		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
-	})
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
 
-	t.Run("empty severity exceptions keep all matches", func(t *testing.T) {
-		filtered := filterMatchesBasedOnSeverity([]string{}, remainingMatches, provider)
-		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
-	})
-
-	t.Run("excluded severities are removed and metadata errors are skipped", func(t *testing.T) {
-		filtered := filterMatchesBasedOnSeverity([]string{"HIGH"}, remainingMatches, provider)
-		assert.ElementsMatch(t, []string{"CVE-medium"}, matchIDs(filtered))
-	})
 func TestNewDefaultDBConfig(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -318,40 +321,6 @@ func TestNewDefaultDBConfig(t *testing.T) {
 			name:     "unsupported URL scheme is rejected",
 			grypeURL: "ftp://example.com/custom-db/listing.json",
 			wantErr:  "invalid scheme: ftp",
-		name        string
-		grypeURL    string
-		wantURL     string
-		wantErr     bool
-		wantUpdate  bool
-		checkDBRoot bool
-	}{
-		{
-			name:        "Default URL when empty",
-			grypeURL:    "",
-			wantURL:     defaultGrypeListingURL,
-			wantErr:     false,
-			wantUpdate:  true,
-			checkDBRoot: true,
-		},
-		{
-			name:        "Custom HTTPS URL",
-			grypeURL:    "https://example.com/grype/db/listing.json",
-			wantURL:     "https://example.com/grype/db/listing.json",
-			wantErr:     false,
-			wantUpdate:  true,
-			checkDBRoot: true,
-		},
-		{
-			name:       "Invalid scheme",
-			grypeURL:   "ftp://example.com/db/listing.json",
-			wantErr:    true,
-			wantUpdate: false,
-		},
-		{
-			name:       "Invalid URL",
-			grypeURL:   "https://",
-			wantErr:    true,
-			wantUpdate: false,
 		},
 	}
 
@@ -361,9 +330,6 @@ func TestNewDefaultDBConfig(t *testing.T) {
 			if tt.wantErr != "" {
 				require.Error(t, err)
 				assert.EqualError(t, err, tt.wantErr)
-			if tt.wantErr {
-				require.Error(t, err)
-				assert.Equal(t, tt.wantUpdate, shouldUpdate)
 				return
 			}
 
@@ -371,12 +337,20 @@ func TestNewDefaultDBConfig(t *testing.T) {
 			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
 			assert.Equal(t, tt.wantDir, installCfg.DBRootDir)
 			assert.Equal(t, tt.wantUpdate, shouldUpdate)
-			assert.Equal(t, tt.wantUpdate, shouldUpdate)
-			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
-			if tt.checkDBRoot {
-				assert.NotEmpty(t, installCfg.DBRootDir)
-				assert.True(t, strings.HasSuffix(installCfg.DBRootDir, defaultDBDirName))
-			}
 		})
 	}
+}
+
+func TestDefaultMatcherConfig(t *testing.T) {
+	cfg := defaultMatcherConfig()
+	assert.Equal(t, "https://search.maven.org/solrsearch/select", cfg.Java.ExternalSearchConfig.MavenBaseURL)
+	assert.False(t, cfg.Java.UseCPEs)
+	assert.False(t, cfg.Ruby.UseCPEs)
+	assert.False(t, cfg.Python.UseCPEs)
+	assert.False(t, cfg.Dotnet.UseCPEs)
+	assert.False(t, cfg.Javascript.UseCPEs)
+	assert.False(t, cfg.Golang.UseCPEs)
+	assert.True(t, cfg.Golang.AlwaysUseCPEForStdlib)
+	assert.False(t, cfg.Golang.AllowMainModulePseudoVersionComparison)
+	assert.True(t, cfg.Stock.UseCPEs)
 }

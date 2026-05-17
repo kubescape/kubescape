@@ -12,6 +12,7 @@ type PatchInfo struct {
 	BuildkitAddress string        // buildkit address
 	Timeout         time.Duration // timeout for patching an image
 	IgnoreError     bool          // ignore errors and continue patching
+	Push            bool          // push the patched image to the registry (default: false)
 	BuildKitOpts    buildkit.Opts //build kit options
 
 	// Image registry credentials
