@@ -34,6 +34,36 @@ func Test_validateControlScanInfo(t *testing.T) {
 			&cautils.ScanInfo{Submit: true, OmitRawResources: true},
 			ErrOmitRawResourcesOrSubmit,
 		},
+		{
+			"Fail threshold above 100 should be invalid",
+			&cautils.ScanInfo{FailThreshold: 101},
+			ErrBadThreshold,
+		},
+		{
+			"Fail threshold below 0 should be invalid",
+			&cautils.ScanInfo{FailThreshold: -1},
+			ErrBadThreshold,
+		},
+		{
+			"Compliance threshold above 100 should be invalid",
+			&cautils.ScanInfo{ComplianceThreshold: 101},
+			ErrBadThreshold,
+		},
+		{
+			"Compliance threshold below 0 should be invalid",
+			&cautils.ScanInfo{ComplianceThreshold: -1},
+			ErrBadThreshold,
+		},
+		{
+			"Coverage threshold above 100 should be invalid",
+			&cautils.ScanInfo{FailCoverageThreshold: 150},
+			ErrBadThreshold,
+		},
+		{
+			"Valid thresholds should be accepted",
+			&cautils.ScanInfo{FailThreshold: 80, ComplianceThreshold: 70, FailCoverageThreshold: 50},
+			nil,
+		},
 	}
 
 	for _, tc := range testCases {
