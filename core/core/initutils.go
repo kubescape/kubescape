@@ -317,3 +317,24 @@ func GetUIPrinter(ctx context.Context, scanInfo *cautils.ScanInfo, clusterName s
 
 	return p
 }
+
+// getExceptionsGetterWithCRD wraps getExceptionsGetter with CRD-based exceptions.
+// If connected to a cluster, it reads SecurityException/ClusterSecurityException
+// CRDs and merges them with the fallback getter (cloud/file/github).
+// Fallback always takes precedence over CRD exceptions.
+func getExceptionsGetterWithCRD(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
+	// get base fallback getter (file/cloud/github)
+	fallback := getExceptionsGetter(ctx, useExceptions, accountID, downloadReleasedPolicy)
+
+	// if not connected to cluster, return fallback only
+	k8s := getKubernetesApi()
+	if k8s == nil {
+		logger.L().Ctx(ctx).Debug("not connected to cluster, CRD exceptions disabled")
+		return fallback
+	}
+
+	// wrap with CRD getter
+	dynamicClient := k8s.DynamicClient
+	logger.L().Ctx(ctx).Info("CRD exceptions enabled: reading SecurityException resources")
+	return getter.NewCRDExceptionsGetter(dynamicClient, fallback)
+}
