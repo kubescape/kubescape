@@ -28,6 +28,9 @@ type OperatorAdapter struct {
 }
 
 func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, error) {
+	if k8sClient == nil || k8sClient.KubernetesClient == nil {
+		return nil, errors.New("kubernetes client is not initialised")
+	}
 	listOptions := metav1.ListOptions{
 		LabelSelector: "app=operator",
 	}
@@ -44,6 +47,9 @@ func getOperatorPod(k8sClient *k8sinterface.KubernetesApi, ns string) (*v1.Pod, 
 
 func NewOperatorAdapter(scanInfo cautils.OperatorScanInfo, ns string) (*OperatorAdapter, error) {
 	k8sClient := getKubernetesApi()
+	if k8sClient == nil || k8sClient.KubernetesClient == nil {
+		return nil, errors.New("could not connect to cluster: set --kubeconfig, $KUBECONFIG, or $KUBERNETES_MASTER")
+	}
 	pod, err := getOperatorPod(k8sClient, ns)
 	if err != nil {
 		return nil, err
