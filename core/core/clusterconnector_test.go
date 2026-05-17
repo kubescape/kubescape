@@ -81,3 +81,11 @@ func Test_getOperatorPod(t *testing.T) {
 		})
 	}
 }
+
+func Test_getOperatorPod_nilClient(t *testing.T) {
+	_, err := getOperatorPod(nil, kubescapeNamespace)
+	assert.EqualError(t, err, "kubernetes client is not initialised")
+
+	_, err = getOperatorPod(&k8sinterface.KubernetesApi{}, kubescapeNamespace)
+	assert.EqualError(t, err, "kubernetes client is not initialised")
+}
