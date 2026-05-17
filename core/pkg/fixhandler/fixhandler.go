@@ -153,15 +153,23 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			skipReason = "skipped: source is not a YAML file"
 		}
 
+		if resourceObj.Source == nil || resourceObj.Source.FileType != reporthandling.SourceTypeYaml {
+			continue
+		}
 		var absolutePath string
 		var documentIndex int
+
 		if skipReason == "" {
 			relativePath, idx, err := h.getFilePathAndIndex(resourcePath)
 			if err != nil {
 				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + resourcePath)
 				skipReason = "skipped: invalid resource path"
 			} else {
+
 				absolutePath = path.Join(h.localBasePath, relativePath)
+				documentIndex = idx
+
+				absolutePath = resolveResourcePath(h.localBasePath, relativePath)
 				documentIndex = idx
 				if _, err := os.Stat(absolutePath); err != nil {
 					logger.L().Ctx(ctx).Warning("Skipping missing file: " + absolutePath)
@@ -169,7 +177,6 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				}
 			}
 		}
-
 		if skipReason != "" {
 			for i := range result.AssociatedControls {
 				ac := &result.AssociatedControls[i]
@@ -236,6 +243,14 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	}
 
 	return resourcesToFix
+}
+
+func resolveResourcePath(basePath, resourcePath string) string {
+	if isAbsolutePath(resourcePath) {
+		return resourcePath
+	}
+
+	return filepath.Join(basePath, resourcePath)
 }
 
 // UnfixedControls returns the failed (resource, control) tuples discovered during
