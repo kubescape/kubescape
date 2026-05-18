@@ -146,6 +146,10 @@ func TestIsYaml(t *testing.T) {
 			want: true,
 		},
 		{
+			path: "temp.yml",
+			want: true,
+		},
+		{
 			path: "temp.json",
 			want: false,
 		},
@@ -169,6 +173,10 @@ func TestIsJson(t *testing.T) {
 	}{
 		{
 			path: "temp.yaml",
+			want: false,
+		},
+		{
+			path: "temp.yml",
 			want: false,
 		},
 		{
@@ -196,6 +204,10 @@ func TestGetFileFormat(t *testing.T) {
 	}{
 		{
 			path: "temp.yaml",
+			want: YAML_FILE_FORMAT,
+		},
+		{
+			path: "temp.yml",
 			want: YAML_FILE_FORMAT,
 		},
 		{
