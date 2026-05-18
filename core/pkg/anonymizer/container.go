@@ -7,6 +7,70 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+// sensitiveEnvKeyPatterns lists substrings that indicate a sensitive env var value.
+var sensitiveEnvKeyPatterns = []string{
+	"password", "passwd", "secret", "token", "key", "credential",
+	"auth", "cert", "private", "api_key", "apikey", "access_key",
+	"url", "uri", "dsn", "connection", "database", "mongo", "redis",
+	"jdbc", "conn",
+}
+
+func isSensitiveEnvKey(key string) bool {
+	lower := strings.ToLower(key)
+	for _, pattern := range sensitiveEnvKeyPatterns {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// anonymizeEnvVars redacts values of environment variables whose key matches
+// a sensitive pattern (password, token, secret, key, credential, etc.).
+func anonymizeEnvVars(container map[string]interface{}, mapping *Mapping) {
+	rawEnv, ok := container["env"]
+	if !ok || rawEnv == nil {
+		return
+	}
+	envList, ok := rawEnv.([]interface{})
+	if !ok {
+		return
+	}
+	for _, item := range envList {
+		envVar, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, ok := envVar["name"].(string)
+		if !ok || name == "" {
+			continue
+		}
+		if isSensitiveEnvKey(name) {
+			if val, ok := envVar["value"].(string); ok && val != "" {
+				envVar["value"] = mapping.GetOrCreate("env", val)
+			}
+		}
+	}
+	container["env"] = envList
+}
+
+// anonymizeAnnotations redacts all annotation values on a resource.
+func anonymizeAnnotations(resource workloadinterface.IMetadata, mapping *Mapping) {
+	bw, ok := resource.(workloadinterface.IWorkload)
+	if !ok {
+		return
+	}
+	annotations := bw.GetAnnotations()
+	if len(annotations) == 0 {
+		return
+	}
+	for key, val := range annotations {
+		if val != "" {
+			bw.SetAnnotation(key, mapping.GetOrCreate("ann", val))
+		}
+	}
+}
+
 func anonymizeContainerMetadata(resource workloadinterface.IMetadata, mapping *Mapping) {
 	if resource == nil {
 		return
@@ -18,6 +82,7 @@ func anonymizeContainerMetadata(resource workloadinterface.IMetadata, mapping *M
 	}
 
 	anonymizePodSpecs(obj, mapping)
+	anonymizeAnnotations(resource, mapping)
 	resource.SetObject(obj)
 }
 

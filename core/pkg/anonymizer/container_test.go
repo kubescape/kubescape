@@ -666,3 +666,130 @@ func TestAnonymizeContainerList_InvalidType(t *testing.T) {
 		anonymizeContainerList(obj, "containers", mapping)
 	})
 }
+
+func TestIsSensitiveEnvKey(t *testing.T) {
+	tests := []struct {
+		name string
+		key  string
+		want bool
+	}{
+		{"password key", "DB_PASSWORD", true},
+		{"secret key", "MY_SECRET", true},
+		{"token key", "API_TOKEN", true},
+		{"access key", "ACCESS_KEY", true},
+		{"credential key", "CREDENTIAL_VALUE", true},
+		{"auth key", "AUTH_HEADER", true},
+		{"cert key", "TLS_CERT", true},
+		{"non sensitive app name", "APP_NAME", false},
+		{"non sensitive port", "PORT", false},
+		{"non sensitive env", "NODE_ENV", false},
+		{"case insensitive", "db_password", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isSensitiveEnvKey(tt.key))
+		})
+	}
+}
+
+func TestAnonymizeEnvVars_SensitiveValuesRedacted(t *testing.T) {
+	mapping := NewMapping()
+	container := map[string]interface{}{
+		"name": "app",
+		"env": []interface{}{
+			map[string]interface{}{"name": "DB_PASSWORD", "value": "supersecret"},
+			map[string]interface{}{"name": "API_TOKEN", "value": "tok-abc123"},
+			map[string]interface{}{"name": "APP_NAME", "value": "myapp"},
+		},
+	}
+
+	anonymizeEnvVars(container, mapping)
+
+	envs := container["env"].([]interface{})
+	for _, item := range envs {
+		env := item.(map[string]interface{})
+		name := env["name"].(string)
+		val, _ := env["value"].(string)
+		switch name {
+		case "DB_PASSWORD":
+			assert.NotEqual(t, "supersecret", val, "password must be anonymized")
+			assert.NotEmpty(t, val)
+		case "API_TOKEN":
+			assert.NotEqual(t, "tok-abc123", val, "token must be anonymized")
+			assert.NotEmpty(t, val)
+		case "APP_NAME":
+			assert.Equal(t, "myapp", val, "non-sensitive value must be preserved")
+		}
+	}
+}
+
+func TestAnonymizeEnvVars_NilEnv(t *testing.T) {
+	mapping := NewMapping()
+	container := map[string]interface{}{"name": "app", "env": nil}
+	// must not panic
+	anonymizeEnvVars(container, mapping)
+}
+
+func TestAnonymizeEnvVars_NoEnvKey(t *testing.T) {
+	mapping := NewMapping()
+	container := map[string]interface{}{"name": "app"}
+	// must not panic
+	anonymizeEnvVars(container, mapping)
+}
+
+func TestAnonymizeEnvVars_SameValueSameMappedToken(t *testing.T) {
+	mapping := NewMapping()
+	container := map[string]interface{}{
+		"env": []interface{}{
+			map[string]interface{}{"name": "DB_PASSWORD", "value": "same-secret"},
+			map[string]interface{}{"name": "API_TOKEN", "value": "same-secret"},
+		},
+	}
+	anonymizeEnvVars(container, mapping)
+	envs := container["env"].([]interface{})
+	val1 := envs[0].(map[string]interface{})["value"].(string)
+	val2 := envs[1].(map[string]interface{})["value"].(string)
+	assert.Equal(t, val1, val2, "same input value must produce same anonymized token")
+}
+
+func TestAnonymizeContainerList_TypedContainerEnvRedacted(t *testing.T) {
+	mapping := NewMapping()
+	obj := map[string]interface{}{}
+	containers := []corev1.Container{
+		{
+			Name:  "app",
+			Image: "nginx:latest",
+			Env: []corev1.EnvVar{
+				{Name: "DB_PASSWORD", Value: "supersecret"},
+				{Name: "APP_NAME", Value: "myapp"},
+			},
+		},
+	}
+	obj["containers"] = containers
+	anonymizeContainerList(obj, "containers", mapping)
+	result := obj["containers"].([]corev1.Container)
+	assert.NotEqual(t, "supersecret", result[0].Env[0].Value, "sensitive env value must be anonymized")
+	assert.Equal(t, "myapp", result[0].Env[1].Value, "non-sensitive env value must be preserved")
+}
+
+func TestAnonymizeEphemeralContainerList_TypedEnvRedacted(t *testing.T) {
+	mapping := NewMapping()
+	obj := map[string]interface{}{}
+	containers := []corev1.EphemeralContainer{
+		{
+			EphemeralContainerCommon: corev1.EphemeralContainerCommon{
+				Name:  "debug",
+				Image: "busybox",
+				Env: []corev1.EnvVar{
+					{Name: "API_TOKEN", Value: "tok-secret"},
+					{Name: "PORT", Value: "8080"},
+				},
+			},
+		},
+	}
+	obj["ephemeralContainers"] = containers
+	anonymizeEphemeralContainerList(obj, "ephemeralContainers", mapping)
+	result := obj["ephemeralContainers"].([]corev1.EphemeralContainer)
+	assert.NotEqual(t, "tok-secret", result[0].Env[0].Value, "sensitive env value must be anonymized")
+	assert.Equal(t, "8080", result[0].Env[1].Value, "non-sensitive env value must be preserved")
+}
