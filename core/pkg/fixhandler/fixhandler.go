@@ -195,6 +195,15 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			DocumentIndex:   documentIndex,
 		}
 
+		// Tentative unfixed entries for this resource. We collect them locally
+		// so a post-loop reconciliation pass can promote controls whose failed
+		// paths are covered by another control's planned YamlExpressions.
+		type pendingUnfixed struct {
+			entry UnfixedControl
+			ac    *resourcesresults.ResourceAssociatedControl
+		}
+		var tentativeUnfixed []pendingUnfixed
+
 		for i := range result.AssociatedControls {
 			ac := &result.AssociatedControls[i]
 			if !ac.GetStatus(nil).IsFailed() {
@@ -220,14 +229,31 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 			if added > 0 {
 				reason = "partial: " + reason
 			}
-			h.unfixedControls = append(h.unfixedControls, UnfixedControl{
-				ControlID:    ac.GetID(),
-				ControlName:  ac.GetName(),
-				ResourceName: resourceObj.GetName(),
-				ResourceKind: resourceObj.GetKind(),
-				FilePath:     absolutePath,
-				Reason:       reason,
+			tentativeUnfixed = append(tentativeUnfixed, pendingUnfixed{
+				entry: UnfixedControl{
+					ControlID:    ac.GetID(),
+					ControlName:  ac.GetName(),
+					ResourceName: resourceObj.GetName(),
+					ResourceKind: resourceObj.GetKind(),
+					FilePath:     absolutePath,
+					Reason:       reason,
+				},
+				ac: ac,
 			})
+		}
+
+		// Reconcile tentative-unfixed entries against the final set of planned
+		// YamlExpressions for this resource: a control's failed paths may be
+		// covered by another control's FixPath (e.g. C-0016's
+		// "privileged = false" also remediates C-0057). Promote those to
+		// fixed instead of misleading the user with "no auto-fix available".
+		plannedPaths := plannedPathsFromExpressions(rfi.YamlExpressions)
+		for _, pu := range tentativeUnfixed {
+			if len(plannedPaths) > 0 && controlIsCoveredByPlannedPaths(pu.ac, plannedPaths) {
+				h.fixedControlsCount++
+				continue
+			}
+			h.unfixedControls = append(h.unfixedControls, pu.entry)
 		}
 
 		if len(rfi.YamlExpressions) > 0 {
@@ -429,6 +455,76 @@ func (h *FixHandler) getFileYamlExpressions(resourcesToFix []ResourceFixInfo) ma
 	}
 
 	return fileYamlExpressions
+}
+
+// plannedPathsFromExpressions returns the distinct, non-empty FixPath.Path
+// values from a YamlExpressions map. Used by the unfixed-control reconciliation
+// pass to test whether a control's failed paths are covered by some planned
+// edit.
+func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []string {
+	if len(exprs) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, len(exprs))
+	out := make([]string, 0, len(exprs))
+	for _, fp := range exprs {
+		if fp.Path == "" || seen[fp.Path] {
+			continue
+		}
+		seen[fp.Path] = true
+		out = append(out, fp.Path)
+	}
+	return out
+}
+
+// yamlPathCovers reports whether setting `planned` necessarily satisfies a
+// check that observed `failed`. Coverage holds when planned == failed, or
+// planned is an ancestor of failed on YAML-segment boundaries — segments are
+// separated by '.' or '['. String prefix alone is not enough: "spec.host" must
+// not be treated as covering "spec.hostNetwork".
+func yamlPathCovers(planned, failed string) bool {
+	if planned == "" || failed == "" {
+		return false
+	}
+	if planned == failed {
+		return true
+	}
+	if !strings.HasPrefix(failed, planned) {
+		return false
+	}
+	next := failed[len(planned)]
+	return next == '.' || next == '['
+}
+
+// controlIsCoveredByPlannedPaths reports whether every failed path on the
+// control's failed rules is covered by at least one planned path. Controls
+// with no FailedPath data (e.g. rules that only carry ReviewPath/DeletePath)
+// are NOT promoted — without a concrete failed location we can't prove
+// coverage, and silently promoting would re-introduce the bug in reverse.
+func controlIsCoveredByPlannedPaths(ac *resourcesresults.ResourceAssociatedControl, plannedPaths []string) bool {
+	sawFailedPath := false
+	for _, rule := range ac.ResourceAssociatedRules {
+		if !rule.GetStatus(nil).IsFailed() {
+			continue
+		}
+		for _, p := range rule.Paths {
+			if p.FailedPath == "" {
+				continue
+			}
+			sawFailedPath = true
+			covered := false
+			for _, planned := range plannedPaths {
+				if yamlPathCovers(planned, p.FailedPath) {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				return false
+			}
+		}
+	}
+	return sawFailedPath
 }
 
 // addYamlExpressionsFromResourceAssociatedControl appends one yaml expression

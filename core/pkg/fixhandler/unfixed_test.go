@@ -42,6 +42,16 @@ func failedRuleNoFix() resourcesresults.ResourceAssociatedRule {
 	}
 }
 
+func failedRuleNoFixAtPath(failedPath string) resourcesresults.ResourceAssociatedRule {
+	return resourcesresults.ResourceAssociatedRule{
+		Name:   "rule-no-fix-" + failedPath,
+		Status: apis.StatusFailed,
+		Paths: []armotypes.PosturePaths{
+			{FailedPath: failedPath},
+		},
+	}
+}
+
 func failedControl(id, name string, rules ...resourcesresults.ResourceAssociatedRule) resourcesresults.ResourceAssociatedControl {
 	return resourcesresults.ResourceAssociatedControl{
 		ControlID:               id,
@@ -505,6 +515,310 @@ func TestUnfixedControls_ReturnsCopy(t *testing.T) {
 	got[0].ControlName = "mutated"
 	assert.Equal(t, "orig", h.unfixedControls[0].ControlName,
 		"caller mutation must not leak into internal state")
+}
+
+// --- cross-control reconciliation (issue-5) ------------------------------
+
+func TestYamlPathCovers(t *testing.T) {
+	cases := []struct {
+		name           string
+		planned, failed string
+		want           bool
+	}{
+		{"exact match", "spec.containers[0].securityContext.privileged", "spec.containers[0].securityContext.privileged", true},
+		{"planned is parent (.)", "spec.containers[0].securityContext", "spec.containers[0].securityContext.privileged", true},
+		{"planned is parent ([)", "spec.containers", "spec.containers[0].securityContext", true},
+		{"failed is parent of planned — NOT covered", "spec.containers[0].securityContext.privileged", "spec.containers[0].securityContext", false},
+		{"sibling with shared prefix — NOT covered", "spec.host", "spec.hostNetwork", false},
+		{"unrelated path", "metadata.labels.app", "spec.hostNetwork", false},
+		{"empty planned", "", "spec.hostNetwork", false},
+		{"empty failed", "spec.hostNetwork", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, yamlPathCovers(tc.planned, tc.failed))
+		})
+	}
+}
+
+func TestPlannedPathsFromExpressions_DedupesAndSkipsEmpty(t *testing.T) {
+	exprs := map[string]armotypes.FixPath{
+		"e1": {Path: "spec.a", Value: "1"},
+		"e2": {Path: "spec.b", Value: "2"},
+		"e3": {Path: "spec.a", Value: "1"}, // duplicate path under different expression key
+		"e4": {Path: "", Value: ""},        // empty — must be skipped
+	}
+	got := plannedPathsFromExpressions(exprs)
+	assert.ElementsMatch(t, []string{"spec.a", "spec.b"}, got)
+}
+
+func TestPlannedPathsFromExpressions_EmptyInput(t *testing.T) {
+	assert.Nil(t, plannedPathsFromExpressions(nil))
+	assert.Nil(t, plannedPathsFromExpressions(map[string]armotypes.FixPath{}))
+}
+
+// The headline bug: C-0016 owns a FixPath for `…privileged = false`. C-0057
+// (Privileged container) has a FailedPath on the same field but no FixPath of
+// its own. After reconciliation, C-0057 must be counted as fixed, not listed
+// under "no auto-fix available for this control".
+func TestPrepareResourcesToFix_PromotesCrossControlCoveredControl(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				// C-0016: owns the FixPath that toggles privileged=false.
+				failedControl("C-0016", "Allow privilege escalation",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.privileged", "false"),
+				),
+				// C-0057: fails on the same field but exposes no FixPath. Must
+				// be promoted to fixed because the planned edit covers it.
+				failedControl("C-0057", "Privileged container",
+					failedRuleNoFixAtPath("spec.template.spec.containers[0].securityContext.privileged"),
+				),
+				// C-0041: genuinely unfixed — failedPath not touched by any planned edit.
+				failedControl("C-0041", "HostNetwork access",
+					failedRuleNoFixAtPath("spec.template.spec.hostNetwork"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 2, h.FixedControlsCount(), "C-0016 fully fixed + C-0057 promoted by reconciliation")
+	if assert.Len(t, h.UnfixedControls(), 1, "only C-0041 must remain unfixed") {
+		assert.Equal(t, "C-0041", h.UnfixedControls()[0].ControlID)
+	}
+}
+
+// Parent-path coverage: planned edit sets `securityContext = {...}`, failed
+// path is `securityContext.privileged`. The parent overwrites the child, so
+// the control must be promoted.
+func TestPrepareResourcesToFix_ParentPathCoversChildFailedPath(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-PARENT", "owns parent fix",
+					failedRuleWithFix("spec.containers[0].securityContext", "{}"),
+				),
+				failedControl("C-CHILD", "fails on child",
+					failedRuleNoFixAtPath("spec.containers[0].securityContext.privileged"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 2, h.FixedControlsCount())
+	assert.Empty(t, h.UnfixedControls())
+}
+
+// Reverse direction: planned edit is on the CHILD, failed path is on the
+// PARENT. We don't know what other parent fields the check observed, so the
+// control must remain unfixed (no false promotion).
+func TestPrepareResourcesToFix_ChildPlannedDoesNotCoverParentFailed(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-CHILD", "owns child fix",
+					failedRuleWithFix("spec.containers[0].securityContext.privileged", "false"),
+				),
+				failedControl("C-PARENT", "fails on parent",
+					failedRuleNoFixAtPath("spec.containers[0].securityContext"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 1, h.FixedControlsCount(), "only C-CHILD; C-PARENT must NOT be promoted")
+	if assert.Len(t, h.UnfixedControls(), 1) {
+		assert.Equal(t, "C-PARENT", h.UnfixedControls()[0].ControlID)
+	}
+}
+
+// Lookalike-prefix safety: planned `spec.host` must not cover failed
+// `spec.hostNetwork`. The promotion check is on YAML segments, not raw string
+// prefix.
+func TestPrepareResourcesToFix_LookalikePrefixDoesNotPromote(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-A", "owns spec.host fix",
+					failedRuleWithFix("spec.host", "something"),
+				),
+				failedControl("C-0041", "HostNetwork access",
+					failedRuleNoFixAtPath("spec.hostNetwork"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 1, h.FixedControlsCount(), "only C-A; C-0041 must remain unfixed")
+	if assert.Len(t, h.UnfixedControls(), 1) {
+		assert.Equal(t, "C-0041", h.UnfixedControls()[0].ControlID)
+	}
+}
+
+// A control whose rules have NO FailedPath data at all (only DeletePath or
+// ReviewPath, or nothing) must not be silently promoted just because some
+// planned edits exist — without a concrete failed location we can't prove
+// coverage.
+func TestPrepareResourcesToFix_NoFailedPathDoesNotPromote(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	noPathRule := resourcesresults.ResourceAssociatedRule{
+		Name:   "rule-only-delete",
+		Status: apis.StatusFailed,
+		Paths: []armotypes.PosturePaths{
+			{DeletePath: "spec.something"},
+		},
+	}
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-OTHER", "owns a fix",
+					failedRuleWithFix("spec.unrelated", "x"),
+				),
+				failedControl("C-NOFAIL", "no failed paths", noPathRule),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 1, h.FixedControlsCount())
+	if assert.Len(t, h.UnfixedControls(), 1) {
+		assert.Equal(t, "C-NOFAIL", h.UnfixedControls()[0].ControlID)
+	}
+}
+
+// Multi-resource: planned paths on resource A must not promote unfixed
+// controls on resource B.
+func TestPrepareResourcesToFix_PromotionIsScopedPerResource(t *testing.T) {
+	dir := t.TempDir()
+	mA := writeManifest(t, dir, "a.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	mB := writeManifest(t, dir, "b.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	relA, _ := filepath.Rel(dir, mA)
+	relB, _ := filepath.Rel(dir, mB)
+	resA := buildResource(t, dir, relA, "Deployment", "demo-a", 0)
+	resB := buildResource(t, dir, relB, "Deployment", "demo-b", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  resA.GetID(),
+			RawResource: resA,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-0016", "Allow privilege escalation",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.privileged", "false"),
+				),
+			},
+		},
+		{
+			ResourceID:  resB.GetID(),
+			RawResource: resB,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				// Same failedPath, different resource — must NOT be promoted
+				// by resource A's planned edit.
+				failedControl("C-0057", "Privileged container",
+					failedRuleNoFixAtPath("spec.template.spec.containers[0].securityContext.privileged"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 1, h.FixedControlsCount(), "only C-0016 on resource A")
+	if assert.Len(t, h.UnfixedControls(), 1) {
+		assert.Equal(t, "C-0057", h.UnfixedControls()[0].ControlID)
+		assert.Equal(t, "demo-b", h.UnfixedControls()[0].ResourceName)
+	}
+}
+
+// A partial control whose remaining (skipped) paths are covered by another
+// control's planned edits should be promoted to fixed by the reconciliation
+// pass.
+func TestPrepareResourcesToFix_PartialPromotedWhenRemainderCovered(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	// C-MIXED has one concrete fix (privileged) and one rule with only a
+	// FailedPath (hostNetwork). C-NET separately owns the FixPath for
+	// hostNetwork. Together they cover all of C-MIXED's failed paths.
+	mixed := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-MIXED",
+		Name:      "mixed",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "fix-priv",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{
+						FailedPath: "spec.template.spec.containers[0].securityContext.privileged",
+						FixPath:    armotypes.FixPath{Path: "spec.template.spec.containers[0].securityContext.privileged", Value: "false"},
+					},
+				},
+			},
+			failedRuleNoFixAtPath("spec.template.spec.hostNetwork"),
+		},
+	}
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				mixed,
+				failedControl("C-NET", "owns hostNetwork fix",
+					failedRuleWithFix("spec.template.spec.hostNetwork", "false"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 2, h.FixedControlsCount(), "C-NET fully fixed + C-MIXED promoted (all failed paths covered)")
+	assert.Empty(t, h.UnfixedControls())
 }
 
 func TestNewFixHandler_AcceptsValidReport(t *testing.T) {
