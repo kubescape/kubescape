@@ -477,11 +477,24 @@ func plannedPathsFromExpressions(exprs map[string]armotypes.FixPath) []string {
 	return out
 }
 
+// normalizeFailedPath strips an "=<expected>" suffix that some FailedPath
+// values carry to encode the value the check expected (e.g.
+// "spec.…runAsNonRoot=true"). The reconciliation pass compares pure YAML
+// paths, so the suffix must not participate in the segment-boundary check.
+func normalizeFailedPath(p string) string {
+	if i := strings.IndexByte(p, '='); i >= 0 {
+		return p[:i]
+	}
+	return p
+}
+
 // yamlPathCovers reports whether setting `planned` necessarily satisfies a
 // check that observed `failed`. Coverage holds when planned == failed, or
 // planned is an ancestor of failed on YAML-segment boundaries — segments are
 // separated by '.' or '['. String prefix alone is not enough: "spec.host" must
-// not be treated as covering "spec.hostNetwork".
+// not be treated as covering "spec.hostNetwork". Callers must pass a
+// normalized `failed` (see normalizeFailedPath) since FailedPath values may
+// carry "=<expected>" suffixes.
 func yamlPathCovers(planned, failed string) bool {
 	if planned == "" || failed == "" {
 		return false
@@ -496,25 +509,49 @@ func yamlPathCovers(planned, failed string) bool {
 	return next == '.' || next == '['
 }
 
-// controlIsCoveredByPlannedPaths reports whether every failed path on the
-// control's failed rules is covered by at least one planned path. Controls
-// with no FailedPath data (e.g. rules that only carry ReviewPath/DeletePath)
-// are NOT promoted — without a concrete failed location we can't prove
-// coverage, and silently promoting would re-introduce the bug in reverse.
+// actionableLocation returns the YAML location a path entry describes,
+// regardless of which remediation field it was stored in. PosturePaths
+// entries carry exactly one of FailedPath / DeletePath / ReviewPath / FixPath
+// in practice (see appendPaths in opa-utils), so taking the first non-empty
+// one yields the location the check was actually pointing at.
+func actionableLocation(p armotypes.PosturePaths) string {
+	if p.FailedPath != "" {
+		return normalizeFailedPath(p.FailedPath)
+	}
+	if p.DeletePath != "" {
+		return normalizeFailedPath(p.DeletePath)
+	}
+	if p.ReviewPath != "" {
+		return normalizeFailedPath(p.ReviewPath)
+	}
+	if p.FixPath.Path != "" {
+		return p.FixPath.Path
+	}
+	return ""
+}
+
+// controlIsCoveredByPlannedPaths reports whether every actionable path entry
+// on the control's failed rules is covered by some planned FixPath. Every
+// entry counts — FailedPath, DeletePath, and ReviewPath alike — so a control
+// that requires (for example) deleting `spec.hostNetwork` cannot be promoted
+// just because an unrelated FailedPath happens to overlap with a planned
+// edit. A control whose rules carry no actionable locations at all is not
+// promoted either (nothing concrete to match against).
 func controlIsCoveredByPlannedPaths(ac *resourcesresults.ResourceAssociatedControl, plannedPaths []string) bool {
-	sawFailedPath := false
+	sawActionablePath := false
 	for _, rule := range ac.ResourceAssociatedRules {
 		if !rule.GetStatus(nil).IsFailed() {
 			continue
 		}
 		for _, p := range rule.Paths {
-			if p.FailedPath == "" {
+			loc := actionableLocation(p)
+			if loc == "" {
 				continue
 			}
-			sawFailedPath = true
+			sawActionablePath = true
 			covered := false
 			for _, planned := range plannedPaths {
-				if yamlPathCovers(planned, p.FailedPath) {
+				if yamlPathCovers(planned, loc) {
 					covered = true
 					break
 				}
@@ -524,7 +561,7 @@ func controlIsCoveredByPlannedPaths(ac *resourcesresults.ResourceAssociatedContr
 			}
 		}
 	}
-	return sawFailedPath
+	return sawActionablePath
 }
 
 // addYamlExpressionsFromResourceAssociatedControl appends one yaml expression

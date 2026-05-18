@@ -821,6 +821,191 @@ func TestPrepareResourcesToFix_PartialPromotedWhenRemainderCovered(t *testing.T)
 	assert.Empty(t, h.UnfixedControls())
 }
 
+// --- blocker regressions -------------------------------------------------
+
+// Some FailedPath values in the wild carry an "=<expected>" suffix
+// (e.g. "spec.…runAsNonRoot=true", as in resourcetable_test.go). Coverage
+// must compare against the normalized path; otherwise a planned edit on the
+// same field is silently rejected because the next char after the planned
+// prefix is '=' rather than '.'/'['.
+func TestPrepareResourcesToFix_FailedPathWithEqualsSuffix(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				failedControl("C-FIX", "owns runAsNonRoot fix",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.runAsNonRoot", "true"),
+				),
+				failedControl("C-OBS", "fails on same field with =<value> suffix",
+					failedRuleNoFixAtPath("spec.template.spec.containers[0].securityContext.runAsNonRoot=true"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 2, h.FixedControlsCount(), "normalized FailedPath must match planned FixPath even with =<value> suffix")
+	assert.Empty(t, h.UnfixedControls())
+}
+
+func TestNormalizeFailedPath(t *testing.T) {
+	cases := map[string]string{
+		"spec.a.b":                           "spec.a.b",
+		"spec.a.b=true":                      "spec.a.b",
+		"spec.a[0].b=null":                   "spec.a[0].b",
+		"":                                   "",
+		"=onlyValue":                         "",
+		"spec.containers[0].image=nginx:1.0": "spec.containers[0].image",
+	}
+	for in, want := range cases {
+		assert.Equal(t, want, normalizeFailedPath(in), in)
+	}
+}
+
+// A control whose rule emits an outstanding DeletePath that another planned
+// edit does NOT touch must remain unfixed — covering only an unrelated
+// FailedPath in the same rule must not be enough to promote.
+func TestPrepareResourcesToFix_OutstandingDeletePathBlocksPromotion(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	// C-MIXED has two path entries: a FailedPath that another control will
+	// cover, and a DeletePath at a completely different location that nothing
+	// covers. The control must NOT be promoted.
+	mixed := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-MIXED",
+		Name:      "mixed-with-delete",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "rule-mixed",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{FailedPath: "spec.template.spec.containers[0].image"},
+					{DeletePath: "spec.template.spec.hostNetwork"},
+				},
+			},
+		},
+	}
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				mixed,
+				failedControl("C-IMG", "owns image fix",
+					failedRuleWithFix("spec.template.spec.containers[0].image", "nginx:1.25"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 1, h.FixedControlsCount(), "only C-IMG; C-MIXED has an unsatisfied DeletePath")
+	if assert.Len(t, h.UnfixedControls(), 1) {
+		assert.Equal(t, "C-MIXED", h.UnfixedControls()[0].ControlID)
+	}
+}
+
+// Same shape with ReviewPath: an outstanding ReviewPath at a location no
+// planned edit touches must keep the control unfixed.
+func TestPrepareResourcesToFix_OutstandingReviewPathBlocksPromotion(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	mixed := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-MIXED",
+		Name:      "mixed-with-review",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "rule-mixed",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{FailedPath: "spec.template.spec.containers[0].image"},
+					{ReviewPath: "spec.template.spec.serviceAccountName"},
+				},
+			},
+		},
+	}
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				mixed,
+				failedControl("C-IMG", "owns image fix",
+					failedRuleWithFix("spec.template.spec.containers[0].image", "nginx:1.25"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 1, h.FixedControlsCount())
+	if assert.Len(t, h.UnfixedControls(), 1) {
+		assert.Equal(t, "C-MIXED", h.UnfixedControls()[0].ControlID)
+	}
+}
+
+// The headline reproducer's exact path shape: C-0057 has TWO path entries
+// for the SAME YAML location — one carrying FailedPath, the other carrying
+// DeletePath. C-0016's planned FixPath covers that location, so BOTH entries
+// are covered and C-0057 must be promoted. (This is the canonical regolibrary
+// shape and the original bug.)
+func TestPrepareResourcesToFix_DeletePathAtSameLocationStillPromoted(t *testing.T) {
+	dir := t.TempDir()
+	manifest := writeManifest(t, dir, "deploy.yaml", "apiVersion: apps/v1\nkind: Deployment\n")
+	rel, _ := filepath.Rel(dir, manifest)
+	res := buildResource(t, dir, rel, "Deployment", "demo", 0)
+
+	c0057 := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-0057",
+		Name:      "Privileged container",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{
+			{
+				Name:   "rule-privilege-escalation",
+				Status: apis.StatusFailed,
+				Paths: []armotypes.PosturePaths{
+					{FailedPath: "spec.template.spec.containers[0].securityContext.privileged"},
+					{DeletePath: "spec.template.spec.containers[0].securityContext.privileged"},
+				},
+			},
+		},
+	}
+	results := []resourcesresults.Result{
+		{
+			ResourceID:  res.GetID(),
+			RawResource: res,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+				c0057,
+				failedControl("C-0016", "Allow privilege escalation",
+					failedRuleWithFix("spec.template.spec.containers[0].securityContext.privileged", "false"),
+				),
+			},
+		},
+	}
+	h := newHandlerForResources(dir, results, nil, false)
+	_ = h.PrepareResourcesToFix(context.Background())
+
+	assert.Equal(t, 2, h.FixedControlsCount(), "both C-0016 and C-0057 promoted (delete & failed at same location both covered)")
+	assert.Empty(t, h.UnfixedControls())
+}
+
 func TestNewFixHandler_AcceptsValidReport(t *testing.T) {
 	dir := t.TempDir()
 	report := reporthandlingv2.PostureReport{
