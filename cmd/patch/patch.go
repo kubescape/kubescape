@@ -86,6 +86,7 @@ func GetPatchCmd(ks meta.IKubescape) *cobra.Command {
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.BuildkitAddress, "address", "a", "unix:///run/buildkit/buildkitd.sock", "Address of buildkitd service, defaults to local buildkitd.sock")
 	patchCmd.PersistentFlags().DurationVar(&patchInfo.Timeout, "timeout", 5*time.Minute, "Timeout for the operation, defaults to '5m'")
 	patchCmd.PersistentFlags().BoolVar(&patchInfo.IgnoreError, "ignore-errors", false, "Ignore errors and continue patching other images. Default to false")
+	patchCmd.PersistentFlags().BoolVar(&patchInfo.Push, "push", false, "Push the patched image to the source registry. Default to false (the patched image is only loaded into the local image store)")
 
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Username, "username", "u", "", "Username for registry login")
 	patchCmd.PersistentFlags().StringVarP(&patchInfo.Password, "password", "p", "", "Password for registry login")

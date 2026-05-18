@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
 )
@@ -82,7 +83,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 
 	if len(errors) > 0 {
 		for _, err := range errors {
-			logger.L().Ctx(ks.Context()).Warning(err.Error())
+			logger.L().Ctx(ks.Context()).Warning("failed to fix resource", helpers.Error(err))
 		}
 		return fmt.Errorf("failed to fix some resources, check the logs for more details")
 	}

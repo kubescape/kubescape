@@ -188,3 +188,39 @@ func Test_parseWorkloadIdentifierString_Valid(t *testing.T) {
 		assert.Equal(t, "Deployment", name)
 	})
 }
+
+func Test_parseWorkloadIdentifierString_Values(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Input       string
+		WantKind    string
+		WantName    string
+		WantErr     bool
+	}{
+		{
+			Description: "valid kind and name",
+			Input:       "Deployment/nginx",
+			WantKind:    "Deployment",
+			WantName:    "nginx",
+			WantErr:     false,
+		},
+		{
+			Description: "too many segments",
+			Input:       "default/Deployment/nginx",
+			WantErr:     true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.Description, func(t *testing.T) {
+			kind, name, err := parseWorkloadIdentifierString(tc.Input)
+			if tc.WantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+			assert.Equal(t, tc.WantKind, kind)
+			assert.Equal(t, tc.WantName, name)
+		})
+	}
+}

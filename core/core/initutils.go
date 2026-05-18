@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/google/uuid"
@@ -113,8 +112,7 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	case hostSensorVal != nil && *hostSensorVal:
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create host scanner: %s", err.Error()))
-
+			logger.L().Ctx(ctx).Warning("failed to create host scanner", helpers.Error(err))
 			return hostsensorutils.NewHostSensorHandlerMock()
 		}
 

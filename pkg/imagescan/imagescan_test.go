@@ -1,8 +1,11 @@
 package imagescan
 
 import (
+	"errors"
+	"path/filepath"
 	"testing"
 
+	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -189,4 +192,112 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	require.NoError(t, err)
 	defer svcWithoutDefault.Close()
 	assert.False(t, svcWithoutDefault.useDefaultMatchers)
+}
+
+func TestValidateDBLoad(t *testing.T) {
+	tests := []struct {
+		name    string
+		loadErr error
+		status  *vulnerability.ProviderStatus
+		wantErr string
+	}{
+		{
+			name:    "load error is wrapped",
+			loadErr: errors.New("boom"),
+			wantErr: "failed to load vulnerability db: boom",
+		},
+		{
+			name:    "nil status is rejected",
+			wantErr: "unable to determine the status of the vulnerability db",
+		},
+		{
+			name: "status error is wrapped",
+			status: &vulnerability.ProviderStatus{
+				Error: errors.New("status failure"),
+			},
+			wantErr: "db could not be loaded: status failure",
+		},
+		{
+			name:   "valid status passes",
+			status: &vulnerability.ProviderStatus{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDBLoad(tt.loadErr, tt.status)
+			if tt.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+
+			require.Error(t, err)
+			assert.EqualError(t, err, tt.wantErr)
+		})
+	}
+}
+
+func TestNewDefaultDBConfig(t *testing.T) {
+	tests := []struct {
+		name       string
+		grypeURL   string
+		wantURL    string
+		wantErr    string
+		wantDir    string
+		wantUpdate bool
+	}{
+		{
+			name:       "default config uses bundled database URL",
+			wantURL:    defaultGrypeListingURL,
+			wantDir:    filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate: true,
+		},
+		{
+			name:       "custom http URL overrides default",
+			grypeURL:   "http://example.com/custom-db/listing.json",
+			wantURL:    "http://example.com/custom-db/listing.json",
+			wantDir:    filepath.Join(xdg.CacheHome, defaultDBDirName),
+			wantUpdate: true,
+		},
+		{
+			name:     "custom URL without host is rejected",
+			grypeURL: "http:///custom-db/listing.json",
+			wantErr:  "invalid grype DB URL: missing host",
+		},
+		{
+			name:     "unsupported URL scheme is rejected",
+			grypeURL: "ftp://example.com/custom-db/listing.json",
+			wantErr:  "invalid scheme: ftp",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			distCfg, installCfg, shouldUpdate, err := NewDefaultDBConfig(tt.grypeURL)
+			if tt.wantErr != "" {
+				require.Error(t, err)
+				assert.EqualError(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantURL, distCfg.LatestURL)
+			assert.Equal(t, tt.wantDir, installCfg.DBRootDir)
+			assert.Equal(t, tt.wantUpdate, shouldUpdate)
+		})
+	}
+}
+
+func TestDefaultMatcherConfig(t *testing.T) {
+	cfg := defaultMatcherConfig()
+	assert.Equal(t, "https://search.maven.org/solrsearch/select", cfg.Java.ExternalSearchConfig.MavenBaseURL)
+	assert.False(t, cfg.Java.UseCPEs)
+	assert.False(t, cfg.Ruby.UseCPEs)
+	assert.False(t, cfg.Python.UseCPEs)
+	assert.False(t, cfg.Dotnet.UseCPEs)
+	assert.False(t, cfg.Javascript.UseCPEs)
+	assert.False(t, cfg.Golang.UseCPEs)
+	assert.True(t, cfg.Golang.AlwaysUseCPEForStdlib)
+	assert.False(t, cfg.Golang.AllowMainModulePseudoVersionComparison)
+	assert.True(t, cfg.Stock.UseCPEs)
 }

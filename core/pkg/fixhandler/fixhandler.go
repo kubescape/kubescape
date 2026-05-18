@@ -396,16 +396,16 @@ func (h *FixHandler) PrintUnfixedControls(phase Phase) {
 	if phase == PhaseApplied {
 		verb = "Auto-fixed"
 	}
-	sb.WriteString(fmt.Sprintf("%s %d of %d flagged control instances. The following require manual remediation:\n",
-		verb, h.fixedControlsCount, totalFailed))
+	fmt.Fprintf(&sb, "%s %d of %d flagged control instances. The following require manual remediation:\n",
+		verb, h.fixedControlsCount, totalFailed)
 
 	for _, u := range deduped {
 		location := u.FilePath
 		if location == "" {
 			location = "<unknown>"
 		}
-		sb.WriteString(fmt.Sprintf("  - %s %s on %s/%s (%s) — %s\n",
-			u.ControlID, u.ControlName, u.ResourceKind, u.ResourceName, location, u.Reason))
+		fmt.Fprintf(&sb, "  - %s %s on %s/%s (%s) — %s\n",
+			u.ControlID, u.ControlName, u.ResourceKind, u.ResourceName, location, u.Reason)
 	}
 
 	logger.L().Warning(sb.String())
@@ -416,14 +416,14 @@ func (h *FixHandler) PrintExpectedChanges(resourcesToFix []ResourceFixInfo) {
 	sb.WriteString("The following changes will be applied:\n")
 
 	for _, resourceFixInfo := range resourcesToFix {
-		sb.WriteString(fmt.Sprintf("File: %s\n", resourceFixInfo.FilePath))
-		sb.WriteString(fmt.Sprintf("Resource: %s\n", resourceFixInfo.Resource.GetName()))
-		sb.WriteString(fmt.Sprintf("Kind: %s\n", resourceFixInfo.Resource.GetKind()))
+		fmt.Fprintf(&sb, "File: %s\n", resourceFixInfo.FilePath)
+		fmt.Fprintf(&sb, "Resource: %s\n", resourceFixInfo.Resource.GetName())
+		fmt.Fprintf(&sb, "Kind: %s\n", resourceFixInfo.Resource.GetKind())
 		sb.WriteString("Changes:\n")
 
 		i := 1
 		for _, fixPath := range resourceFixInfo.YamlExpressions {
-			sb.WriteString(fmt.Sprintf("\t%d) %s = %s\n", i, fixPath.Path, fixPath.Value))
+			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i, fixPath.Path, fixPath.Value)
 			i++
 		}
 		sb.WriteString("\n------\n")
@@ -466,17 +466,20 @@ func (h *FixHandler) ApplyChanges(ctx context.Context, resourcesToFix []Resource
 }
 
 func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath string, documentIndex int, err error) {
-	splittedPath := strings.Split(filePathWithIndex, ":")
-	if len(splittedPath) <= 1 {
+	lastColon := strings.LastIndex(filePathWithIndex, ":")
+	if lastColon == -1 {
 		return "", 0, fmt.Errorf("expected to find ':' in file path")
 	}
 
-	filePath = splittedPath[0]
-	if documentIndex, err := strconv.Atoi(splittedPath[1]); err != nil {
+	filePath = filePathWithIndex[:lastColon]
+	indexStr := filePathWithIndex[lastColon+1:]
+
+	documentIndex, err = strconv.Atoi(indexStr)
+	if err != nil {
 		return "", 0, err
-	} else {
-		return filePath, documentIndex, nil
 	}
+
+	return filePath, documentIndex, nil
 }
 
 func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
@@ -608,7 +611,7 @@ func GetFileString(filepath string) (string, error) {
 }
 
 func writeFixesToFile(filepath, content string) error {
-	err := os.WriteFile(filepath, []byte(content), 0644) //nolint:gosec
+	err := os.WriteFile(filepath, []byte(content), 0644) //nolint:gosec // Writes back to user's own manifest files; 0644 preserves expected permissions.
 
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)

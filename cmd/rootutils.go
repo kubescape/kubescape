@@ -18,12 +18,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var isTerminal = isatty.IsTerminal
+
 func initLogger() {
 	if rootInfo.LoggerName == "" {
 		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
 			rootInfo.LoggerName = l
 		} else {
-			if isatty.IsTerminal(os.Stdout.Fd()) {
+			if isTerminal(os.Stdout.Fd()) {
 				rootInfo.LoggerName = iconlogger.LoggerName
 			} else {
 				rootInfo.LoggerName = zaplogger.LoggerName
