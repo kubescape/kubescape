@@ -561,3 +561,42 @@ func TestSkipNamespace(t *testing.T) {
 		})
 	}
 }
+
+func TestSplit(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "removes empty entries",
+			input:    "default,,kube-system,",
+			expected: []string{"default", "kube-system"},
+		},
+		{
+			name:     "only commas",
+			input:    ",,",
+			expected: []string{},
+		},
+		{
+			name:     "trims whitespace",
+			input:    " default , kube-system ",
+			expected: []string{"default", "kube-system"},
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := split(tt.input)
+
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Fatalf("split(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}

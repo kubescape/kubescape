@@ -14,6 +14,7 @@ import (
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gopkg.in/op/go-logging.v1"
 )
 
@@ -651,6 +652,65 @@ func TestGetLocalPath(t *testing.T) {
 			if got := getLocalPath(tt.args.report); got != tt.want {
 				t.Errorf("getLocalPath() = %v, want %v", got, tt.want)
 			}
+		})
+	}
+}
+
+func TestGetFilePathAndIndex(t *testing.T) {
+	h := &FixHandler{}
+
+	tests := []struct {
+		name          string
+		input         string
+		expectedPath  string
+		expectedIndex int
+		expectErr     bool
+	}{
+		{
+			name:          "windows absolute path",
+			input:         "C:\\Users\\admin\\deploy.yaml:2",
+			expectedPath:  "C:\\Users\\admin\\deploy.yaml",
+			expectedIndex: 2,
+			expectErr:     false,
+		},
+		{
+			name:          "unix path containing colon",
+			input:         "dir:with:colon/deploy.yaml:3",
+			expectedPath:  "dir:with:colon/deploy.yaml",
+			expectedIndex: 3,
+			expectErr:     false,
+		},
+		{
+			name:          "standard unix path",
+			input:         "/tmp/deploy.yaml:1",
+			expectedPath:  "/tmp/deploy.yaml",
+			expectedIndex: 1,
+			expectErr:     false,
+		},
+		{
+			name:      "missing separator",
+			input:     "deploy.yaml",
+			expectErr: true,
+		},
+		{
+			name:      "invalid document index",
+			input:     "deploy.yaml:not-a-number",
+			expectErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path, index, err := h.getFilePathAndIndex(tt.input)
+
+			if tt.expectErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
+			require.Equal(t, tt.expectedPath, path)
+			require.Equal(t, tt.expectedIndex, index)
 		})
 	}
 }
