@@ -517,13 +517,13 @@ func TestUnfixedControls_ReturnsCopy(t *testing.T) {
 		"caller mutation must not leak into internal state")
 }
 
-// --- cross-control reconciliation (issue-5) ------------------------------
+// --- cross-control reconciliation (#2279) --------------------------------
 
 func TestYamlPathCovers(t *testing.T) {
 	cases := []struct {
-		name           string
+		name            string
 		planned, failed string
-		want           bool
+		want            bool
 	}{
 		{"exact match", "spec.containers[0].securityContext.privileged", "spec.containers[0].securityContext.privileged", true},
 		{"planned is parent (.)", "spec.containers[0].securityContext", "spec.containers[0].securityContext.privileged", true},
