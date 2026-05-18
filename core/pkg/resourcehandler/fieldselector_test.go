@@ -22,7 +22,7 @@ func TestGetNamespacesSelector(t *testing.T) {
 func TestExcludedNamespacesSelectors(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 
-	es := NewExcludeSelector("default,ingress")
+	es := NewExcludeSelector(" default , ingress ")
 	selectors := es.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
 	assert.Equal(t, 1, len(selectors))
 	assert.Equal(t, "metadata.namespace!=default,metadata.namespace!=ingress", selectors[0])
@@ -35,7 +35,7 @@ func TestExcludedNamespacesSelectors(t *testing.T) {
 func TestIncludeNamespacesSelectors(t *testing.T) {
 	k8sinterface.InitializeMapResourcesMock()
 
-	is := NewIncludeSelector("default,ingress")
+	is := NewIncludeSelector(" default , ingress ")
 	selectors := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
 	assert.Equal(t, 2, len(selectors))
 	assert.Equal(t, "metadata.namespace==default", selectors[0])
