@@ -313,19 +313,19 @@ func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
 	var sb strings.Builder
 	sb.WriteString("\nHelm-rendered resources cannot be patched in place. Suggested values.yaml edits:\n\n")
 	for _, s := range suggestions {
-		sb.WriteString(fmt.Sprintf("Chart: %s (%s)\n", s.ChartName, s.ChartPath))
+		fmt.Fprintf(&sb, "Chart: %s (%s)\n", s.ChartName, s.ChartPath)
 		if s.TemplateFile != "" {
-			sb.WriteString(fmt.Sprintf("Template: %s\n", s.TemplateFile))
+			fmt.Fprintf(&sb, "Template: %s\n", s.TemplateFile)
 		}
-		sb.WriteString(fmt.Sprintf("Resource: %s/%s\n", s.Resource.GetKind(), s.Resource.GetName()))
+		fmt.Fprintf(&sb, "Resource: %s/%s\n", s.Resource.GetKind(), s.Resource.GetName())
 		sb.WriteString("Required changes (rendered-YAML paths):\n")
 		for i, fp := range s.FixPaths {
-			sb.WriteString(fmt.Sprintf("\t%d) %s = %s\n", i+1, fp.Path, fp.Value))
+			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i+1, fp.Path, fp.Value)
 		}
 		if len(s.ValuesPaths) > 0 {
 			sb.WriteString("Candidate .Values keys referenced by this template:\n")
 			for _, v := range s.ValuesPaths {
-				sb.WriteString(fmt.Sprintf("\t- .Values.%s\n", v))
+				fmt.Fprintf(&sb, "\t- .Values.%s\n", v)
 			}
 			sb.WriteString("Edit one of these in values.yaml to satisfy the change above.\n")
 		} else {
