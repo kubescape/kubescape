@@ -42,6 +42,10 @@ func (m *MockIKubescape) Fix(_ *metav1.FixInfo) error {
 	return nil
 }
 
+func (m *MockIKubescape) Diff(_ *metav1.DiffInfo) error {
+	return nil
+}
+
 func (m *MockIKubescape) Patch(_ *metav1.PatchInfo, _ *cautils.ScanInfo) (bool, error) {
 	return false, nil
 }
