@@ -38,7 +38,7 @@ kubescape scan [target] [flags]
 |------|-------------|---------|
 | `--account <id>` | Kubescape SaaS account ID | from cache |
 | `--access-key <key>` | Kubescape SaaS access key | from cache |
-| `--compliance-threshold <float>` | Fail if compliance score is below threshold | `0` |
+| `--compliance-threshold <float>` | Fail if compliance score is below threshold. Applies to `scan framework`, `scan control`, and `--view resource\|control` — see [score thresholds](#score-thresholds). | `0` |
 | `--controls-config <path>` | Path to controls configuration file | - |
 | `-e, --exclude-namespaces <ns>` | Namespaces to exclude (comma-separated) | - |
 | `--exceptions <path>` | Path to exceptions file | - |
@@ -78,12 +78,28 @@ kubescape scan https://github.com/org/repo
 # Output to JSON file
 kubescape scan --format json --output results.json
 
-# Set compliance threshold (exit 1 if below)
-kubescape scan --compliance-threshold 80
+# Set compliance threshold (exit 1 if below). Combine with a framework,
+# control, or --view resource|control (see "Score thresholds" below).
+kubescape scan framework nsa --compliance-threshold 80
+kubescape scan --view resource --compliance-threshold 80
 
 # Exclude namespaces
 kubescape scan --exclude-namespaces kube-system,kube-public
 ```
+
+### Score thresholds
+
+`--compliance-threshold` (compliance score) and the deprecated
+`--fail-threshold` (risk score) apply to the following invocations:
+
+- `kubescape scan framework <name> ...`
+- `kubescape scan control <id> ...`
+- `kubescape scan --view resource ...` or `--view control ...`
+
+The default `kubescape scan [path]` uses `--view security`, which does
+not evaluate against a score threshold. To gate a pipeline on the
+compliance or risk score, use one of the forms above.
+`--severity-threshold` and `--fail-coverage-below` apply in every view.
 
 ---
 

@@ -252,14 +252,23 @@ kubescape operator scan vulnerabilities
 
 We offer two important metrics to assess compliance:
 
-- Control Compliance Score: This score measures the compliance of individual controls within a framework. It is calculated by evaluating the ratio of resources that passed to the total number of resources evaluated against that control.
+- Control Compliance Score: This score measures the compliance of individual controls within a framework. It is calculated by evaluating the ratio of resources that passed to the total number of resources evaluated against that control. To check against a threshold, use the resource or control view:
     ```bash
-    kubescape scan --compliance-threshold <SCORE_VALUE[float32]>
+    kubescape scan --view resource  --compliance-threshold <SCORE_VALUE[float32]>
+    kubescape scan --view control   --compliance-threshold <SCORE_VALUE[float32]>
+    kubescape scan control <CONTROL_ID> --compliance-threshold <SCORE_VALUE[float32]>
     ```
 - Framework Compliance Score: This score provides an overall assessment of your cluster's compliance with a specific framework. It is calculated by averaging the Control Compliance Scores of all controls within the framework.
     ```bash
     kubescape scan framework <FRAMEWORK_NAME> --compliance-threshold <SCORE_VALUE[float32]>
     ```
+
+`--compliance-threshold` (compliance score) and the deprecated
+`--fail-threshold` (risk score) apply to the framework/control
+subcommands and to `--view resource|control`. The default
+`kubescape scan <path>` (security view) does not evaluate against
+these score thresholds, so use one of the forms above when you want
+the exit code to reflect the score.
 
 ### Output Formats
 
