@@ -37,6 +37,11 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 		// download exceptions from Kubescape Cloud backend
 		return getter.GetKSCloudAPIConnector()
 	}
+	// TODO(kubescape/kubescape#1982): add CRD-based exception source.
+	// When running in-cluster, query SecurityException / ClusterSecurityException
+	// CRDs and merge results with the downloaded/cloud exceptions.
+	// See CRDExceptionsGetter.GetExceptions() for the planned implementation.
+	//
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
