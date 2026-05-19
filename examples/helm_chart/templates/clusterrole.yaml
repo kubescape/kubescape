@@ -8,4 +8,7 @@ rules:
   - apiGroups: ["*"]
     resources: ["*"]
     verbs: ["get", "list", "describe"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
 
