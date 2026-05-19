@@ -61,6 +61,7 @@ func (opap *OPAProcessor) updateResults(ctx context.Context) {
 				opap.AllPolicies.Controls, // update status depending on action required
 				resourcesresults.WithExceptionsProcessor(processor),
 			)
+			opap.emitExceptionMatchEvents(resource, t)
 		}
 
 		// summarize the resources
