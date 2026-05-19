@@ -53,5 +53,6 @@ pipeline {
         }
     }
 }
-kubescape scan framework nsa . --format junit --output kubescape-results.xml
+```
+
 
