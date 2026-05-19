@@ -256,6 +256,7 @@ func TestTimedCacheMultipleInvalidatesDontBreakTTL(t *testing.T) {
 
 func TestTimedCacheFreshSetNotClearedByExpiredTick(t *testing.T) {
 	cache := NewTimedCache[string](10 * time.Millisecond)
+	defer cache.Stop()
 
 	cache.Set("original")
 
