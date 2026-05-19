@@ -1,4 +1,3 @@
-cat > docs/jenkins.md << 'EOF'
 # Integrating with Jenkins CI/CD
 
 Use Jenkins to scan your Kubernetes manifests for misconfigurations
@@ -20,6 +19,13 @@ workflow.
 curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
 export PATH=$PATH:$HOME/.kubescape/bin
 kubescape scan . --format junit --output results.xml --exclude-namespaces kube-system,kube-public
+```
+
+## Declarative Pipeline
+
+Alternatively,you can integrate kubescape into a Jenkins Declarative Pipeline:
+
+```groovy
 pipeline {
     agent any
     environment {
