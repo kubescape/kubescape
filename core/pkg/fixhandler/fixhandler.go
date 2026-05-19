@@ -128,6 +128,10 @@ func (h *FixHandler) getPathFromRawResource(obj map[string]interface{}) string {
 	return ""
 }
 
+// PrepareResourcesToFix returns the YAML-source resources that the existing
+// yq-based pipeline can patch. Helm-rendered resources are split off into
+// PrepareHelmSuggestions because their fix paths reference rendered output
+// that has no reliable line mapping back to the source template.
 func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInfo {
 	resourceIdToResource := h.buildResourcesMap()
 
@@ -262,6 +266,100 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	}
 
 	return resourcesToFix
+}
+
+// PrepareHelmSuggestions collects fix guidance for resources whose Source is a
+// Helm chart. We never auto-edit template files for these: the fix paths are
+// keyed against rendered YAML, and the previous attempts at mapping rendered
+// lines back to template lines (#1215/#1551/#1620/#1628) all foundered on
+// range, conditionals, whitespace trimming, and partials. Instead we surface
+// the rule's intent plus the .Values.* keys the template statically reads, so
+// the user can edit values.yaml themselves.
+func (h *FixHandler) PrepareHelmSuggestions(ctx context.Context) []HelmFixSuggestion {
+	resourceIdToResource := h.buildResourcesMap()
+	suggestions := make([]HelmFixSuggestion, 0)
+
+	for _, result := range h.reportObj.Results {
+		if !result.GetStatus(nil).IsFailed() {
+			continue
+		}
+		resourceObj := resourceIdToResource[result.ResourceID]
+		if resourceObj == nil || resourceObj.Source == nil {
+			continue
+		}
+		if resourceObj.Source.FileType != reporthandling.SourceTypeHelmChart {
+			continue
+		}
+
+		var fixPaths []armotypes.FixPath
+		for i := range result.AssociatedControls {
+			ac := &result.AssociatedControls[i]
+			if !ac.GetStatus(nil).IsFailed() {
+				continue
+			}
+			for _, rule := range ac.ResourceAssociatedRules {
+				if !rule.GetStatus(nil).IsFailed() {
+					continue
+				}
+				for _, rp := range rule.Paths {
+					if rp.FixPath.Path == "" {
+						continue
+					}
+					if strings.HasPrefix(rp.FixPath.Value, UserValuePrefix) && h.fixInfo.SkipUserValues {
+						continue
+					}
+					fixPaths = append(fixPaths, rp.FixPath)
+				}
+			}
+		}
+		if len(fixPaths) == 0 {
+			continue
+		}
+
+		suggestions = append(suggestions, HelmFixSuggestion{
+			Resource:     resourceObj,
+			ChartPath:    resourceObj.Source.HelmPath,
+			ChartName:    resourceObj.Source.HelmChartName,
+			TemplateFile: resourceObj.Source.HelmTemplateFile,
+			ValuesPaths:  resourceObj.Source.HelmValuesPaths,
+			FixPaths:     fixPaths,
+		})
+	}
+	return suggestions
+}
+
+// PrintHelmSuggestions renders the Helm fix guidance to the logger. It is
+// always print-only — we never write edits for Helm sources because we cannot
+// guarantee the .Values key for a given fix path. The user opens values.yaml
+// and applies the change deliberately.
+func (h *FixHandler) PrintHelmSuggestions(suggestions []HelmFixSuggestion) {
+	if len(suggestions) == 0 {
+		return
+	}
+	var sb strings.Builder
+	sb.WriteString("\nHelm-rendered resources cannot be patched in place. Suggested values.yaml edits:\n\n")
+	for _, s := range suggestions {
+		fmt.Fprintf(&sb, "Chart: %s (%s)\n", s.ChartName, s.ChartPath)
+		if s.TemplateFile != "" {
+			fmt.Fprintf(&sb, "Template: %s\n", s.TemplateFile)
+		}
+		fmt.Fprintf(&sb, "Resource: %s/%s\n", s.Resource.GetKind(), s.Resource.GetName())
+		sb.WriteString("Required changes (rendered-YAML paths):\n")
+		for i, fp := range s.FixPaths {
+			fmt.Fprintf(&sb, "\t%d) %s = %s\n", i+1, fp.Path, fp.Value)
+		}
+		if len(s.ValuesPaths) > 0 {
+			sb.WriteString("Candidate .Values keys referenced by this template:\n")
+			for _, v := range s.ValuesPaths {
+				fmt.Fprintf(&sb, "\t- .Values.%s\n", v)
+			}
+			sb.WriteString("Edit one of these in values.yaml to satisfy the change above.\n")
+		} else {
+			sb.WriteString("(No .Values.* references could be statically traced for this template — edit the template directly.)\n")
+		}
+		sb.WriteString("\n------\n")
+	}
+	logger.L().Info(sb.String())
 }
 
 // UnfixedControls returns the failed (resource, control) tuples discovered during

@@ -11,6 +11,9 @@ import (
 	"github.com/kubescape/go-logger"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/internal/testutils"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/mikefarah/yq/v4/pkg/yqlib"
 	"github.com/stretchr/testify/assert"
@@ -654,6 +657,167 @@ func TestGetLocalPath(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths
+// verifies the partition that issue #1772 hinges on: a Helm-rendered
+// resource must (a) be excluded from the yq-based ResourceFixInfo path
+// — applying yq edits using rendered-YAML line numbers is the original bug
+// — and (b) surface as a HelmFixSuggestion carrying the .Values keys
+// statically traced from the source template, so the user can edit
+// values.yaml deliberately.
+func TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths(t *testing.T) {
+	failed := apis.StatusInfo{InnerStatus: apis.StatusFailed}
+
+	// Helm-source resource: must end up in HelmFixSuggestion, never in ResourceFixInfo.
+	helmObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "api"},
+	}
+	helmRes := &reporthandling.Resource{
+		Object: helmObj,
+		Source: &reporthandling.Source{
+			FileType:         reporthandling.SourceTypeHelmChart,
+			HelmPath:         "/charts/myapp",
+			HelmChartName:    "myapp",
+			HelmTemplateFile: "templates/deployment.yaml",
+			HelmValuesPaths:  []string{"image.tag", "replicaCount"},
+		},
+	}
+	// Resource ID is derived by the IMetadata middleware from Object, not
+	// from the ResourceID field — populate it via GetID() so buildResourcesMap
+	// keys match the result lookup.
+	resID := helmRes.GetID()
+
+	report := &reporthandlingv2.PostureReport{
+		Resources: []reporthandling.Resource{*helmRes},
+		Results: []resourcesresults.Result{{
+			ResourceID:  resID,
+			RawResource: helmRes,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+				ControlID: "C-0001",
+				Status:    failed,
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+					Name:   "rule-x",
+					Status: apis.StatusFailed,
+					Paths: []armotypes.PosturePaths{{
+						FixPath: armotypes.FixPath{
+							Path:  "spec.template.spec.containers[0].securityContext.runAsNonRoot",
+							Value: "true",
+						},
+					}},
+				}},
+			}},
+		}},
+	}
+
+	h, err := NewFixHandlerMock()
+	assert.NoError(t, err)
+	h.reportObj = report
+
+	rfi := h.PrepareResourcesToFix(context.TODO())
+	assert.Len(t, rfi, 0, "Helm-rendered resources must not enter the yq-based fix path")
+
+	suggestions := h.PrepareHelmSuggestions(context.TODO())
+	assert.Len(t, suggestions, 1)
+	s := suggestions[0]
+	assert.Equal(t, "myapp", s.ChartName)
+	assert.Equal(t, "/charts/myapp", s.ChartPath)
+	assert.Equal(t, "templates/deployment.yaml", s.TemplateFile)
+	assert.Equal(t, []string{"image.tag", "replicaCount"}, s.ValuesPaths)
+	assert.Len(t, s.FixPaths, 1)
+	assert.Equal(t, "true", s.FixPaths[0].Value)
+}
+
+// TestPrepareHelmSuggestions_MixedHelmAndYamlResources verifies the partition
+// holds when a single report contains both a Helm-rendered resource and a
+// plain YAML resource: the YAML one must take the yq-based ResourceFixInfo
+// path, the Helm one must take the HelmFixSuggestion path, and neither should
+// leak into the other. This is the case that issue #1772 actually surfaces
+// in practice — users scan directories that mix Helm charts with raw manifests.
+func TestPrepareHelmSuggestions_MixedHelmAndYamlResources(t *testing.T) {
+	failed := apis.StatusInfo{InnerStatus: apis.StatusFailed}
+
+	// Plain YAML resource: needs a real file on disk because
+	// PrepareResourcesToFix stat()s the resolved path before queuing it.
+	tmpDir := t.TempDir()
+	yamlRelPath := "deploy.yaml"
+	yamlContent := "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, yamlRelPath), []byte(yamlContent), 0600); err != nil {
+		t.Fatalf("write yaml fixture: %v", err)
+	}
+
+	yamlObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "web"},
+		// sourcePath flags this as a LocalWorkload and feeds getFilePathAndIndex.
+		"sourcePath": yamlRelPath + ":0",
+	}
+	yamlRes := &reporthandling.Resource{
+		Object: yamlObj,
+		Source: &reporthandling.Source{FileType: reporthandling.SourceTypeYaml},
+	}
+	yamlResID := yamlRes.GetID()
+
+	helmObj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]interface{}{"name": "api"},
+	}
+	helmRes := &reporthandling.Resource{
+		Object: helmObj,
+		Source: &reporthandling.Source{
+			FileType:         reporthandling.SourceTypeHelmChart,
+			HelmPath:         "/charts/myapp",
+			HelmChartName:    "myapp",
+			HelmTemplateFile: "templates/deployment.yaml",
+			HelmValuesPaths:  []string{"image.tag"},
+		},
+	}
+	helmResID := helmRes.GetID()
+
+	mkResult := func(rid string, raw *reporthandling.Resource, fixPath string) resourcesresults.Result {
+		return resourcesresults.Result{
+			ResourceID:  rid,
+			RawResource: raw,
+			AssociatedControls: []resourcesresults.ResourceAssociatedControl{{
+				ControlID: "C-0001",
+				Status:    failed,
+				ResourceAssociatedRules: []resourcesresults.ResourceAssociatedRule{{
+					Name:   "rule-x",
+					Status: apis.StatusFailed,
+					Paths: []armotypes.PosturePaths{{
+						FixPath: armotypes.FixPath{Path: fixPath, Value: "true"},
+					}},
+				}},
+			}},
+		}
+	}
+
+	report := &reporthandlingv2.PostureReport{
+		Resources: []reporthandling.Resource{*yamlRes, *helmRes},
+		Results: []resourcesresults.Result{
+			mkResult(yamlResID, yamlRes, "spec.template.spec.containers[0].securityContext.runAsNonRoot"),
+			mkResult(helmResID, helmRes, "spec.template.spec.containers[0].securityContext.runAsNonRoot"),
+		},
+	}
+
+	h, err := NewFixHandlerMock()
+	assert.NoError(t, err)
+	h.reportObj = report
+	h.localBasePath = tmpDir
+
+	rfi := h.PrepareResourcesToFix(context.TODO())
+	assert.Len(t, rfi, 1, "exactly the plain YAML resource should reach the yq-based fix path")
+	assert.Equal(t, filepath.Join(tmpDir, yamlRelPath), rfi[0].FilePath)
+	assert.Equal(t, yamlResID, rfi[0].Resource.GetID(), "ResourceFixInfo must not contain the Helm-rendered resource")
+
+	suggestions := h.PrepareHelmSuggestions(context.TODO())
+	assert.Len(t, suggestions, 1, "exactly the Helm resource should produce a HelmFixSuggestion")
+	assert.Equal(t, "myapp", suggestions[0].ChartName)
+	assert.Equal(t, []string{"image.tag"}, suggestions[0].ValuesPaths)
 }
 
 func TestGetFilePathAndIndex(t *testing.T) {
