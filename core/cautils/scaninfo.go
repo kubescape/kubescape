@@ -156,6 +156,7 @@ type ScanInfo struct {
 
 type Getters struct {
 	ExceptionsGetter     getter.IExceptionsGetter
+	CRDExceptionsGetter  getter.IExceptionsGetter
 	ControlsInputsGetter getter.IControlsInputsGetter
 	PolicyGetter         getter.IPolicyGetter
 	AttackTracksGetter   getter.IAttackTracksGetter

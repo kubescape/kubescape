@@ -201,11 +201,21 @@ func (policyHandler *PolicyHandler) getExceptions() ([]armotypes.PostureExceptio
 	}
 
 	exceptions, err := policyHandler.getters.ExceptionsGetter.GetExceptions(policyHandler.clusterName)
-	if err == nil {
-		policyHandler.cachedExceptions.Set(exceptions)
+	if err != nil {
+		return nil, err
 	}
 
-	return exceptions, err
+	if policyHandler.getters.CRDExceptionsGetter != nil {
+		crdExceptions, crdErr := policyHandler.getters.CRDExceptionsGetter.GetExceptions(policyHandler.clusterName)
+		if crdErr != nil {
+			logger.L().Warning("failed to get CRD exceptions", helpers.Error(crdErr))
+			return exceptions, nil
+		}
+		exceptions = append(exceptions, crdExceptions...)
+	}
+
+	policyHandler.cachedExceptions.Set(exceptions)
+	return exceptions, nil
 }
 
 func (policyHandler *PolicyHandler) getControlInputs() (map[string][]string, error) {
