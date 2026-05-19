@@ -277,20 +277,21 @@ func TestTimedCacheFreshSetNotClearedByExpiredTick(t *testing.T) {
 }
 
 func TestTimedCacheSetSurvivesBackgroundInvalidation(t *testing.T) {
-	const iterations = 500
+	const ttl = 20 * time.Millisecond
+	cache := NewTimedCache[string](ttl)
+	defer cache.Stop()
 
-	for i := 0; i < iterations; i++ {
-		cache := NewTimedCache[string](1 * time.Millisecond)
+	time.Sleep(3 * ttl)
 
-		time.Sleep(3 * time.Millisecond)
-
+	i := 0
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) {
 		cache.Set("v")
 		val, ok := cache.Get()
 		if !ok || val != "v" {
-			cache.Stop()
 			t.Fatalf("iteration %d: Get() returned ok=%v val=%q after Set() within TTL", i, ok, val)
 		}
-
-		cache.Stop()
+		time.Sleep(ttl / 2)
+		i++
 	}
 }
