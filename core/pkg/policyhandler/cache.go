@@ -78,11 +78,10 @@ func (c *TimedCache[T]) invalidateTask() {
 		select {
 		case <-ticker.C:
 			c.mutex.Lock()
-			expired := time.Now().After(c.expiration)
-			c.mutex.Unlock()
-			if expired {
-				c.invalidateExternal()
+			if time.Now().After(c.expiration) {
+				c.invalidateLocked()
 			}
+			c.mutex.Unlock()
 		case <-c.stopChan:
 			return
 		}

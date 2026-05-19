@@ -253,3 +253,44 @@ func TestTimedCacheMultipleInvalidatesDontBreakTTL(t *testing.T) {
 
 	t.Error("TTL expiration did not fire after multiple Invalidate() calls")
 }
+
+func TestTimedCacheFreshSetNotClearedByExpiredTick(t *testing.T) {
+	cache := NewTimedCache[string](10 * time.Millisecond)
+
+	cache.Set("original")
+
+	time.Sleep(25 * time.Millisecond)
+
+	cache.Set("fresh")
+
+	val, ok := cache.Get()
+	if !ok || val != "fresh" {
+		t.Errorf("Expected 'fresh' after Set(), got val=%q ok=%v", val, ok)
+	}
+
+	time.Sleep(5 * time.Millisecond)
+
+	val, ok = cache.Get()
+	if !ok || val != "fresh" {
+		t.Errorf("Expected 'fresh' to persist within TTL, got val=%q ok=%v", val, ok)
+	}
+}
+
+func TestTimedCacheSetSurvivesBackgroundInvalidation(t *testing.T) {
+	const iterations = 500
+
+	for i := 0; i < iterations; i++ {
+		cache := NewTimedCache[string](1 * time.Millisecond)
+
+		time.Sleep(3 * time.Millisecond)
+
+		cache.Set("v")
+		val, ok := cache.Get()
+		if !ok || val != "v" {
+			cache.Stop()
+			t.Fatalf("iteration %d: Get() returned ok=%v val=%q after Set() within TTL", i, ok, val)
+		}
+
+		cache.Stop()
+	}
+}
