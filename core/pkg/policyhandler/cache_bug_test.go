@@ -253,3 +253,94 @@ func TestTimedCacheMultipleInvalidatesDontBreakTTL(t *testing.T) {
 
 	t.Error("TTL expiration did not fire after multiple Invalidate() calls")
 }
+
+// TestTimedCacheTOCTOURace is a deterministic regression test for the TOCTOU bug
+// that existed in invalidateTask before the fix.
+//
+// Old buggy flow inside invalidateTask:
+//
+//	lock → check expiry (true) → unlock
+//	                              ← Set("fresh") runs here (lock is free)
+//	invalidateExternal() → clears "fresh"  ← BUG
+//
+// Fixed flow: the write lock is held across the check AND invalidateLocked(), so
+// any concurrent Set() blocks until after invalidation and the fresh value is safe.
+//
+// Synchronization strategy:
+//   - invalidateHook fires before invalidateLocked (inside the write lock in fixed code,
+//     outside it in the old buggy code). It signals a goroutine to call Set("fresh")
+//     and waits, ensuring Set runs in the TOCTOU window if the lock is free.
+//   - afterInvalidateHook fires after invalidateLocked (inside the write lock in fixed
+//     code, after invalidateExternal() in old code). It signals that the full invalidation
+//     cycle is complete, giving the test a reliable point to assert from.
+//
+// On old buggy code: Set("fresh") succeeds inside the gap, hook returns, then
+// invalidateExternal clears "fresh". afterInvalidateHook fires after the clear.
+// Test asserts after both signals → Get() returns false → FAIL (correctly).
+//
+// On fixed code: Set("fresh") blocks on the held write lock. Hook times out, then
+// invalidateLocked runs (clearing the old expiration). afterInvalidateHook fires.
+// Lock is released. Set("fresh") then runs. Test asserts after both signals →
+// Get() returns "fresh" → PASS.
+func TestTimedCacheTOCTOURace(t *testing.T) {
+	const ttl = 20 * time.Millisecond
+
+	var armed atomic.Bool
+	var afterArmed atomic.Bool
+	hookReached := make(chan struct{})
+	setAttempted := make(chan struct{})
+	setDone := make(chan struct{})
+	afterInvalidateDone := make(chan struct{})
+
+	cache := NewTimedCache[string](ttl)
+	defer cache.Stop()
+
+	cache.invalidateHook = func() {
+		if !armed.CompareAndSwap(true, false) {
+			return
+		}
+		afterArmed.Store(true)
+		close(hookReached)
+		<-setAttempted
+	}
+
+	cache.afterInvalidateHook = func() {
+		if !afterArmed.CompareAndSwap(true, false) {
+			return
+		}
+		close(afterInvalidateDone)
+	}
+
+	cache.Set("seed")
+	time.Sleep(2 * ttl)
+	armed.Store(true)
+
+	go func() {
+		select {
+		case <-hookReached:
+			close(setAttempted)
+			cache.Set("fresh")
+			close(setDone)
+		case <-time.After(200 * time.Millisecond):
+			close(setAttempted)
+			close(setDone)
+		}
+	}()
+
+	select {
+	case <-afterInvalidateDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("afterInvalidateHook never fired")
+	}
+
+	select {
+	case <-setDone:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("Set(fresh) goroutine did not complete")
+	}
+
+	val, ok := cache.Get()
+	if !ok || val != "fresh" {
+		t.Errorf("TOCTOU: fresh value was cleared by stale invalidation; got val=%q ok=%v", val, ok)
+	}
+}

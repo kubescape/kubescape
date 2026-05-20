@@ -20,6 +20,17 @@ type TimedCache[T any] struct {
 	stopChan   chan struct{}
 	stopWg     sync.WaitGroup
 	stopped    uint32
+	// invalidateHook, if non-nil, is called inside invalidateTask after the expiry
+	// check succeeds and before invalidateLocked. In the fixed implementation this
+	// call occurs while the write lock is held, so a concurrent Set blocks until
+	// after invalidation. Tests set this field to observe that property; it is
+	// always nil outside of tests.
+	invalidateHook func()
+	// afterInvalidateHook, if non-nil, is called inside invalidateTask immediately
+	// after invalidateLocked returns, still while the write lock is held. Tests use
+	// this to know when the full invalidation cycle is complete. Always nil outside
+	// of tests.
+	afterInvalidateHook func()
 }
 
 func NewTimedCache[T any](ttl time.Duration) *TimedCache[T] {
@@ -78,11 +89,16 @@ func (c *TimedCache[T]) invalidateTask() {
 		select {
 		case <-ticker.C:
 			c.mutex.Lock()
-			expired := time.Now().After(c.expiration)
-			c.mutex.Unlock()
-			if expired {
-				c.invalidateExternal()
+			if time.Now().After(c.expiration) {
+				if c.invalidateHook != nil {
+					c.invalidateHook()
+				}
+				c.invalidateLocked()
+				if c.afterInvalidateHook != nil {
+					c.afterInvalidateHook()
+				}
 			}
+			c.mutex.Unlock()
 		case <-c.stopChan:
 			return
 		}
