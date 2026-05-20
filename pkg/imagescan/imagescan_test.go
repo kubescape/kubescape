@@ -8,6 +8,8 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/anchore/grype/grype/vulnerability"
+	grypepkg "github.com/anchore/grype/grype/pkg"
+	"github.com/anchore/grype/grype/match"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
