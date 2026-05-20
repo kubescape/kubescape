@@ -45,6 +45,23 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 	}
 }
 
+func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
+	o, _ := os.Getwd()
+	testDir := filepath.Join(o, "testdata", "mixed_extensions")
+	workloads := LoadResourcesFromFiles(context.Background(), testDir, "")
+	assert.Equal(t, 2, len(workloads))
+
+	expectedFiles := []string{
+		filepath.Join(testDir, "pod.yaml"),
+		filepath.Join(testDir, "service.YAML"),
+	}
+
+	for _, ef := range expectedFiles {
+		_, ok := workloads[ef]
+		assert.True(t, ok, "Expected workload for file %s", ef)
+	}
+}
+
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
 	sourceToWorkloads, sourceToChartName, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
 	assert.NoError(t, err)
@@ -146,7 +163,19 @@ func TestIsYaml(t *testing.T) {
 			want: true,
 		},
 		{
+			path: "temp.YAML",
+			want: true,
+		},
+		{
 			path: "temp.yml",
+			want: true,
+		},
+		{
+			path: "temp.Yml",
+			want: true,
+		},
+		{
+			path: "temp.Yaml",
 			want: true,
 		},
 		{
@@ -154,7 +183,15 @@ func TestIsYaml(t *testing.T) {
 			want: false,
 		},
 		{
+			path: "temp.Json",
+			want: false,
+		},
+		{
 			path: "random.txt",
+			want: false,
+		},
+		{
+			path: "no-ext",
 			want: false,
 		},
 	}
@@ -184,7 +221,23 @@ func TestIsJson(t *testing.T) {
 			want: true,
 		},
 		{
+			path: "temp.JSON",
+			want: true,
+		},
+		{
+			path: "temp.Json",
+			want: true,
+		},
+		{
+			path: "temp.Yaml",
+			want: false,
+		},
+		{
 			path: "random.txt",
+			want: false,
+		},
+		{
+			path: "no-ext",
 			want: false,
 		},
 	}
@@ -207,11 +260,31 @@ func TestGetFileFormat(t *testing.T) {
 			want: YAML_FILE_FORMAT,
 		},
 		{
+			path: "temp.YAML",
+			want: YAML_FILE_FORMAT,
+		},
+		{
 			path: "temp.yml",
 			want: YAML_FILE_FORMAT,
 		},
 		{
+			path: "temp.Yml",
+			want: YAML_FILE_FORMAT,
+		},
+		{
+			path: "temp.Yaml",
+			want: YAML_FILE_FORMAT,
+		},
+		{
 			path: "temp.json",
+			want: JSON_FILE_FORMAT,
+		},
+		{
+			path: "temp.JSON",
+			want: JSON_FILE_FORMAT,
+		},
+		{
+			path: "temp.Json",
 			want: JSON_FILE_FORMAT,
 		},
 		{
