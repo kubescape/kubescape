@@ -11,6 +11,7 @@ import (
 func TestNewHtmlPrinter(t *testing.T) {
 	hp := NewHtmlPrinter()
 	assert.NotNil(t, hp)
+	assert.Nil(t, hp.writer)
 }
 
 func TestSetWriter_Html(t *testing.T) {
