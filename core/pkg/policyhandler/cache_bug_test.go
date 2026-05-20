@@ -288,6 +288,7 @@ func TestTimedCacheTOCTOURace(t *testing.T) {
 	var armed atomic.Bool
 	var afterArmed atomic.Bool
 	hookReached := make(chan struct{})
+	setAttempted := make(chan struct{})
 	setDone := make(chan struct{})
 	afterInvalidateDone := make(chan struct{})
 
@@ -300,14 +301,7 @@ func TestTimedCacheTOCTOURace(t *testing.T) {
 		}
 		afterArmed.Store(true)
 		close(hookReached)
-		select {
-		case <-setDone:
-			// old buggy path: Set("fresh") completed inside the lock-release gap;
-			// invalidation will run next and clear it
-		case <-time.After(50 * time.Millisecond):
-			// fixed path: Set("fresh") is blocked on the write lock held here;
-			// it runs only after invalidateLocked and the lock are released
-		}
+		<-setAttempted
 	}
 
 	cache.afterInvalidateHook = func() {
@@ -318,38 +312,35 @@ func TestTimedCacheTOCTOURace(t *testing.T) {
 	}
 
 	cache.Set("seed")
-	time.Sleep(2 * ttl) // let "seed" expire and early ticks fire with hooks unarmed
-	armed.Store(true)   // arm for the next qualifying tick
+	time.Sleep(2 * ttl)
+	armed.Store(true)
 
 	go func() {
 		select {
 		case <-hookReached:
+			close(setAttempted)
+			cache.Set("fresh")
+			close(setDone)
 		case <-time.After(200 * time.Millisecond):
-			t.Error("invalidateHook never reached the invalidation point")
-			return
+			close(setAttempted)
+			close(setDone)
 		}
-		cache.Set("fresh")
-		close(setDone)
 	}()
 
-	// Wait for the full invalidation cycle to complete before asserting.
 	select {
 	case <-afterInvalidateDone:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("afterInvalidateHook never fired; invalidation did not complete")
+		t.Fatal("afterInvalidateHook never fired")
 	}
 
-	// In fixed code, Set("fresh") may still be running (it was blocked on the lock
-	// during the hook; the lock is released after afterInvalidateHook fires). Wait
-	// for it to finish before reading the cache.
 	select {
 	case <-setDone:
 	case <-time.After(200 * time.Millisecond):
-		t.Fatal("Set(\"fresh\") goroutine did not complete")
+		t.Fatal("Set(fresh) goroutine did not complete")
 	}
 
 	val, ok := cache.Get()
 	if !ok || val != "fresh" {
-		t.Errorf("TOCTOU bug: 'fresh' was cleared by the expired-tick invalidation; got val=%q ok=%v", val, ok)
+		t.Errorf("TOCTOU: fresh value was cleared by stale invalidation; got val=%q ok=%v", val, ok)
 	}
 }
