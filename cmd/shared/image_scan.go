@@ -14,5 +14,8 @@ func ValidateImageScanInfo(scanInfo *cautils.ScanInfo) error {
 	if err := ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
+	if err := ValidateThresholds(scanInfo); err != nil {
+		return err
+	}
 	return nil
 }
