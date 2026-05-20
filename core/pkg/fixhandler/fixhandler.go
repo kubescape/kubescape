@@ -751,7 +751,7 @@ func writeFixesToFile(filepath, content string) error {
 		return fmt.Errorf("error reading file permissions: %w", err)
 	}
 
-	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm) //nolint:gosec // Writes back to user's own manifest files; preserve existing permissions.
+	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}

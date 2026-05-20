@@ -36,9 +36,9 @@ func TestEmitExceptionMatchEvents(t *testing.T) {
 		expectedMessage string
 	}{
 		{
-			name:        "event emitted on match",
-			exceptions:  []armotypes.PostureExceptionPolicy{crdException},
-			expectEvent: true,
+			name:            "event emitted on match",
+			exceptions:      []armotypes.PostureExceptionPolicy{crdException},
+			expectEvent:     true,
 			expectedMessage: "Matched control C-0034 on Deployment/nginx-frontend in namespace production",
 		},
 		{
