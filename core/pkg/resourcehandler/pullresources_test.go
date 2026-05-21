@@ -66,6 +66,7 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 	}
 
 	_, selectorErrs := handler.pullSingleResource(
+		context.Background(),
 		resource,
 		nil,
 		"",
@@ -109,7 +110,7 @@ func newHandlerWithReactor(t *testing.T, reactor k8stesting.ReactionFunc) *K8sRe
 		DiscoveryClient:  client.Discovery(),
 		Context:          context.Background(),
 	}
-	return NewK8sResourceHandler(k8s, nil, nil, "test-cluster")
+	return NewK8sResourceHandler(context.Background(), k8s, nil, nil, "test-cluster")
 }
 
 // TestPullResources_NonForbiddenErrorRecorded verifies that a non-404 API error
@@ -128,7 +129,7 @@ func TestPullResources_NonForbiddenErrorRecorded(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
 
 	require.Len(t, failedQueries, 1, "expected one failed query entry")
 	for _, f := range failedQueries {
@@ -152,7 +153,7 @@ func TestPullResources_NotFoundErrorIgnored(t *testing.T) {
 		},
 	}
 
-	_, _, failedQueries := handler.pullResources(qrs, &EmptySelector{})
+	_, _, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
 
 	assert.Empty(t, failedQueries, "404-style errors should not be recorded as failures")
 }
@@ -202,7 +203,7 @@ func TestPullResources_PartialFailure(t *testing.T) {
 		},
 	}
 
-	k8sResources, allResources, failedQueries := handler.pullResources(qrs, &EmptySelector{})
+	k8sResources, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
 
 	// failed query is recorded
 	assert.Len(t, failedQueries, 1)
@@ -234,7 +235,7 @@ func TestPullResources_TotalFailure(t *testing.T) {
 		},
 	}
 
-	_, allResources, failedQueries := handler.pullResources(qrs, &EmptySelector{})
+	_, allResources, failedQueries := handler.pullResources(context.Background(), qrs, &EmptySelector{})
 
 	assert.Empty(t, allResources, "no resources should be collected when all queries fail")
 	assert.Len(t, failedQueries, 2, "both failed GVRs should be recorded")

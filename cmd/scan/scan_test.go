@@ -376,6 +376,88 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
+// TestGetScanCommand_ScanTimeoutFlagRegistered verifies that the --scan-timeout
+// flag is registered on the scan command and has the correct type and default.
+func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	f := cmd.PersistentFlags().Lookup("scan-timeout")
+	require.NotNil(t, f, "--scan-timeout flag must be registered on the scan command")
+	assert.Equal(t, "duration", f.Value.Type(),
+		"--scan-timeout must be a duration flag (accepts values like 5m, 30s, 1h)")
+	assert.Equal(t, "0s", f.DefValue,
+		"--scan-timeout default must be 0s (no timeout)")
+}
+
+// TestGetScanCommand_ScanTimeoutFlagParsed verifies that valid duration strings
+// are accepted by the --scan-timeout flag and stored in ScanInfo.ScanTimeout.
+func TestGetScanCommand_ScanTimeoutFlagParsed(t *testing.T) {
+	tests := []struct {
+		name    string
+		flagVal string
+		want    time.Duration
+	}{
+		{"five minutes", "5m", 5 * time.Minute},
+		{"thirty seconds", "30s", 30 * time.Second},
+		{"one hour", "1h", time.Hour},
+		{"zero means no timeout", "0", 0},
+		{"complex duration", "1h30m", 90 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockKubescape := &mocks.MockIKubescape{}
+			cmd := GetScanCommand(mockKubescape)
+
+			err := cmd.PersistentFlags().Set("scan-timeout", tt.flagVal)
+			require.NoError(t, err, "setting --scan-timeout=%s should not produce an error", tt.flagVal)
+
+			f := cmd.PersistentFlags().Lookup("scan-timeout")
+			assert.Equal(t, tt.want.String(), f.Value.String(),
+				"parsed duration for --scan-timeout=%s is incorrect", tt.flagVal)
+		})
+	}
+}
+
+// TestGetScanCommand_ScanTimeoutFlagInherited verifies that the --scan-timeout
+// flag is inherited by scan subcommands (framework, control, workload) since it
+// is registered as a PersistentFlag on the parent scan command.
+func TestGetScanCommand_ScanTimeoutFlagInherited(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	// Persistent flags propagate to all subcommands.
+	for _, sub := range cmd.Commands() {
+		t.Run(sub.Name(), func(t *testing.T) {
+			f := sub.InheritedFlags().Lookup("scan-timeout")
+			require.NotNil(t, f,
+				"subcommand %q must inherit --scan-timeout from the parent scan command",
+				sub.Name())
+		})
+	}
+}
+
+// TestScanInfo_ScanTimeoutField verifies that the ScanTimeout field is
+// present on ScanInfo and can be set to any valid duration.
+func TestScanInfo_ScanTimeoutField(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{"no timeout (zero value)", 0},
+		{"five minutes", 5 * time.Minute},
+		{"one millisecond", time.Millisecond},
+		{"twenty-four hours", 24 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			si := &cautils.ScanInfo{ScanTimeout: tt.timeout}
+			assert.Equal(t, tt.timeout, si.ScanTimeout)
+		})
+	}
+}
+
 // coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we
 // can test it without triggering os.Exit.
 func coverageWouldFail(notEvaluated, totalControls int, threshold float32) bool {
