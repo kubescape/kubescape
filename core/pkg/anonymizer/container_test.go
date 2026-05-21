@@ -422,11 +422,23 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 							Env: []corev1.EnvVar{
 								{
 									Name:  "DATABASE_URL",
-									Value: "postgres://user:pass@db.internal/prod",
+									Value: "postgres://example-user@example-host.internal/prod",
 								},
 								{
 									Name:  "CONNECTION_STRING",
-									Value: "Server=db;User=admin;Password=secret;",
+									Value: "Server=db;User=demo;Password=masked;",
+								},
+								{
+									Name:  "CONFIG",
+									Value: "redis://:secret@redis.internal:6379",
+								},
+								{
+									Name:  "LOG_LEVEL",
+									Value: "info",
+								},
+								{
+									Name:  "PORT",
+									Value: "8080",
 								},
 							},
 						},
@@ -442,10 +454,16 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				assert.NotEqual(t, "postgres://user:pass@db.internal/prod", containers[0].Env[0].Value)
-				assert.NotEqual(t, "Server=db;User=admin;Password=secret;", containers[0].Env[1].Value)
+				assert.NotEqual(t, "postgres://example-user@example-host.internal/prod", containers[0].Env[0].Value)
+				assert.NotEqual(t, "Server=db;User=demo;Password=masked;", containers[0].Env[1].Value)
+				assert.NotEqual(t, "redis://:secret@redis.internal:6379", containers[0].Env[2].Value)
+
 				assert.Contains(t, containers[0].Env[0].Value, "env-")
 				assert.Contains(t, containers[0].Env[1].Value, "env-")
+				assert.Contains(t, containers[0].Env[2].Value, "env-")
+
+				assert.Equal(t, "info", containers[0].Env[3].Value)
+				assert.Equal(t, "8080", containers[0].Env[4].Value)
 			},
 		},
 		{
@@ -458,11 +476,23 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 							"env": []interface{}{
 								map[string]interface{}{
 									"name":  "DATABASE_URL",
-									"value": "postgres://user:pass@db.internal/prod",
+									"value": "postgres://example-user@example-host.internal/prod",
 								},
 								map[string]interface{}{
 									"name":  "REDIS_URL",
 									"value": "redis://:secret@redis.internal:6379",
+								},
+								map[string]interface{}{
+									"name":  "CONFIG",
+									"value": "mongodb://example-user@example-host.internal:27017/prod",
+								},
+								map[string]interface{}{
+									"name":  "FEATURE_FLAG",
+									"value": "true",
+								},
+								map[string]interface{}{
+									"name":  "PORT",
+									"value": "8080",
 								},
 							},
 						},
@@ -487,7 +517,7 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 				if !assert.True(t, ok, "expected env slice") {
 					return
 				}
-				if !assert.Len(t, env, 2) {
+				if !assert.Len(t, env, 5) {
 					return
 				}
 
@@ -501,12 +531,34 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 					return
 				}
 
-				assert.NotEqual(t, "postgres://user:pass@db.internal/prod", firstEnv["value"])
+				thirdEnv, ok := env[2].(map[string]interface{})
+				if !assert.True(t, ok, "expected third env map") {
+					return
+				}
+
+				fourthEnv, ok := env[3].(map[string]interface{})
+				if !assert.True(t, ok, "expected fourth env map") {
+					return
+				}
+
+				fifthEnv, ok := env[4].(map[string]interface{})
+				if !assert.True(t, ok, "expected fifth env map") {
+					return
+				}
+
+				assert.NotEqual(t, "postgres://example-user@example-host.internal/prod", firstEnv["value"])
 				assert.NotEqual(t, "redis://:secret@redis.internal:6379", secondEnv["value"])
+				assert.NotEqual(t, "mongodb://example-user@example-host.internal:27017/prod", thirdEnv["value"])
+
 				assert.Contains(t, firstEnv["value"], "env-")
 				assert.Contains(t, secondEnv["value"], "env-")
+				assert.Contains(t, thirdEnv["value"], "env-")
+
+				assert.Equal(t, "true", fourthEnv["value"])
+				assert.Equal(t, "8080", fifthEnv["value"])
 			},
 		},
+
 		{
 			name: "typed image pull secrets should be anonymized",
 			object: map[string]interface{}{

@@ -1,6 +1,8 @@
 package anonymizer
 
 import (
+	"strings"
+
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -150,7 +152,8 @@ func anonymizeTypedEnv(envVars []corev1.EnvVar, mapping *Mapping) {
 	for i := range envVars {
 		envVar := &envVars[i]
 
-		if envVar.Value != "" {
+		if envVar.Value != "" &&
+			(isSensitiveEnvName(envVar.Name) || isSensitiveEnvValue(envVar.Value)) {
 			envVar.Value = mapping.GetOrCreate("env", envVar.Value)
 		}
 
@@ -188,7 +191,11 @@ func anonymizeUnstructuredEnv(container map[string]interface{}, mapping *Mapping
 			continue
 		}
 
-		if value, ok := envVar["value"].(string); ok && value != "" {
+		name, _ := envVar["name"].(string)
+
+		if value, ok := envVar["value"].(string); ok &&
+			value != "" &&
+			(isSensitiveEnvName(name) || isSensitiveEnvValue(value)) {
 			envVar["value"] = mapping.GetOrCreate("env", value)
 		}
 
@@ -263,6 +270,59 @@ func anonymizeUnstructuredReference(
 
 	ref["name"] = mapping.GetOrCreate("ref", name)
 }
+
+func isSensitiveEnvValue(value string) bool {
+	value = strings.ToLower(value)
+
+	sensitivePatterns := []string{
+		"://", // postgres:// redis:// mongodb:// etc
+		"password=",
+		"pwd=",
+		"user id=",
+		"userid=",
+		"dsn=",
+		"sslmode=",
+	}
+
+	for _, pattern := range sensitivePatterns {
+		if strings.Contains(value, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isSensitiveEnvName(name string) bool {
+	name = strings.ToLower(name)
+
+	sensitivePatterns := []string{
+		"password",
+		"passwd",
+		"pwd",
+		"secret",
+		"token",
+		"api_key",
+		"access_key",
+		"credential",
+		"database_url",
+		"db_url",
+		"redis_url",
+		"mongo_uri",
+		"mongodb_uri",
+		"dsn",
+		"connection_string",
+	}
+
+	for _, pattern := range sensitivePatterns {
+		if strings.Contains(name, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
 func anonymizeImagePullSecrets(
 	obj map[string]interface{},
 	mapping *Mapping,
