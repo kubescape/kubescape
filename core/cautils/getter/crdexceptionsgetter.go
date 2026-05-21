@@ -101,7 +101,10 @@ func convertCRDObjectToPosturePolicies(obj *unstructured.Unstructured, kind stri
 	reason, _, _ := unstructured.NestedString(obj.Object, "spec", "reason")
 	expiresAt, _, _ := unstructured.NestedString(obj.Object, "spec", "expiresAt")
 	postureItems, _, _ := unstructured.NestedSlice(obj.Object, "spec", "posture")
-	resources, _ := buildResourceDesignators(obj, kind)
+	resources, err := buildResourceDesignators(obj, kind)
+	if err != nil {
+		return nil, err
+	}
 
 	policies := make([]armotypes.PostureExceptionPolicy, 0, len(postureItems))
 	for _, raw := range postureItems {
@@ -142,6 +145,10 @@ func buildResourceDesignators(obj *unstructured.Unstructured, kind string) ([]ma
 	namespace := obj.GetNamespace()
 	if kind == "SecurityException" && namespace != "" {
 		designators = append(designators, map[string]string{identifiers.AttributeNamespace: namespace})
+	}
+
+	if _, found, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "match", "objectSelector"); found {
+		return nil, fmt.Errorf("spec.match.objectSelector is not supported")
 	}
 
 	resources, _, _ := unstructured.NestedSlice(obj.Object, "spec", "match", "resources")

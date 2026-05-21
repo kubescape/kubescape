@@ -92,3 +92,25 @@ func TestConvertCRDObjectToPosturePolicies_DefaultScope(t *testing.T) {
 	require.Len(t, policies, 1)
 	assert.Equal(t, "*", policies[0].Resources[0].Attributes[identifiers.AttributeKind])
 }
+
+func TestConvertCRDObjectToPosturePolicies_ObjectSelectorIsRejected(t *testing.T) {
+	obj := &unstructured.Unstructured{}
+	obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "kubescape.io", Version: "v1", Kind: "SecurityException"})
+	obj.SetName("se-selector")
+	obj.SetNamespace("team-a")
+	obj.Object["spec"] = map[string]interface{}{
+		"match": map[string]interface{}{
+			"objectSelector": map[string]interface{}{
+				"matchLabels": map[string]interface{}{"app": "nginx"},
+			},
+		},
+		"posture": []interface{}{
+			map[string]interface{}{"controlID": "C-0100", "action": "ignore"},
+		},
+	}
+
+	policies, err := convertCRDObjectToPosturePolicies(obj, "SecurityException")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "spec.match.objectSelector is not supported")
+	assert.Nil(t, policies)
+}
