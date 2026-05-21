@@ -15,6 +15,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExceedsSeverity(t *testing.T) {
@@ -376,8 +377,6 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
-// TestGetScanCommand_ScanTimeoutFlagRegistered verifies that the --scan-timeout
-// flag is registered on the scan command and has the correct type and default.
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
@@ -390,8 +389,6 @@ func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
 		"--scan-timeout default must be 0s (no timeout)")
 }
 
-// TestGetScanCommand_ScanTimeoutFlagParsed verifies that valid duration strings
-// are accepted by the --scan-timeout flag and stored in ScanInfo.ScanTimeout.
 func TestGetScanCommand_ScanTimeoutFlagParsed(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -420,14 +417,10 @@ func TestGetScanCommand_ScanTimeoutFlagParsed(t *testing.T) {
 	}
 }
 
-// TestGetScanCommand_ScanTimeoutFlagInherited verifies that the --scan-timeout
-// flag is inherited by scan subcommands (framework, control, workload) since it
-// is registered as a PersistentFlag on the parent scan command.
 func TestGetScanCommand_ScanTimeoutFlagInherited(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
 
-	// Persistent flags propagate to all subcommands.
 	for _, sub := range cmd.Commands() {
 		t.Run(sub.Name(), func(t *testing.T) {
 			f := sub.InheritedFlags().Lookup("scan-timeout")
@@ -438,8 +431,6 @@ func TestGetScanCommand_ScanTimeoutFlagInherited(t *testing.T) {
 	}
 }
 
-// TestScanInfo_ScanTimeoutField verifies that the ScanTimeout field is
-// present on ScanInfo and can be set to any valid duration.
 func TestScanInfo_ScanTimeoutField(t *testing.T) {
 	tests := []struct {
 		name    string

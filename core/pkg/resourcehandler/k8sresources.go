@@ -368,18 +368,12 @@ type selectorFailure struct {
 	err      error
 }
 
-// maxParallelResourcePulls limits the number of concurrent K8s API List calls
-// issued by pullResources. This avoids overwhelming small API servers while
-// still providing a significant speedup on clusters with many resource types.
 const maxParallelResourcePulls = 8
 
 func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]queryFailure) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
 
-	// keyed by QueryableResource.String() (GVR + field selectors) so a failure on
-	// one selector variant is never suppressed by a success on a different variant
-	// for the same raw GVR.
 	failedQueries := map[string]queryFailure{}
 
 	var (
@@ -387,20 +381,14 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 		wg sync.WaitGroup
 	)
 
-	// sem is a counting semaphore that bounds the number of in-flight API
-	// calls so we don't overload the kube-apiserver on smaller clusters.
 	sem := make(chan struct{}, maxParallelResourcePulls)
 
 	for key := range queryableResources {
 		qr := queryableResources[key]
 		wg.Add(1)
-		go func() {
+		go func(qr QueryableResource) {
 			defer wg.Done()
 
-			// Context-aware semaphore acquisition: if the context is cancelled
-			// (e.g. scan timeout expired or Ctrl-C) while we are waiting for a
-			// slot, bail out immediately and record the cancellation so the
-			// caller can surface it rather than silently returning empty maps.
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
@@ -418,9 +406,6 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
 
-			// Record per-selector failures under a selector-qualified key so
-			// that a failure on one namespace selector is never silently
-			// discarded when a sibling selector for the same GVR succeeded.
 			if len(selectorErrs) > 0 {
 				mu.Lock()
 				for _, se := range selectorErrs {
@@ -438,12 +423,9 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 			}
 
 			if len(result) == 0 && len(selectorErrs) > 0 {
-				// All selectors failed — no data collected for this resource.
 				return
 			}
 
-			// Convert API results outside the critical section — these
-			// functions operate only on the local result slice.
 			metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
 			ids := workloadinterface.ListMetaIDs(metaObjs)
 
@@ -458,32 +440,17 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 				k8sResources[gvrKey] = append(k8sResources[gvrKey], ids...)
 			}
 			mu.Unlock()
-		}()
+		}(qr)
 	}
 
 	wg.Wait()
 	return k8sResources, allResources, failedQueries
 }
 
-// recordFailedQueryStatuses classifies each failed query as either a whole-GVR
-// failure or a partial failure and surfaces them accordingly.
-//
-// Whole-GVR failure (no data at all for the GVR): a StatusSkipped entry is
-// written to infoMap keyed by the raw GVR string, which BuildScanCoverage uses
-// to mark the dependent controls as NotEvaluated.
-//
-// Partial failure (some data exists in k8sResources for the GVR but this
-// specific selector's query failed): the failure is returned as a
-// PartialGVRPull so callers can surface it without incorrectly overriding the
-// whole-GVR status. Controls will be evaluated against the partial data, but
-// the PartialGVRPull entry makes the gap visible to operators and CI/CD
-// pipelines — previously this case was silently suppressed.
 func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResources cautils.K8SResources, infoMap map[string]apis.StatusInfo) []cautils.PartialGVRPull {
 	var partials []cautils.PartialGVRPull
 	for _, f := range failedQueries {
 		if len(k8sResources[f.gvr]) > 0 {
-			// GVR has partial data — don't mark whole-GVR as skipped, but do
-			// record the per-selector gap so the caller can surface it.
 			partials = append(partials, cautils.PartialGVRPull{
 				GVR:      f.gvr,
 				Selector: f.selector,
@@ -500,14 +467,6 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
-// pullSingleResource lists all instances of a Kubernetes resource, expanding
-// the globalFieldSelector into per-namespace (or per-name) selectors as
-// needed. Each selector is listed independently; if one fails the error is
-// recorded as a selectorFailure and the loop continues to the remaining
-// selectors so partial results are never silently discarded.
-//
-// The caller should treat a non-empty selectorFailure slice as a signal that
-// the returned resourceList is incomplete and surface it accordingly.
 func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, []selectorFailure) {
 	var resourceList []unstructured.Unstructured
 	var selectorErrs []selectorFailure
