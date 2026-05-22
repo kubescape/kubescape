@@ -173,16 +173,27 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
 	}
 }
 
-func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
-	if scanInfo.ScanTimeout > 0 {
-		originalCtx := ks.Context()
-		timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
-		defer func() {
-			cancel()
-			ks.SetContext(originalCtx)
-		}()
-		ks.SetContext(timeoutCtx)
+// applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
+// returns a cleanup function that cancels the context and restores the
+// original. The caller must defer the returned function so the deadline
+// covers both ks.Scan() and results.HandleResults().
+//
+//	defer applyTimeout(scanInfo, ks)()
+func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
+	if scanInfo.ScanTimeout <= 0 {
+		return func() {}
 	}
+	originalCtx := ks.Context()
+	timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
+	ks.SetContext(timeoutCtx)
+	return func() {
+		cancel()
+		ks.SetContext(originalCtx)
+	}
+}
+
+func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
+	defer applyTimeout(&scanInfo, ks)()
 
 	results, err := ks.Scan(&scanInfo)
 	if err != nil {
