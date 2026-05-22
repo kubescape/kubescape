@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNewPrometheusPrinter(t *testing.T) {
@@ -77,14 +78,17 @@ func TestScore(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Score() must write to pp.writer, not stdout
-			r, w, _ := os.Pipe()
+			r, w, err := os.Pipe()
+			require.NoError(t, err)
 			promPrinter := NewPrometheusPrinter(false)
 			promPrinter.writer = w
 
 			promPrinter.Score(tt.score)
 
-			w.Close()
-			got, _ := io.ReadAll(r)
+			require.NoError(t, w.Close())
+			got, err := io.ReadAll(r)
+			require.NoError(t, err)
+			require.NoError(t, r.Close())
 			assert.Equal(t, tt.want, string(got))
 		})
 	}

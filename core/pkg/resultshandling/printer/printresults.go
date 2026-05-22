@@ -3,6 +3,7 @@ package printer
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -50,8 +51,9 @@ func GetWriter(ctx context.Context, outputFile string) *os.File {
 // GetWriterNoStdoutFallback opens outputFile for writing for formats whose
 // output (binary, markup) would corrupt a TTY if dumped to stdout. On any
 // failure to open the requested file it falls back to a uniquely-named file
-// under os.TempDir() using tempPattern (e.g. "kubescape-report-*.pdf"). Only
-// if even that fails does it return os.DevNull — it never returns os.Stdout.
+// under os.TempDir() using tempPattern (e.g. "kubescape-report-*.pdf"). If
+// that fails it tries os.DevNull, then a pipe-based sink as a last resort.
+// It never returns os.Stdout.
 func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err == nil {
@@ -73,9 +75,23 @@ func GetWriterNoStdoutFallback(ctx context.Context, outputFile, tempPattern stri
 	}
 	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 	if err != nil {
-		// os.DevNull should always be openable; if not, fall back to a closed
-		// file rather than stdout so the TTY stays clean.
-		return os.NewFile(0, os.DevNull)
+		// os.DevNull should always be openable; if not, fall back to a temp file
+		// so we still return a writable, closable handle.
+		if tmp, tmpErr := os.CreateTemp(".", tempPattern); tmpErr == nil {
+			logger.L().Ctx(ctx).Warning("failed to open os.DevNull; falling back to temp file",
+				helpers.String("filename", tmp.Name()))
+			return tmp
+		}
+		r, w, pipeErr := os.Pipe()
+		if pipeErr == nil {
+			go func() {
+				_, _ = io.Copy(io.Discard, r)
+				_ = r.Close()
+			}()
+			return w
+		}
+		// Final fallback: return a non-nil file handle even if it is not writable.
+		return os.NewFile(^uintptr(0), os.DevNull)
 	}
 	return devNull
 }

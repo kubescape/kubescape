@@ -744,9 +744,20 @@ func GetFileString(filepath string) (string, error) {
 }
 
 func writeFixesToFile(filepath, content string) error {
-	err := os.WriteFile(filepath, []byte(content), 0644) //nolint:gosec // Writes back to user's own manifest files; 0644 preserves expected permissions.
+	perm := os.FileMode(0644)
+	if info, err := os.Stat(filepath); err == nil {
+		perm = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("error reading file permissions: %w", err)
+	}
 
+	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
 	if err != nil {
+		return fmt.Errorf("error writing fixes to file: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(content); err != nil {
 		return fmt.Errorf("error writing fixes to file: %w", err)
 	}
 

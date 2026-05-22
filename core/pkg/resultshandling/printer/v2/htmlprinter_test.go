@@ -11,7 +11,7 @@ import (
 func TestNewHtmlPrinter(t *testing.T) {
 	hp := NewHtmlPrinter()
 	assert.NotNil(t, hp)
-	assert.Empty(t, hp)
+	assert.Nil(t, hp.writer)
 }
 
 func TestSetWriter_Html(t *testing.T) {
@@ -49,7 +49,6 @@ func TestSetWriter_Html(t *testing.T) {
 		},
 	}
 
-	hp := NewHtmlPrinter()
 	ctx := context.Background()
 
 	tmp := t.TempDir()
@@ -60,7 +59,11 @@ func TestSetWriter_Html(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			hp := NewHtmlPrinter()
 			hp.SetWriter(ctx, tt.outputFile)
+			t.Cleanup(func() {
+				_ = hp.writer.Close()
+			})
 			assert.Equal(t, tt.expected, hp.writer.Name())
 			assert.NotEqual(t, "/dev/stdout", hp.writer.Name(),
 				"HTML printer must never write to stdout")

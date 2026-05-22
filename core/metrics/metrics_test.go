@@ -15,7 +15,6 @@ import (
 func resetMetricsForTest(t *testing.T) {
 	t.Helper()
 
-	savedInitOnce := initOnce
 	savedKubernetesResourcesCount := kubernetesResourcesCount
 	savedWorkerNodesCount := workerNodesCount
 
@@ -24,7 +23,7 @@ func resetMetricsForTest(t *testing.T) {
 	workerNodesCount = nil
 
 	t.Cleanup(func() {
-		initOnce = savedInitOnce
+		initOnce = sync.Once{}
 		kubernetesResourcesCount = savedKubernetesResourcesCount
 		workerNodesCount = savedWorkerNodesCount
 	})
