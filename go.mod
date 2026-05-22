@@ -33,7 +33,7 @@ require (
 	github.com/kubescape/go-git-url v0.0.31
 	github.com/kubescape/go-logger v0.0.28
 	github.com/kubescape/k8s-interface v0.0.209
-	github.com/kubescape/opa-utils v0.0.295
+	github.com/kubescape/opa-utils v0.0.298
 	github.com/kubescape/rbac-utils v0.0.21-0.20230806101615-07e36f555520
 	github.com/kubescape/regolibrary/v2 v2.0.1
 	github.com/kubescape/sizing-checker v0.0.0-20250323151332-73a18561dc73

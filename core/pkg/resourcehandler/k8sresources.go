@@ -17,6 +17,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/metrics"
 	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
+	"github.com/kubescape/kubescape/v3/core/pkg/vapreconcile"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	v1 "k8s.io/api/core/v1"
@@ -175,6 +176,16 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 		if err != nil {
 			cautils.SetInfoMapForResources(err.Error(), cloudResources, sessionObj.InfoMap)
 			logger.L().Debug("failed to collect cloud data", helpers.Error(err))
+		}
+	}
+
+	if scanInfo.GetScanningContext() == cautils.ContextCluster {
+		policies, bindings, err := vapreconcile.Collect(ctx, k8sHandler.k8s)
+		if err != nil {
+			logger.L().Ctx(ctx).Warning("failed to collect VAP resources", helpers.Error(err))
+		} else {
+			sessionObj.VAPPolicies = policies
+			sessionObj.VAPBindings = bindings
 		}
 	}
 
