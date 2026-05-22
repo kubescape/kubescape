@@ -65,6 +65,8 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 		},
 	}
 
+	_, err := handler.pullSingleResource(
+
 	_, selectorErrs := handler.pullSingleResource(
 		resource,
 		nil,
@@ -72,7 +74,9 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 		fieldSelector,
 	)
 
+	require.NoError(t, err)
 	require.Empty(t, selectorErrs)
+
 
 	require.Len(t, capturedSelectors, 2)
 

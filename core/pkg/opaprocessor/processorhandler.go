@@ -255,14 +255,20 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				if opap.skipNamespace(failedResource.GetNamespace()) {
 					continue
 				}
+
 				id := failedResource.GetID()
 				failedIDs[id] = struct{}{}
-				resources[id] = &resourcesresults.ResourceAssociatedRule{
-					Name:                  rule.Name,
-					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+
+				// Preserve accumulated Paths/RelatedResourcesIDs from previous namespace iterations
+				if _, exists := resources[id]; !exists {
+					resources[id] = &resourcesresults.ResourceAssociatedRule{
+						Name:                  rule.Name,
+						ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+					}
 				}
 			}
 		}
+
 		for _, inputResource := range inputResources {
 			if opap.skipNamespace(inputResource.GetNamespace()) {
 				continue

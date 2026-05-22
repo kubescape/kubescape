@@ -659,6 +659,7 @@ func TestGetLocalPath(t *testing.T) {
 	}
 }
 
+
 // TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths
 // verifies the partition that issue #1772 hinges on: a Helm-rendered
 // resource must (a) be excluded from the yq-based ResourceFixInfo path
@@ -828,6 +829,30 @@ func TestGetFilePathAndIndex(t *testing.T) {
 		input         string
 		expectedPath  string
 		expectedIndex int
+		expectError   bool
+	}{
+		{
+			name:          "windows path",
+			input:         `C:\Users\admin\deploy.yaml:2`,
+			expectedPath:  `C:\Users\admin\deploy.yaml`,
+			expectedIndex: 2,
+		},
+		{
+			name:          "unix path",
+			input:         "/unix/standard/path.yaml:0",
+			expectedPath:  "/unix/standard/path.yaml",
+			expectedIndex: 0,
+		},
+		{
+			name:          "linux path containing colon",
+			input:         "/linux/weird:path.yaml:1",
+			expectedPath:  "/linux/weird:path.yaml",
+			expectedIndex: 1,
+		},
+		{
+			name:        "invalid path",
+			input:       "invalidpathwithoutcolon",
+			expectError: true,
 		expectErr     bool
 	}{
 		{
@@ -867,6 +892,14 @@ func TestGetFilePathAndIndex(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			path, index, err := h.getFilePathAndIndex(tt.input)
 
+			if tt.expectError {
+				assert.Error(t, err)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedPath, path)
+			assert.Equal(t, tt.expectedIndex, index)
 			if tt.expectErr {
 				require.Error(t, err)
 				return
@@ -875,6 +908,7 @@ func TestGetFilePathAndIndex(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, tt.expectedPath, path)
 			require.Equal(t, tt.expectedIndex, index)
+
 		})
 	}
 }

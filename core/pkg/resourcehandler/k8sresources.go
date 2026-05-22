@@ -374,6 +374,16 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 	// one selector variant is never suppressed by a success on a different variant
 	// for the same raw GVR.
 	failedQueries := map[string]queryFailure{}
+	for i := range queryableResources {
+		apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(queryableResources[i].GroupVersionResourceTriplet)
+		gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
+		result, err := k8sHandler.pullSingleResource(&gvr, nil, queryableResources[i].FieldSelectors, globalFieldSelectors)
+		if err != nil {
+			if !strings.Contains(err.Error(), "the server could not find the requested resource") {
+				qr := queryableResources[i]
+				failedQueries[qr.String()] = queryFailure{
+					gvr: queryableResources[i].GroupVersionResourceTriplet,
+					err: err,
 
 	var (
 		mu sync.Mutex
@@ -478,6 +488,15 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
+func (k8sHandler *K8sResourceHandler) pullSingleResource(
+	resource *schema.GroupVersionResource,
+	labels map[string]string,
+	fields string,
+	fieldSelector IFieldSelector,
+) ([]unstructured.Unstructured, error) {
+
+	var resourceList []unstructured.Unstructured
+
 // pullSingleResource lists all instances of a Kubernetes resource, expanding
 // the globalFieldSelector into per-namespace (or per-name) selectors as
 // needed. Each selector is listed independently; if one fails the error is
@@ -490,15 +509,24 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 	var resourceList []unstructured.Unstructured
 	var selectorErrs []selectorFailure
 
+
 	fieldSelectors := fieldSelector.GetNamespacesSelectors(resource)
 
 	for i := range fieldSelectors {
 		listOptions := metav1.ListOptions{}
 
+		if fieldSelectors[i] != "" {
+			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)
+		} else if fields != "" {
+			listOptions.FieldSelector = fields
+		}
+
+
 		if len(labels) > 0 {
 			set := k8slabels.Set(labels)
 			listOptions.LabelSelector = set.AsSelector().String()
 		}
+
 
 		if fieldSelectors[i] != "" {
 			listOptions.FieldSelector = combineFieldSelectors(fieldSelectors[i], fields)
@@ -535,6 +563,26 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 			return nil
 
 		}); err != nil {
+
+			return nil, fmt.Errorf(
+				"failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w",
+				resource,
+				listOptions.LabelSelector,
+				listOptions.FieldSelector,
+				err,
+			)
+		}
+
+		logger.L().Debug(
+			"Pulled resources",
+			helpers.String("resource", resource.String()),
+			helpers.String("fieldSelector", listOptions.FieldSelector),
+			helpers.String("labelSelector", listOptions.LabelSelector),
+			helpers.Int("count", len(resourceList)-lenBefore),
+		)
+	}
+
+	return resourceList, nil
 			selectorErrs = append(selectorErrs, selectorFailure{
 				selector: listOptions.FieldSelector,
 				err:      fmt.Errorf("failed to get resource: %v, labelSelector: %v, fieldSelector: %v, reason: %w", resource, listOptions.LabelSelector, listOptions.FieldSelector, err),
