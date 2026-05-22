@@ -63,6 +63,8 @@ func BuildIndex(policies, bindings []unstructured.Unstructured) map[string]*repo
 		}
 	}
 
+	seenActions := make(map[string]map[string]struct{})
+
 	for i := range bindings {
 		vapb := &bindings[i]
 		spec, ok := vapb.Object["spec"].(map[string]interface{})
@@ -75,18 +77,24 @@ func BuildIndex(policies, bindings []unstructured.Unstructured) map[string]*repo
 			continue
 		}
 
-		var actions []string
+		status, ok := index[controlID]
+		if !ok {
+			continue
+		}
+		status.Bound = true
+
+		if seenActions[controlID] == nil {
+			seenActions[controlID] = make(map[string]struct{})
+		}
 		if actionsRaw, ok := spec["validationActions"].([]interface{}); ok {
 			for _, a := range actionsRaw {
 				if s, ok := a.(string); ok {
-					actions = append(actions, s)
+					if _, dup := seenActions[controlID][s]; !dup {
+						seenActions[controlID][s] = struct{}{}
+						status.Actions = append(status.Actions, s)
+					}
 				}
 			}
-		}
-
-		if status, ok := index[controlID]; ok {
-			status.Bound = true
-			status.Actions = actions
 		}
 	}
 

@@ -127,6 +127,22 @@ func TestBuildIndex_MultipleControls(t *testing.T) {
 	assert.False(t, index["C-0038"].Bound)
 }
 
+func TestBuildIndex_SameControlMultipleBindings(t *testing.T) {
+	// two bindings pointing at the same policy — actions should be merged, not overwritten
+	policies := []unstructured.Unstructured{
+		makeVAP("kubescape-c-0041-deny-host-network", "C-0041"),
+	}
+	bindings := []unstructured.Unstructured{
+		makeVAPB("c0041-binding-deny", "kubescape-c-0041-deny-host-network", []string{"Deny"}),
+		makeVAPB("c0041-binding-audit", "kubescape-c-0041-deny-host-network", []string{"Audit"}),
+	}
+
+	index := BuildIndex(policies, bindings)
+
+	assert.True(t, index["C-0041"].Bound)
+	assert.ElementsMatch(t, []string{"Deny", "Audit"}, index["C-0041"].Actions)
+}
+
 func TestEnrichSummary_AttachesStatus(t *testing.T) {
 	controls := reportsummary.ControlSummaries{
 		"C-0041": reportsummary.ControlSummary{ControlID: "C-0041"},
