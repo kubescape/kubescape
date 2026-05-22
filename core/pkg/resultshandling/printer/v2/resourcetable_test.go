@@ -528,3 +528,97 @@ func TestGenerateResourceRows_Loop(t *testing.T) {
 		})
 	}
 }
+
+func TestAddContainerNameToAssistedRemediation_OutOfBounds(t *testing.T) {
+	tests := []struct {
+		name          string
+		resource      workloadinterface.IMetadata
+		paths         []string
+		expectedPaths []string
+	}{
+		{
+			name: "valid container index appends name",
+			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "nginx",
+							"image": "nginx:latest",
+						},
+					},
+				},
+			}),
+			paths:         []string{"spec.containers[0].securityContext.runAsNonRoot"},
+			expectedPaths: []string{"spec.containers[0].securityContext.runAsNonRoot (nginx)"},
+		},
+		{
+			name: "out of bounds container index is skipped",
+			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "nginx",
+							"image": "nginx:latest",
+						},
+					},
+				},
+			}),
+			paths:         []string{"spec.containers[5].securityContext.readOnlyRootFilesystem"},
+			expectedPaths: []string{"spec.containers[5].securityContext.readOnlyRootFilesystem"},
+		},
+		{
+			name: "mixed valid and out of bounds indices",
+			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "nginx",
+							"image": "nginx:latest",
+						},
+						map[string]interface{}{
+							"name":  "sidecar",
+							"image": "sidecar:latest",
+						},
+					},
+				},
+			}),
+			paths: []string{
+				"spec.containers[0].securityContext.runAsNonRoot",
+				"spec.containers[10].securityContext.readOnlyRootFilesystem",
+				"spec.containers[1].securityContext.allowPrivilegeEscalation",
+			},
+			expectedPaths: []string{
+				"spec.containers[0].securityContext.runAsNonRoot (nginx)",
+				"spec.containers[10].securityContext.readOnlyRootFilesystem",
+				"spec.containers[1].securityContext.allowPrivilegeEscalation (sidecar)",
+			},
+		},
+		{
+			name: "path without container index is unchanged",
+			resource: workloadinterface.NewWorkloadObj(map[string]interface{}{
+				"kind": "Pod",
+				"spec": map[string]interface{}{
+					"containers": []interface{}{
+						map[string]interface{}{
+							"name":  "nginx",
+							"image": "nginx:latest",
+						},
+					},
+				},
+			}),
+			paths:         []string{"metadata.labels.app"},
+			expectedPaths: []string{"metadata.labels.app"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			paths := tt.paths
+			addContainerNameToAssistedRemediation(tt.resource, &paths)
+			assert.Equal(t, tt.expectedPaths, paths)
+		})
+	}
+}

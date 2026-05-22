@@ -102,20 +102,43 @@ func TestSetWriter_Pdf(t *testing.T) {
 			expected:   "customFilename.pdf",
 		},
 		{
-			name:       "Output file name is empty",
+			// Regression for issue-6: empty --output must NOT fall through to
+			// stdout for binary formats — default to ./report.pdf instead.
+			name:       "Output file name is empty defaults to report.pdf",
 			outputFile: "",
-			expected:   "/dev/stdout",
+			expected:   "report.pdf",
+		},
+		{
+			name:       "Whitespace-only output file is treated as empty",
+			outputFile: "   ",
+			expected:   "report.pdf",
+		},
+		{
+			// Surrounding whitespace must be trimmed before extension handling,
+			// otherwise we'd produce filenames like "  myfile  .pdf".
+			name:       "Surrounding whitespace is trimmed",
+			outputFile: "  myfile  ",
+			expected:   "myfile.pdf",
 		},
 	}
 
 	pp := NewPdfPrinter()
 	ctx := context.Background()
 
+	// Run from a temp cwd so the default-named file lands somewhere disposable.
+	tmp := t.TempDir()
+	origWd, err := os.Getwd()
+	assert.NoError(t, err)
+	assert.NoError(t, os.Chdir(tmp))
+	t.Cleanup(func() { _ = os.Chdir(origWd) })
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 
 			pp.SetWriter(ctx, tt.outputFile)
 			assert.Equal(t, tt.expected, pp.writer.Name())
+			assert.NotEqual(t, "/dev/stdout", pp.writer.Name(),
+				"PDF printer must never write to stdout")
 		})
 	}
 }

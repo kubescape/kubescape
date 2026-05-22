@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/go-git/go-git/v5"
+	apisv1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -109,27 +110,110 @@ func TestGetScanningContext(t *testing.T) {
 
 func TestScanInfoFormats(t *testing.T) {
 	testCases := []struct {
+		name  string
 		Input string
 		Want  []string
 	}{
-		{"", []string{}},
-		{"json", []string{"json"}},
-		{"pdf", []string{"pdf"}},
-		{"html", []string{"html"}},
-		{"sarif", []string{"sarif"}},
-		{"html,pdf,sarif", []string{"html", "pdf", "sarif"}},
-		{"pretty-printer,pdf,sarif", []string{"pretty-printer", "pdf", "sarif"}},
+		{"empty string", "", []string{}},
+		{"single json", "json", []string{"json"}},
+		{"single pdf", "pdf", []string{"pdf"}},
+		{"single html", "html", []string{"html"}},
+		{"single sarif", "sarif", []string{"sarif"}},
+		{"multiple formats", "html,pdf,sarif", []string{"html", "pdf", "sarif"}},
+		{"pretty-printer with others", "pretty-printer,pdf,sarif", []string{"pretty-printer", "pdf", "sarif"}},
+		{"consecutive commas", "json,,pdf", []string{"json", "pdf"}},
+		{"whitespace-only entry", "json, ,pdf", []string{"json", "pdf"}},
+		{"trailing comma", "json,pdf,", []string{"json", "pdf"}},
+		{"leading comma", ",json,pdf", []string{"json", "pdf"}},
+		{"only commas", ",,,", []string{}},
+		{"whitespace around formats", " json , pdf ", []string{"json", "pdf"}},
+		{"duplicates preserved order", "json,pdf,json", []string{"json", "pdf"}},
+		{"duplicates with whitespace", "json, json ,pdf", []string{"json", "pdf"}},
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.Input, func(t *testing.T) {
-			input := tc.Input
-			want := tc.Want
-			scanInfo := &ScanInfo{Format: input}
+		t.Run(tc.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{Format: tc.Input}
 
 			got := scanInfo.Formats()
 
-			assert.Equal(t, want, got)
+			assert.Equal(t, tc.Want, got)
+		})
+	}
+}
+
+func TestScanInfoFormatsDeduplicatesInOrder(t *testing.T) {
+	testCases := []struct {
+		name   string
+		format string
+		want   []string
+	}{
+		{
+			name:   "duplicate json",
+			format: "json,json",
+			want:   []string{"json"},
+		},
+		{
+			name:   "keeps first occurrence order",
+			format: "json,pdf,json,sarif,pdf",
+			want:   []string{"json", "pdf", "sarif"},
+		},
+		{
+			name:   "trims whitespace and deduplicates",
+			format: "json, json,json",
+			want:   []string{"json"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{Format: tc.format}
+
+			assert.Equal(t, tc.want, scanInfo.Formats())
+		})
+	}
+}
+
+func TestScanInfoSetPolicyIdentifiers(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing []PolicyIdentifier
+		policies []string
+		want     []PolicyIdentifier
+	}{
+		{
+			name:     "adds new policies",
+			policies: []string{"nsa", "mitre"},
+			want: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+				{Identifier: "mitre", Kind: apisv1.KindFramework},
+			},
+		},
+		{
+			name: "skips existing policy",
+			existing: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+			},
+			policies: []string{"nsa", "mitre"},
+			want: []PolicyIdentifier{
+				{Identifier: "nsa", Kind: apisv1.KindFramework},
+				{Identifier: "mitre", Kind: apisv1.KindFramework},
+			},
+		},
+		{
+			name:     "empty policy list leaves existing values",
+			existing: []PolicyIdentifier{{Identifier: "C-0001", Kind: apisv1.KindControl}},
+			want:     []PolicyIdentifier{{Identifier: "C-0001", Kind: apisv1.KindControl}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanInfo := &ScanInfo{PolicyIdentifier: tt.existing}
+
+			scanInfo.SetPolicyIdentifiers(tt.policies, apisv1.KindFramework)
+
+			assert.Equal(t, tt.want, scanInfo.PolicyIdentifier)
 		})
 	}
 }

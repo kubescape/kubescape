@@ -1,11 +1,10 @@
 package anonymizer
 
 import (
-	"encoding/json"
-
-	corev1 "k8s.io/api/core/v1"
+	"strings"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	corev1 "k8s.io/api/core/v1"
 )
 
 func anonymizeContainerMetadata(resource workloadinterface.IMetadata, mapping *Mapping) {
@@ -22,12 +21,20 @@ func anonymizeContainerMetadata(resource workloadinterface.IMetadata, mapping *M
 	resource.SetObject(obj)
 }
 
+// anonymizePodSpecs recursively traverses workload objects looking for pod-spec
+// shaped sections where container-related metadata may exist.
+//
+// Kubernetes resources may reach this layer as either typed objects converted
+// into generic maps or as fully unstructured manifests depending on the scan source,
+// so traversal stays representation-agnostic and delegates shape-specific handling
+// to dedicated helpers.
 func anonymizePodSpecs(node interface{}, mapping *Mapping) {
 	switch v := node.(type) {
 	case map[string]interface{}:
 		anonymizeContainerList(v, "containers", mapping)
 		anonymizeContainerList(v, "initContainers", mapping)
 		anonymizeEphemeralContainerList(v, "ephemeralContainers", mapping)
+		anonymizeImagePullSecrets(v, mapping)
 
 		for _, child := range v {
 			anonymizePodSpecs(child, mapping)
@@ -40,6 +47,21 @@ func anonymizePodSpecs(node interface{}, mapping *Mapping) {
 	}
 }
 
+// anonymizeContainerFields handles unstructured container objects represented
+// as map[string]interface{}.
+func anonymizeContainerFields(container map[string]interface{}, mapping *Mapping) {
+	if name, ok := container["name"].(string); ok && name != "" {
+		container["name"] = mapping.GetOrCreate("ctr", name)
+	}
+
+	if image, ok := container["image"].(string); ok && image != "" {
+		container["image"] = mapping.GetOrCreate("img", image)
+	}
+
+	anonymizeUnstructuredEnv(container, mapping)
+	anonymizeUnstructuredEnvFrom(container, mapping)
+}
+
 func anonymizeContainerList(
 	obj map[string]interface{},
 	key string,
@@ -50,26 +72,36 @@ func anonymizeContainerList(
 		return
 	}
 
-	data, err := json.Marshal(rawContainers)
-	if err != nil {
+	if containers, ok := rawContainers.([]corev1.Container); ok {
+		for i := range containers {
+			if containers[i].Name != "" {
+				containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+			}
+
+			if containers[i].Image != "" {
+				containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
+			}
+
+			anonymizeTypedEnv(containers[i].Env, mapping)
+			anonymizeTypedEnvFrom(containers[i].EnvFrom, mapping)
+		}
+
+		obj[key] = containers
 		return
 	}
 
-	var containers []corev1.Container
-	if err := json.Unmarshal(data, &containers); err != nil {
-		return
-	}
+	if containers, ok := rawContainers.([]interface{}); ok {
+		for _, item := range containers {
+			container, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
 
-	for i := range containers {
-		if containers[i].Name != "" {
-			containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+			anonymizeContainerFields(container, mapping)
 		}
-		if containers[i].Image != "" {
-			containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
-		}
-	}
 
-	obj[key] = containers
+		obj[key] = containers
+	}
 }
 
 func anonymizeEphemeralContainerList(
@@ -82,24 +114,252 @@ func anonymizeEphemeralContainerList(
 		return
 	}
 
-	data, err := json.Marshal(rawContainers)
-	if err != nil {
+	if containers, ok := rawContainers.([]corev1.EphemeralContainer); ok {
+		for i := range containers {
+			if containers[i].Name != "" {
+				containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+			}
+
+			if containers[i].Image != "" {
+				containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
+			}
+
+			anonymizeTypedEnv(containers[i].Env, mapping)
+			anonymizeTypedEnvFrom(containers[i].EnvFrom, mapping)
+		}
+
+		obj[key] = containers
 		return
 	}
 
-	var containers []corev1.EphemeralContainer
-	if err := json.Unmarshal(data, &containers); err != nil {
+	if containers, ok := rawContainers.([]interface{}); ok {
+		for _, item := range containers {
+			container, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			anonymizeContainerFields(container, mapping)
+		}
+
+		obj[key] = containers
+	}
+}
+
+// anonymizeTypedEnv anonymizes literal env values and resource references
+// inside typed EnvVar definitions.
+func anonymizeTypedEnv(envVars []corev1.EnvVar, mapping *Mapping) {
+	for i := range envVars {
+		envVar := &envVars[i]
+
+		if envVar.Value != "" &&
+			(isSensitiveEnvName(envVar.Name) || isSensitiveEnvValue(envVar.Value)) {
+			envVar.Value = mapping.GetOrCreate("env", envVar.Value)
+		}
+
+		if envVar.ValueFrom == nil {
+			continue
+		}
+
+		if secretRef := envVar.ValueFrom.SecretKeyRef; secretRef != nil &&
+			secretRef.Name != "" {
+			secretRef.Name = mapping.GetOrCreate("ref", secretRef.Name)
+		}
+
+		if configMapRef := envVar.ValueFrom.ConfigMapKeyRef; configMapRef != nil &&
+			configMapRef.Name != "" {
+			configMapRef.Name = mapping.GetOrCreate("ref", configMapRef.Name)
+		}
+	}
+}
+
+// anonymizeUnstructuredEnv handles env entries in generic manifest maps.
+func anonymizeUnstructuredEnv(container map[string]interface{}, mapping *Mapping) {
+	rawEnv, exists := container["env"]
+	if !exists || rawEnv == nil {
 		return
 	}
 
-	for i := range containers {
-		if containers[i].Name != "" {
-			containers[i].Name = mapping.GetOrCreate("ctr", containers[i].Name)
+	envVars, ok := rawEnv.([]interface{})
+	if !ok {
+		return
+	}
+
+	for _, item := range envVars {
+		envVar, ok := item.(map[string]interface{})
+		if !ok {
+			continue
 		}
-		if containers[i].Image != "" {
-			containers[i].Image = mapping.GetOrCreate("img", containers[i].Image)
+
+		name, _ := envVar["name"].(string)
+
+		if value, ok := envVar["value"].(string); ok &&
+			value != "" &&
+			(isSensitiveEnvName(name) || isSensitiveEnvValue(value)) {
+			envVar["value"] = mapping.GetOrCreate("env", value)
+		}
+
+		rawValueFrom, exists := envVar["valueFrom"]
+		if !exists || rawValueFrom == nil {
+			continue
+		}
+
+		valueFrom, ok := rawValueFrom.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		anonymizeUnstructuredReference(valueFrom, "secretKeyRef", mapping)
+		anonymizeUnstructuredReference(valueFrom, "configMapKeyRef", mapping)
+	}
+}
+
+// anonymizeTypedEnvFrom anonymizes typed envFrom resource references.
+func anonymizeTypedEnvFrom(envFrom []corev1.EnvFromSource, mapping *Mapping) {
+	for i := range envFrom {
+		source := &envFrom[i]
+
+		if source.SecretRef != nil && source.SecretRef.Name != "" {
+			source.SecretRef.Name = mapping.GetOrCreate(
+				"ref",
+				source.SecretRef.Name,
+			)
+		}
+
+		if source.ConfigMapRef != nil && source.ConfigMapRef.Name != "" {
+			source.ConfigMapRef.Name = mapping.GetOrCreate(
+				"ref",
+				source.ConfigMapRef.Name,
+			)
+		}
+	}
+}
+
+// anonymizeUnstructuredEnvFrom handles envFrom entries in generic manifest maps.
+func anonymizeUnstructuredEnvFrom(container map[string]interface{}, mapping *Mapping) {
+	rawEnvFrom, ok := container["envFrom"].([]interface{})
+	if !ok {
+		return
+	}
+
+	for _, item := range rawEnvFrom {
+		envFrom, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		anonymizeUnstructuredReference(envFrom, "secretRef", mapping)
+		anonymizeUnstructuredReference(envFrom, "configMapRef", mapping)
+	}
+}
+
+func anonymizeUnstructuredReference(
+	obj map[string]interface{},
+	key string,
+	mapping *Mapping,
+) {
+	ref, ok := obj[key].(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	name, ok := ref["name"].(string)
+	if !ok || name == "" {
+		return
+	}
+
+	ref["name"] = mapping.GetOrCreate("ref", name)
+}
+
+func isSensitiveEnvValue(value string) bool {
+	value = strings.ToLower(value)
+
+	sensitivePatterns := []string{
+		"://", // postgres:// redis:// mongodb:// etc
+		"password=",
+		"pwd=",
+		"user id=",
+		"userid=",
+		"dsn=",
+		"sslmode=",
+	}
+
+	for _, pattern := range sensitivePatterns {
+		if strings.Contains(value, pattern) {
+			return true
 		}
 	}
 
-	obj[key] = containers
+	return false
+}
+
+func isSensitiveEnvName(name string) bool {
+	name = strings.ToLower(name)
+
+	sensitivePatterns := []string{
+		"password",
+		"passwd",
+		"pwd",
+		"secret",
+		"token",
+		"api_key",
+		"access_key",
+		"credential",
+		"database_url",
+		"db_url",
+		"redis_url",
+		"mongo_uri",
+		"mongodb_uri",
+		"dsn",
+		"connection_string",
+	}
+
+	for _, pattern := range sensitivePatterns {
+		if strings.Contains(name, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func anonymizeImagePullSecrets(
+	obj map[string]interface{},
+	mapping *Mapping,
+) {
+	rawRefs, ok := obj["imagePullSecrets"]
+	if !ok || rawRefs == nil {
+		return
+	}
+
+	// Typed Kubernetes objects (manifest decoding path)
+	if refs, ok := rawRefs.([]corev1.LocalObjectReference); ok {
+		for i := range refs {
+			if refs[i].Name != "" {
+				refs[i].Name = mapping.GetOrCreate("ref", refs[i].Name)
+			}
+		}
+
+		obj["imagePullSecrets"] = refs
+		return
+	}
+
+	// Unstructured objects (runtime / normalized object path)
+	if refs, ok := rawRefs.([]interface{}); ok {
+		for _, item := range refs {
+			ref, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			name, ok := ref["name"].(string)
+			if !ok || name == "" {
+				continue
+			}
+
+			ref["name"] = mapping.GetOrCreate("ref", name)
+		}
+
+		obj["imagePullSecrets"] = refs
+	}
 }

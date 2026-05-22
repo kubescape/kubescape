@@ -165,7 +165,7 @@ func (lc *LocalConfig) UpdateCachedConfig() error {
 
 func (lc *LocalConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
 	}
 	return nil
 }
@@ -247,7 +247,7 @@ func (c *ClusterConfig) UpdateCachedConfig() error {
 
 func (c *ClusterConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
 	}
 	return nil
 }
@@ -436,19 +436,16 @@ func GetConfigMapNamespace() string {
 }
 
 func updateCredentials(configObj *ConfigObj, accountID, accessKey string) {
+	// Explicit flags take precedence over env vars; env vars are only applied as fallback.
 	if accessKey != "" {
 		configObj.AccessKey = accessKey
-	}
-
-	if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
+	} else if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
 		configObj.AccessKey = envAccessKey
 	}
 
 	if accountID != "" {
 		configObj.AccountID = accountID
-	}
-
-	if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
+	} else if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
 		configObj.AccountID = envAccountID
 	}
 }

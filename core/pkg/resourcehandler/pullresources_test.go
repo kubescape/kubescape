@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -65,6 +66,8 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 	}
 
 	_, err := handler.pullSingleResource(
+
+	_, selectorErrs := handler.pullSingleResource(
 		resource,
 		nil,
 		"",
@@ -72,6 +75,8 @@ func TestPullSingleResource_FieldSelectorDoesNotLeakAcrossIterations(t *testing.
 	)
 
 	require.NoError(t, err)
+	require.Empty(t, selectorErrs)
+
 
 	require.Len(t, capturedSelectors, 2)
 
@@ -100,7 +105,7 @@ func newHandlerWithReactor(t *testing.T, reactor k8stesting.ReactionFunc) *K8sRe
 	t.Helper()
 	client := fakeclientset.NewClientset()
 	dynClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), testGVRToListKind)
-	dynClient.Fake.PrependReactor("list", "*", reactor)
+	dynClient.PrependReactor("list", "*", reactor)
 
 	k8s := &k8sinterface.KubernetesApi{
 		KubernetesClient: client,
@@ -254,31 +259,114 @@ func TestRecordFailedQueryStatuses_WrittenWhenGVRTotallyAbsent(t *testing.T) {
 		failedGVR: {gvr: failedGVR, err: fmt.Errorf("forbidden")},
 	}
 
-	recordFailedQueryStatuses(failedQueries, k8sResourcesMap, infoMap)
+	partials := recordFailedQueryStatuses(failedQueries, k8sResourcesMap, infoMap)
 
 	info, ok := infoMap[failedGVR]
 	require.True(t, ok, "InfoMap should have an entry for the failed GVR")
 	assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
 	assert.Contains(t, info.InnerInfo, "forbidden")
+	assert.Empty(t, partials, "whole-GVR failure should not produce a PartialGVRPull")
 }
 
-// TestRecordFailedQueryStatuses_NotWrittenWhenGVRHasData verifies that when a
-// GVR failed for one field-selector query but another query for the same GVR
-// succeeded and populated k8sResources, the helper does NOT write to infoMap —
-// preventing controls from being incorrectly marked skipped when they do have
-// data. Drives the real production helper.
-func TestRecordFailedQueryStatuses_NotWrittenWhenGVRHasData(t *testing.T) {
+// TestRecordFailedQueryStatuses_PartialFailureSurfaced verifies the fix for the
+// silent false-negative bug: when a GVR failed for one field-selector query but
+// another selector for the same GVR succeeded, the failure must NOT be silently
+// suppressed. Instead it must be returned as a PartialGVRPull so the operator
+// and CI/CD pipelines can detect the incomplete scan.
+//
+// Prior to the fix, the presence of data in k8sResources[gvr] caused the
+// failure to be discarded entirely, leaving controls to evaluate (and silently
+// pass) against a truncated resource set.
+func TestRecordFailedQueryStatuses_PartialFailureSurfaced(t *testing.T) {
 	gvr := "/v1/pods"
+	selector := "metadata.namespace==prod"
 	infoMap := map[string]apis.StatusInfo{}
 
 	k8sResourcesMap := cautils.K8SResources{
-		gvr: []string{"default/pod-abc"},
+		gvr: []string{"default/pod-abc"}, // data from the successful selector
 	}
 	failedQueries := map[string]queryFailure{
-		gvr + "/metadata.namespace=prod": {gvr: gvr, err: fmt.Errorf("forbidden for prod")},
+		gvr + "/" + selector: {gvr: gvr, selector: selector, err: fmt.Errorf("forbidden for prod namespace")},
 	}
 
-	recordFailedQueryStatuses(failedQueries, k8sResourcesMap, infoMap)
+	partials := recordFailedQueryStatuses(failedQueries, k8sResourcesMap, infoMap)
 
-	assert.Empty(t, infoMap, "InfoMap should NOT be written when k8sResources already has data for the GVR")
+	// InfoMap must NOT be written — the whole GVR is not absent, so marking
+	// it as skipped would incorrectly suppress control evaluation.
+	assert.Empty(t, infoMap, "InfoMap must not be written for a partial GVR failure")
+
+	// The failure must be surfaced as a PartialGVRPull — not silently dropped.
+	require.Len(t, partials, 1, "partial failure must be returned, not suppressed")
+	assert.Equal(t, gvr, partials[0].GVR)
+	assert.Equal(t, selector, partials[0].Selector)
+	assert.Contains(t, partials[0].Error, "forbidden for prod namespace")
+}
+
+// TestRecordFailedQueryStatuses_PartialFailureSessionField verifies that when
+// two field-selector queries target the same GVR and one succeeds while the
+// other fails, GetResources stores the failure in sessionObj.PartialGVRFailures
+// rather than suppressing it silently.
+//
+// This is the end-to-end regression test for the silent false-negative bug:
+// prior to the fix, the presence of data from the first selector caused the
+// second selector's failure to be silently discarded, leaving the caller with
+// no indication that the resource set is incomplete.
+func TestRecordFailedQueryStatuses_PartialFailureSessionField(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+
+	fakeSecret := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "v1",
+			"kind":       "Secret",
+			"metadata":   map[string]interface{}{"name": "secret1", "namespace": "default"},
+		},
+	}
+	secretList := &unstructured.UnstructuredList{
+		Object: map[string]interface{}{"apiVersion": "v1", "kind": "SecretList"},
+		Items:  []unstructured.Unstructured{*fakeSecret},
+	}
+
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			// First secret selector succeeds; second fails to simulate a
+			// per-resource RBAC restriction on a different secret.
+			if opts.FieldSelector == "metadata.name=secret1" {
+				return secretList, nil
+			}
+			if opts.FieldSelector == "metadata.name=secret2,metadata.namespace=default" {
+				return nil, fmt.Errorf("RBAC denied for secret2")
+			}
+			// Any other query (e.g. Namespace list) returns empty — not an error.
+			return &unstructured.UnstructuredList{Items: []unstructured.Unstructured{}}, nil
+		},
+	}
+
+	// mockMatch(4) produces two field-selectors for the Secret GVR:
+	//   1. metadata.name=secret1  → succeeds
+	//   2. metadata.name=secret2,metadata.namespace=default → fails
+	rule := mockRule("rule-a", nil, "")
+	rule.Match = append(rule.Match, mockMatch(6), mockMatch(4))
+	control := mockControl("control-1", nil)
+	control.Rules = append(control.Rules, rule)
+	framework := mockFramework("test", nil)
+	framework.Controls = append(framework.Controls, control)
+
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
+	require.NoError(t, err)
+
+	// The GVR has data (from selector 1), so InfoMap must NOT have a whole-GVR
+	// skip entry — that would incorrectly mark the control as NotEvaluated.
+	_, inInfoMap := sessionObj.InfoMap["core/v1/secrets"]
+	assert.False(t, inInfoMap, "a partially-collected GVR must not appear as a whole-GVR skip in InfoMap")
+
+	// The per-selector failure must surface in PartialGVRFailures so the caller
+	// can warn the operator — this is the fix for the silent false-negative.
+	require.NotEmpty(t, sessionObj.PartialGVRFailures,
+		"the failed selector must be recorded in PartialGVRFailures, not silently dropped")
+	assert.Contains(t, sessionObj.PartialGVRFailures[0].Error, "RBAC denied for secret2")
 }

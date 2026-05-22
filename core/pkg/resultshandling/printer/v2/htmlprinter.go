@@ -42,15 +42,18 @@ func NewHtmlPrinter() *HtmlPrinter {
 }
 
 func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = htmlOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
-			outputFile = outputFile + htmlOutputExt
-		}
+	outputFile = strings.TrimSpace(outputFile)
+	if outputFile == "" {
+		// Raw HTML markup must never fall back to stdout on a TTY.
+		outputFile = htmlOutputFile + htmlOutputExt
+		logger.L().Info("no --output specified for html format; writing to default file",
+			helpers.String("filename", outputFile))
+	} else if filepath.Ext(outputFile) != htmlOutputExt {
+		outputFile = outputFile + htmlOutputExt
 	}
-	hp.writer = printer.GetWriter(ctx, outputFile)
+	// HTML must never fall back to stdout on file-create errors either
+	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+htmlOutputExt)
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {

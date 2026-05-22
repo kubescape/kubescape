@@ -47,9 +47,13 @@ func (c RegistryCredentials) IsEmpty() bool {
 func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Config, bool, error) {
 	dir := filepath.Join(xdg.CacheHome, defaultDBDirName)
 	finalURL := defaultGrypeListingURL
-	if grypeURL != "" {
-		logger.L().Info(fmt.Sprintf("Using custom Grype database URL: %s", grypeURL))
-		parsed, err := url.ParseRequestURI(grypeURL)
+
+	cleanedGrypeURL := strings.TrimSpace(grypeURL)
+
+	if cleanedGrypeURL != "" {
+		logger.L().Info(fmt.Sprintf("Using custom Grype database URL: %s", cleanedGrypeURL))
+
+		parsed, err := url.ParseRequestURI(cleanedGrypeURL)
 		if err != nil {
 			return distribution.Config{}, installation.Config{}, false, err
 		}
@@ -62,7 +66,7 @@ func NewDefaultDBConfig(grypeURL string) (distribution.Config, installation.Conf
 			return distribution.Config{}, installation.Config{}, false, fmt.Errorf("invalid scheme: %s", parsed.Scheme)
 		}
 
-		finalURL = grypeURL
+		finalURL = cleanedGrypeURL
 	}
 
 	shouldUpdate := true

@@ -384,3 +384,35 @@ func TestUpdateEmptyFields(t *testing.T) {
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClusterName, tests[i].outCo.ClusterName)
 	}
 }
+
+func TestUpdateCredentials_FlagTakesPrecedenceOverEnv(t *testing.T) {
+	// Regression test: explicit flag values must not be overwritten by env vars.
+	t.Setenv(accountIdEnvVar, "env-account-id")
+	t.Setenv(accessKeyEnvVar, "env-access-key")
+
+	configObj := &ConfigObj{}
+	updateCredentials(configObj, "flag-account-id", "flag-access-key")
+
+	if configObj.AccountID != "flag-account-id" {
+		t.Errorf("expected AccountID=flag-account-id, got %s", configObj.AccountID)
+	}
+	if configObj.AccessKey != "flag-access-key" {
+		t.Errorf("expected AccessKey=flag-access-key, got %s", configObj.AccessKey)
+	}
+}
+
+func TestUpdateCredentials_EnvAppliedWhenNoFlag(t *testing.T) {
+	// Env vars should apply as fallback when no flag value is provided.
+	t.Setenv(accountIdEnvVar, "env-account-id")
+	t.Setenv(accessKeyEnvVar, "env-access-key")
+
+	configObj := &ConfigObj{}
+	updateCredentials(configObj, "", "")
+
+	if configObj.AccountID != "env-account-id" {
+		t.Errorf("expected AccountID=env-account-id, got %s", configObj.AccountID)
+	}
+	if configObj.AccessKey != "env-access-key" {
+		t.Errorf("expected AccessKey=env-access-key, got %s", configObj.AccessKey)
+	}
+}

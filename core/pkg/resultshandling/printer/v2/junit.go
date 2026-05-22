@@ -41,26 +41,26 @@ type JUnitXML struct {
 // JUnitTestSuites represents the test summary
 type JUnitTestSuites struct {
 	XMLName  xml.Name         `xml:"testsuites"`
-	Suites   []JUnitTestSuite `xml:"testsuite"`              // list of controls
-	Errors   int              `xml:"errors,attr"`            // total number of tests with error result from all testsuites
-	Failures int              `xml:"failures,attr"`          // total number of failed tests from all testsuites
-	Tests    int              `xml:"tests,attr"`             // total number of tests from all testsuites. Some software may expect to only see the number of successful tests from all testsuites though
-	Time     string           `xml:"time,attr,omitempty"`    // time in seconds to execute all test suites
-	Name     string           `xml:"name,attr,omitempty"`    // ? Add framework names ?
+	Suites   []JUnitTestSuite `xml:"testsuite"`           // list of controls
+	Errors   int              `xml:"errors,attr"`         // total number of tests with error result from all testsuites
+	Failures int              `xml:"failures,attr"`       // total number of failed tests from all testsuites
+	Tests    int              `xml:"tests,attr"`          // total number of tests from all testsuites. Some software may expect to only see the number of successful tests from all testsuites though
+	Time     string           `xml:"time,attr,omitempty"` // time in seconds to execute all test suites
+	Name     string           `xml:"name,attr,omitempty"` // ? Add framework names ?
 }
 
 // JUnitTestSuite represents a single control
 type JUnitTestSuite struct {
 	XMLName    xml.Name        `xml:"testsuite"`
-	Tests      int             `xml:"tests,attr"`                // total number of tests from this testsuite. Some software may expect to only see the number of successful tests though
-	Name       string          `xml:"name,attr"`                 // Full (class) name of the test for non-aggregated testsuite documents. Class name without the package for aggregated testsuites documents. Required
-	Errors     int             `xml:"errors,attr"`               // The total number of tests in the suite that errors
-	Failures   int             `xml:"failures,attr"`             // The total number of tests in the suite that failed
-	Hostname   string          `xml:"hostname,attr,omitempty"`   // Host on which the tests were executed ? cluster name ?
-	ID         int             `xml:"id,attr"`                   // Starts at 0 for the first testsuite and is incremented by 1 for each following testsuite
-	Skipped    int             `xml:"skipped,attr"`              // The total number of skipped tests
-	Time       string          `xml:"time,attr,omitempty"`       // Time taken (in seconds) to execute the tests in the suite
-	Timestamp  string          `xml:"timestamp,attr,omitempty"`  // when the test was executed in ISO 8601 format (2014-01-21T16:17:18)
+	Tests      int             `xml:"tests,attr"`               // total number of tests from this testsuite. Some software may expect to only see the number of successful tests though
+	Name       string          `xml:"name,attr"`                // Full (class) name of the test for non-aggregated testsuite documents. Class name without the package for aggregated testsuites documents. Required
+	Errors     int             `xml:"errors,attr"`              // The total number of tests in the suite that errors
+	Failures   int             `xml:"failures,attr"`            // The total number of tests in the suite that failed
+	Hostname   string          `xml:"hostname,attr,omitempty"`  // Host on which the tests were executed ? cluster name ?
+	ID         int             `xml:"id,attr"`                  // Starts at 0 for the first testsuite and is incremented by 1 for each following testsuite
+	Skipped    int             `xml:"skipped,attr"`             // The total number of skipped tests
+	Time       string          `xml:"time,attr,omitempty"`      // Time taken (in seconds) to execute the tests in the suite
+	Timestamp  string          `xml:"timestamp,attr,omitempty"` // when the test was executed in ISO 8601 format (2014-01-21T16:17:18)
 	Properties []JUnitProperty `xml:"properties>property,omitempty"`
 	TestCases  []JUnitTestCase `xml:"testcase"`
 }

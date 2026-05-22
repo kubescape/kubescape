@@ -14,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v3"
@@ -34,6 +35,10 @@ const (
 type Chart struct {
 	Name string
 	Path string
+	// Provenance links this rendered source back to its template and the
+	// .Values keys that template reads. Zero value when extraction failed
+	// or no static refs were found — callers must tolerate empty fields.
+	Provenance helmprovenance.Provenance
 }
 
 // LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names.
@@ -78,11 +83,13 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 				continue
 			}
 			chartName := chart.GetName()
+			prov := chart.Provenance()
 			for k, v := range wls {
 				sourceToWorkloads[k] = v
 				sourceToChart[k] = Chart{
-					Name: chartName,
-					Path: helmDir,
+					Name:       chartName,
+					Path:       helmDir,
+					Provenance: prov[k],
 				}
 			}
 		}
@@ -373,11 +380,11 @@ func convertYamlToJson(i interface{}) interface{} {
 }
 
 func IsYaml(filePath string) bool {
-	return slices.Contains(YAML_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
+	return slices.Contains(YAML_PREFIX, strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), ".")))
 }
 
 func IsJson(filePath string) bool {
-	return slices.Contains(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
+	return slices.Contains(JSON_PREFIX, strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), ".")))
 }
 
 func glob(root, pattern string, onlyDirectories bool) ([]string, error) {
