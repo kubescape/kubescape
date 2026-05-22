@@ -1,5 +1,10 @@
 name: a-pr-scanner
-permissions: read-all
+permissions:
+  contents: read
+  checks: read
+  actions: read
+  packages: read
+  pull-requests: read
 on:
   workflow_call:
     inputs:
@@ -38,7 +43,7 @@ jobs:
       - uses: actions/setup-go@7b8cf10d4e4a01d4992d18a89f4d7dc5a3e6d6f4 # v4.3.0
         name: Installing go
         with:
-          go-version: ${{ inputs.GO_VERSION }}
+          go-version-file: go.mod
 
       - name: Test core pkg
         run: ${{ env.DOCKER_CMD }} go test -v ./...

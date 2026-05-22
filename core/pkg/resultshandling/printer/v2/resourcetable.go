@@ -16,6 +16,8 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
+var specContainerRegex = regexp.MustCompile(`spec\.containers\[(\d+)]`)
+
 const (
 	resourceColumnSeverity = iota
 	resourceColumnName     = iota
@@ -99,12 +101,17 @@ func generateResourceRows(controls []resourcesresults.ResourceAssociatedControl,
 
 func addContainerNameToAssistedRemediation(resource workloadinterface.IMetadata, paths *[]string) {
 	for i := range *paths {
-		re := regexp.MustCompile(`spec\.containers\[(\d+)]`)
-		match := re.FindStringSubmatch((*paths)[i])
+		match := specContainerRegex.FindStringSubmatch((*paths)[i])
 		if len(match) == 2 {
-			index, _ := strconv.Atoi(match[1])
+			index, err := strconv.Atoi(match[1])
+			if err != nil {
+				continue
+			}
 			wl := workloadinterface.NewWorkloadObj(resource.GetObject())
 			containers, _ := wl.GetContainers()
+			if index >= len(containers) {
+				continue
+			}
 			containerName := containers[index].Name
 			(*paths)[i] = (*paths)[i] + " (" + containerName + ")"
 		}

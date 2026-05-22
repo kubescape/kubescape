@@ -198,8 +198,11 @@ kubescape scan --exclude-namespaces kube-system,kube-public
 # Use alternative kubeconfig
 kubescape scan --kubeconfig /path/to/kubeconfig
 
-# Set compliance threshold (exit code 1 if below threshold)
-kubescape scan --compliance-threshold 80
+# Set compliance threshold (exit code 1 if below threshold).
+# Score thresholds apply to the framework/control subcommands and to
+# --view resource|control.
+kubescape scan framework nsa --compliance-threshold 80
+kubescape scan --view resource --compliance-threshold 80
 
 # Set severity threshold
 kubescape scan --severity-threshold high

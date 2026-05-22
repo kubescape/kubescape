@@ -100,6 +100,7 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
+
 // helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
 // into the cautils.HelmValueOptions used by chart rendering.
 func helmValueOptionsFromScanInfo(scanInfo *cautils.ScanInfo) cautils.HelmValueOptions {
@@ -182,12 +183,15 @@ func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils
 	}
 
 	return reporthandling.Source{
-		Path:          repoRoot,
-		HelmPath:      helmChart.Path,
-		RelativePath:  source,
-		FileType:      reporthandling.SourceTypeHelmChart,
-		HelmChartName: helmChart.Name,
-		LastCommit:    lastCommit,
+		Path:             repoRoot,
+		HelmPath:         helmChart.Path,
+		RelativePath:     source,
+		FileType:         reporthandling.SourceTypeHelmChart,
+		HelmChartName:    helmChart.Name,
+		HelmTemplateFile: helmChart.Provenance.TemplateFile,
+		HelmValuesPaths:  helmChart.Provenance.ValuesPaths,
+		HelmTemplateLine: helmChart.Provenance.TemplateLine,
+		LastCommit:       lastCommit,
 	}
 }
 

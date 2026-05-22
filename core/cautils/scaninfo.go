@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -73,12 +74,11 @@ func (bpf *BoolPtrFlag) SetBool(val bool) {
 }
 
 func (bpf *BoolPtrFlag) Set(val string) error {
-	switch val {
-	case "true":
-		bpf.SetBool(true)
-	case "false":
-		bpf.SetBool(false)
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return err
 	}
+	bpf.SetBool(parsed)
 	return nil
 }
 
@@ -222,14 +222,22 @@ func (scanInfo *ScanInfo) setUseFrom() {
 	}
 }
 
-// Formats returns a slice of output formats that have been requested for a given scan
+// Formats returns a slice of output formats that have been requested for a given scan.
+// Empty entries and surrounding whitespace are dropped so that inputs like
+// "json,,pdf" or "json, ,pdf" do not produce blank format strings.
 func (scanInfo *ScanInfo) Formats() []string {
-	formatString := scanInfo.Format
-	if formatString != "" {
-		return unique(strings.Split(scanInfo.Format, ","))
-	} else {
+	if scanInfo.Format == "" {
 		return []string{}
 	}
+
+	var cleaned []string
+	for _, f := range strings.Split(scanInfo.Format, ",") {
+		if v := strings.TrimSpace(f); v != "" {
+			cleaned = append(cleaned, v)
+		}
+	}
+
+	return unique(cleaned)
 }
 
 func unique(items []string) []string {

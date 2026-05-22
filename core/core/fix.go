@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	metav1 "github.com/kubescape/kubescape/v3/core/meta/datastructures/v1"
 	"github.com/kubescape/kubescape/v3/core/pkg/fixhandler"
 )
@@ -23,6 +24,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	}
 
 	resourcesToFix := handler.PrepareResourcesToFix(ks.Context())
+	helmSuggestions := handler.PrepareHelmSuggestions(ks.Context())
+
+	if len(resourcesToFix) == 0 && len(helmSuggestions) == 0 {
+		logger.L().Info(noResourcesToFix)
+		return nil
+	}
+
+	// Helm guidance is print-only — applied to none of the apply/confirm
+	// path below, since we do not auto-edit chart templates or values.yaml.
+	handler.PrintHelmSuggestions(helmSuggestions)
 
 	if len(resourcesToFix) == 0 {
 		logger.L().Info(noResourcesToFix)
@@ -72,7 +83,7 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 
 	if len(errors) > 0 {
 		for _, err := range errors {
-			logger.L().Ctx(ks.Context()).Warning(err.Error())
+			logger.L().Ctx(ks.Context()).Warning("failed to fix resource", helpers.Error(err))
 		}
 		return fmt.Errorf("failed to fix some resources, check the logs for more details")
 	}

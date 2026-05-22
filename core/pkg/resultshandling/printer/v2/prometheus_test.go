@@ -50,44 +50,41 @@ func TestScore(t *testing.T) {
 		{
 			name:  "Score less than 0",
 			score: -20.0,
-			want:  "\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score 0\n",
+			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 0\n",
 		},
 		{
 			name:  "Score greater than 100",
 			score: 120.0,
-			want:  "\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score 100\n",
+			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 100\n",
 		},
 		{
 			name:  "Score 50",
 			score: 50.0,
-			want:  "\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score 50\n",
+			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 50\n",
 		},
 		{
 			name:  "Zero Score",
 			score: 0.0,
-			want:  "\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score 0\n",
+			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 0\n",
 		},
 		{
 			name:  "Perfect Score",
 			score: 100,
-			want:  "\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score 100\n",
+			want:  "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n# TYPE kubescape_score gauge\nkubescape_score 100\n",
 		},
 	}
 
-	promPrinter := NewPrometheusPrinter(false)
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Redirect stdout to a buffer
-			rescueStdout := os.Stdout
+			// Score() must write to pp.writer, not stdout
 			r, w, _ := os.Pipe()
-			os.Stdout = w
+			promPrinter := NewPrometheusPrinter(false)
+			promPrinter.writer = w
 
 			promPrinter.Score(tt.score)
 
 			w.Close()
 			got, _ := io.ReadAll(r)
-			os.Stdout = rescueStdout
 			assert.Equal(t, tt.want, string(got))
 		})
 	}

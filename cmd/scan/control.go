@@ -132,7 +132,7 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 	severity := scanInfo.FailThresholdSeverity
 
 	if scanInfo.Submit && scanInfo.OmitRawResources {
-		return fmt.Errorf("you can use `omit-raw-resources` or `submit`, but not both")
+		return ErrOmitRawResourcesOrSubmit
 	}
 
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {

@@ -33,6 +33,22 @@ type ResourceFixInfo struct {
 	DocumentIndex   int
 }
 
+// HelmFixSuggestion describes a fix for a Helm-rendered resource. We do not
+// edit chart templates directly: the rendered line numbers in the yq fix paths
+// don't reliably map back to template lines (this was the underlying bug
+// behind PRs #1215/#1551/#1620/#1628 and the rationale for issue #1772).
+// Instead, we surface the rule's fix path together with the .Values.* keys
+// statically referenced by the source template, so the user can edit
+// values.yaml deliberately.
+type HelmFixSuggestion struct {
+	Resource     *reporthandling.Resource
+	ChartPath    string              // on-disk chart root (Source.HelmPath)
+	ChartName    string              // Source.HelmChartName
+	TemplateFile string              // chart-relative, e.g. "templates/deployment.yaml"
+	ValuesPaths  []string            // candidate dotted .Values.* keys referenced by the template; may be empty
+	FixPaths     []armotypes.FixPath // rule-suggested rendered-YAML edits, for the user to translate into values.yaml
+}
+
 // UnfixedControl describes a failed (resource, control) tuple for which `kubescape fix`
 // did not produce an automatic remediation. The user must address these manually.
 type UnfixedControl struct {

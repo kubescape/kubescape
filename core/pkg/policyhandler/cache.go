@@ -2,21 +2,35 @@ package policyhandler
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// TimedCache provides functionality for managing a timed cache.
-// The timed cache holds a value for a specified time duration (TTL).
-// After the TTL has passed, the value is invalidated.
-//
-// The cache is thread safe.
+const (
+	cacheStateActive uint32 = iota
+	cacheStateStopping
+)
+
 type TimedCache[T any] struct {
 	value      T
 	isSet      bool
 	ttl        time.Duration
 	expiration time.Time
 	mutex      sync.RWMutex
-	stopChan   chan struct{} // to stop the invalidateTask goroutine
+	stopChan   chan struct{}
+	stopWg     sync.WaitGroup
+	stopped    uint32
+	// invalidateHook, if non-nil, is called inside invalidateTask after the expiry
+	// check succeeds and before invalidateLocked. In the fixed implementation this
+	// call occurs while the write lock is held, so a concurrent Set blocks until
+	// after invalidation. Tests set this field to observe that property; it is
+	// always nil outside of tests.
+	invalidateHook func()
+	// afterInvalidateHook, if non-nil, is called inside invalidateTask immediately
+	// after invalidateLocked returns, still while the write lock is held. Tests use
+	// this to know when the full invalidation cycle is complete. Always nil outside
+	// of tests.
+	afterInvalidateHook func()
 }
 
 func NewTimedCache[T any](ttl time.Duration) *TimedCache[T] {
@@ -26,8 +40,8 @@ func NewTimedCache[T any](ttl time.Duration) *TimedCache[T] {
 		stopChan: make(chan struct{}),
 	}
 
-	// start the invalidate task only when the ttl is greater than 0 (cache is enabled)
 	if ttl > 0 {
+		cache.stopWg.Add(1)
 		go cache.invalidateTask()
 	}
 
@@ -46,9 +60,8 @@ func (c *TimedCache[T]) Set(value T) {
 	c.value = value
 	c.expiration = time.Now().Add(c.ttl)
 
-	// Signal invalidation to Get() if cache is already expired
 	if time.Now().After(c.expiration) {
-		c.Invalidate()
+		c.invalidateLocked()
 	}
 }
 
@@ -56,21 +69,19 @@ func (c *TimedCache[T]) Get() (T, bool) {
 	c.mutex.RLock()
 	defer c.mutex.RUnlock()
 
-	// If the invalidateTask() goroutine is currently invalidating the cache,
-	// the Get() method may return the stale cached value before the invalidation is complete.
-	// To avoid the stale cached value, we're requiring the Get() method to wait for the invalidation signal before returning the value.
-	select {
-	case <-c.stopChan:
+	if atomic.LoadUint32(&c.stopped) != cacheStateActive {
 		return c.value, false
-	default:
-		if !c.isSet || time.Now().After(c.expiration) {
-			return c.value, false
-		}
-		return c.value, true
 	}
+
+	if !c.isSet || time.Now().After(c.expiration) {
+		return c.value, false
+	}
+	return c.value, true
 }
 
 func (c *TimedCache[T]) invalidateTask() {
+	defer c.stopWg.Done()
+
 	ticker := time.NewTicker(c.ttl)
 	defer ticker.Stop()
 
@@ -78,31 +89,46 @@ func (c *TimedCache[T]) invalidateTask() {
 		select {
 		case <-ticker.C:
 			c.mutex.Lock()
-			expired := time.Now().After(c.expiration)
-			c.mutex.Unlock()
-			if expired {
-				c.Invalidate()
+			if time.Now().After(c.expiration) {
+				if c.invalidateHook != nil {
+					c.invalidateHook()
+				}
+				c.invalidateLocked()
+				if c.afterInvalidateHook != nil {
+					c.afterInvalidateHook()
+				}
 			}
+			c.mutex.Unlock()
 		case <-c.stopChan:
 			return
-		default:
-			// Check if TTL is still non-zero and return if true, to avoid possible memory leaks
-			if c.ttl == 0 {
-				return
-			}
 		}
 	}
 }
 
 func (c *TimedCache[T]) Stop() {
+	if !atomic.CompareAndSwapUint32(&c.stopped, cacheStateActive, cacheStateStopping) {
+		return
+	}
 	close(c.stopChan)
+	c.stopWg.Wait()
 }
 
 func (c *TimedCache[T]) Invalidate() {
+	if atomic.LoadUint32(&c.stopped) != cacheStateActive {
+		return
+	}
+	c.invalidateExternal()
+}
+
+func (c *TimedCache[T]) invalidateExternal() {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+	c.invalidateLocked()
+}
 
+func (c *TimedCache[T]) invalidateLocked() {
+	if atomic.LoadUint32(&c.stopped) != cacheStateActive {
+		return
+	}
 	c.isSet = false
-	close(c.stopChan)
-	c.stopChan = make(chan struct{})
 }

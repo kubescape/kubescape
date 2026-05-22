@@ -500,10 +500,17 @@ func (opap *OPAProcessor) skipNamespace(ns string) bool {
 }
 
 func split(namespaces string) []string {
-	if namespaces == "" {
-		return nil
+	parts := strings.Split(namespaces, ",")
+	result := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
 	}
-	return strings.Split(namespaces, ",")
+
+	return result
 }
 
 func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, error) {

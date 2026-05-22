@@ -211,8 +211,6 @@ func TestRemoveEphemeralContainersData_ClearsEnvFrom(t *testing.T) {
 	}
 }
 
-
-
 func TestRemoveContainersData_ClearsValueFrom(t *testing.T) {
 	containers := []corev1.Container{
 		{
@@ -631,6 +629,98 @@ func TestApplyExceptionsToManualControls(t *testing.T) {
 		assert.Equal(t, apis.SubStatusManualReview, ctrl.GetSubStatus())
 		assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status())
 	})
+}
+
+func TestRequiresResourceMatch(t *testing.T) {
+	tests := []struct {
+		name       string
+		designator identifiers.PortalDesignator
+		want       bool
+	}{
+		{
+			name:       "empty designator does not require a resource match",
+			designator: identifiers.PortalDesignator{},
+			want:       false,
+		},
+		{
+			name: "cluster-only attributes do not require a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributeCluster: "prod-cluster"},
+			},
+			want: false,
+		},
+		{
+			name: "wlid requires a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorWlid,
+				WLID:           "wlid://cluster-prod/namespace-default/deployment-nginx",
+			},
+			want: true,
+		},
+		{
+			name: "wild wlid requires a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorWildWlid,
+				WildWLID:       "wlid://cluster-prod/*/deployment-*",
+			},
+			want: true,
+		},
+		{
+			name: "namespace attribute requires a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributeNamespace: "kube-system"},
+			},
+			want: true,
+		},
+		{
+			name: "name attribute requires a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributeName: "nginx"},
+			},
+			want: true,
+		},
+		{
+			name: "kind attribute requires a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributeKind: "Deployment"},
+			},
+			want: true,
+		},
+		{
+			name: "path attribute requires a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributePath: "/spec/template"},
+			},
+			want: true,
+		},
+		{
+			name: "resourceID attribute requires a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{identifiers.AttributeResourceID: "resource-123"},
+			},
+			want: true,
+		},
+		{
+			name: "labels require a resource match",
+			designator: identifiers.PortalDesignator{
+				DesignatorType: identifiers.DesignatorAttributes,
+				Attributes:     map[string]string{"app": "nginx"},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, requiresResourceMatch(tt.designator))
+		})
+	}
 }
 
 // mockCounters implements reportsummary.ICounters for testing

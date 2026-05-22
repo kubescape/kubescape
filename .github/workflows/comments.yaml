@@ -14,7 +14,7 @@ jobs:
       - name: PR Agent action step
         continue-on-error: true
         id: pragent
-        uses: Codium-ai/pr-agent@main
+        uses: Codium-ai/pr-agent@0bd56c0508504c718cc03d504cd4ceb6725ba3c7 # main
         env:
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

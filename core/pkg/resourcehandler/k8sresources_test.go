@@ -534,7 +534,7 @@ func TestIsMasterNodeTaints(t *testing.T) {
 `
 	var taintNode v1.Node
 	_ = json.Unmarshal([]byte(taintNodeJson), &taintNode)
-	assert.True(t, isMasterNodeTaints(taintNode.Spec.Taints))
+	assert.False(t, isMasterNodeTaints(taintNode.Spec.Taints))
 
 	taintNodeJson1 :=
 		`
@@ -628,4 +628,51 @@ func TestCloudResourceRequired(t *testing.T) {
 
 	assert.True(t, cloudResourceRequired(cloudResources, ClusterDescribe))
 	assert.False(t, cloudResourceRequired(cloudResources, "ListRolePolicies"))
+}
+
+func Test_isMasterNodeTaints(t *testing.T) {
+	tests := []struct {
+		name   string
+		taints []v1.Taint
+		want   bool
+	}{
+		{
+			name: "control plane taint",
+			taints: []v1.Taint{
+				{
+					Key:    "node-role.kubernetes.io/control-plane",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "cordoned worker node taint",
+			taints: []v1.Taint{
+				{
+					Key:    "node.kubernetes.io/unschedulable",
+					Value:  "",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "custom empty-value taint",
+			taints: []v1.Taint{
+				{
+					Key:    "dedicated-gpu",
+					Value:  "",
+					Effect: v1.TaintEffectNoSchedule,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isMasterNodeTaints(tt.taints))
+		})
+	}
 }

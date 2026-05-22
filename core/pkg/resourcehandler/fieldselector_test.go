@@ -45,4 +45,25 @@ func TestIncludeNamespacesSelectors(t *testing.T) {
 	assert.Equal(t, 2, len(selectors2))
 	assert.Equal(t, "metadata.name==default", selectors2[0])
 	assert.Equal(t, "metadata.name==ingress", selectors2[1])
+
+	// Cluster-scoped resources must collapse to a single unfiltered query
+	// regardless of how many namespaces were included; otherwise
+	// pullSingleResource would LIST the collection once per namespace and
+	// duplicate every cluster-scoped object N times in k8sResources[gvr].
+	clusterScopedSelectors := is.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "nodes"})
+	assert.Equal(t, []string{""}, clusterScopedSelectors)
+
+	manyNs := NewIncludeSelector("a,b,c,d,e")
+	assert.Equal(t, []string{""}, manyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "clusterroles"}))
+
+	// empty namespace string: no valid namespace to include, so result is empty
+	emptyNs := NewIncludeSelector("")
+	assert.Empty(t, emptyNs.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"}))
+
+	// malformed input with empty segments: empty segments are skipped
+	malformed := NewIncludeSelector("ns1,,ns3")
+	malformedSelectors := malformed.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
+	assert.Equal(t, 2, len(malformedSelectors))
+	assert.Equal(t, "metadata.namespace==ns1", malformedSelectors[0])
+	assert.Equal(t, "metadata.namespace==ns3", malformedSelectors[1])
 }
