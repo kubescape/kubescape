@@ -7,6 +7,8 @@ import (
 
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/armosec/armoapi-go/identifiers"
+	"github.com/kubescape/go-logger"
+	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/pkg/securityexception"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -148,6 +150,11 @@ func buildResourceDesignators(obj *unstructured.Unstructured, kind string) ([]ma
 	}
 
 	if _, found, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "match", "objectSelector"); found {
+		logger.L().Warning("SecurityException CRD uses unsupported spec.match.objectSelector; skipping",
+			helpers.String("name", obj.GetName()),
+			helpers.String("namespace", namespace),
+			helpers.String("kind", kind),
+		)
 		return nil, fmt.Errorf("spec.match.objectSelector is not supported")
 	}
 
