@@ -12,6 +12,7 @@ import (
 	printerv1 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v1"
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v3/core/pkg/vapreconcile"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
@@ -76,6 +77,11 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 
 // HandleResults handles all necessary actions for the scan results
 func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
+	if len(rh.ScanData.VAPPolicies) > 0 {
+		index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
+		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
+	}
+
 	// Display scan results in the UI first to give immediate value.
 
 	rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
