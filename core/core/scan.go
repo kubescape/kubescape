@@ -136,16 +136,6 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 }
 
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
-	if scanInfo.ScanTimeout > 0 {
-		originalCtx := ks.Ctx
-		timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
-		defer func() {
-			cancel()
-			ks.Ctx = originalCtx
-		}()
-		ks.Ctx = timeoutCtx
-	}
-
 	ctxInit, spanInit := otel.Tracer("").Start(ks.Context(), "initialization")
 	logger.L().Start("Kubescape scanner initializing...")
 

@@ -11,6 +11,7 @@ import (
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	resultshandlingpkg "github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
@@ -447,6 +448,52 @@ func TestScanInfo_ScanTimeoutField(t *testing.T) {
 			assert.Equal(t, tt.timeout, si.ScanTimeout)
 		})
 	}
+}
+
+// contextTrackingKubescape is a test-local IKubescape that records what
+// context was active when Scan() was called, so we can assert the deadline.
+type contextTrackingKubescape struct {
+	mocks.MockIKubescape
+	ctx         context.Context
+	scanCalledWith context.Context
+}
+
+func (m *contextTrackingKubescape) Context() context.Context       { return m.ctx }
+func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
+func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
+	m.scanCalledWith = m.ctx
+	return nil, nil
+}
+
+func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
+	ks := &contextTrackingKubescape{ctx: context.Background()}
+	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
+
+	_ = securityScan(scanInfo, ks)
+
+	_, hasDeadline := ks.scanCalledWith.Deadline()
+	assert.True(t, hasDeadline, "Scan() must receive a context with a deadline when ScanTimeout > 0")
+}
+
+func TestSecurityScan_TimeoutContextRestoredAfterReturn(t *testing.T) {
+	originalCtx := context.Background()
+	ks := &contextTrackingKubescape{ctx: originalCtx}
+	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
+
+	_ = securityScan(scanInfo, ks)
+
+	_, hasDeadline := ks.Context().Deadline()
+	assert.False(t, hasDeadline, "original context must be restored on ks after securityScan returns")
+}
+
+func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
+	ks := &contextTrackingKubescape{ctx: context.Background()}
+	scanInfo := cautils.ScanInfo{ScanTimeout: 0}
+
+	_ = securityScan(scanInfo, ks)
+
+	_, hasDeadline := ks.scanCalledWith.Deadline()
+	assert.False(t, hasDeadline, "Scan() must not receive a deadline when ScanTimeout is 0")
 }
 
 // coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we

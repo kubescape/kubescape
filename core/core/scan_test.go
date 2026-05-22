@@ -2,13 +2,11 @@ package core
 
 import (
 	"context"
-	"errors"
 	"testing"
 	"time"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 func TestGetOutputPrinters(t *testing.T) {
@@ -212,63 +210,28 @@ func TestGetOutputPrintersDeduplicatesPrettyPrinterFallback(t *testing.T) {
 	}
 }
 
-func TestScan_TimeoutContextSetOnKubescape(t *testing.T) {
-	tests := []struct {
-		name        string
-		timeout     time.Duration
-		wantTimeout bool
-	}{
-		{"zero timeout does not add deadline", 0, false},
-		{"positive timeout adds deadline", 5 * time.Minute, true},
-		{"one second timeout adds deadline", time.Second, true},
-	}
+func TestKubescape_SetContext(t *testing.T) {
+	type ctxKey struct{}
+	ks := NewKubescape(context.Background())
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ks := NewKubescape(context.Background())
-			scanInfo := &cautils.ScanInfo{ScanTimeout: tt.timeout}
+	newCtx := context.WithValue(context.Background(), ctxKey{}, "sentinel")
+	ks.SetContext(newCtx)
 
-			originalCtx := ks.Ctx
-			if scanInfo.ScanTimeout > 0 {
-				timeoutCtx, cancel := context.WithTimeout(ks.Ctx, scanInfo.ScanTimeout)
-				defer cancel()
-				ks.Ctx = timeoutCtx
-			}
-
-			_, hasDeadline := ks.Ctx.Deadline()
-			assert.Equal(t, tt.wantTimeout, hasDeadline)
-
-			if !tt.wantTimeout {
-				assert.Equal(t, originalCtx, ks.Ctx)
-			}
-		})
-	}
+	assert.Equal(t, newCtx, ks.Context())
+	assert.Equal(t, "sentinel", ks.Context().Value(ctxKey{}))
 }
 
-func TestScan_TimeoutContextCancelsOnExpiry(t *testing.T) {
-	ks := NewKubescape(context.Background())
-	scanInfo := &cautils.ScanInfo{ScanTimeout: 50 * time.Millisecond}
+func TestKubescape_SetContextRestoresOriginal(t *testing.T) {
+	originalCtx := context.Background()
+	ks := NewKubescape(originalCtx)
 
-	timeoutCtx, cancel := context.WithTimeout(ks.Ctx, scanInfo.ScanTimeout)
-	defer cancel()
-	ks.Ctx = timeoutCtx
+	timeoutCtx, cancel := context.WithTimeout(originalCtx, time.Minute)
+	ks.SetContext(timeoutCtx)
+	_, hasDeadline := ks.Context().Deadline()
+	assert.True(t, hasDeadline)
 
-	<-ks.Ctx.Done()
-
-	require.Error(t, ks.Ctx.Err())
-	assert.True(t, errors.Is(ks.Ctx.Err(), context.DeadlineExceeded))
-}
-
-func TestScan_ZeroTimeoutDoesNotAddDeadline(t *testing.T) {
-	ks := NewKubescape(context.Background())
-	scanInfo := &cautils.ScanInfo{ScanTimeout: 0}
-
-	if scanInfo.ScanTimeout > 0 {
-		timeoutCtx, cancel := context.WithTimeout(ks.Ctx, scanInfo.ScanTimeout)
-		defer cancel()
-		ks.Ctx = timeoutCtx
-	}
-
-	_, hasDeadline := ks.Ctx.Deadline()
+	cancel()
+	ks.SetContext(originalCtx)
+	_, hasDeadline = ks.Context().Deadline()
 	assert.False(t, hasDeadline)
 }
