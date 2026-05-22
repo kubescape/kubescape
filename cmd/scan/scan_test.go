@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -452,9 +453,11 @@ func TestScanInfo_ScanTimeoutField(t *testing.T) {
 
 // contextTrackingKubescape is a test-local IKubescape that records what
 // context was active when Scan() was called, so we can assert the deadline.
+// Scan() returns a sentinel error so securityScan exits before HandleResults,
+// avoiding a nil-pointer dereference on the stub ResultsHandler.
 type contextTrackingKubescape struct {
 	mocks.MockIKubescape
-	ctx         context.Context
+	ctx            context.Context
 	scanCalledWith context.Context
 }
 
@@ -462,7 +465,7 @@ func (m *contextTrackingKubescape) Context() context.Context       { return m.ct
 func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
 func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
 	m.scanCalledWith = m.ctx
-	return nil, nil
+	return nil, errors.New("stub: scan not implemented in test")
 }
 
 func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
