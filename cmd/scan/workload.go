@@ -57,6 +57,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return validateWorkloadIdentifier(args[0])
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer applyTimeout(scanInfo, ks)()
 
 			if scanInfo.FailThresholdSeverity != "" {
 				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {

@@ -87,7 +87,7 @@ func getResourceHandlerMock() *K8sResourceHandler {
 		Context:          context.Background(),
 	}
 
-	return NewK8sResourceHandler(k8s, nil, nil, "test")
+	return NewK8sResourceHandler(context.Background(), k8s, nil, nil, "test")
 }
 func Test_CollectResources(t *testing.T) {
 	resourceHandler := getResourceHandlerMock()

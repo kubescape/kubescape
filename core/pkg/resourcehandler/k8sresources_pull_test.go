@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -79,7 +81,7 @@ func TestPullResources_PartialFailureSurface(t *testing.T) {
 		},
 	}
 
-	k8sResourcesMap, allResources, failedQueries := handler.pullResources(queryableResources, &EmptySelector{})
+	k8sResourcesMap, allResources, failedQueries := handler.pullResources(context.Background(), queryableResources, &EmptySelector{})
 
 	// Verify that the successful selector populated the shared raw-GVR bucket.
 	assert.Len(t, allResources, 1)
@@ -159,4 +161,49 @@ func TestGetResources_FailsWhenAllQueriesFail(t *testing.T) {
 	_, _, _, _, err := handler.GetResources(context.Background(), sessionObj, scanInfo)
 	assert.ErrorContains(t, err, "failed to pull any Kubernetes resources")
 	assert.ErrorContains(t, err, "simulated API failure")
+}
+
+// TestGetResources_ScanAbortedOnContextCancellation verifies that when the
+// scan context is cancelled (e.g. by a --scan-timeout expiry), GetResources
+// returns a "scan aborted" error that explicitly wraps the context error.
+// This gives users a clear, actionable message instead of a confusing
+// "failed to pull any Kubernetes resources" message.
+func TestGetResources_ScanAbortedOnContextCancellation(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+
+	// List function blocks until its context is done, simulating a slow API.
+	hangForever := make(chan struct{})
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			select {
+			case <-hangForever:
+				return &unstructured.UnstructuredList{}, nil
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		},
+	}
+
+	rule := mockRule("rule-a", nil, "")
+	rule.Match = append(rule.Match, mockMatch(4))
+	control := mockControl("control-1", nil)
+	control.Rules = append(control.Rules, rule)
+	framework := mockFramework("test", nil)
+	framework.Controls = append(framework.Controls, control)
+
+	scanInfo := &cautils.ScanInfo{}
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	_, _, _, _, err := handler.GetResources(ctx, sessionObj, scanInfo)
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "scan aborted",
+		"timeout error should say 'scan aborted', not 'failed to pull any Kubernetes resources'")
+	assert.True(t,
+		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled),
+		"error should wrap the context error so callers can use errors.Is(err, context.DeadlineExceeded)")
 }

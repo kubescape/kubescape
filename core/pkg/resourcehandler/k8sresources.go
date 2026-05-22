@@ -49,14 +49,14 @@ type K8sResourceHandler struct {
 	rbacObjectsAPI    *cautils.RBACObjects
 }
 
-func NewK8sResourceHandler(k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
+func NewK8sResourceHandler(ctx context.Context, k8s *k8sinterface.KubernetesApi, hostSensorHandler hostsensorutils.IHostSensor, rbacObjects *cautils.RBACObjects, clusterName string) *K8sResourceHandler {
 	k8sHandler := &K8sResourceHandler{
 		clusterName:       clusterName,
 		k8s:               k8s,
 		hostSensorHandler: hostSensorHandler,
 		rbacObjectsAPI:    rbacObjects,
 	}
-	if err := k8sHandler.setCloudProvider(); err != nil {
+	if err := k8sHandler.setCloudProvider(ctx); err != nil {
 		logger.L().Warning("failed to set cloud provider", helpers.Error(err))
 	}
 	return k8sHandler
@@ -71,7 +71,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	if scanInfo.IsDeletedScanObject {
 		sessionObj.SingleResourceScan, err = getWorkloadFromScanObject(scanInfo.ScanObject)
 	} else {
-		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(scanInfo.ScanObject, globalFieldSelectors)
+		sessionObj.SingleResourceScan, err = k8sHandler.findScanObjectResource(ctx, scanInfo.ScanObject, globalFieldSelectors)
 	}
 
 	if err != nil {
@@ -90,7 +90,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	sessionObj.ResourceToControlsMap = resourceToControl
 
 	// pull k8s resources
-	k8sResourcesMap, allResources, failedQueries := k8sHandler.pullResources(queryableResources, globalFieldSelectors)
+	k8sResourcesMap, allResources, failedQueries := k8sHandler.pullResources(ctx, queryableResources, globalFieldSelectors)
 
 	// Record failed GVR statuses before any early return so BuildScanCoverage
 	// has data even when every pull fails (severe RBAC restrictions).
@@ -109,6 +109,13 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 
 	if len(allResources) == 0 && len(failedQueries) > 0 {
 		// Every query failed — nothing was collected; treat as fatal.
+		// If the context was cancelled (e.g. scan timeout expired or Ctrl-C),
+		// report that explicitly so users understand why the scan stopped rather
+		// than seeing a confusing "failed to pull resources" message.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			cautils.StopSpinner()
+			return k8sResourcesMap, allResources, ksResourceMap, excludedRulesMap, fmt.Errorf("scan aborted: %w", ctxErr)
+		}
 		var combined []string
 		for _, f := range failedQueries {
 			combined = append(combined, fmt.Sprintf("%s: %s", f.gvr, f.err.Error()))
@@ -127,7 +134,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 	}
 
 	metrics.UpdateKubernetesResourcesCount(ctx, int64(len(allResources)))
-	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber()
+	numberOfWorkerNodes, err := k8sHandler.pullWorkerNodesNumber(ctx)
 
 	if err != nil {
 		logger.L().Debug("failed to collect worker nodes number", helpers.Error(err))
@@ -197,7 +204,7 @@ func (k8sHandler *K8sResourceHandler) GetCloudProvider() string {
 }
 
 // findScanObjectResource pulls the requested k8s object to be scanned from the api server
-func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
+func (k8sHandler *K8sResourceHandler) findScanObjectResource(ctx context.Context, resource *objectsenvelopes.ScanObject, globalFieldSelector IFieldSelector) (workloadinterface.IWorkload, error) {
 	if resource == nil {
 		return nil, nil
 	}
@@ -219,7 +226,7 @@ func (k8sHandler *K8sResourceHandler) findScanObjectResource(resource *objectsen
 	if resource.GetNamespace() != "" && k8sinterface.IsNamespaceScope(&gvr) {
 		fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespaceFieldSelectorString(resource.GetNamespace(), FieldSelectorsEqualsOperator))
 	}
-	result, selectorErrs := k8sHandler.pullSingleResource(&gvr, nil, fieldSelectors, globalFieldSelector)
+	result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, fieldSelectors, globalFieldSelector)
 	if len(result) == 0 && len(selectorErrs) > 0 {
 		return nil, fmt.Errorf("failed to get resource %s, reason: %v", getReadableID(resource), selectorErrs[0].err)
 	}
@@ -372,18 +379,12 @@ type selectorFailure struct {
 	err      error
 }
 
-// maxParallelResourcePulls limits the number of concurrent K8s API List calls
-// issued by pullResources. This avoids overwhelming small API servers while
-// still providing a significant speedup on clusters with many resource types.
 const maxParallelResourcePulls = 8
 
-func (k8sHandler *K8sResourceHandler) pullResources(queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]queryFailure) {
+func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryableResources QueryableResources, globalFieldSelectors IFieldSelector) (cautils.K8SResources, map[string]workloadinterface.IMetadata, map[string]queryFailure) {
 	k8sResources := queryableResources.ToK8sResourceMap()
 	allResources := map[string]workloadinterface.IMetadata{}
 
-	// keyed by QueryableResource.String() (GVR + field selectors) so a failure on
-	// one selector variant is never suppressed by a success on a different variant
-	// for the same raw GVR.
 	failedQueries := map[string]queryFailure{}
 
 	var (
@@ -391,25 +392,31 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 		wg sync.WaitGroup
 	)
 
-	// sem is a counting semaphore that bounds the number of in-flight API
-	// calls so we don't overload the kube-apiserver on smaller clusters.
 	sem := make(chan struct{}, maxParallelResourcePulls)
 
 	for key := range queryableResources {
 		qr := queryableResources[key]
 		wg.Add(1)
-		go func() {
+		go func(qr QueryableResource) {
 			defer wg.Done()
-			sem <- struct{}{}
+
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+				mu.Lock()
+				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
+					gvr: qr.GroupVersionResourceTriplet,
+					err: ctx.Err(),
+				}
+				mu.Unlock()
+				return
+			}
 			defer func() { <-sem }()
 
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
-			result, selectorErrs := k8sHandler.pullSingleResource(&gvr, nil, qr.FieldSelectors, globalFieldSelectors)
+			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
 
-			// Record per-selector failures under a selector-qualified key so
-			// that a failure on one namespace selector is never silently
-			// discarded when a sibling selector for the same GVR succeeded.
 			if len(selectorErrs) > 0 {
 				mu.Lock()
 				for _, se := range selectorErrs {
@@ -427,12 +434,9 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 			}
 
 			if len(result) == 0 && len(selectorErrs) > 0 {
-				// All selectors failed — no data collected for this resource.
 				return
 			}
 
-			// Convert API results outside the critical section — these
-			// functions operate only on the local result slice.
 			metaObjs := ConvertMapListToMeta(k8sinterface.ConvertUnstructuredSliceToMap(result))
 			ids := workloadinterface.ListMetaIDs(metaObjs)
 
@@ -447,32 +451,17 @@ func (k8sHandler *K8sResourceHandler) pullResources(queryableResources Queryable
 				k8sResources[gvrKey] = append(k8sResources[gvrKey], ids...)
 			}
 			mu.Unlock()
-		}()
+		}(qr)
 	}
 
 	wg.Wait()
 	return k8sResources, allResources, failedQueries
 }
 
-// recordFailedQueryStatuses classifies each failed query as either a whole-GVR
-// failure or a partial failure and surfaces them accordingly.
-//
-// Whole-GVR failure (no data at all for the GVR): a StatusSkipped entry is
-// written to infoMap keyed by the raw GVR string, which BuildScanCoverage uses
-// to mark the dependent controls as NotEvaluated.
-//
-// Partial failure (some data exists in k8sResources for the GVR but this
-// specific selector's query failed): the failure is returned as a
-// PartialGVRPull so callers can surface it without incorrectly overriding the
-// whole-GVR status. Controls will be evaluated against the partial data, but
-// the PartialGVRPull entry makes the gap visible to operators and CI/CD
-// pipelines — previously this case was silently suppressed.
 func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResources cautils.K8SResources, infoMap map[string]apis.StatusInfo) []cautils.PartialGVRPull {
 	var partials []cautils.PartialGVRPull
 	for _, f := range failedQueries {
 		if len(k8sResources[f.gvr]) > 0 {
-			// GVR has partial data — don't mark whole-GVR as skipped, but do
-			// record the per-selector gap so the caller can surface it.
 			partials = append(partials, cautils.PartialGVRPull{
 				GVR:      f.gvr,
 				Selector: f.selector,
@@ -489,15 +478,7 @@ func recordFailedQueryStatuses(failedQueries map[string]queryFailure, k8sResourc
 	return partials
 }
 
-// pullSingleResource lists all instances of a Kubernetes resource, expanding
-// the globalFieldSelector into per-namespace (or per-name) selectors as
-// needed. Each selector is listed independently; if one fails the error is
-// recorded as a selectorFailure and the loop continues to the remaining
-// selectors so partial results are never silently discarded.
-//
-// The caller should treat a non-empty selectorFailure slice as a signal that
-// the returned resourceList is incomplete and surface it accordingly.
-func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, []selectorFailure) {
+func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, resource *schema.GroupVersionResource, labels map[string]string, fields string, fieldSelector IFieldSelector) ([]unstructured.Unstructured, []selectorFailure) {
 	var resourceList []unstructured.Unstructured
 	var selectorErrs []selectorFailure
 
@@ -523,9 +504,9 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(resource *schema.GroupV
 
 		lenBefore := len(resourceList)
 
-		if err := pager.New(func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
-			return clientResource.List(ctx, opts)
-		}).EachListItem(context.Background(), listOptions, func(obj runtime.Object) error {
+		if err := pager.New(func(pCtx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
+			return clientResource.List(pCtx, opts)
+		}).EachListItem(ctx, listOptions, func(obj runtime.Object) error {
 
 			uObject := obj.(*unstructured.Unstructured)
 
@@ -624,8 +605,8 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	return nil
 }
 
-func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
-	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber(ctx context.Context) (int, error) {
+	nodesList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	scheduableNodes := v1.NodeList{}
 	if nodesList != nil {
 		for _, node := range nodesList.Items {
@@ -644,8 +625,8 @@ func (k8sHandler *K8sResourceHandler) pullWorkerNodesNumber() (int, error) {
 	return len(scheduableNodes.Items), nil
 }
 
-func (k8sHandler *K8sResourceHandler) setCloudProvider() error {
-	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{})
+func (k8sHandler *K8sResourceHandler) setCloudProvider(ctx context.Context) error {
+	nodeList, err := k8sHandler.k8s.KubernetesClient.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return err
 	}

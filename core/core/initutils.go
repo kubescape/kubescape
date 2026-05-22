@@ -101,7 +101,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		_ = getter.GetKSCloudAPIConnector()
 	}
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
+	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.

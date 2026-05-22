@@ -43,6 +43,8 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			defer applyTimeout(scanInfo, ks)()
+
 			if len(args) != 1 {
 				return fmt.Errorf("the command takes exactly one image name as an argument")
 			}
