@@ -24,15 +24,17 @@ func (cp *ClusterPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.Summar
 
 func (cp *ClusterPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
 
-	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapClusterControlsToCategories)
+	categoriesToCategoryControls := bucketControlsByCategory(summaryDetails.ListControls())
 
-	for _, id := range clusterCategoriesDisplayOrder {
-		categoryControl, ok := categoriesToCategoryControls[id]
+	for _, id := range categoryRenderOrder(clusterCategoriesDisplayOrder, categoriesToCategoryControls) {
+		categoryControl := categoriesToCategoryControls[id]
+
+		categoryType, ok := mapCategoryToType[id]
 		if !ok {
-			continue
+			categoryType = TypeCounting
 		}
 
-		cp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
+		cp.renderSingleCategoryTable(categoryControl.CategoryName, categoryType, writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
 	}
 }
 
