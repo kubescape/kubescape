@@ -7,6 +7,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -92,4 +96,53 @@ func TestScore(t *testing.T) {
 			assert.Equal(t, tt.want, string(got))
 		})
 	}
+}
+
+func TestResourceMetricsEmitted(t *testing.T) {
+	// Regression test for https://github.com/kubescape/kubescape/issues/2236
+	// Fails on master (setResourcesCounters commented out), passes with patch.
+	obj := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "nginx",
+			"namespace": "default",
+		},
+	}
+	wl := workloadinterface.NewWorkloadObj(obj)
+	resourceID := wl.GetID()
+
+	failedRule := resourcesresults.ResourceAssociatedRule{}
+	failedRule.SetStatus(apis.StatusFailed, nil)
+
+	skippedRule := resourcesresults.ResourceAssociatedRule{}
+	skippedRule.SetStatus(apis.StatusSkipped, nil)
+
+	failedCtrl1 := resourcesresults.ResourceAssociatedControl{}
+	failedCtrl1.ResourceAssociatedRules = []resourcesresults.ResourceAssociatedRule{failedRule}
+
+	failedCtrl2 := resourcesresults.ResourceAssociatedControl{}
+	failedCtrl2.ResourceAssociatedRules = []resourcesresults.ResourceAssociatedRule{failedRule}
+
+	skippedCtrl := resourcesresults.ResourceAssociatedControl{}
+	skippedCtrl.ResourceAssociatedRules = []resourcesresults.ResourceAssociatedRule{skippedRule}
+
+	result := resourcesresults.Result{}
+	result.ResourceID = resourceID
+	result.AssociatedControls = []resourcesresults.ResourceAssociatedControl{
+		failedCtrl1, failedCtrl2, skippedCtrl,
+	}
+
+	pp := NewPrometheusPrinter(false)
+	metrics := pp.generatePrometheusFormat(
+		map[string]workloadinterface.IMetadata{resourceID: wl},
+		map[string]resourcesresults.Result{resourceID: result},
+		&reportsummary.SummaryDetails{},
+	)
+	output := metrics.String()
+
+	assert.Contains(t, output, "kubescape_resource_count_controls_failed",
+		"missing kubescape_resource_count_controls_failed — setResourcesCounters may be commented out")
+	assert.Contains(t, output, "kubescape_resource_count_controls_skipped",
+		"missing kubescape_resource_count_controls_skipped — setResourcesCounters may be commented out")
 }
