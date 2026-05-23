@@ -260,6 +260,9 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				}
 				id := failedResource.GetID()
 				failedIDs[id] = struct{}{}
+				if _, exists := resources[id]; exists {
+					continue
+				}
 				resources[id] = &resourcesresults.ResourceAssociatedRule{
 					Name:                  rule.Name,
 					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
