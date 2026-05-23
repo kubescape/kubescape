@@ -30,8 +30,6 @@ type IPrinter interface {
 	Score(score float32)
 }
 
-
-
 func GetWriter(ctx context.Context, outputFile string) *os.File {
 	if outputFile != "" {
 		if err := os.MkdirAll(filepath.Dir(outputFile), os.ModePerm); err != nil {
