@@ -664,12 +664,15 @@ func TestTestCases_MissingControl(t *testing.T) {
 		"C-MISSING": {
 			ControlID:  "C-MISSING",
 			Name:       "missing",
-			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusPassed},
 		},
 	}
 
 	assert.NotPanics(t, func() {
 		cases := testsCases(session, &externalControls, "TestSuite")
-		assert.Empty(t, cases)
+		if assert.Len(t, cases, 1) {
+			assert.Equal(t, "missing", cases[0].Name)
+			assert.Nil(t, cases[0].Failure)
+		}
 	})
 }

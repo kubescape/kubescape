@@ -237,6 +237,7 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 		ResourceID:         resourceID,
 		AssociatedControls: []resourcesresults.ResourceAssociatedControl{ac},
 	}
+	require.True(t, result.GetStatus(nil).IsFailed())
 
 	session := cautils.NewOPASessionObjMock()
 	session.ResourcesResult[resourceID] = result
@@ -251,7 +252,10 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 
 	tmp, err := os.CreateTemp("", "sarif-missing-*.sarif")
 	require.NoError(t, err)
-	defer os.Remove(tmp.Name())
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
 
 	sp := NewSARIFPrinter()
 	sp.writer = tmp

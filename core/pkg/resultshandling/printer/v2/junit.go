@@ -227,7 +227,7 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 
 	for _, cID := range sortedIDs {
 		testCase := JUnitTestCase{}
-		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, cID)
+		control := controls.GetControl(reportsummary.EControlCriteriaID, cID)
 		if control == nil {
 			continue
 		}
