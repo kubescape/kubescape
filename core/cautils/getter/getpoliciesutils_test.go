@@ -23,6 +23,87 @@ func TestGetDefaultPath(t *testing.T) {
 	require.Equal(t, ".kubescape", filepath.Base(filepath.Dir(pth)))
 }
 
+func TestPolicyCacheFilename(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should lowercase an uppercase identifier", func(t *testing.T) {
+		got, err := PolicyCacheFilename("NSA")
+		require.NoError(t, err)
+		require.Equal(t, "nsa.json", got)
+	})
+
+	t.Run("should leave an already-lowercase identifier unchanged", func(t *testing.T) {
+		got, err := PolicyCacheFilename("nsa")
+		require.NoError(t, err)
+		require.Equal(t, "nsa.json", got)
+	})
+
+	t.Run("should trim whitespace and lowercase a mixed-case identifier", func(t *testing.T) {
+		got, err := PolicyCacheFilename("  Nsa  ")
+		require.NoError(t, err)
+		require.Equal(t, "nsa.json", got)
+	})
+
+	t.Run("should lowercase MITRE to mitre.json", func(t *testing.T) {
+		got, err := PolicyCacheFilename("MITRE")
+		require.NoError(t, err)
+		require.Equal(t, "mitre.json", got)
+	})
+
+	t.Run("should error on an empty identifier", func(t *testing.T) {
+		got, err := PolicyCacheFilename("")
+		require.Error(t, err)
+		require.Empty(t, got)
+	})
+
+	t.Run("should error on a whitespace-only identifier", func(t *testing.T) {
+		got, err := PolicyCacheFilename("   ")
+		require.Error(t, err)
+		require.Empty(t, got)
+	})
+}
+
+func TestPolicyCachePath(t *testing.T) {
+	t.Parallel()
+
+	t.Run("should return canonical path for an uppercase identifier", func(t *testing.T) {
+		pth, err := PolicyCachePath("NSA")
+		require.NoError(t, err)
+		require.Equal(t, "nsa.json", filepath.Base(pth))
+		require.Equal(t, ".kubescape", filepath.Base(filepath.Dir(pth)))
+	})
+
+	t.Run("should map mixed-case and lowercase identifiers to the same path", func(t *testing.T) {
+		upper, err := PolicyCachePath("NSA")
+		require.NoError(t, err)
+		lower, err := PolicyCachePath("nsa")
+		require.NoError(t, err)
+		spaced, err := PolicyCachePath("  Nsa  ")
+		require.NoError(t, err)
+		require.Equal(t, upper, lower)
+		require.Equal(t, upper, spaced)
+	})
+
+	t.Run("should lowercase MITRE to mitre.json under the local store", func(t *testing.T) {
+		pth, err := PolicyCachePath("MITRE")
+		require.NoError(t, err)
+		require.Equal(t, "mitre.json", filepath.Base(pth))
+		require.Equal(t, ".kubescape", filepath.Base(filepath.Dir(pth)))
+	})
+
+	t.Run("should error on an empty identifier", func(t *testing.T) {
+		pth, err := PolicyCachePath("")
+		require.Error(t, err)
+		require.Empty(t, pth)
+	})
+
+	t.Run("should error on a whitespace-only identifier", func(t *testing.T) {
+		pth, err := PolicyCachePath("   ")
+		require.Error(t, err)
+		require.Empty(t, pth)
+	})
+}
+
 func TestSaveInFile(t *testing.T) {
 	t.Parallel()
 

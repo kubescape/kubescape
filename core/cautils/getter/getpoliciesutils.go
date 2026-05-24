@@ -16,6 +16,24 @@ func GetDefaultPath(name string) string {
 	return filepath.Join(DefaultLocalStore, name)
 }
 
+// PolicyCacheFilename returns the canonical cache filename for a framework or control identifier.
+func PolicyCacheFilename(identifier string) (string, error) {
+	norm := strings.ToLower(strings.TrimSpace(identifier))
+	if norm == "" {
+		return "", fmt.Errorf("policy identifier is empty")
+	}
+	return norm + ".json", nil
+}
+
+// PolicyCachePath returns the canonical cache file path under the local kubescape store for a framework or control identifier.
+func PolicyCachePath(identifier string) (string, error) {
+	name, err := PolicyCacheFilename(identifier)
+	if err != nil {
+		return "", err
+	}
+	return GetDefaultPath(name), nil
+}
+
 // SaveInFile serializes any object as a JSON file.
 func SaveInFile(object interface{}, targetFile string) error {
 	encodedData, err := json.MarshalIndent(object, "", "  ")
