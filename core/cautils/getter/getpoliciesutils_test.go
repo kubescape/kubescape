@@ -61,6 +61,30 @@ func TestPolicyCacheFilename(t *testing.T) {
 		require.Error(t, err)
 		require.Empty(t, got)
 	})
+
+	t.Run("should error on a dot identifier", func(t *testing.T) {
+		got, err := PolicyCacheFilename(".")
+		require.Error(t, err)
+		require.Empty(t, got)
+	})
+
+	t.Run("should error on a double-dot identifier", func(t *testing.T) {
+		got, err := PolicyCacheFilename("..")
+		require.Error(t, err)
+		require.Empty(t, got)
+	})
+
+	t.Run("should error on an identifier containing a forward slash", func(t *testing.T) {
+		got, err := PolicyCacheFilename("../etc/passwd")
+		require.Error(t, err)
+		require.Empty(t, got)
+	})
+
+	t.Run("should error on an identifier containing a backslash", func(t *testing.T) {
+		got, err := PolicyCacheFilename(`nsa\evil`)
+		require.Error(t, err)
+		require.Empty(t, got)
+	})
 }
 
 func TestPolicyCachePath(t *testing.T) {
@@ -99,6 +123,30 @@ func TestPolicyCachePath(t *testing.T) {
 
 	t.Run("should error on a whitespace-only identifier", func(t *testing.T) {
 		pth, err := PolicyCachePath("   ")
+		require.Error(t, err)
+		require.Empty(t, pth)
+	})
+
+	t.Run("should error on a dot identifier", func(t *testing.T) {
+		pth, err := PolicyCachePath(".")
+		require.Error(t, err)
+		require.Empty(t, pth)
+	})
+
+	t.Run("should error on a double-dot identifier", func(t *testing.T) {
+		pth, err := PolicyCachePath("..")
+		require.Error(t, err)
+		require.Empty(t, pth)
+	})
+
+	t.Run("should error on an identifier containing a forward slash", func(t *testing.T) {
+		pth, err := PolicyCachePath("../etc/passwd")
+		require.Error(t, err)
+		require.Empty(t, pth)
+	})
+
+	t.Run("should error on an identifier containing a backslash", func(t *testing.T) {
+		pth, err := PolicyCachePath(`nsa\evil`)
 		require.Error(t, err)
 		require.Empty(t, pth)
 	})
