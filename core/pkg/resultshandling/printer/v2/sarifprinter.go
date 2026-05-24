@@ -212,6 +212,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 				if ac.GetStatus(nil).IsFailed() {
 					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+					if ctl == nil {
+						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
+						continue
+					}
 					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 					sp.addRule(run, ctl)
 					r := sp.addResult(run, ctl, filepath, location)

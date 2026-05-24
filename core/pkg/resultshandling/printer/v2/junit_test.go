@@ -651,3 +651,25 @@ func TestAggregateSuiteCounts(t *testing.T) {
 		})
 	}
 }
+
+func TestTestCases_MissingControl(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		},
+	}
+
+	externalControls := reportsummary.ControlSummaries{
+		"C-MISSING": {
+			ControlID:  "C-MISSING",
+			Name:       "missing",
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusFailed},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		cases := testsCases(session, &externalControls, "TestSuite")
+		assert.Empty(t, cases)
+	})
+}
