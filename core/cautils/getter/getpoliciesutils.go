@@ -22,6 +22,9 @@ func PolicyCacheFilename(identifier string) (string, error) {
 	if norm == "" {
 		return "", fmt.Errorf("policy identifier is empty")
 	}
+	if norm == "." || norm == ".." || strings.ContainsAny(norm, `/\`) {
+		return "", fmt.Errorf("policy identifier contains path separators")
+	}
 	return norm + ".json", nil
 }
 
