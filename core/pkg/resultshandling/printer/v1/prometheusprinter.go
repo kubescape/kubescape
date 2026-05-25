@@ -98,3 +98,9 @@ func (p *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *caut
 	}
 
 }
+
+func (p *PrometheusPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}

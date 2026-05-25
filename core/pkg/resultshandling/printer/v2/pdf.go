@@ -138,3 +138,9 @@ func getSeverityColor(severity string) *props.Color {
 	}
 	return &props.BlackColor
 }
+
+func (p *PdfPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}
