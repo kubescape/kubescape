@@ -20,7 +20,9 @@ func TestDeduplicateExceptions(t *testing.T) {
 			attrs[identifiers.AttributeName] = workloadName
 		}
 		return armotypes.PostureExceptionPolicy{
-			Name: name,
+			PortalBase: armotypes.PortalBase{
+				Name: name,
+			},
 			PosturePolicies: []armotypes.PosturePolicy{
 				{ControlID: controlID},
 			},
@@ -70,7 +72,7 @@ func TestDeduplicateExceptions(t *testing.T) {
 			wantNames: []string{"cloud-1", "crd-1"},
 		},
 		{
-			name: "no cloud exceptions keeps all CRD",
+			name:  "no cloud exceptions keeps all CRD",
 			cloud: nil,
 			crd: []armotypes.PostureExceptionPolicy{
 				buildPolicy("crd-1", "C-0003", "team-b", "StatefulSet", "db"),
