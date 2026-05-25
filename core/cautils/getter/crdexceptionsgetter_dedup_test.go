@@ -20,7 +20,9 @@ func TestDeduplicateExceptions(t *testing.T) {
 			attrs[identifiers.AttributeName] = workloadName
 		}
 		return armotypes.PostureExceptionPolicy{
-			Name: name,
+			PortalBase: armotypes.PortalBase{
+				Name: name,
+			},
 			PosturePolicies: []armotypes.PosturePolicy{
 				{ControlID: controlID},
 			},
