@@ -10,6 +10,8 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
+// anonymizeSession rewrites sensitive resource identifiers and metadata while
+// preserving internal referential integrity across the full OPA session.
 func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 	if session == nil {
 		return
@@ -26,6 +28,13 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 		if namespace := resource.GetNamespace(); namespace != "" {
 			resource.SetNamespace(mapping.GetOrCreate("ns", namespace))
 		}
+
+		// Annotations may contain infrastructure identifiers, secret paths, or
+		// other sensitive metadata at both top-level and nested workload templates.
+		anonymizeResourceAnnotations(resource, mapping)
+
+		// Container-related anonymization is handled separately to preserve the
+		// existing typed/unstructured traversal behavior.
 		anonymizeContainerMetadata(resource, mapping)
 
 		if len(session.LabelsToCopy) > 0 {
@@ -96,6 +105,7 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 		newResourceAttackTracks[newID] = attackTrack
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
+
 	if session.Report != nil {
 		for controlID, control := range session.Report.SummaryDetails.Controls {
 			remappedResourceIDs := control.ResourceIDs
@@ -118,6 +128,8 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 	}
 }
 
+// resolveMappedID preserves referential integrity when IDs are rewritten during
+// anonymization, ensuring cross-references remain valid.
 func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, prefix string) string {
 	if mappedID, ok := idMapping[originalID]; ok {
 		return mappedID
@@ -126,18 +138,90 @@ func resolveMappedID(mapping *Mapping, idMapping map[string]string, originalID, 
 	return mapping.GetOrCreate(prefix, originalID)
 }
 
+// anonymizeResourceLabels anonymizes only labels explicitly configured for
+// copying into reports, preserving existing --hide behavior.
 func anonymizeResourceLabels(resource workloadinterface.IMetadata, labelsToCopy []string, mapping *Mapping) {
 	bw, ok := resource.(workloadinterface.IWorkload)
 	if !ok {
 		return
 	}
+
 	labels := bw.GetLabels()
 	if len(labels) == 0 {
 		return
 	}
+
 	for _, key := range labelsToCopy {
 		if val, exists := labels[key]; exists && val != "" {
 			bw.SetLabel(key, mapping.GetOrCreate("lbl", val))
 		}
+	}
+}
+
+// anonymizeResourceAnnotations walks the full resource object and anonymizes
+// annotation values anywhere metadata.annotations appears, including nested
+// workload templates such as Deployment pod specs.
+func anonymizeResourceAnnotations(resource workloadinterface.IMetadata, mapping *Mapping) {
+	if resource == nil {
+		return
+	}
+
+	obj := resource.GetObject()
+	if obj == nil {
+		return
+	}
+
+	anonymizeAnnotationNodes(obj, mapping)
+	resource.SetObject(obj)
+}
+
+// anonymizeAnnotationNodes recursively traverses unstructured resource objects
+// to locate metadata blocks regardless of workload nesting depth.
+func anonymizeAnnotationNodes(node interface{}, mapping *Mapping) {
+	switch v := node.(type) {
+	case map[string]interface{}:
+		anonymizeAnnotationMap(v, mapping)
+
+		for _, child := range v {
+			anonymizeAnnotationNodes(child, mapping)
+		}
+
+	case []interface{}:
+		for _, item := range v {
+			anonymizeAnnotationNodes(item, mapping)
+		}
+	}
+}
+
+// anonymizeAnnotationMap anonymizes string annotation values while preserving
+// annotation keys, which remain meaningful Kubernetes identifiers.
+func anonymizeAnnotationMap(obj map[string]interface{}, mapping *Mapping) {
+	rawMetadata, ok := obj["metadata"]
+	if !ok || rawMetadata == nil {
+		return
+	}
+
+	metadata, ok := rawMetadata.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	rawAnnotations, ok := metadata["annotations"]
+	if !ok || rawAnnotations == nil {
+		return
+	}
+
+	annotations, ok := rawAnnotations.(map[string]interface{})
+	if !ok {
+		return
+	}
+
+	for key, val := range annotations {
+		str, ok := val.(string)
+		if !ok || str == "" {
+			continue
+		}
+
+		annotations[key] = mapping.GetOrCreate("ann", str)
 	}
 }

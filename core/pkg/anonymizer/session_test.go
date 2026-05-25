@@ -300,3 +300,161 @@ func TestAnonymizeResourceLabels_Guards(t *testing.T) {
 		})
 	}
 }
+
+func TestAnonymizeSession_Annotations(t *testing.T) {
+	tests := []struct {
+		name     string
+		resource map[string]interface{}
+		validate func(t *testing.T, resource workloadinterface.IMetadata)
+	}{
+		{
+			name: "annotation values should be anonymized",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name":      "payment-service",
+					"namespace": "production",
+					"annotations": map[string]interface{}{
+						"iam.amazonaws.com/role":                  "arn:aws:iam::ACCOUNT_ID:role/example-role",
+						"vault.hashicorp.com/agent-inject-secret": "example/path/config",
+					},
+				},
+			},
+			validate: func(t *testing.T, resource workloadinterface.IMetadata) {
+				metadata := resource.GetObject()["metadata"].(map[string]interface{})
+				annotations := metadata["annotations"].(map[string]interface{})
+
+				assert.NotEqual(t, "arn:aws:iam::ACCOUNT_ID:role/example-role", annotations["iam.amazonaws.com/role"])
+				assert.NotEqual(t, "example/path/config", annotations["vault.hashicorp.com/agent-inject-secret"])
+
+				assert.Contains(t, annotations["iam.amazonaws.com/role"], "ann-")
+				assert.Contains(t, annotations["vault.hashicorp.com/agent-inject-secret"], "ann-")
+			},
+		},
+		{
+			name: "nested template annotation values should be anonymized",
+			resource: map[string]interface{}{
+				"apiVersion": "apps/v1",
+				"kind":       "Deployment",
+				"metadata": map[string]interface{}{
+					"name": "analytics-worker",
+				},
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"metadata": map[string]interface{}{
+							"annotations": map[string]interface{}{
+								"secret.company.io/runtime-path": "secret/prod/analytics/runtime",
+								"team.company.io/owner":          "analytics-platform",
+							},
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, resource workloadinterface.IMetadata) {
+				spec := resource.GetObject()["spec"].(map[string]interface{})
+				template := spec["template"].(map[string]interface{})
+				metadata := template["metadata"].(map[string]interface{})
+				annotations := metadata["annotations"].(map[string]interface{})
+
+				assert.NotEqual(
+					t,
+					"secret/prod/analytics/runtime",
+					annotations["secret.company.io/runtime-path"],
+				)
+
+				assert.NotEqual(
+					t,
+					"analytics-platform",
+					annotations["team.company.io/owner"],
+				)
+
+				assert.Contains(
+					t,
+					annotations["secret.company.io/runtime-path"],
+					"ann-",
+				)
+
+				assert.Contains(
+					t,
+					annotations["team.company.io/owner"],
+					"ann-",
+				)
+			},
+		},
+		{
+			name: "identical annotation values should map deterministically",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"annotations": map[string]interface{}{
+						"annotation-a": "internal.prod.local",
+						"annotation-b": "internal.prod.local",
+					},
+				},
+			},
+			validate: func(t *testing.T, resource workloadinterface.IMetadata) {
+				metadata := resource.GetObject()["metadata"].(map[string]interface{})
+				annotations := metadata["annotations"].(map[string]interface{})
+
+				assert.Equal(t, annotations["annotation-a"], annotations["annotation-b"])
+			},
+		},
+		{
+			name: "missing metadata should not panic",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+			},
+			validate: func(t *testing.T, resource workloadinterface.IMetadata) {},
+		},
+		{
+			name: "missing annotations should not panic",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"name": "payment",
+				},
+			},
+			validate: func(t *testing.T, resource workloadinterface.IMetadata) {},
+		},
+		{
+			name: "empty annotations should not panic",
+			resource: map[string]interface{}{
+				"apiVersion": "v1",
+				"kind":       "Pod",
+				"metadata": map[string]interface{}{
+					"annotations": map[string]interface{}{},
+				},
+			},
+			validate: func(t *testing.T, resource workloadinterface.IMetadata) {},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			resource := workloadinterface.NewWorkloadObj(test.resource)
+			oldID := resource.GetID()
+
+			session := &cautils.OPASessionObj{
+				AllResources:         map[string]workloadinterface.IMetadata{oldID: resource},
+				ResourcesResult:      make(map[string]resourcesresults.Result),
+				ResourceSource:       make(map[string]reporthandling.Source),
+				ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+				ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+			}
+
+			mapping := NewMapping()
+
+			assert.NotPanics(t, func() {
+				anonymizeSession(session, mapping)
+			})
+
+			for _, resource := range session.AllResources {
+				test.validate(t, resource)
+			}
+		})
+	}
+}
