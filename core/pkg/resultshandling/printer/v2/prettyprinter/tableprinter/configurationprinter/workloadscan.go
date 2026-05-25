@@ -23,13 +23,10 @@ func (wp *WorkloadPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.Summa
 
 func (wp *WorkloadPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
 
-	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapWorkloadControlsToCategories)
+	categoriesToCategoryControls := bucketControlsByCategory(summaryDetails.ListControls())
 
-	for _, id := range workloadCategoriesDisplayOrder {
-		categoryControl, ok := categoriesToCategoryControls[id]
-		if !ok {
-			continue
-		}
+	for _, id := range categoryRenderOrder(workloadCategoriesDisplayOrder, categoriesToCategoryControls) {
+		categoryControl := categoriesToCategoryControls[id]
 
 		wp.renderSingleCategoryTable(categoryControl.CategoryName, writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
 	}
