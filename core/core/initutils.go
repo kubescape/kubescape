@@ -39,7 +39,7 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	if accountID != "" {
 		// download exceptions from Kubescape Cloud backend
 		primary = getter.GetKSCloudAPIConnector()
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter())
+		return getter.NewCRDExceptionsGetter(primary)
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
@@ -48,10 +48,10 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
 		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
-		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter())
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(nil))
 	}
 	primary = downloadReleasedPolicy
-	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter())
+	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(nil))
 
 }
 
