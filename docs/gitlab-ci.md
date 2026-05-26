@@ -21,7 +21,7 @@ scan_with_kubescape:
   stage: scan
   image: alpine:latest
   script:
-    - apk add curl gcompat
+    - apk add --no-cache bash curl gcompat
     - curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
     - export PATH=$PATH:$HOME/.kubescape/bin
     - kubescape scan . --format junit --output results.xml --exclude-namespaces kube-system,kube-public
@@ -49,10 +49,10 @@ scan_with_kubescape:
   stage: scan
   image: alpine:latest
   script:
-    - apk add curl gcompat
+    - apk add --no-cache bash curl gcompat
     - curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
     - export PATH=$PATH:$HOME/.kubescape/bin
-    - kubescape scan . --format junit --output results.xml --compliance-threshold 80 --exclude-namespaces kube-system,kube-public
+    - kubescape scan framework nsa . --format junit --output results.xml --compliance-threshold 80
   artifacts:
     reports:
       junit: results.xml
@@ -76,7 +76,7 @@ scan_nsa_framework:
   stage: scan
   image: alpine:latest
   script:
-    - apk add curl gcompat
+    - apk add --no-cache bash curl gcompat
     - curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
     - export PATH=$PATH:$HOME/.kubescape/bin
     - kubescape scan framework nsa . --format junit --output results.xml
