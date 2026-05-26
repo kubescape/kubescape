@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
-	"testing"
 
 	"github.com/anchore/grype/grype/match"
 	grypepkg "github.com/anchore/grype/grype/pkg"
