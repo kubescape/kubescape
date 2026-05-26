@@ -5,6 +5,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -69,4 +72,20 @@ func TestSetWriter_Html(t *testing.T) {
 				"HTML printer must never write to stdout")
 		})
 	}
+}
+
+func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-MISSING",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+
+	summaryDetails := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{},
+	}
+
+	assert.NotPanics(t, func() {
+		results := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{ac}, summaryDetails)
+		assert.Empty(t, results)
+	})
 }

@@ -1,11 +1,20 @@
 package printer
 
 import (
+	"context"
+	"os"
 	"testing"
 
+	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/owenrumney/go-sarif/v2/sarif"
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func Test_scoreToSeverityLevel(t *testing.T) {
@@ -215,4 +224,44 @@ func TestAddFix_AddsNewFixToResult(t *testing.T) {
 	})
 
 	assert.Equal(t, expectedFix, result.Fixes[0])
+}
+
+func TestPrintConfigurationScan_MissingControl(t *testing.T) {
+	resourceID := "apps/v1/Deployment/default/my-deployment"
+
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-MISSING",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+	result := resourcesresults.Result{
+		ResourceID:         resourceID,
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{ac},
+	}
+	require.True(t, result.GetStatus(nil).IsFailed())
+
+	session := cautils.NewOPASessionObjMock()
+	session.ResourcesResult[resourceID] = result
+	session.ResourceSource = map[string]reporthandling.Source{
+		resourceID: {RelativePath: "deploy.yaml"},
+	}
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-missing-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+
+	assert.NotPanics(t, func() {
+		err := sp.printConfigurationScan(context.Background(), session)
+		assert.NoError(t, err)
+	})
 }
