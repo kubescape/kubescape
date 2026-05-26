@@ -245,8 +245,8 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 func TestExceedsSeverityThreshold(t *testing.T) {
 	provider := thresholdStubVulnerabilityProvider{
 		metadataByID: map[string]*vulnerability.Metadata{
-			"CVE-high": &vulnerability.Metadata{Severity: vulnerability.HighSeverity.String()},
-			"CVE-low":  &vulnerability.Metadata{Severity: vulnerability.LowSeverity.String()},
+			"CVE-high": {Severity: vulnerability.HighSeverity.String()},
+			"CVE-low":  {Severity: vulnerability.LowSeverity.String()},
 		},
 		errByID: map[string]error{
 			"CVE-error": errors.New("lookup failed"),
