@@ -151,7 +151,27 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 			},
 		},
 		ResourceSource: map[string]reporthandling.Source{
-			oldID: {},
+			oldID: {
+				Path:             "/home/devjijo/work/acme-platform/manifests/payments/api-deployment.yaml",
+				RelativePath:     "clusters/production/payments/api/deployment.yaml",
+				HelmPath:         "charts/platform-security",
+				FileType:         "Helm Chart",
+				HelmChartName:    "payments-service",
+				HelmTemplateFile: "templates/api-deployment.yaml",
+				HelmValuesPaths: []string{
+					"database.connection.url",
+					"redis.auth.password",
+					"serviceAccount.name",
+				},
+				HelmTemplateLine:       87,
+				KustomizeDirectoryName: "production-overlays",
+				LastCommit: reporthandling.LastCommit{
+					Hash:           "9f8c7a6b5d4e3f21",
+					CommitterName:  "Platform Engineer",
+					CommitterEmail: "platform.engineer@example.com",
+					Message:        "update deployment configuration",
+				},
+			},
 		},
 		ResourcesPrioritized: map[string]prioritization.PrioritizedResource{
 			oldID: {ResourceID: oldID},
@@ -197,8 +217,89 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 		result.AssociatedControls[0].ResourceAssociatedRules[0].RelatedResourcesIDs[0],
 	)
 
-	_, ok = session.ResourceSource[newID]
+	source, ok := session.ResourceSource[newID]
 	assert.True(t, ok)
+
+	assert.NotEqual(
+		t,
+		"/home/devjijo/work/acme-platform/manifests/payments/api-deployment.yaml",
+		source.Path,
+	)
+
+	assert.NotEqual(
+		t,
+		"clusters/production/payments/api/deployment.yaml",
+		source.RelativePath,
+	)
+
+	assert.NotEqual(
+		t,
+		"charts/platform-security",
+		source.HelmPath,
+	)
+
+	assert.NotEqual(
+		t,
+		"payments-service",
+		source.HelmChartName,
+	)
+
+	assert.NotEqual(
+		t,
+		"templates/api-deployment.yaml",
+		source.HelmTemplateFile,
+	)
+
+	assert.NotEqual(
+		t,
+		"production-overlays",
+		source.KustomizeDirectoryName,
+	)
+
+	assert.NotEqual(
+		t,
+		"database.connection.url",
+		source.HelmValuesPaths[0],
+	)
+
+	assert.NotEqual(
+		t,
+		"redis.auth.password",
+		source.HelmValuesPaths[1],
+	)
+
+	assert.NotEqual(
+		t,
+		"serviceAccount.name",
+		source.HelmValuesPaths[2],
+	)
+
+	assert.NotEqual(
+		t,
+		"9f8c7a6b5d4e3f21",
+		source.LastCommit.Hash,
+	)
+
+	assert.NotEqual(
+		t,
+		"Platform Engineer",
+		source.LastCommit.CommitterName,
+	)
+
+	assert.NotEqual(
+		t,
+		"platform.engineer@example.com",
+		source.LastCommit.CommitterEmail,
+	)
+
+	assert.NotEqual(
+		t,
+		"update deployment configuration",
+		source.LastCommit.Message,
+	)
+
+	assert.Equal(t, "Helm Chart", source.FileType)
+	assert.Equal(t, 87, source.HelmTemplateLine)
 
 	prioritized, ok := session.ResourcesPrioritized[newID]
 	assert.True(t, ok)
