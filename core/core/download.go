@@ -227,7 +227,11 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) err
 		return fmt.Errorf("missing control ID")
 	}
 	if downloadInfo.FileName == "" {
-		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Identifier)
+		filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)
+		if err != nil {
+			return err
+		}
+		downloadInfo.FileName = filename
 	}
 	controls, err := g.GetControl(downloadInfo.Identifier)
 	if err != nil {

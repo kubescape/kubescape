@@ -50,6 +50,18 @@ func TestPolicyCacheFilename(t *testing.T) {
 		require.Equal(t, "mitre.json", got)
 	})
 
+	t.Run("should lowercase a mixed-case control ID to a single filename", func(t *testing.T) {
+		upper, err := PolicyCacheFilename("C-0001")
+		require.NoError(t, err)
+		require.Equal(t, "c-0001.json", upper)
+
+		lower, err := PolicyCacheFilename("c-0001")
+		require.NoError(t, err)
+		require.Equal(t, "c-0001.json", lower)
+
+		require.Equal(t, upper, lower)
+	})
+
 	t.Run("should error on an empty identifier", func(t *testing.T) {
 		got, err := PolicyCacheFilename("")
 		require.Error(t, err)
@@ -113,6 +125,17 @@ func TestPolicyCachePath(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "mitre.json", filepath.Base(pth))
 		require.Equal(t, ".kubescape", filepath.Base(filepath.Dir(pth)))
+	})
+
+	t.Run("should map mixed-case and lowercase control IDs to the same path", func(t *testing.T) {
+		upper, err := PolicyCachePath("C-0001")
+		require.NoError(t, err)
+		require.Equal(t, "c-0001.json", filepath.Base(upper))
+
+		lower, err := PolicyCachePath("c-0001")
+		require.NoError(t, err)
+
+		require.Equal(t, upper, lower)
 	})
 
 	t.Run("should error on an empty identifier", func(t *testing.T) {
