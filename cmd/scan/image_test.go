@@ -74,6 +74,9 @@ func TestGetImageCmd_RunE_Success(t *testing.T) {
 	scanInfo := cautils.ScanInfo{}
 
 	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parentCmd := &cobra.Command{Use: "scan"}
+	parentCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"`)
+	parentCmd.AddCommand(cmd)
 
 	err := cmd.RunE(cmd, []string{"nginx"})
 	assert.NoError(t, err)
