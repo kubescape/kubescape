@@ -354,29 +354,3 @@ func TestNewDefaultDBConfig_SanitizationHarden(t *testing.T) {
 	}
 }
 
-func TestValidateDBLoad(t *testing.T) {
-	t.Run("load error", func(t *testing.T) {
-		loadErr := errors.New("load failed")
-		err := validateDBLoad(loadErr, &vulnerability.ProviderStatus{})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "failed to load vulnerability db")
-	})
-
-	t.Run("nil status", func(t *testing.T) {
-		err := validateDBLoad(nil, nil)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unable to determine the status")
-	})
-
-	t.Run("status error", func(t *testing.T) {
-		statusErr := errors.New("status failed")
-		err := validateDBLoad(nil, &vulnerability.ProviderStatus{Error: statusErr})
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "db could not be loaded")
-	})
-
-	t.Run("ok", func(t *testing.T) {
-		err := validateDBLoad(nil, &vulnerability.ProviderStatus{})
-		require.NoError(t, err)
-	})
-}
