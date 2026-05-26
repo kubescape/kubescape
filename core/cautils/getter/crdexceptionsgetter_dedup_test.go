@@ -8,13 +8,16 @@ import (
 )
 
 func TestDeduplicateExceptions(t *testing.T) {
-	buildPolicy := func(name, controlID, namespace, kind, workloadName string) armotypes.PostureExceptionPolicy {
+	buildPolicy := func(name, controlID, namespace, kind, apiGroup, workloadName string) armotypes.PostureExceptionPolicy {
 		attrs := map[string]string{}
 		if namespace != "" {
 			attrs[identifiers.AttributeNamespace] = namespace
 		}
 		if kind != "" {
 			attrs[identifiers.AttributeKind] = kind
+		}
+		if apiGroup != "" {
+			attrs[identifiers.AttributeApiGroup] = apiGroup
 		}
 		if workloadName != "" {
 			attrs[identifiers.AttributeName] = workloadName
@@ -44,30 +47,40 @@ func TestDeduplicateExceptions(t *testing.T) {
 		{
 			name: "cloud wins for same control and workload",
 			cloud: []armotypes.PostureExceptionPolicy{
-				buildPolicy("cloud-1", "C-0001", "team-a", "Deployment", "api"),
+				buildPolicy("cloud-1", "C-0001", "team-a", "Deployment", "apps", "api"),
 			},
 			crd: []armotypes.PostureExceptionPolicy{
-				buildPolicy("crd-1", "C-0001", "team-a", "Deployment", "api"),
+				buildPolicy("crd-1", "C-0001", "team-a", "Deployment", "apps", "api"),
 			},
 			wantNames: []string{"cloud-1"},
 		},
 		{
 			name: "different controls are merged",
 			cloud: []armotypes.PostureExceptionPolicy{
-				buildPolicy("cloud-1", "C-0001", "team-a", "Deployment", "api"),
+				buildPolicy("cloud-1", "C-0001", "team-a", "Deployment", "apps", "api"),
 			},
 			crd: []armotypes.PostureExceptionPolicy{
-				buildPolicy("crd-1", "C-0002", "team-a", "Deployment", "api"),
+				buildPolicy("crd-1", "C-0002", "team-a", "Deployment", "apps", "api"),
 			},
 			wantNames: []string{"cloud-1", "crd-1"},
 		},
 		{
 			name: "same control different workload is merged",
 			cloud: []armotypes.PostureExceptionPolicy{
-				buildPolicy("cloud-1", "C-0001", "team-a", "Deployment", "api"),
+				buildPolicy("cloud-1", "C-0001", "team-a", "Deployment", "apps", "api"),
 			},
 			crd: []armotypes.PostureExceptionPolicy{
-				buildPolicy("crd-1", "C-0001", "team-a", "Deployment", "worker"),
+				buildPolicy("crd-1", "C-0001", "team-a", "Deployment", "apps", "worker"),
+			},
+			wantNames: []string{"cloud-1", "crd-1"},
+		},
+		{
+			name: "same control same workload but different api groups are merged",
+			cloud: []armotypes.PostureExceptionPolicy{
+				buildPolicy("cloud-1", "C-0001", "team-a", "Deployment", "apps", "api"),
+			},
+			crd: []armotypes.PostureExceptionPolicy{
+				buildPolicy("crd-1", "C-0001", "team-a", "Deployment", "batch", "api"),
 			},
 			wantNames: []string{"cloud-1", "crd-1"},
 		},
@@ -75,14 +88,14 @@ func TestDeduplicateExceptions(t *testing.T) {
 			name:  "no cloud exceptions keeps all CRD",
 			cloud: nil,
 			crd: []armotypes.PostureExceptionPolicy{
-				buildPolicy("crd-1", "C-0003", "team-b", "StatefulSet", "db"),
+				buildPolicy("crd-1", "C-0003", "team-b", "StatefulSet", "apps", "db"),
 			},
 			wantNames: []string{"crd-1"},
 		},
 		{
 			name: "no CRD exceptions keeps all cloud",
 			cloud: []armotypes.PostureExceptionPolicy{
-				buildPolicy("cloud-1", "C-0004", "team-b", "DaemonSet", "agent"),
+				buildPolicy("cloud-1", "C-0004", "team-b", "DaemonSet", "apps", "agent"),
 			},
 			crd:       nil,
 			wantNames: []string{"cloud-1"},

@@ -342,7 +342,11 @@ func isResourceCovered(
 	return false
 }
 
-// exceptionDedupKey builds a deterministic key using a separator not valid in Kubernetes names or kinds.
+// exceptionDedupKey builds a deterministic key using a separator not valid in Kubernetes names, kinds, or API groups.
 func exceptionDedupKey(controlID string, designator identifiers.PortalDesignator) string {
-	return controlID + exceptionKeySeparator + designator.GetNamespace() + exceptionKeySeparator + designator.GetName() + exceptionKeySeparator + designator.GetKind()
+	apiGroup := ""
+	if designator.Attributes != nil {
+		apiGroup = designator.Attributes[identifiers.AttributeApiGroup]
+	}
+	return controlID + exceptionKeySeparator + designator.GetNamespace() + exceptionKeySeparator + designator.GetName() + exceptionKeySeparator + designator.GetKind() + exceptionKeySeparator + apiGroup
 }
