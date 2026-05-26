@@ -284,6 +284,12 @@ Configure the HTTP handler using environment variables:
 | `KS_LOGGER_NAME` | Logger name | `kubescape` |
 | `KS_LOGGER_LEVEL` | Log level | `info`, `debug`, `warning`, `error` |
 | `KS_DOWNLOAD_ARTIFACTS` | Download artifacts on each scan | `true`, `false` |
+| `KS_HTTP_READ_HEADER_TIMEOUT` | Time to read request headers | `10s` |
+| `KS_HTTP_READ_TIMEOUT` | Time to read full request (including body) | `30s` |
+| `KS_HTTP_WRITE_TIMEOUT` | Time to write the response | `15m` |
+| `KS_HTTP_IDLE_TIMEOUT` | Keep-alive idle timeout | `2m` |
+| `KS_HTTP_MAX_HEADER_BYTES` | Maximum request header size in bytes | `1048576` |
+| `KS_PPROF_PORT` | pprof listener port (debug only) | `6060` |
 
 ---
 
@@ -316,6 +322,10 @@ export KS_LOGGER_LEVEL=debug
 ### Performance Profiling
 
 The HTTP handler exposes pprof endpoints for performance analysis:
+
+```bash
+export KS_PPROF_PORT=6060
+```
 
 ```bash
 # Heap profile
