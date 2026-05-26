@@ -3,7 +3,6 @@ package imagescan
 import (
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -354,3 +353,4 @@ func TestNewDefaultDBConfig_SanitizationHarden(t *testing.T) {
 		})
 	}
 }
+
