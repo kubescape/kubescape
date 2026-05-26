@@ -227,8 +227,10 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 
 	for _, cID := range sortedIDs {
 		testCase := JUnitTestCase{}
-		control := results.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, cID)
-
+		control := controls.GetControl(reportsummary.EControlCriteriaID, cID)
+		if control == nil {
+			continue
+		}
 		testCase.Name = control.GetName()
 		testCase.Classname = classname
 
@@ -305,5 +307,11 @@ func properties(complianceScore float32) []JUnitProperty {
 			Name:  "complianceScore",
 			Value: fmt.Sprintf("%.2f", complianceScore),
 		},
+	}
+}
+
+func (p *JunitPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
 	}
 }

@@ -29,13 +29,17 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 }
 
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
+	var primary getter.IExceptionsGetter
+
 	if useExceptions != "" {
 		// load exceptions from file
-		return getter.NewLoadPolicy([]string{useExceptions})
+		primary = getter.NewLoadPolicy([]string{useExceptions})
+		return primary
 	}
 	if accountID != "" {
 		// download exceptions from Kubescape Cloud backend
-		return getter.GetKSCloudAPIConnector()
+		primary = getter.GetKSCloudAPIConnector()
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter())
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
@@ -43,9 +47,11 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter())
 	}
-	return downloadReleasedPolicy
+	primary = downloadReleasedPolicy
+	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter())
 
 }
 
@@ -95,7 +101,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		_ = getter.GetKSCloudAPIConnector()
 	}
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
+	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.

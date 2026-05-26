@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
@@ -207,4 +208,30 @@ func TestGetOutputPrintersDeduplicatesPrettyPrinterFallback(t *testing.T) {
 			assert.Len(t, got, tt.expectedLen)
 		})
 	}
+}
+
+func TestKubescape_SetContext(t *testing.T) {
+	type ctxKey struct{}
+	ks := NewKubescape(context.Background())
+
+	newCtx := context.WithValue(context.Background(), ctxKey{}, "sentinel")
+	ks.SetContext(newCtx)
+
+	assert.Equal(t, newCtx, ks.Context())
+	assert.Equal(t, "sentinel", ks.Context().Value(ctxKey{}))
+}
+
+func TestKubescape_SetContextRestoresOriginal(t *testing.T) {
+	originalCtx := context.Background()
+	ks := NewKubescape(originalCtx)
+
+	timeoutCtx, cancel := context.WithTimeout(originalCtx, time.Minute)
+	ks.SetContext(timeoutCtx)
+	_, hasDeadline := ks.Context().Deadline()
+	assert.True(t, hasDeadline)
+
+	cancel()
+	ks.SetContext(originalCtx)
+	_, hasDeadline = ks.Context().Deadline()
+	assert.False(t, hasDeadline)
 }

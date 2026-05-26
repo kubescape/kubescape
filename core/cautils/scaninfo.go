@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -140,6 +141,7 @@ type ScanInfo struct {
 	ScanType              ScanTypes
 	ScanImages            bool
 	UseDefaultMatchers    bool
+	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)

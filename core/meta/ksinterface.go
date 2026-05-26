@@ -10,6 +10,7 @@ import (
 
 type IKubescape interface {
 	Context() context.Context
+	SetContext(ctx context.Context)
 
 	Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) // TODO - use scanInfo from v1
 
@@ -24,6 +25,9 @@ type IKubescape interface {
 
 	// fix
 	Fix(fixInfo *metav1.FixInfo) error
+
+	// diff
+	Diff(diffInfo *metav1.DiffInfo) error
 
 	// patch
 	Patch(patchInfo *metav1.PatchInfo, scanInfo *cautils.ScanInfo) (bool, error)

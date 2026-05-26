@@ -25,3 +25,5 @@ func (silentPrinter *SilentPrinter) SetWriter(ctx context.Context, outputFile st
 
 func (silentPrinter *SilentPrinter) Score(score float32) {
 }
+
+func (sp *SilentPrinter) CloseWriter() {}

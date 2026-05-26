@@ -26,6 +26,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/storage"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
+	"k8s.io/client-go/tools/record"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -41,6 +42,7 @@ type OPAProcessor struct {
 	clusterName          string
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
+	exceptionEventRecorder record.EventRecorder
 	opaRegisterOnce   sync.Once
 	excludeNamespaces []string
 	includeNamespaces []string
@@ -49,7 +51,7 @@ type OPAProcessor struct {
 	compiledMu        sync.RWMutex
 }
 
-func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool) *OPAProcessor {
+func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
 		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
@@ -59,6 +61,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		OPASessionObj:        sessionObj,
 		regoDependenciesData: regoDependenciesData,
 		clusterName:          clusterName,
+		exceptionEventRecorder: exceptionEventRecorder,
 		excludeNamespaces:    split(excludeNamespaces),
 		includeNamespaces:    split(includeNamespaces),
 		printEnabled:         enableRegoPrint,
@@ -257,6 +260,9 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				}
 				id := failedResource.GetID()
 				failedIDs[id] = struct{}{}
+				if _, exists := resources[id]; exists {
+					continue
+				}
 				resources[id] = &resourcesresults.ResourceAssociatedRule{
 					Name:                  rule.Name,
 					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
@@ -500,10 +506,17 @@ func (opap *OPAProcessor) skipNamespace(ns string) bool {
 }
 
 func split(namespaces string) []string {
-	if namespaces == "" {
-		return nil
+	parts := strings.Split(namespaces, ",")
+	result := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
 	}
-	return strings.Split(namespaces, ",")
+
+	return result
 }
 
 func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, error) {

@@ -731,6 +731,7 @@ type mockCounters struct {
 func (m mockCounters) Failed() int   { return m.failed }
 func (m mockCounters) Skipped() int  { return m.skipped }
 func (m mockCounters) Passed() int   { return m.passed + m.excluded } // mirrors StatusCounters.Passed() which includes ExcludedResources
+func (m mockCounters) Passed() int   { return m.passed + m.excluded }
 func (m mockCounters) Excluded() int { return m.excluded }
 func (m mockCounters) All() int      { return m.failed + m.skipped + m.passed + m.excluded }
 
@@ -762,6 +763,7 @@ func TestIsEmptyResources(t *testing.T) {
 		},
 		{
 			name:     "one excluded — not empty (Passed() includes ExcludedResources per StatusCounters)",
+			name:     "one excluded — not empty (excluded counts as passed)",
 			counters: mockCounters{excluded: 1},
 			want:     false,
 		},
@@ -791,6 +793,7 @@ func TestMapControlToInfo(t *testing.T) {
 		"resource-with-excluded-results": {
 			InnerStatus: apis.StatusPassed,
 			InnerInfo:   "excluded resources count as non-empty (StatusCounters.Passed includes ExcludedResources)",
+			InnerInfo:   "excluded resources count as non-empty",
 		},
 		"resource-with-missing-control": {
 			InnerStatus: apis.StatusPassed,

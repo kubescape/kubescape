@@ -106,6 +106,9 @@ func TestPrometheusPrinterPrintDetails(t *testing.T) {
 			if tt.notWantLine != "" {
 				assert.NotContains(t, string(got), tt.notWantLine)
 			}
+			if len(tt.resources) == 0 {
+				assert.Empty(t, strings.TrimSpace(string(got)))
+			}
 		})
 	}
 }

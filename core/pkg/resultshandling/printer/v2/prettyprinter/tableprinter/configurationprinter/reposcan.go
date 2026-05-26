@@ -30,20 +30,24 @@ func (rp *RepoPrinter) PrintSummaryTable(_ io.Writer, _ *reportsummary.SummaryDe
 
 func (rp *RepoPrinter) PrintCategoriesTables(writer io.Writer, summaryDetails *reportsummary.SummaryDetails, _ [][]string) {
 
-	categoriesToCategoryControls := mapCategoryToSummary(summaryDetails.ListControls(), mapRepoControlsToCategories)
+	categoriesToCategoryControls := bucketControlsByCategory(summaryDetails.ListControls())
 
 	tableRendered := false
-	for _, id := range repoCategoriesDisplayOrder {
-		categoryControl, ok := categoriesToCategoryControls[id]
-		if !ok {
-			continue
-		}
+	for _, id := range categoryRenderOrder(repoCategoriesDisplayOrder, categoriesToCategoryControls) {
+		categoryControl := categoriesToCategoryControls[id]
 
 		if categoryControl.Status != apis.StatusFailed {
 			continue
 		}
 
-		tableRendered = tableRendered || rp.renderSingleCategoryTable(categoryControl.CategoryName, mapCategoryToType[id], writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries))
+		categoryType, ok := mapCategoryToType[id]
+		if !ok {
+			categoryType = TypeCounting
+		}
+
+		if rp.renderSingleCategoryTable(categoryControl.CategoryName, categoryType, writer, categoryControl.controlSummaries, utils.MapInfoToPrintInfoFromIface(categoryControl.controlSummaries)) {
+			tableRendered = true
+		}
 	}
 
 	if !tableRendered {

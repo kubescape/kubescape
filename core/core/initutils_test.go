@@ -86,7 +86,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "",
 				downloadReleasedPolicy: nil,
 			},
-			want: "*getter.DownloadReleasedPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter empty useExceptions",
@@ -96,7 +96,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*getter.DownloadReleasedPolicy",
+			want: "*getter.MergedExceptionsGetter",
 		},
 		{
 			name: "Test GetExceptionsGetter with useExceptions and empty accountID",
@@ -126,7 +126,7 @@ func TestGetExceptionsGetter(t *testing.T) {
 				accountID:              "123456789012",
 				downloadReleasedPolicy: getter.NewDownloadReleasedPolicy(),
 			},
-			want: "*v1.KSCloudAPI",
+			want: "*getter.MergedExceptionsGetter",
 		},
 	}
 

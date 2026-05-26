@@ -1,6 +1,7 @@
 package scan
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"strings"
@@ -89,8 +90,8 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
 
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 100, "Failure threshold is the percent above which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1")
+	scanCmd.PersistentFlags().Float32VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 100, "Failure threshold is the percent above which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', and '--view resource|control'")
+	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', and '--view resource|control'")
 	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Minimum percentage of controls that must be evaluated (0 to disable). If coverage drops below this threshold the command returns exit code 1")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
@@ -114,6 +115,7 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Hide sensitive identifiers (namespace, resource names, container names, images) in results")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
+	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
 
 	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
 	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
@@ -171,7 +173,28 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
 	}
 }
 
+// applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
+// returns a cleanup function that cancels the context and restores the
+// original. The caller must defer the returned function so the deadline
+// covers both ks.Scan() and results.HandleResults().
+//
+//	defer applyTimeout(scanInfo, ks)()
+func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
+	if scanInfo.ScanTimeout <= 0 {
+		return func() {}
+	}
+	originalCtx := ks.Context()
+	timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
+	ks.SetContext(timeoutCtx)
+	return func() {
+		cancel()
+		ks.SetContext(originalCtx)
+	}
+}
+
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
+	defer applyTimeout(&scanInfo, ks)()
+
 	results, err := ks.Scan(&scanInfo)
 	if err != nil {
 		return err

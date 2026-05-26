@@ -458,6 +458,9 @@ func getControlsSummaryMapFromScannedControlMap(ctx context.Context, scannedCont
 }
 
 func parseControlSeverity(controlSummary reportsummary.IControlSummary) v1beta1.ControlSeverity {
+	if controlSummary == nil {
+		return v1beta1.ControlSeverity{}
+	}
 	scoreFactor := controlSummary.GetScoreFactor()
 	severity := apis.ControlSeverityToString(scoreFactor)
 

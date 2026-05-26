@@ -258,7 +258,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 	case "list_vulnerability_manifests":
 		namespace := metav1.NamespaceAll
 		if ns, ok := arguments["namespace"]; ok {
-			if nsStr, ok := ns.(string); ok && nsStr != "" {
+			nsStr, ok := ns.(string)
+			if !ok {
+				return nil, fmt.Errorf("namespace must be a string")
+			}
+			if nsStr != "" {
 				namespace = nsStr
 			}
 		}

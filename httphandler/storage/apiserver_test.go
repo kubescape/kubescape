@@ -94,6 +94,30 @@ func Test_getControlsMapFromResult(t *testing.T) {
 	}
 }
 
+func TestParseControlSeverity_Nil(t *testing.T) {
+	assert.NotPanics(t, func() {
+		result := parseControlSeverity(nil)
+		assert.Equal(t, v1beta1.ControlSeverity{}, result)
+	})
+}
+
+func TestGetControlsMapFromResult_MissingControl(t *testing.T) {
+	scanResult := resourcesresults.Result{
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-MISSING",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		actual := getControlsMapFromResult(context.Background(), &scanResult, reportsummary.ControlSummaries{})
+		assert.Contains(t, actual, "C-MISSING")
+		assert.Equal(t, v1beta1.ControlSeverity{}, actual["C-MISSING"].Severity)
+	})
+}
+
 type FakeMetadata struct {
 	workloadinterface.IMetadata
 

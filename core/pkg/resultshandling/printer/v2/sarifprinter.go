@@ -212,6 +212,10 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 
 				if ac.GetStatus(nil).IsFailed() {
 					ctl := opaSessionObj.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ac.GetID())
+					if ctl == nil {
+						logger.L().Debug("control not found in summary details, skipping", helpers.String("controlID", ac.GetID()))
+						continue
+					}
 					location := sp.resolveFixLocation(opaSessionObj, locationResolver, &ac, resourceID)
 					sp.addRule(run, ctl)
 					r := sp.addResult(run, ctl, filepath, location)
@@ -425,4 +429,10 @@ func (sp *SARIFPrinter) generateRemediationMessage(control reportsummary.IContro
 func hashArtifactChange(artifactChange *sarif.ArtifactChange) [32]byte {
 	acJson, _ := json.Marshal(artifactChange)
 	return sha256.Sum256(acJson)
+}
+
+func (p *SARIFPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
 }

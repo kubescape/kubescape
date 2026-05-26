@@ -178,3 +178,9 @@ func convertToReportSummary(input map[string]*imageprinter.SeveritySummary) map[
 func (jp *JsonPrinter) PrintNextSteps() {
 
 }
+
+func (p *JsonPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}
