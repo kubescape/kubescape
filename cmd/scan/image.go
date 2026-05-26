@@ -49,8 +49,10 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 				return fmt.Errorf("the command takes exactly one image name as an argument")
 			}
 
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, sarif")
+			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed {
+				if err := shared.ValidateScanFormat(scanInfo.Format); err != nil {
+					return err
+				}
 			}
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
 				return err

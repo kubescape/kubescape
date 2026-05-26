@@ -98,6 +98,36 @@ func TestTerminateOnExceedingSeverity(t *testing.T) {
 	}
 }
 
+func TestValidateScanFormat(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Input       string
+		Want        error
+	}{
+		{"pretty-printer should be valid", "pretty-printer", nil},
+		{"json should be valid", "json", nil},
+		{"junit should be valid", "junit", nil},
+		{"prometheus should be valid", "prometheus", nil},
+		{"pdf should be valid", "pdf", nil},
+		{"html should be valid", "html", nil},
+		{"sarif should be valid", "sarif", nil},
+		{"JSON uppercase should be valid", "JSON", nil},
+		{"empty string should be invalid", "", ErrInvalidScanFormat},
+		{"xml should be invalid", "xml", ErrInvalidScanFormat},
+		{"csv should be invalid", "csv", ErrInvalidScanFormat},
+		{"bogus should be invalid", "bogus", ErrInvalidScanFormat},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.Description, func(t *testing.T) {
+			got := ValidateScanFormat(testCase.Input)
+			if got != testCase.Want {
+				t.Errorf("got: %v, want: %v", got, testCase.Want)
+			}
+		})
+	}
+}
+
 func TestValidateSeverity(t *testing.T) {
 	testCases := []struct {
 		Description string

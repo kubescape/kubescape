@@ -62,8 +62,10 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 					return err
 				}
 			}
-			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
-				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
+			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed {
+				if err := shared.ValidateScanFormat(scanInfo.Format); err != nil {
+					return err
+				}
 			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err

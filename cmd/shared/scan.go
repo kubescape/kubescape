@@ -7,8 +7,33 @@ import (
 
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
 )
+
+// supportedScanFormats lists all valid output formats for scan commands.
+var supportedScanFormats = []string{
+	printer.PrettyFormat,
+	printer.JsonFormat,
+	printer.JunitResultFormat,
+	printer.PrometheusFormat,
+	printer.PdfFormat,
+	printer.HtmlFormat,
+	printer.SARIFFormat,
+}
+
+// ErrInvalidScanFormat is returned when the format flag is set to an unsupported value.
+var ErrInvalidScanFormat = fmt.Errorf("invalid format. Supported formats: %s", strings.Join(supportedScanFormats, ", "))
+
+// ValidateScanFormat returns an error if the given format string is not a supported scan output format.
+func ValidateScanFormat(format string) error {
+	for _, f := range supportedScanFormats {
+		if strings.EqualFold(format, f) {
+			return nil
+		}
+	}
+	return ErrInvalidScanFormat
+}
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
 
