@@ -730,7 +730,7 @@ type mockCounters struct {
 
 func (m mockCounters) Failed() int   { return m.failed }
 func (m mockCounters) Skipped() int  { return m.skipped }
-func (m mockCounters) Passed() int   { return m.passed }
+func (m mockCounters) Passed() int   { return m.passed + m.excluded }
 func (m mockCounters) Excluded() int { return m.excluded }
 func (m mockCounters) All() int      { return m.failed + m.skipped + m.passed + m.excluded }
 
@@ -761,9 +761,9 @@ func TestIsEmptyResources(t *testing.T) {
 			want:     false,
 		},
 		{
-			name:     "one excluded — empty (excluded does not count as a result)",
+			name:     "one excluded — not empty (excluded counts as passed)",
 			counters: mockCounters{excluded: 1},
-			want:     true,
+			want:     false,
 		},
 		{
 			name:     "mixed non-zero — not empty",
@@ -776,6 +776,62 @@ func TestIsEmptyResources(t *testing.T) {
 			assert.Equal(t, tt.want, isEmptyResources(tt.counters))
 		})
 	}
+}
+
+func TestMapControlToInfo(t *testing.T) {
+	infoMap := map[string]apis.StatusInfo{
+		"resource-with-empty-control": {
+			InnerStatus: apis.StatusSkipped,
+			InnerInfo:   "external result only",
+		},
+		"resource-with-k8s-results": {
+			InnerStatus: apis.StatusFailed,
+			InnerInfo:   "should not override a control with resource counters",
+		},
+		"resource-with-excluded-results": {
+			InnerStatus: apis.StatusPassed,
+			InnerInfo:   "excluded resources count as non-empty",
+		},
+		"resource-with-missing-control": {
+			InnerStatus: apis.StatusPassed,
+			InnerInfo:   "control is not present in the summary",
+		},
+		"resource-without-controls": {
+			InnerStatus: apis.StatusPassed,
+			InnerInfo:   "resource is not mapped to any control",
+		},
+	}
+
+	got := mapControlToInfo(
+		map[string][]string{
+			"resource-with-empty-control":    {"C-0001"},
+			"resource-with-k8s-results":      {"C-0002"},
+			"resource-with-excluded-results": {"C-0003"},
+			"resource-with-missing-control":  {"C-9999"},
+		},
+		infoMap,
+		reportsummary.ControlSummaries{
+			"C-0001": {
+				ControlID: "C-0001",
+			},
+			"C-0002": {
+				ControlID: "C-0002",
+				StatusCounters: reportsummary.StatusCounters{
+					FailedResources: 1,
+				},
+			},
+			"C-0003": {
+				ControlID: "C-0003",
+				StatusCounters: reportsummary.StatusCounters{
+					ExcludedResources: 2,
+				},
+			},
+		},
+	)
+
+	assert.Equal(t, map[string]apis.StatusInfo{
+		"C-0001": infoMap["resource-with-empty-control"],
+	}, got)
 }
 
 func TestIsLargeCluster(t *testing.T) {
