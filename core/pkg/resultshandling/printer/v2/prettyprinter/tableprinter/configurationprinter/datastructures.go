@@ -68,4 +68,3 @@ var mapCategoryToType = map[string]CategoryType{
 	networkCategoryID:       TypeCounting,
 	workloadsCategoryID:     TypeCounting,
 }
-

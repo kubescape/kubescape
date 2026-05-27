@@ -205,9 +205,9 @@ func TestResults_GetEmptyID_OfflineFallback_TableDriven(t *testing.T) {
 
 	type tc struct {
 		name       string
-		seedLatest bool                         // call setBusy/setNotBusy so latestID == validUUID
-		writeFile  bool                         // create the result file on disk
-		query      string                       // query string appended to /results
+		seedLatest bool   // call setBusy/setNotBusy so latestID == validUUID
+		writeFile  bool   // create the result file on disk
+		query      string // query string appended to /results
 		wantStatus int
 		wantType   utilsapisv1.ScanResponseType // zero value means "don't assert type"
 		wantKept   bool                         // must the file still exist after the call?

@@ -63,9 +63,9 @@ func TestMergeMaps(t *testing.T) {
 
 func TestSplitYAMLDocuments(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantLen  int
+		name    string
+		input   string
+		wantLen int
 	}{
 		{
 			name:    "single document no separator",

@@ -37,8 +37,8 @@ func TestEstimateClusterSize(t *testing.T) {
 			name: "multiple groups",
 			input: K8SResources{
 				"apps/v1/deployments": {"id1", "id2"},
-				"v1/pods":            {"id3", "id4", "id5"},
-				"v1/services":        {"id6"},
+				"v1/pods":             {"id3", "id4", "id5"},
+				"v1/services":         {"id6"},
 			},
 			expected: 6,
 		},

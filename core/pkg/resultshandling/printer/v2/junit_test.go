@@ -616,9 +616,9 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 // testsSuites. This unit test pins the loop itself.
 func TestAggregateSuiteCounts(t *testing.T) {
 	cases := []struct {
-		name                                 string
-		in                                   []JUnitTestSuite
-		wantTests, wantFailures, wantErrors  int
+		name                                string
+		in                                  []JUnitTestSuite
+		wantTests, wantFailures, wantErrors int
 	}{
 		{
 			name: "empty slice yields zeros",
