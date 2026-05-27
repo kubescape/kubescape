@@ -61,7 +61,7 @@ func TestGojayUnmarshalScanResultReport(t *testing.T) {
 			wantLayerSize: 1,
 		},
 		{
-			name: "empty arrays decode to empty slices",
+			name: "empty arrays keep zero-value slices",
 			input: `{
 				"customerGUID":"customer-2",
 				"imageTag":"busybox",
@@ -70,9 +70,10 @@ func TestGojayUnmarshalScanResultReport(t *testing.T) {
 				"listOfDangerousArtifcats":[]
 			}`,
 			want: ScanResultReport{
-				CustomerGUID: "customer-2",
-				ImgTag:       "busybox",
-				Timestamp:    1,
+				CustomerGUID:             "customer-2",
+				ImgTag:                   "busybox",
+				Timestamp:                1,
+				ListOfDangerousArtifcats: nil,
 			},
 			wantLayerSize: 0,
 		},
@@ -186,7 +187,7 @@ func TestGojayUnmarshalInvalidTypesKeepZeroValues(t *testing.T) {
 			},
 		},
 		{
-			name:  "numeric dangerous artifact is ignored",
+			name:  "numeric dangerous artifact decodes to empty string",
 			input: `{"listOfDangerousArtifcats":["ok",5]}`,
 			assert: func(t *testing.T, got ScanResultReport) {
 				assert.Equal(t, []string{"ok", ""}, got.ListOfDangerousArtifcats)
