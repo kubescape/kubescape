@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/stretchr/testify/assert"
@@ -599,4 +600,31 @@ func TestSplit(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMakeRegoDeps_InputIsolation(t *testing.T) {
+	regoDeps := resources.NewRegoDependenciesDataMock()
+
+	regoDeps.PostureControlInputs = map[string][]string{
+		"severity": {"high"},
+	}
+
+	opap := &OPAProcessor{
+		OPASessionObj: &cautils.OPASessionObj{
+			Report: &reporthandlingv2.PostureReport{
+				ClusterCloudProvider: "aws",
+			},
+		},
+		regoDependenciesData: regoDeps,
+	}
+
+	deps := opap.makeRegoDeps(nil, map[string][]string{
+		"runtime": {"enabled"},
+	})
+
+	deps.PostureControlInputs["runtime"][0] = "disabled"
+
+	_, runtimeExists := opap.regoDependenciesData.PostureControlInputs["runtime"]
+
+	assert.False(t, runtimeExists)
 }
