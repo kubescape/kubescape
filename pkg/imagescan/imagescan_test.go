@@ -15,11 +15,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type thresholdStubVulnerabilityProvider struct {
 type stubVulnerabilityProvider struct {
 	metadataByID map[string]*vulnerability.Metadata
 	errByID      map[string]error
 }
 
+func (s thresholdStubVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
+	return nil
+}
+
+func (s thresholdStubVulnerabilityProvider) FindVulnerabilities(...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+
+func (s thresholdStubVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
 func (s stubVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
 	return nil
 }
@@ -40,6 +50,11 @@ func (s stubVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Refer
 	return nil, errors.New("metadata not found")
 }
 
+func (s thresholdStubVulnerabilityProvider) Close() error {
+	return nil
+}
+
+func makeThresholdTestMatch(id string) match.Match {
 func (s stubVulnerabilityProvider) Close() error {
 	return nil
 }
@@ -249,6 +264,60 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	require.NoError(t, err)
 	defer svcWithoutDefault.Close()
 	assert.False(t, svcWithoutDefault.useDefaultMatchers)
+}
+
+func TestExceedsSeverityThreshold(t *testing.T) {
+	provider := thresholdStubVulnerabilityProvider{
+		metadataByID: map[string]*vulnerability.Metadata{
+			"CVE-high": {Severity: vulnerability.HighSeverity.String()},
+			"CVE-low":  {Severity: vulnerability.LowSeverity.String()},
+		},
+		errByID: map[string]error{
+			"CVE-error": errors.New("lookup failed"),
+		},
+	}
+
+	tests := []struct {
+		name      string
+		threshold vulnerability.Severity
+		matches   match.Matches
+		want      bool
+	}{
+		{
+			name:      "unknown threshold never fails the scan",
+			threshold: vulnerability.UnknownSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-high"),
+			),
+			want: false,
+		},
+		{
+			name:      "match equal to threshold fails the scan",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-high"),
+				makeThresholdTestMatch("CVE-low"),
+			),
+			want: true,
+		},
+		{
+			name:      "metadata errors are ignored when no remaining match exceeds threshold",
+			threshold: vulnerability.MediumSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-error"),
+				makeThresholdTestMatch("CVE-low"),
+			),
+			want: false,
+		},
+	}
+
+	svc := &Service{vp: provider}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, svc.ExceedsSeverityThreshold(tt.threshold, tt.matches))
+		})
+	}
 }
 
 func TestValidateDBLoad(t *testing.T) {
