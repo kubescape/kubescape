@@ -7,10 +7,66 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type stubVulnerabilityProvider struct {
+	metadataByID map[string]*vulnerability.Metadata
+	errByID      map[string]error
+}
+
+func (s stubVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
+	return nil
+}
+
+func (s stubVulnerabilityProvider) FindVulnerabilities(...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+
+func (s stubVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	if err, ok := s.errByID[ref.ID]; ok {
+		return nil, err
+	}
+
+	if metadata, ok := s.metadataByID[ref.ID]; ok {
+		return metadata, nil
+	}
+
+	return nil, errors.New("metadata not found")
+}
+
+func (s stubVulnerabilityProvider) Close() error {
+	return nil
+}
+
+func makeTestMatch(id string) match.Match {
+	return match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{
+				ID:        id,
+				Namespace: "nvd",
+			},
+		},
+		Package: grypepkg.Package{
+			ID:      grypepkg.ID("pkg-" + id),
+			Name:    "pkg-" + id,
+			Version: "1.0.0",
+		},
+	}
+}
+
+func matchIDs(matches match.Matches) []string {
+	ids := make([]string, 0, matches.Count())
+	for m := range matches.Enumerate() {
+		ids = append(ids, m.Vulnerability.ID)
+	}
+	return ids
+}
 
 func TestParseSeverity(t *testing.T) {
 	tests := []struct {
@@ -353,4 +409,41 @@ func TestNewDefaultDBConfig_SanitizationHarden(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFilterMatchesBasedOnSeverity(t *testing.T) {
+	provider := stubVulnerabilityProvider{
+		metadataByID: map[string]*vulnerability.Metadata{
+			"CVE-high": {
+				Severity: "high",
+			},
+			"CVE-medium": {
+				Severity: "medium",
+			},
+		},
+		errByID: map[string]error{
+			"CVE-error": errors.New("lookup failed"),
+		},
+	}
+
+	remainingMatches := match.NewMatches(
+		makeTestMatch("CVE-high"),
+		makeTestMatch("CVE-medium"),
+		makeTestMatch("CVE-error"),
+	)
+
+	t.Run("nil severity exceptions keep all matches", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity(nil, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
+	})
+
+	t.Run("empty severity exceptions keep all matches", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity([]string{}, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
+	})
+
+	t.Run("excluded severities are removed and metadata errors are skipped", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity([]string{"HIGH"}, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-medium"}, matchIDs(filtered))
+	})
 }
