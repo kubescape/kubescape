@@ -150,7 +150,7 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 	}
 
 	sessionObj.TopWorkloadsByScore = topWorkloads
-}	
+}
 
 func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources map[string]int) {
 	if sessionObj.Metadata.ContextMetadata.ClusterContextMetadata == nil {
