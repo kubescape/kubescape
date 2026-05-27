@@ -1,6 +1,8 @@
 package anonymizer
 
 import (
+	"strings"
+
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -28,6 +30,11 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 		if namespace := resource.GetNamespace(); namespace != "" {
 			resource.SetNamespace(mapping.GetOrCreate("ns", namespace))
 		}
+
+		// sourcePath leaks manifest filenames/line references in hidden output
+		// (for example test-anonymize.yaml:1), so anonymize it alongside other
+		// resource-local metadata.
+		anonymizeResourceObjectSourcePath(resource, mapping)
 
 		// Annotations may contain infrastructure identifiers, secret paths, or
 		// other sensitive metadata at both top-level and nested workload templates.
@@ -87,6 +94,7 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 	newResourceSource := make(map[string]reporthandling.Source, len(session.ResourceSource))
 	for oldID, source := range session.ResourceSource {
 		newID := resolveMappedID(mapping, idMapping, oldID, "ref")
+		anonymizeResourceSource(&source, mapping)
 		newResourceSource[newID] = source
 	}
 	session.ResourceSource = newResourceSource
@@ -175,6 +183,50 @@ func anonymizeResourceAnnotations(resource workloadinterface.IMetadata, mapping 
 	resource.SetObject(obj)
 }
 
+// anonymizeResourceObjectSourcePath anonymizes object.sourcePath while
+// preserving line number context (e.g. src-xxxx:12).
+func anonymizeResourceObjectSourcePath(resource workloadinterface.IMetadata, mapping *Mapping) {
+	if resource == nil {
+		return
+	}
+
+	obj := resource.GetObject()
+	if obj == nil {
+		return
+	}
+
+	rawSourcePath, ok := obj["sourcePath"]
+	if !ok {
+		return
+	}
+
+	sourcePath, ok := rawSourcePath.(string)
+	if !ok || sourcePath == "" {
+		return
+	}
+
+	obj["sourcePath"] = anonymizeSourcePath(sourcePath, mapping)
+	resource.SetObject(obj)
+}
+
+// anonymizeSourcePath preserves trailing line numbers while anonymizing the
+// underlying file path.
+func anonymizeSourcePath(sourcePath string, mapping *Mapping) string {
+	lastColon := strings.LastIndex(sourcePath, ":")
+	if lastColon == -1 {
+		return mapping.GetOrCreate("src", sourcePath)
+	}
+
+	pathPart := sourcePath[:lastColon]
+	linePart := sourcePath[lastColon:]
+
+	if pathPart == "" {
+		return mapping.GetOrCreate("src", sourcePath)
+	}
+
+	return mapping.GetOrCreate("src", pathPart) + linePart
+}
+
 // anonymizeAnnotationNodes recursively traverses unstructured resource objects
 // to locate metadata blocks regardless of workload nesting depth.
 func anonymizeAnnotationNodes(node interface{}, mapping *Mapping) {
@@ -223,5 +275,70 @@ func anonymizeAnnotationMap(obj map[string]interface{}, mapping *Mapping) {
 		}
 
 		annotations[key] = mapping.GetOrCreate("ann", str)
+	}
+}
+
+// anonymizeResourceSource anonymizes source metadata that may expose local
+// filesystem structure, repository layout, Helm/Kustomize metadata, or git
+// commit identity in hidden scan output.
+func anonymizeResourceSource(source *reporthandling.Source, mapping *Mapping) {
+	if source == nil {
+		return
+	}
+
+	if source.Path != "" {
+		source.Path = mapping.GetOrCreate("src", source.Path)
+	}
+
+	if source.RelativePath != "" {
+		source.RelativePath = mapping.GetOrCreate("src", source.RelativePath)
+	}
+
+	if source.HelmPath != "" {
+		source.HelmPath = mapping.GetOrCreate("src", source.HelmPath)
+	}
+
+	if source.HelmChartName != "" {
+		source.HelmChartName = mapping.GetOrCreate("src", source.HelmChartName)
+	}
+
+	if source.HelmTemplateFile != "" {
+		source.HelmTemplateFile = mapping.GetOrCreate("src", source.HelmTemplateFile)
+	}
+
+	if source.KustomizeDirectoryName != "" {
+		source.KustomizeDirectoryName = mapping.GetOrCreate("src", source.KustomizeDirectoryName)
+	}
+
+	for i := range source.HelmValuesPaths {
+		if source.HelmValuesPaths[i] != "" {
+			source.HelmValuesPaths[i] = mapping.GetOrCreate("src", source.HelmValuesPaths[i])
+		}
+	}
+
+	anonymizeLastCommit(&source.LastCommit, mapping)
+}
+
+// anonymizeLastCommit anonymizes commit metadata that may reveal repository
+// identity or contributor information while preserving non-sensitive timestamps.
+func anonymizeLastCommit(commit *reporthandling.LastCommit, mapping *Mapping) {
+	if commit == nil {
+		return
+	}
+
+	if commit.Hash != "" {
+		commit.Hash = mapping.GetOrCreate("git", commit.Hash)
+	}
+
+	if commit.CommitterName != "" {
+		commit.CommitterName = mapping.GetOrCreate("git", commit.CommitterName)
+	}
+
+	if commit.CommitterEmail != "" {
+		commit.CommitterEmail = mapping.GetOrCreate("git", commit.CommitterEmail)
+	}
+
+	if commit.Message != "" {
+		commit.Message = mapping.GetOrCreate("git", commit.Message)
 	}
 }
