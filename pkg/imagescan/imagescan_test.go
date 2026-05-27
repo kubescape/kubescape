@@ -16,7 +16,6 @@ import (
 )
 
 type thresholdStubVulnerabilityProvider struct {
-type stubVulnerabilityProvider struct {
 	metadataByID map[string]*vulnerability.Metadata
 	errByID      map[string]error
 }
@@ -30,6 +29,42 @@ func (s thresholdStubVulnerabilityProvider) FindVulnerabilities(...vulnerability
 }
 
 func (s thresholdStubVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	if err, ok := s.errByID[ref.ID]; ok {
+		return nil, err
+	}
+
+	if metadata, ok := s.metadataByID[ref.ID]; ok {
+		return metadata, nil
+	}
+
+	return nil, errors.New("metadata not found")
+}
+
+func (s thresholdStubVulnerabilityProvider) Close() error {
+	return nil
+}
+
+func makeThresholdTestMatch(id string) match.Match {
+	return match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{
+				ID:        id,
+				Namespace: "nvd",
+			},
+		},
+		Package: grypepkg.Package{
+			ID:      grypepkg.ID("pkg-" + id),
+			Name:    "pkg-" + id,
+			Version: "1.0.0",
+		},
+	}
+}
+
+type stubVulnerabilityProvider struct {
+	metadataByID map[string]*vulnerability.Metadata
+	errByID      map[string]error
+}
+
 func (s stubVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
 	return nil
 }
@@ -50,11 +85,6 @@ func (s stubVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Refer
 	return nil, errors.New("metadata not found")
 }
 
-func (s thresholdStubVulnerabilityProvider) Close() error {
-	return nil
-}
-
-func makeThresholdTestMatch(id string) match.Match {
 func (s stubVulnerabilityProvider) Close() error {
 	return nil
 }
