@@ -219,7 +219,12 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		for _, policy := range scanInfo.PolicyIdentifier {
-			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Identifier+".json"))
+			path, err := getter.PolicyCachePath(policy.Identifier)
+			if err != nil {
+				logger.L().Warning("skipping default cache lookup for policy", helpers.String("identifier", policy.Identifier), helpers.Error(err))
+				continue
+			}
+			scanInfo.UseFrom = append(scanInfo.UseFrom, path)
 		}
 	}
 }
