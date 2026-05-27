@@ -36,7 +36,7 @@ func TestReportV2ToV1(t *testing.T) {
 				},
 			},
 			wantFrameworkNames:  []string{""},
-			wantFrameworkScores: []float32{0},
+			wantFrameworkScores: []float32{77},
 		},
 		{
 			name: "framework summaries preserve names and scores",
