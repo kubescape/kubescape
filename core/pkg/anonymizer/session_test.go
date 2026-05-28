@@ -559,3 +559,101 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 		})
 	}
 }
+
+func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
+	repoContext := &reporthandlingv2.RepoContextMetadata{
+		Provider:      "github",
+		Repo:          "kubescape",
+		Owner:         "jijo-OO7",
+		Branch:        "feature/private-work",
+		DefaultBranch: "main",
+		RemoteURL:     "https://github.com/jijo-OO7/kubescape",
+		LocalRootPath: "/home/devjijo/work/kubescape",
+		LastCommit: reporthandling.LastCommit{
+			Hash:           "abcdef123456",
+			CommitterName:  "Platform Engineer",
+			CommitterEmail: "platform.engineer@example.com",
+			Message:        "internal security fixes",
+		},
+	}
+
+	session := &cautils.OPASessionObj{
+		AllResources:         make(map[string]workloadinterface.IMetadata),
+		ResourcesResult:      make(map[string]resourcesresults.Result),
+		ResourceSource:       make(map[string]reporthandling.Source),
+		ResourcesPrioritized: make(map[string]prioritization.PrioritizedResource),
+		ResourceAttackTracks: make(map[string]v1alpha1.IAttackTrack),
+
+		Metadata: &reporthandlingv2.Metadata{
+			ContextMetadata: reporthandlingv2.ContextMetadata{
+				RepoContextMetadata: &reporthandlingv2.RepoContextMetadata{
+					Provider:      repoContext.Provider,
+					Repo:          repoContext.Repo,
+					Owner:         repoContext.Owner,
+					Branch:        repoContext.Branch,
+					DefaultBranch: repoContext.DefaultBranch,
+					RemoteURL:     repoContext.RemoteURL,
+					LocalRootPath: repoContext.LocalRootPath,
+					LastCommit:    repoContext.LastCommit,
+				},
+			},
+		},
+
+		Report: &reporthandlingv2.PostureReport{
+			Metadata: reporthandlingv2.Metadata{
+				ContextMetadata: reporthandlingv2.ContextMetadata{
+					RepoContextMetadata: &reporthandlingv2.RepoContextMetadata{
+						Provider:      repoContext.Provider,
+						Repo:          repoContext.Repo,
+						Owner:         repoContext.Owner,
+						Branch:        repoContext.Branch,
+						DefaultBranch: repoContext.DefaultBranch,
+						RemoteURL:     repoContext.RemoteURL,
+						LocalRootPath: repoContext.LocalRootPath,
+						LastCommit:    repoContext.LastCommit,
+					},
+				},
+			},
+		},
+	}
+
+	mapping := NewMapping()
+	anonymizeSession(session, mapping)
+
+	for _, repo := range []*reporthandlingv2.RepoContextMetadata{
+		session.Metadata.ContextMetadata.RepoContextMetadata,
+		session.Report.Metadata.ContextMetadata.RepoContextMetadata,
+	} {
+		assert.NotNil(t, repo)
+
+		if repo == nil {
+			return
+		}
+
+		assert.Equal(t, "github", repo.Provider)
+
+		assert.NotEqual(t, "kubescape", repo.Repo)
+		assert.NotEqual(t, "jijo-OO7", repo.Owner)
+		assert.NotEqual(t, "feature/private-work", repo.Branch)
+		assert.NotEqual(t, "main", repo.DefaultBranch)
+		assert.NotEqual(t, "https://github.com/jijo-OO7/kubescape", repo.RemoteURL)
+
+		assert.Equal(t, "/home/devjijo/work/kubescape", repo.LocalRootPath)
+
+		assert.Contains(t, repo.Repo, "git-")
+		assert.Contains(t, repo.Owner, "git-")
+		assert.Contains(t, repo.Branch, "git-")
+		assert.Contains(t, repo.DefaultBranch, "git-")
+		assert.Contains(t, repo.RemoteURL, "git-")
+
+		assert.NotEqual(t, "abcdef123456", repo.LastCommit.Hash)
+		assert.NotEqual(t, "Platform Engineer", repo.LastCommit.CommitterName)
+		assert.NotEqual(t, "platform.engineer@example.com", repo.LastCommit.CommitterEmail)
+		assert.NotEqual(t, "internal security fixes", repo.LastCommit.Message)
+
+		assert.Contains(t, repo.LastCommit.Hash, "git-")
+		assert.Contains(t, repo.LastCommit.CommitterName, "git-")
+		assert.Contains(t, repo.LastCommit.CommitterEmail, "git-")
+		assert.Contains(t, repo.LastCommit.Message, "git-")
+	}
+}

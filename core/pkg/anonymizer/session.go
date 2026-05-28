@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
 // anonymizeSession rewrites sensitive resource identifiers and metadata while
@@ -114,7 +115,14 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
 
+	if session.Metadata != nil {
+		anonymizeRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, mapping)
+	}
+
 	if session.Report != nil {
+
+		anonymizeRepoContextMetadata(session.Report.Metadata.ContextMetadata.RepoContextMetadata, mapping)
+
 		for controlID, control := range session.Report.SummaryDetails.Controls {
 			remappedResourceIDs := control.ResourceIDs
 
@@ -341,4 +349,34 @@ func anonymizeLastCommit(commit *reporthandling.LastCommit, mapping *Mapping) {
 	if commit.Message != "" {
 		commit.Message = mapping.GetOrCreate("git", commit.Message)
 	}
+}
+
+// anonymizeRepoContextMetadata anonymizes repository identity metadata while
+// preserving operational fields required by downstream consumers.
+func anonymizeRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, mapping *Mapping) {
+	if repo == nil {
+		return
+	}
+
+	if repo.Repo != "" {
+		repo.Repo = mapping.GetOrCreate("git", repo.Repo)
+	}
+
+	if repo.Owner != "" {
+		repo.Owner = mapping.GetOrCreate("git", repo.Owner)
+	}
+
+	if repo.Branch != "" {
+		repo.Branch = mapping.GetOrCreate("git", repo.Branch)
+	}
+
+	if repo.DefaultBranch != "" {
+		repo.DefaultBranch = mapping.GetOrCreate("git", repo.DefaultBranch)
+	}
+
+	if repo.RemoteURL != "" {
+		repo.RemoteURL = mapping.GetOrCreate("git", repo.RemoteURL)
+	}
+
+	anonymizeLastCommit(&repo.LastCommit, mapping)
 }
