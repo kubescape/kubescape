@@ -2,8 +2,10 @@ package printer
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling"
@@ -264,4 +266,94 @@ func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 		err := sp.printConfigurationScan(context.Background(), session)
 		assert.NoError(t, err)
 	})
+}
+
+// TestPrintConfigurationScan_PopulatesInvocations is the regression test for
+// the SARIF half of kubescape/kubescape#2325: runs[].invocations was absent
+// from every SARIF report, so GitHub code-scanning ingestion collapsed every
+// upload to "scanned just now" and there was no startTimeUtc/endTimeUtc.
+func TestPrintConfigurationScan_PopulatesInvocations(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		},
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-invocations-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+
+	before := time.Now().UTC()
+	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+	after := time.Now().UTC()
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+
+	invocations := report.Runs[0].Invocations
+	require.Len(t, invocations, 1, "exactly one invocation must be recorded per run")
+
+	inv := invocations[0]
+	require.NotNil(t, inv.StartTimeUTC, "startTimeUtc must be populated")
+	require.NotNil(t, inv.EndTimeUTC, "endTimeUtc must be populated")
+	require.NotNil(t, inv.ExecutionSuccessful)
+	assert.True(t, *inv.ExecutionSuccessful)
+
+	// endTime is set just before the SARIF file is written, so it must fall
+	// inside the [before, after] window observed by this test.
+	assert.False(t, inv.EndTimeUTC.Before(before), "endTimeUtc precedes the test's before-marker")
+	assert.False(t, inv.EndTimeUTC.After(after), "endTimeUtc is after the test's after-marker")
+	assert.False(t, inv.EndTimeUTC.Before(*inv.StartTimeUTC), "endTimeUtc must be >= startTimeUtc")
+}
+
+// TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime
+// verifies the start-time fallback chain: when ReportGenerationTime is already
+// set (e.g. by FinalizeResults running earlier on the same session), the SARIF
+// invocation uses it as startTimeUtc instead of "now". This keeps the JSON and
+// SARIF outputs reporting the same scan start for the same scan.
+func TestPrintConfigurationScan_InvocationStartTimeUsesReportGenerationTime(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	preset := time.Date(2024, 3, 14, 9, 15, 26, 0, time.UTC)
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		},
+		ReportGenerationTime: preset,
+	}
+
+	tmp, err := os.CreateTemp("", "sarif-start-*.sarif")
+	require.NoError(t, err)
+	defer func() {
+		assert.NoError(t, tmp.Close())
+		assert.NoError(t, os.Remove(tmp.Name()))
+	}()
+
+	sp := NewSARIFPrinter()
+	sp.writer = tmp
+
+	require.NoError(t, sp.printConfigurationScan(context.Background(), session))
+
+	raw, err := os.ReadFile(tmp.Name())
+	require.NoError(t, err)
+
+	var report sarif.Report
+	require.NoError(t, json.Unmarshal(raw, &report))
+	require.Len(t, report.Runs, 1)
+	require.Len(t, report.Runs[0].Invocations, 1)
+
+	inv := report.Runs[0].Invocations[0]
+	require.NotNil(t, inv.StartTimeUTC)
+	assert.True(t, inv.StartTimeUTC.Equal(preset),
+		"startTimeUtc must reuse ReportGenerationTime, got %s want %s", inv.StartTimeUTC, preset)
 }

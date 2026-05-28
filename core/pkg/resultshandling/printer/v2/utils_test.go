@@ -3,6 +3,7 @@ package printer
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
@@ -927,4 +928,42 @@ func TestConvertToPostureReport_NilCoverageNotAttached(t *testing.T) {
 	)
 	require.NotNil(t, result)
 	assert.Nil(t, result.ScanCoverage)
+}
+
+// TestFinalizeResults_SetsGenerationTimeWhenZero is the regression test for
+// kubescape/kubescape#2325: JSON reports were emitting
+// "generationTime":"0001-01-01T00:00:00Z" because nothing on the scan path
+// ever assigned ReportGenerationTime. FinalizeResults is the single funnel
+// for both file output and SaaS submission, so the fix lives there.
+func TestFinalizeResults_SetsGenerationTimeWhenZero(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	require.True(t, session.Report.ReportGenerationTime.IsZero(),
+		"precondition: mock starts with the zero-value time that #2325 reported")
+
+	before := time.Now().UTC()
+	report := FinalizeResults(session)
+	after := time.Now().UTC()
+
+	require.NotNil(t, report)
+	assert.False(t, report.ReportGenerationTime.IsZero(),
+		"FinalizeResults must populate ReportGenerationTime")
+	assert.False(t, session.Report.ReportGenerationTime.IsZero(),
+		"FinalizeResults must also write back to the session so downstream consumers see it")
+	assert.Equal(t, session.Report.ReportGenerationTime, report.ReportGenerationTime)
+	assert.WithinDuration(t, before, report.ReportGenerationTime, after.Sub(before)+time.Second)
+}
+
+// TestFinalizeResults_PreservesExistingGenerationTime ensures we don't clobber
+// a timestamp that the caller has already set (e.g. when callers eventually
+// thread a real scan-start time through Scan(...)).
+func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	preset := time.Date(2024, 3, 14, 9, 15, 26, 0, time.UTC)
+	session.Report.ReportGenerationTime = preset
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, preset, report.ReportGenerationTime)
+	assert.Equal(t, preset, session.Report.ReportGenerationTime)
 }
