@@ -8,7 +8,51 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
+
+// providerRank ranks discovery providers so rendered output wins over raw file input.
+func providerRank(fileType string) int {
+	switch fileType {
+	case reporthandling.SourceTypeKustomizeDirectory, reporthandling.SourceTypeHelmChart:
+		return 2
+	case reporthandling.SourceTypeYaml, reporthandling.SourceTypeJson:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// resourceIdentity returns the path-independent k8s identity tuple used for dedup.
+func resourceIdentity(w workloadinterface.IMetadata) string {
+	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), w.GetKind(), w.GetName())
+}
+
+// dedupWorkloads keeps one copy per resource identity, preferring the highest-ranked provider.
+func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource map[string]reporthandling.Source) ([]workloadinterface.IMetadata, map[string]reporthandling.Source) {
+	seen := make(map[string]int, len(workloads))
+	out := make([]workloadinterface.IMetadata, 0, len(workloads))
+	for _, w := range workloads {
+		key := resourceIdentity(w)
+		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
+		if i, dup := seen[key]; dup {
+			if rank > providerRank(workloadIDToSource[out[i].GetID()].FileType) {
+				out[i] = w
+			}
+			continue
+		}
+		seen[key] = len(out)
+		out = append(out, w)
+	}
+
+	pruned := make(map[string]reporthandling.Source, len(out))
+	for _, w := range out {
+		if s, ok := workloadIDToSource[w.GetID()]; ok {
+			pruned[w.GetID()] = s
+		}
+	}
+	return out, pruned
+}
 
 func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {

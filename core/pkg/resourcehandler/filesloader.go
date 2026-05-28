@@ -352,6 +352,9 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		}
 	}
 
+	// drop duplicates yielded by multiple providers (e.g. kustomize render + plain-YAML glob)
+	workloads, workloadIDToSource = dedupWorkloads(workloads, workloadIDToSource)
+
 	return workloadIDToSource, workloads, nil
 }
 
