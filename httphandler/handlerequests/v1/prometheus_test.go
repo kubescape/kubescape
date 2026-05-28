@@ -39,7 +39,7 @@ func TestGetPrometheusDefaultScanCommand(t *testing.T) {
 		assert.False(t, scanInfo.ScanAll) // Don't scan all when specific frameworks are set
 		assert.False(t, scanInfo.HostSensorEnabled.GetBool())
 		assert.Equal(t, getter.DefaultLocalStore, scanInfo.UseArtifactsFrom)
-		
+
 		// Verify specific frameworks are set
 		assert.Len(t, scanInfo.PolicyIdentifier, 3)
 		assert.Equal(t, "nsa", scanInfo.PolicyIdentifier[0].Identifier)
