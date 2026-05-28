@@ -36,7 +36,9 @@ func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource 
 		key := resourceIdentity(w)
 		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
 		if i, dup := seen[key]; dup {
-			if rank > providerRank(workloadIDToSource[out[i].GetID()].FileType) {
+			curr := out[i]
+			currRank := providerRank(workloadIDToSource[curr.GetID()].FileType)
+			if rank > currRank || (rank == currRank && w.GetID() < curr.GetID()) {
 				out[i] = w
 			}
 			continue

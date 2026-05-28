@@ -93,6 +93,11 @@ func TestDedupWorkloads(t *testing.T) {
 	kustomizeCopy := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/kustomize")
 	other := localWorkloadWithPath("apps/v1", "Deployment", "default", "other", "other.yaml:0")
 
+	tieWinnerID := helmCopy.GetID()
+	if kustomizeCopy.GetID() < tieWinnerID {
+		tieWinnerID = kustomizeCopy.GetID()
+	}
+
 	tt := []struct {
 		name               string
 		workloads          []workloadinterface.IMetadata
@@ -118,13 +123,22 @@ func TestDedupWorkloads(t *testing.T) {
 			expectedIDs: []string{rendered.GetID()},
 		},
 		{
-			name:      "equal rank keeps the first-seen copy",
+			name:      "equal rank picks the lexically smallest GetID — helm before kustomize",
 			workloads: []workloadinterface.IMetadata{helmCopy, kustomizeCopy},
 			workloadIDToSource: map[string]reporthandling.Source{
 				helmCopy.GetID():      {FileType: reporthandling.SourceTypeHelmChart},
 				kustomizeCopy.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
 			},
-			expectedIDs: []string{helmCopy.GetID()},
+			expectedIDs: []string{tieWinnerID},
+		},
+		{
+			name:      "equal rank picks the lexically smallest GetID — kustomize before helm",
+			workloads: []workloadinterface.IMetadata{kustomizeCopy, helmCopy},
+			workloadIDToSource: map[string]reporthandling.Source{
+				kustomizeCopy.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
+				helmCopy.GetID():      {FileType: reporthandling.SourceTypeHelmChart},
+			},
+			expectedIDs: []string{tieWinnerID},
 		},
 		{
 			name:      "distinct resources are all kept",
