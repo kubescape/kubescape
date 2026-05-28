@@ -11,7 +11,9 @@ import (
 	helpersv1 "github.com/kubescape/opa-utils/reporthandling/helpers/v1"
 	reportv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic/fake"
 	fakeclientset "k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/rest"
@@ -56,6 +58,22 @@ func Test_getCloudMetadata(t *testing.T) {
 	}
 }
 
+// vapTestScheme returns a runtime.Scheme with VAP and VAPBinding list types
+// registered so the fake dynamic client doesn't panic when vapreconcile.Collect
+// lists them during cluster scans.
+func vapTestScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	s.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingAdmissionPolicyList"},
+		&unstructured.UnstructuredList{},
+	)
+	s.AddKnownTypeWithName(
+		schema.GroupVersionKind{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingAdmissionPolicyBindingList"},
+		&unstructured.UnstructuredList{},
+	)
+	return s
+}
+
 // https://github.com/kubescape/kubescape/pull/1004
 // Cluster named .*eks.* config without a cloudconfig panics whereas we just want to scan a file
 func getResourceHandlerMock() *K8sResourceHandler {
@@ -64,12 +82,12 @@ func getResourceHandlerMock() *K8sResourceHandler {
 
 	k8s := &k8sinterface.KubernetesApi{
 		KubernetesClient: client,
-		DynamicClient:    fake.NewSimpleDynamicClient(runtime.NewScheme()),
+		DynamicClient:    fake.NewSimpleDynamicClient(vapTestScheme()),
 		DiscoveryClient:  fakeDiscovery,
 		Context:          context.Background(),
 	}
 
-	return NewK8sResourceHandler(k8s, nil, nil, "test")
+	return NewK8sResourceHandler(context.Background(), k8s, nil, nil, "test")
 }
 func Test_CollectResources(t *testing.T) {
 	resourceHandler := getResourceHandlerMock()

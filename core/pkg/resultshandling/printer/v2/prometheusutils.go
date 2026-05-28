@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 )
 
 type metricsName string
@@ -174,23 +176,49 @@ func (mrc *mResources) prefix() string {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+func toMetricHeader(name, help string) string {
+	return fmt.Sprintf("# HELP %s %s\n# TYPE %s gauge", name, help, name)
+}
+
 func toRowInMetrics(name string, row string, value int) string {
 	return fmt.Sprintf("%s{%s} %d", name, row, value)
 
 }
-func (m *Metrics) String() string {
-
-	r := strings.Join(m.rs.metrics(), "\n") + "\n"
-	for i := range m.listFrameworks {
-		r += strings.Join(m.listFrameworks[i].metrics(), "\n") + "\n"
+func emitMetricFamily(lines []string) string {
+	if len(lines) == 0 {
+		return ""
 	}
-	for i := range m.listControls {
-		r += strings.Join(m.listControls[i].metrics(), "\n") + "\n"
-	}
-	for i := range m.listResources {
-		r += strings.Join(m.listResources[i].metrics(), "\n") + "\n"
+	emitted := map[string]bool{}
+	r := ""
+	for _, line := range lines {
+		// extract metric name (everything before '{')
+		name := line
+		if idx := strings.Index(line, "{"); idx >= 0 {
+			name = line[:idx]
+		}
+		if !emitted[name] {
+			r += toMetricHeader(name, name) + "\n"
+			emitted[name] = true
+		}
+		r += line + "\n"
 	}
 	return r
+}
+
+func (m *Metrics) String() string {
+	// collect all metric lines first, then emit headers once per family
+	var all []string
+	all = append(all, m.rs.metrics()...)
+	for i := range m.listFrameworks {
+		all = append(all, m.listFrameworks[i].metrics()...)
+	}
+	for i := range m.listControls {
+		all = append(all, m.listControls[i].metrics()...)
+	}
+	for i := range m.listResources {
+		all = append(all, m.listResources[i].metrics()...)
+	}
+	return emitMetricFamily(all)
 }
 
 type mComplianceScore struct {
@@ -227,11 +255,11 @@ type mFrameworkComplianceScore struct {
 }
 
 type mResources struct {
-	name       string
-	namespace  string
-	apiVersion string
-	kind       string
-	// controlsCountPassed   int // unused
+	name                 string
+	namespace            string
+	apiVersion           string
+	kind                 string
+	controlsCountPassed  int
 	controlsCountFailed  int
 	controlsCountSkipped int
 }
@@ -292,7 +320,6 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 	}
 }
 
-/* unused for now
 // return -> (passed, skipped, failed)
 func resourceControlStatusCounters(result *resourcesresults.Result) (int, int, int) {
 	failed := 0
@@ -337,4 +364,3 @@ func (m *Metrics) setResourcesCounters(
 	}
 
 }
-*/

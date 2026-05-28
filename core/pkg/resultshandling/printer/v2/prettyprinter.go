@@ -366,3 +366,9 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 
 	fmt.Fprintf(pp.writer, "\nTo fix this, ensure the scanning identity has list/get permissions on the missing resource types.\n")
 }
+
+func (p *PrettyPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}

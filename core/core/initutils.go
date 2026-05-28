@@ -18,6 +18,9 @@ import (
 	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"go.opentelemetry.io/otel"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // getKubernetesApi
@@ -28,14 +31,40 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	return k8sinterface.NewKubernetesApi()
 }
 
+func getExceptionsK8sClient(ctx context.Context) client.Client {
+	if !k8sinterface.IsConnectedToCluster() {
+		return nil
+	}
+	config := k8sinterface.GetK8sConfig()
+	if config == nil {
+		return nil
+	}
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to add corev1 scheme", helpers.Error(err))
+		return nil
+	}
+	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to create controller-runtime client", helpers.Error(err))
+		return nil
+	}
+	return k8sClient
+}
+
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
+	var primary getter.IExceptionsGetter
+
 	if useExceptions != "" {
 		// load exceptions from file
-		return getter.NewLoadPolicy([]string{useExceptions})
+		primary = getter.NewLoadPolicy([]string{useExceptions})
+		return primary
 	}
 	if accountID != "" {
 		// download exceptions from Kubescape Cloud backend
-		return getter.GetKSCloudAPIConnector()
+		primary = getter.GetKSCloudAPIConnector()
+		k8sClient := getExceptionsK8sClient(ctx)
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
@@ -43,9 +72,13 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+		k8sClient := getExceptionsK8sClient(ctx)
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
-	return downloadReleasedPolicy
+	primary = downloadReleasedPolicy
+	k8sClient := getExceptionsK8sClient(ctx)
+	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 
 }
 
@@ -95,7 +128,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		_ = getter.GetKSCloudAPIConnector()
 	}
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
+	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.

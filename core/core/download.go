@@ -178,7 +178,12 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 			return err
 		}
 		for _, fw := range frameworks {
-			downloadTo := filepath.Join(downloadInfo.Path, (strings.ToLower(fw.Name) + ".json"))
+			filename, err := getter.PolicyCacheFilename(fw.Name)
+			if err != nil {
+				logger.L().Ctx(ctx).Warning("skipping framework with empty name", helpers.Error(err))
+				continue
+			}
+			downloadTo := filepath.Join(downloadInfo.Path, filename)
 			err = getter.SaveInFile(fw, downloadTo)
 			if err != nil {
 				return err
@@ -188,7 +193,11 @@ func downloadFramework(ctx context.Context, downloadInfo *metav1.DownloadInfo) e
 		// return fmt.Errorf("missing framework name")
 	} else {
 		if downloadInfo.FileName == "" {
-			downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Identifier)
+			filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)
+			if err != nil {
+				return err
+			}
+			downloadInfo.FileName = filename
 		}
 		framework, err := g.GetFramework(downloadInfo.Identifier)
 		if err != nil {
@@ -218,7 +227,11 @@ func downloadControl(ctx context.Context, downloadInfo *metav1.DownloadInfo) err
 		return fmt.Errorf("missing control ID")
 	}
 	if downloadInfo.FileName == "" {
-		downloadInfo.FileName = fmt.Sprintf("%s.json", downloadInfo.Identifier)
+		filename, err := getter.PolicyCacheFilename(downloadInfo.Identifier)
+		if err != nil {
+			return err
+		}
+		downloadInfo.FileName = filename
 	}
 	controls, err := g.GetControl(downloadInfo.Identifier)
 	if err != nil {

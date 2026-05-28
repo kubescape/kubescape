@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/kubescape/v3/core/mocks"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
 	"github.com/open-policy-agent/opa/v1/ast"
 	"github.com/stretchr/testify/assert"
@@ -201,7 +202,7 @@ func TestProcessResourcesResult(t *testing.T) {
 	opaSessionObj.K8SResources = k8sResources
 	opaSessionObj.AllResources[deployment.GetID()] = deployment
 
-	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false)
+	opap := NewOPAProcessor(opaSessionObj, resources.NewRegoDependenciesDataMock(), "test", "", "", false, nil)
 	opap.AllPolicies = policies
 	opap.Process(context.Background(), policies, nil)
 
@@ -560,4 +561,70 @@ func TestSkipNamespace(t *testing.T) {
 			assert.Equal(t, tt.expectedSkip, opap.skipNamespace(tt.namespace))
 		})
 	}
+}
+
+func TestSplit(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "removes empty entries",
+			input:    "default,,kube-system,",
+			expected: []string{"default", "kube-system"},
+		},
+		{
+			name:     "only commas",
+			input:    ",,",
+			expected: []string{},
+		},
+		{
+			name:     "trims whitespace",
+			input:    " default , kube-system ",
+			expected: []string{"default", "kube-system"},
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := split(tt.input)
+
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Fatalf("split(%q) = %v, want %v", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMakeRegoDeps_InputIsolation(t *testing.T) {
+	regoDeps := resources.NewRegoDependenciesDataMock()
+
+	regoDeps.PostureControlInputs = map[string][]string{
+		"severity": {"high"},
+	}
+
+	opap := &OPAProcessor{
+		OPASessionObj: &cautils.OPASessionObj{
+			Report: &reporthandlingv2.PostureReport{
+				ClusterCloudProvider: "aws",
+			},
+		},
+		regoDependenciesData: regoDeps,
+	}
+
+	deps := opap.makeRegoDeps(nil, map[string][]string{
+		"runtime": {"enabled"},
+	})
+
+	deps.PostureControlInputs["runtime"][0] = "disabled"
+
+	_, runtimeExists := opap.regoDependenciesData.PostureControlInputs["runtime"]
+
+	assert.False(t, runtimeExists)
 }

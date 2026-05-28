@@ -345,6 +345,13 @@ func (h *FixHandler) PrepareHelmSuggestions(ctx context.Context) []HelmFixSugges
 			ChartPath: resourceObj.Source.HelmPath,
 			ChartName: resourceObj.Source.HelmChartName,
 			FixPaths:  fixPaths,
+
+			Resource:     resourceObj,
+			ChartPath:    resourceObj.Source.HelmPath,
+			ChartName:    resourceObj.Source.HelmChartName,
+			TemplateFile: resourceObj.Source.HelmTemplateFile,
+			ValuesPaths:  resourceObj.Source.HelmValuesPaths,
+			FixPaths:     fixPaths,
 		})
 	}
 	return suggestions

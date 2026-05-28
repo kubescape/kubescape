@@ -158,9 +158,13 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
-				cache := getter.GetDefaultPath(rule.Identifier + ".json")
 				if _, ok := policyHandler.getters.PolicyGetter.(*getter.LoadPolicy); ok {
 					continue // skip caching for local files
+				}
+				cache, err := getter.PolicyCachePath(rule.Identifier)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("skipping framework cache write", helpers.String("identifier", rule.Identifier), helpers.Error(err))
+					continue
 				}
 				if err := getter.SaveInFile(receivedFramework, cache); err != nil {
 					logger.L().Ctx(ctx).Warning("failed to cache framework", helpers.String("file", cache), helpers.Error(err))
@@ -180,7 +184,11 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
 
-				cache := getter.GetDefaultPath(policy.Identifier + ".json")
+				cache, err := getter.PolicyCachePath(policy.Identifier)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("skipping control cache write", helpers.String("identifier", policy.Identifier), helpers.Error(err))
+					continue
+				}
 				if err := getter.SaveInFile(receivedControl, cache); err != nil {
 					logger.L().Ctx(ctx).Warning("failed to cache control", helpers.String("file", cache), helpers.Error(err))
 				}

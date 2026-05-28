@@ -24,6 +24,16 @@ func (ks *Kubescape) Fix(fixInfo *metav1.FixInfo) error {
 	}
 
 	resourcesToFix := handler.PrepareResourcesToFix(ks.Context())
+	helmSuggestions := handler.PrepareHelmSuggestions(ks.Context())
+
+	if len(resourcesToFix) == 0 && len(helmSuggestions) == 0 {
+		logger.L().Info(noResourcesToFix)
+		return nil
+	}
+
+	// Helm guidance is print-only — applied to none of the apply/confirm
+	// path below, since we do not auto-edit chart templates or values.yaml.
+	handler.PrintHelmSuggestions(helmSuggestions)
 
 	if len(resourcesToFix) == 0 {
 		logger.L().Info(noResourcesToFix)

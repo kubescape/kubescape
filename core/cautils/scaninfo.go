@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -140,6 +141,7 @@ type ScanInfo struct {
 	ScanType              ScanTypes
 	ScanImages            bool
 	UseDefaultMatchers    bool
+	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
@@ -217,7 +219,12 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		for _, policy := range scanInfo.PolicyIdentifier {
-			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Identifier+".json"))
+			path, err := getter.PolicyCachePath(policy.Identifier)
+			if err != nil {
+				logger.L().Warning("skipping default cache lookup for policy", helpers.String("identifier", policy.Identifier), helpers.Error(err))
+				continue
+			}
+			scanInfo.UseFrom = append(scanInfo.UseFrom, path)
 		}
 	}
 }

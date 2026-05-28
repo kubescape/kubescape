@@ -183,12 +183,15 @@ func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils
 	}
 
 	return reporthandling.Source{
-		Path:          repoRoot,
-		HelmPath:      helmChart.Path,
-		RelativePath:  source,
-		FileType:      reporthandling.SourceTypeHelmChart,
-		HelmChartName: helmChart.Name,
-		LastCommit:    lastCommit,
+		Path:             repoRoot,
+		HelmPath:         helmChart.Path,
+		RelativePath:     source,
+		FileType:         reporthandling.SourceTypeHelmChart,
+		HelmChartName:    helmChart.Name,
+		HelmTemplateFile: helmChart.Provenance.TemplateFile,
+		HelmValuesPaths:  helmChart.Provenance.ValuesPaths,
+		HelmTemplateLine: helmChart.Provenance.TemplateLine,
+		LastCommit:       lastCommit,
 	}
 }
 

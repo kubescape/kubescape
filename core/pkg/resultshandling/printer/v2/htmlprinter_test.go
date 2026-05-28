@@ -5,13 +5,16 @@ import (
 	"os"
 	"testing"
 
+	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestNewHtmlPrinter(t *testing.T) {
 	hp := NewHtmlPrinter()
 	assert.NotNil(t, hp)
-	assert.Empty(t, hp)
+	assert.Nil(t, hp.writer)
 }
 
 func TestSetWriter_Html(t *testing.T) {
@@ -49,7 +52,6 @@ func TestSetWriter_Html(t *testing.T) {
 		},
 	}
 
-	hp := NewHtmlPrinter()
 	ctx := context.Background()
 
 	tmp := t.TempDir()
@@ -60,10 +62,30 @@ func TestSetWriter_Html(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			hp := NewHtmlPrinter()
 			hp.SetWriter(ctx, tt.outputFile)
+			t.Cleanup(func() {
+				_ = hp.writer.Close()
+			})
 			assert.Equal(t, tt.expected, hp.writer.Name())
 			assert.NotEqual(t, "/dev/stdout", hp.writer.Name(),
 				"HTML printer must never write to stdout")
 		})
 	}
+}
+
+func TestBuildResourceControlResultTable_MissingControl(t *testing.T) {
+	ac := resourcesresults.ResourceAssociatedControl{
+		ControlID: "C-MISSING",
+		Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+	}
+
+	summaryDetails := &reportsummary.SummaryDetails{
+		Controls: reportsummary.ControlSummaries{},
+	}
+
+	assert.NotPanics(t, func() {
+		results := buildResourceControlResultTable([]resourcesresults.ResourceAssociatedControl{ac}, summaryDetails)
+		assert.Empty(t, results)
+	})
 }

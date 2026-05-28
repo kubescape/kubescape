@@ -43,7 +43,9 @@ func (pp *PrometheusPrinter) Score(score float32) {
 		score = 0
 	}
 
-	fmt.Fprintf(pp.writer, "\n# Overall compliance-score (100- Excellent, 0- All failed)\nkubescape_score %d\n", cautils.Float32ToInt(score))
+	fmt.Fprintf(pp.writer, "# HELP kubescape_score Overall compliance score (100 Excellent, 0 All failed)\n")
+	fmt.Fprintf(pp.writer, "# TYPE kubescape_score gauge\n")
+	fmt.Fprintf(pp.writer, "kubescape_score %d\n", cautils.Float32ToInt(score))
 }
 
 func (pp *PrometheusPrinter) generatePrometheusFormat(
@@ -53,7 +55,7 @@ func (pp *PrometheusPrinter) generatePrometheusFormat(
 
 	m := &Metrics{}
 	m.setComplianceScores(summaryDetails)
-	// m.setResourcesCounters(resources, results)
+	m.setResourcesCounters(resources, results)
 
 	return m
 }
@@ -71,4 +73,10 @@ func (pp *PrometheusPrinter) ActionPrint(ctx context.Context, opaSessionObj *cau
 		return
 	}
 	printer.LogOutputFile(pp.writer.Name())
+}
+
+func (p *PrometheusPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
 }
