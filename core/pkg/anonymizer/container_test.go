@@ -586,6 +586,103 @@ func TestAnonymizeContainerMetadata(t *testing.T) {
 		},
 
 		{
+			name: "typed service account name should be anonymized",
+			object: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"serviceAccountName": "payments-runtime",
+				},
+			},
+			validate: func(t *testing.T, spec map[string]interface{}) {
+				serviceAccountName, ok := spec["serviceAccountName"].(string)
+				if !assert.True(t, ok, "expected serviceAccountName string") {
+					return
+				}
+
+				assert.NotEqual(t, "payments-runtime", serviceAccountName)
+				assert.Contains(t, serviceAccountName, "sa-")
+			},
+		},
+		{
+			name: "deprecated service account should be anonymized",
+			object: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"serviceAccount": "payments-runtime",
+				},
+			},
+			validate: func(t *testing.T, spec map[string]interface{}) {
+				serviceAccount, ok := spec["serviceAccount"].(string)
+				if !assert.True(t, ok, "expected serviceAccount string") {
+					return
+				}
+
+				assert.NotEqual(t, "payments-runtime", serviceAccount)
+				assert.Contains(t, serviceAccount, "sa-")
+			},
+		},
+		{
+			name: "nested template deprecated service account should be anonymized",
+			object: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"serviceAccount": "analytics-runtime",
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, spec map[string]interface{}) {
+				template, ok := spec["template"].(map[string]interface{})
+				if !assert.True(t, ok, "expected template map") {
+					return
+				}
+
+				templateSpec, ok := template["spec"].(map[string]interface{})
+				if !assert.True(t, ok, "expected template spec map") {
+					return
+				}
+
+				serviceAccount, ok := templateSpec["serviceAccount"].(string)
+				if !assert.True(t, ok, "expected serviceAccount string") {
+					return
+				}
+
+				assert.NotEqual(t, "analytics-runtime", serviceAccount)
+				assert.Contains(t, serviceAccount, "sa-")
+			},
+		},
+		{
+			name: "nested template service account name should be anonymized",
+			object: map[string]interface{}{
+				"spec": map[string]interface{}{
+					"template": map[string]interface{}{
+						"spec": map[string]interface{}{
+							"serviceAccountName": "analytics-runtime",
+						},
+					},
+				},
+			},
+			validate: func(t *testing.T, spec map[string]interface{}) {
+				template, ok := spec["template"].(map[string]interface{})
+				if !assert.True(t, ok, "expected template map") {
+					return
+				}
+
+				templateSpec, ok := template["spec"].(map[string]interface{})
+				if !assert.True(t, ok, "expected template spec map") {
+					return
+				}
+
+				serviceAccountName, ok := templateSpec["serviceAccountName"].(string)
+				if !assert.True(t, ok, "expected serviceAccountName string") {
+					return
+				}
+
+				assert.NotEqual(t, "analytics-runtime", serviceAccountName)
+				assert.Contains(t, serviceAccountName, "sa-")
+			},
+		},
+
+		{
 			name: "unstructured image pull secrets should be anonymized",
 			object: map[string]interface{}{
 				"spec": map[string]interface{}{
