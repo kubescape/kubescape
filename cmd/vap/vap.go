@@ -149,13 +149,10 @@ var celAdmissionPolicyByControlID = map[string]string{
 	"C-0001": "kubescape-c-0001-deny-forbidden-container-registries",
 	"C-0004": "kubescape-c-0004-deny-resources-with-memory-limit-or-request-not-set",
 	"C-0009": "kubescape-c-0009-deny-resources-with-memory-or-cpu-limit-not-set",
-	"C-0012": "kubescape-c-0012-deny-resources-with-sensitive-information-in-environment-variables",
-	"C-0013": "kubescape-c-0013-deny-resources-with-capability-to-run-as-root",
 	"C-0016": "kubescape-c-0016-allow-privilege-escalation",
 	"C-0017": "kubescape-c-0017-deny-resources-with-mutable-container-filesystem",
 	"C-0018": "kubescape-c-0018-deny-resources-without-configured-readiness-probes",
 	"C-0020": "kubescape-c-0020-deny-resources-having-volumes-with-potential-access-to-known-cloud-credentials",
-	"C-0026": "kubescape-c-0026-deny-cronjobs",
 	"C-0034": "kubescape-c-0034-deny-resources-with-automount-service-account-token-enabled",
 	"C-0038": "kubescape-c-0038-deny-resources-with-host-ipc-or-pid-privileges",
 	"C-0041": "kubescape-c-0041-deny-resources-with-host-network-access",
@@ -176,13 +173,10 @@ var celAdmissionPolicyByControlID = map[string]string{
 	"C-0076": "kubescape-c-0076-deny-resources-without-configured-list-of-labels-not-set",
 	"C-0077": "kubescape-c-0077-deny-resources-without-configured-list-of-k8s-common-labels-not-set",
 	"C-0078": "kubescape-c-0078-only-allow-images-from-allowed-registry",
-	"C-0198": "kubescape-c-0198-deny-root-containers",
-	"C-0210": "kubescape-c-0210-deny-seccomp-profile-unconfined",
 	"C-0268": "kubescape-c-0268-deny-resources-with-cpu-request-not-set",
 	"C-0269": "kubescape-c-0269-deny-resources-with-memory-request-not-set",
 	"C-0270": "kubescape-c-0270-deny-resources-with-cpu-limit-not-set",
 	"C-0271": "kubescape-c-0271-deny-resources-with-memory-limit-not-set",
-	"C-0280": "kubescape-c-0280-deny-access-to-csr-approval-subresource",
 }
 
 func resolvePolicyName(policyName, controlID string) (string, error) {
