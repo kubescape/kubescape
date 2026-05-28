@@ -143,3 +143,22 @@ func TestSetTopWorkloads(t *testing.T) {
 		require.NotNil(t, obj.Report)
 	})
 }
+
+func TestSetTopWorkloads_Idempotent(t *testing.T) {
+	obj := NewOPASessionObjMock()
+
+	obj.ResourcesPrioritized = map[string]prioritization.PrioritizedResource{
+		"res1": {ResourceID: "res1", Score: 100},
+		"res2": {ResourceID: "res2", Score: 90},
+	}
+
+	obj.ResourceSource = map[string]reporthandling.Source{}
+
+	obj.SetTopWorkloads()
+
+	firstLen := len(obj.TopWorkloadsByScore)
+
+	obj.SetTopWorkloads()
+
+	assert.Len(t, obj.TopWorkloadsByScore, firstLen)
+}
