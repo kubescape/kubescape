@@ -47,7 +47,14 @@ func (drp *DownloadReleasedPolicy) GetFramework(name string) (*reporthandling.Fr
 	if err != nil {
 		return nil, err
 	}
-	return framework, err
+	if framework != nil && strings.EqualFold(framework.Name, "allcontrols") {
+		controls, err := drp.gs.GetOPAControls()
+		if err != nil {
+			return nil, err
+		}
+		framework.Controls = controls
+	}
+	return framework, nil
 }
 
 func (drp *DownloadReleasedPolicy) GetFrameworks() ([]reporthandling.Framework, error) {
@@ -55,7 +62,16 @@ func (drp *DownloadReleasedPolicy) GetFrameworks() ([]reporthandling.Framework, 
 	if err != nil {
 		return nil, err
 	}
-	return frameworks, err
+	for i := range frameworks {
+		if strings.EqualFold(frameworks[i].Name, "allcontrols") {
+			controls, err := drp.gs.GetOPAControls()
+			if err != nil {
+				return nil, err
+			}
+			frameworks[i].Controls = controls
+		}
+	}
+	return frameworks, nil
 }
 
 func (drp *DownloadReleasedPolicy) ListFrameworks() ([]string, error) {
