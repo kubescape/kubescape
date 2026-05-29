@@ -273,7 +273,7 @@ func TestLoadPolicy(t *testing.T) {
 			controlIDs, err := p.ListControls()
 			require.NoError(t, err)
 			require.Greater(t, len(controlIDs), 0)
-			require.Equal(t, testControl, controlIDs[0])
+			require.Equal(t, fmt.Sprintf("%s|Access container service account|%s", testControl, testFramework), controlIDs[0])
 		})
 	})
 
