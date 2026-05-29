@@ -88,15 +88,11 @@ func TestResourceIdentity(t *testing.T) {
 
 func TestDedupWorkloads(t *testing.T) {
 	raw := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "deploy.yaml:0")
+	raw2 := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "elsewhere.yaml:0")
 	rendered := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/some/dir")
 	helmCopy := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/helm")
 	kustomizeCopy := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/kustomize")
 	other := localWorkloadWithPath("apps/v1", "Deployment", "default", "other", "other.yaml:0")
-
-	tieWinnerID := helmCopy.GetID()
-	if kustomizeCopy.GetID() < tieWinnerID {
-		tieWinnerID = kustomizeCopy.GetID()
-	}
 
 	tt := []struct {
 		name               string
@@ -105,7 +101,7 @@ func TestDedupWorkloads(t *testing.T) {
 		expectedIDs        []string
 	}{
 		{
-			name:      "rendered copy wins when discovered after raw file",
+			name:      "rendered copy replaces raw copy (raw discovered first)",
 			workloads: []workloadinterface.IMetadata{raw, rendered},
 			workloadIDToSource: map[string]reporthandling.Source{
 				raw.GetID():      {FileType: reporthandling.SourceTypeYaml},
@@ -114,7 +110,7 @@ func TestDedupWorkloads(t *testing.T) {
 			expectedIDs: []string{rendered.GetID()},
 		},
 		{
-			name:      "rendered copy wins when discovered before raw file",
+			name:      "rendered copy replaces raw copy (rendered discovered first)",
 			workloads: []workloadinterface.IMetadata{rendered, raw},
 			workloadIDToSource: map[string]reporthandling.Source{
 				rendered.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
@@ -123,22 +119,32 @@ func TestDedupWorkloads(t *testing.T) {
 			expectedIDs: []string{rendered.GetID()},
 		},
 		{
-			name:      "equal rank picks the lexically smallest GetID — helm before kustomize",
+			name:      "two raw copies with the same identity are both kept",
+			workloads: []workloadinterface.IMetadata{raw, raw2},
+			workloadIDToSource: map[string]reporthandling.Source{
+				raw.GetID():  {FileType: reporthandling.SourceTypeYaml},
+				raw2.GetID(): {FileType: reporthandling.SourceTypeYaml},
+			},
+			expectedIDs: []string{raw.GetID(), raw2.GetID()},
+		},
+		{
+			name:      "two rendered copies (helm + kustomize) with the same identity are both kept",
 			workloads: []workloadinterface.IMetadata{helmCopy, kustomizeCopy},
 			workloadIDToSource: map[string]reporthandling.Source{
 				helmCopy.GetID():      {FileType: reporthandling.SourceTypeHelmChart},
 				kustomizeCopy.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
 			},
-			expectedIDs: []string{tieWinnerID},
+			expectedIDs: []string{helmCopy.GetID(), kustomizeCopy.GetID()},
 		},
 		{
-			name:      "equal rank picks the lexically smallest GetID — kustomize before helm",
-			workloads: []workloadinterface.IMetadata{kustomizeCopy, helmCopy},
+			name:      "rendered copy replaces every lower-ranked raw copy",
+			workloads: []workloadinterface.IMetadata{raw, raw2, rendered},
 			workloadIDToSource: map[string]reporthandling.Source{
-				kustomizeCopy.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
-				helmCopy.GetID():      {FileType: reporthandling.SourceTypeHelmChart},
+				raw.GetID():      {FileType: reporthandling.SourceTypeYaml},
+				raw2.GetID():     {FileType: reporthandling.SourceTypeYaml},
+				rendered.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
 			},
-			expectedIDs: []string{tieWinnerID},
+			expectedIDs: []string{rendered.GetID()},
 		},
 		{
 			name:      "distinct resources are all kept",

@@ -28,23 +28,24 @@ func resourceIdentity(w workloadinterface.IMetadata) string {
 	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), w.GetKind(), w.GetName())
 }
 
-// dedupWorkloads keeps one copy per resource identity, preferring the highest-ranked provider.
+// dedupWorkloads drops lower-ranked cross-provider duplicates only; same-rank duplicates are kept.
 func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource map[string]reporthandling.Source) ([]workloadinterface.IMetadata, map[string]reporthandling.Source) {
-	seen := make(map[string]int, len(workloads))
+	maxRank := make(map[string]int, len(workloads))
+	for _, w := range workloads {
+		key := resourceIdentity(w)
+		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
+		if rank > maxRank[key] {
+			maxRank[key] = rank
+		}
+	}
+
 	out := make([]workloadinterface.IMetadata, 0, len(workloads))
 	for _, w := range workloads {
 		key := resourceIdentity(w)
 		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
-		if i, dup := seen[key]; dup {
-			curr := out[i]
-			currRank := providerRank(workloadIDToSource[curr.GetID()].FileType)
-			if rank > currRank || (rank == currRank && w.GetID() < curr.GetID()) {
-				out[i] = w
-			}
-			continue
+		if rank == maxRank[key] {
+			out = append(out, w)
 		}
-		seen[key] = len(out)
-		out = append(out, w)
 	}
 
 	pruned := make(map[string]reporthandling.Source, len(out))
