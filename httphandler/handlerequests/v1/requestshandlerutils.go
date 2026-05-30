@@ -95,7 +95,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 			pr := result.GetResults()
 
 			if err := store.StorePostureReportResults(ctx, pr); err != nil {
-				return nil, err
+				return nil, writeScanErrorToFile(err, scanID)
 			}
 		} else {
 			logger.L().Debug("storage is not initialized - skipping storing results")
@@ -129,6 +129,18 @@ func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 
 	extensions := []string{"", ".json"}
 
+	// Failed artifacts win over success artifacts. HandleResults writes the
+	// JSON output before later failure points (e.g. StorePostureReportResults),
+	// so when both files exist the failed one is the source of truth and the
+	// success file is stale data that must not mask the failure.
+	for _, ext := range extensions {
+		path := filepath.Join(FailedOutputDir, cleanID+ext)
+		f, err := os.ReadFile(path)
+		if err == nil {
+			return nil, &ScanFailedError{Message: string(f)}
+		}
+	}
+
 	for _, ext := range extensions {
 		path := filepath.Join(OutputDir, cleanID+ext)
 		f, err := os.ReadFile(path)
@@ -136,14 +148,6 @@ func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 			postureReport := &reporthandlingv2.PostureReport{}
 			err = json.Unmarshal(f, postureReport)
 			return postureReport, err
-		}
-	}
-
-	for _, ext := range extensions {
-		path := filepath.Join(FailedOutputDir, cleanID+ext)
-		f, err := os.ReadFile(path)
-		if err == nil {
-			return nil, &ScanFailedError{Message: string(f)}
 		}
 	}
 
