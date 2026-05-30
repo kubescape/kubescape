@@ -85,7 +85,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		return nil, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
-		return nil, err
+		return nil, writeScanErrorToFile(err, scanID)
 	}
 
 	if !skipPersistence {
@@ -107,6 +107,18 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 	return nil, nil
 }
 
+// ScanFailedError carries the plaintext error written by writeScanErrorToFile.
+// readResultsFile returns this when the only artifact for a scan ID is under
+// FailedOutputDir, so the Results handler can surface the real scan failure
+// instead of a JSON parse error.
+type ScanFailedError struct {
+	Message string
+}
+
+func (e *ScanFailedError) Error() string {
+	return e.Message
+}
+
 func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 	parsedUUID, err := uuid.Parse(fileID)
 	if err != nil {
@@ -115,20 +127,26 @@ func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 	}
 	cleanID := parsedUUID.String()
 
-	dirs := []string{OutputDir, FailedOutputDir}
 	extensions := []string{"", ".json"}
 
-	for _, dir := range dirs {
-		for _, ext := range extensions {
-			path := filepath.Join(dir, cleanID+ext)
-			f, err := os.ReadFile(path)
-			if err == nil {
-				postureReport := &reporthandlingv2.PostureReport{}
-				err = json.Unmarshal(f, postureReport)
-				return postureReport, err
-			}
+	for _, ext := range extensions {
+		path := filepath.Join(OutputDir, cleanID+ext)
+		f, err := os.ReadFile(path)
+		if err == nil {
+			postureReport := &reporthandlingv2.PostureReport{}
+			err = json.Unmarshal(f, postureReport)
+			return postureReport, err
 		}
 	}
+
+	for _, ext := range extensions {
+		path := filepath.Join(FailedOutputDir, cleanID+ext)
+		f, err := os.ReadFile(path)
+		if err == nil {
+			return nil, &ScanFailedError{Message: string(f)}
+		}
+	}
+
 	return nil, fmt.Errorf("file %s not found", cleanID)
 }
 
