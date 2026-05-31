@@ -54,19 +54,29 @@ func anonymizeEnvVars(container map[string]interface{}, mapping *Mapping) {
 	container["env"] = envList
 }
 
-// anonymizeAnnotations redacts all annotation values on a resource.
+// anonymizeAnnotations redacts all annotation values on a resource,
+// including both top-level metadata.annotations and pod-template
+// spec.template.metadata.annotations for controller workloads such as
+// Deployments, StatefulSets, DaemonSets, and CronJobs.
 func anonymizeAnnotations(resource workloadinterface.IMetadata, mapping *Mapping) {
 	bw, ok := resource.(workloadinterface.IWorkload)
 	if !ok {
 		return
 	}
-	annotations := bw.GetAnnotations()
-	if len(annotations) == 0 {
-		return
-	}
-	for key, val := range annotations {
+
+	// Top-level metadata.annotations
+	for key, val := range bw.GetAnnotations() {
 		if val != "" {
 			bw.SetAnnotation(key, mapping.GetOrCreate("ann", val))
+		}
+	}
+
+	// Pod-template spec.template.metadata.annotations (Deployments, StatefulSets, etc.)
+	if w, ok := resource.(*workloadinterface.Workload); ok {
+		for key, val := range w.GetPodAnnotations() {
+			if val != "" {
+				w.SetPodAnnotation(key, mapping.GetOrCreate("ann", val))
+			}
 		}
 	}
 }

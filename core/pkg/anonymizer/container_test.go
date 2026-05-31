@@ -793,3 +793,44 @@ func TestAnonymizeEphemeralContainerList_TypedEnvRedacted(t *testing.T) {
 	assert.NotEqual(t, "tok-secret", result[0].Env[0].Value, "sensitive env value must be anonymized")
 	assert.Equal(t, "8080", result[0].Env[1].Value, "non-sensitive env value must be preserved")
 }
+
+func TestAnonymizeAnnotations_DeploymentPodTemplateAnnotations(t *testing.T) {
+	deployment := map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      "payment-service",
+			"namespace": "production",
+			"annotations": map[string]interface{}{
+				"top-level-key": "top-level-secret-value",
+			},
+		},
+		"spec": map[string]interface{}{
+			"template": map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"annotations": map[string]interface{}{
+						"vault.hashicorp.com/agent-inject-secret": "secret/prod/db",
+						"iam.amazonaws.com/role":                  "arn:aws:iam::123:role/svc",
+					},
+				},
+			},
+		},
+	}
+
+	resource := workloadinterface.NewWorkloadObj(deployment)
+	mapping := NewMapping()
+
+	anonymizeContainerMetadata(resource, mapping)
+
+	// Top-level annotations must be anonymized
+	topAnnotations := resource.GetAnnotations()
+	assert.NotEqual(t, "top-level-secret-value", topAnnotations["top-level-key"], "top-level annotation value must be anonymized")
+
+	// Pod-template annotations must also be anonymized
+	podAnnotations := resource.GetPodAnnotations()
+	assert.NotEqual(t, "secret/prod/db", podAnnotations["vault.hashicorp.com/agent-inject-secret"], "pod-template annotation value must be anonymized")
+	assert.NotEqual(t, "arn:aws:iam::123:role/svc", podAnnotations["iam.amazonaws.com/role"], "pod-template annotation value must be anonymized")
+
+	assert.Contains(t, podAnnotations["vault.hashicorp.com/agent-inject-secret"], "ann-", "anonymized value must use ann- prefix")
+	assert.Contains(t, podAnnotations["iam.amazonaws.com/role"], "ann-", "anonymized value must use ann- prefix")
+}
