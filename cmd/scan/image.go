@@ -50,9 +50,11 @@ func getImageCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command 
 			}
 
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed {
-				if err := shared.ValidateScanFormat(scanInfo.Format); err != nil {
+				normalized, err := shared.ValidateScanFormat(scanInfo.Format)
+				if err != nil {
 					return err
 				}
+				scanInfo.Format = normalized
 			}
 			if err := shared.ValidateImageScanInfo(scanInfo); err != nil {
 				return err

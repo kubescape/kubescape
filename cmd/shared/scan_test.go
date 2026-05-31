@@ -120,7 +120,7 @@ func TestValidateScanFormat(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.Description, func(t *testing.T) {
-			got := ValidateScanFormat(testCase.Input)
+			_, got := ValidateScanFormat(testCase.Input)
 			if got != testCase.Want {
 				t.Errorf("got: %v, want: %v", got, testCase.Want)
 			}

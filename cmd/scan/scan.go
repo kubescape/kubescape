@@ -53,9 +53,11 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 				}
 			}
 			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed {
-				if err := shared.ValidateScanFormat(scanInfo.Format); err != nil {
+				normalized, err := shared.ValidateScanFormat(scanInfo.Format)
+				if err != nil {
 					return err
 				}
+				scanInfo.Format = normalized
 			}
 			requestedView := scanInfo.View
 			if err := validateFrameworkScanInfo(&scanInfo); err != nil {

@@ -26,13 +26,14 @@ var supportedScanFormats = []string{
 var ErrInvalidScanFormat = fmt.Errorf("invalid format. Supported formats: %s", strings.Join(supportedScanFormats, ", "))
 
 // ValidateScanFormat returns an error if the given format string is not a supported scan output format.
-func ValidateScanFormat(format string) error {
+// It also normalizes the format to lowercase so downstream printers receive a consistent value.
+func ValidateScanFormat(format string) (string, error) {
 	for _, f := range supportedScanFormats {
 		if strings.EqualFold(format, f) {
-			return nil
+			return f, nil
 		}
 	}
-	return ErrInvalidScanFormat
+	return "", ErrInvalidScanFormat
 }
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))

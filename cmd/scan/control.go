@@ -63,9 +63,11 @@ func getControlCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comman
 				}
 			}
 			if f := cmd.InheritedFlags().Lookup("format"); f != nil && f.Changed {
-				if err := shared.ValidateScanFormat(scanInfo.Format); err != nil {
+				normalized, err := shared.ValidateScanFormat(scanInfo.Format)
+				if err != nil {
 					return err
 				}
+				scanInfo.Format = normalized
 			}
 			if err := validateFrameworkScanInfo(scanInfo); err != nil {
 				return err
