@@ -343,8 +343,17 @@ func updateConfigFile(configObj *ConfigObj) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-
-	return os.WriteFile(fullPath, configObj.Config(), 0600)
+	// Tighten permissions on pre-existing directory in case it was
+	// created with broader permissions by an older version.
+	if err := os.Chmod(dir, 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(fullPath, configObj.Config(), 0600); err != nil {
+		return err
+	}
+	// Tighten permissions on pre-existing file in case it was created
+	// with broader permissions by an older version.
+	return os.Chmod(fullPath, 0600)
 }
 
 func (c *ClusterConfig) GenerateAccountID() (string, error) {
