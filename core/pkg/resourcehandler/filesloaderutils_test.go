@@ -5,9 +5,172 @@ import (
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/stretchr/testify/assert"
 )
+
+// localWorkloadWithPath builds a localworkload with the given source path so its GetID() embeds the path hash.
+func localWorkloadWithPath(apiVersion, kind, namespace, name, path string) workloadinterface.IMetadata {
+	wl := mockWorkload(apiVersion, kind, namespace, name)
+	lw := localworkload.NewLocalWorkload(wl.GetObject())
+	lw.SetPath(path)
+	return lw
+}
+
+func TestProviderRank(t *testing.T) {
+	tt := []struct {
+		name     string
+		fileType string
+		expected int
+	}{
+		{name: "kustomize directory", fileType: reporthandling.SourceTypeKustomizeDirectory, expected: 2},
+		{name: "helm chart", fileType: reporthandling.SourceTypeHelmChart, expected: 2},
+		{name: "yaml file", fileType: reporthandling.SourceTypeYaml, expected: 1},
+		{name: "json file", fileType: reporthandling.SourceTypeJson, expected: 1},
+		{name: "empty", fileType: "", expected: 0},
+		{name: "unknown", fileType: "something-unknown", expected: 0},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, providerRank(tc.fileType))
+		})
+	}
+}
+
+func TestResourceIdentity(t *testing.T) {
+	base := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "deploy.yaml:0")
+
+	tt := []struct {
+		name     string
+		other    workloadinterface.IMetadata
+		expected bool
+	}{
+		{
+			name:     "same identity different path",
+			other:    localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/some/dir"),
+			expected: true,
+		},
+		{
+			name:     "different namespace",
+			other:    localWorkloadWithPath("apps/v1", "Deployment", "other", "bad-deploy", "x"),
+			expected: false,
+		},
+		{
+			name:     "different name",
+			other:    localWorkloadWithPath("apps/v1", "Deployment", "default", "other", "x"),
+			expected: false,
+		},
+		{
+			name:     "different kind",
+			other:    localWorkloadWithPath("apps/v1", "StatefulSet", "default", "bad-deploy", "x"),
+			expected: false,
+		},
+		{
+			name:     "different api version",
+			other:    localWorkloadWithPath("v1", "Deployment", "default", "bad-deploy", "x"),
+			expected: false,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.expected {
+				assert.Equal(t, resourceIdentity(base), resourceIdentity(tc.other))
+				assert.NotEqual(t, base.GetID(), tc.other.GetID())
+			} else {
+				assert.NotEqual(t, resourceIdentity(base), resourceIdentity(tc.other))
+			}
+		})
+	}
+}
+
+func TestDedupWorkloads(t *testing.T) {
+	raw := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "deploy.yaml:0")
+	raw2 := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "elsewhere.yaml:0")
+	rendered := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/some/dir")
+	helmCopy := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/helm")
+	kustomizeCopy := localWorkloadWithPath("apps/v1", "Deployment", "default", "bad-deploy", "/kustomize")
+	other := localWorkloadWithPath("apps/v1", "Deployment", "default", "other", "other.yaml:0")
+
+	tt := []struct {
+		name               string
+		workloads          []workloadinterface.IMetadata
+		workloadIDToSource map[string]reporthandling.Source
+		expectedIDs        []string
+	}{
+		{
+			name:      "rendered copy replaces raw copy (raw discovered first)",
+			workloads: []workloadinterface.IMetadata{raw, rendered},
+			workloadIDToSource: map[string]reporthandling.Source{
+				raw.GetID():      {FileType: reporthandling.SourceTypeYaml},
+				rendered.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
+			},
+			expectedIDs: []string{rendered.GetID()},
+		},
+		{
+			name:      "rendered copy replaces raw copy (rendered discovered first)",
+			workloads: []workloadinterface.IMetadata{rendered, raw},
+			workloadIDToSource: map[string]reporthandling.Source{
+				rendered.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
+				raw.GetID():      {FileType: reporthandling.SourceTypeYaml},
+			},
+			expectedIDs: []string{rendered.GetID()},
+		},
+		{
+			name:      "two raw copies with the same identity are both kept",
+			workloads: []workloadinterface.IMetadata{raw, raw2},
+			workloadIDToSource: map[string]reporthandling.Source{
+				raw.GetID():  {FileType: reporthandling.SourceTypeYaml},
+				raw2.GetID(): {FileType: reporthandling.SourceTypeYaml},
+			},
+			expectedIDs: []string{raw.GetID(), raw2.GetID()},
+		},
+		{
+			name:      "two rendered copies (helm + kustomize) with the same identity are both kept",
+			workloads: []workloadinterface.IMetadata{helmCopy, kustomizeCopy},
+			workloadIDToSource: map[string]reporthandling.Source{
+				helmCopy.GetID():      {FileType: reporthandling.SourceTypeHelmChart},
+				kustomizeCopy.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
+			},
+			expectedIDs: []string{helmCopy.GetID(), kustomizeCopy.GetID()},
+		},
+		{
+			name:      "rendered copy replaces every lower-ranked raw copy",
+			workloads: []workloadinterface.IMetadata{raw, raw2, rendered},
+			workloadIDToSource: map[string]reporthandling.Source{
+				raw.GetID():      {FileType: reporthandling.SourceTypeYaml},
+				raw2.GetID():     {FileType: reporthandling.SourceTypeYaml},
+				rendered.GetID(): {FileType: reporthandling.SourceTypeKustomizeDirectory},
+			},
+			expectedIDs: []string{rendered.GetID()},
+		},
+		{
+			name:      "distinct resources are all kept",
+			workloads: []workloadinterface.IMetadata{raw, other},
+			workloadIDToSource: map[string]reporthandling.Source{
+				raw.GetID():   {FileType: reporthandling.SourceTypeYaml},
+				other.GetID(): {FileType: reporthandling.SourceTypeYaml},
+			},
+			expectedIDs: []string{raw.GetID(), other.GetID()},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			got, gotSrc := dedupWorkloads(tc.workloads, tc.workloadIDToSource)
+
+			assert.Len(t, got, len(tc.expectedIDs))
+			assert.Len(t, gotSrc, len(tc.expectedIDs))
+			for i, id := range tc.expectedIDs {
+				assert.Equal(t, id, got[i].GetID())
+				_, ok := gotSrc[id]
+				assert.True(t, ok)
+			}
+		})
+	}
+}
 
 func mockWorkloadWithSource(apiVersion, kind, namespace, name, source string) workloadinterface.IMetadata {
 	wl := mockWorkload(apiVersion, kind, namespace, name)
