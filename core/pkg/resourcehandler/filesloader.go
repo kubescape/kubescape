@@ -352,7 +352,7 @@ func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautil
 		}
 	}
 
-	// drop duplicates yielded by multiple providers (e.g. kustomize render + plain-YAML glob)
+	// backstop: drop cross-provider identity collisions the path-level kustomize skip can't see (e.g. helm + raw YAML)
 	workloads, workloadIDToSource = dedupWorkloads(workloads, workloadIDToSource)
 
 	return workloadIDToSource, workloads, nil

@@ -40,18 +40,14 @@ func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource 
 	}
 
 	out := make([]workloadinterface.IMetadata, 0, len(workloads))
+	pruned := make(map[string]reporthandling.Source, len(workloads))
 	for _, w := range workloads {
-		key := resourceIdentity(w)
 		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
-		if rank == maxRank[key] {
+		if rank == maxRank[resourceIdentity(w)] {
 			out = append(out, w)
-		}
-	}
-
-	pruned := make(map[string]reporthandling.Source, len(out))
-	for _, w := range out {
-		if s, ok := workloadIDToSource[w.GetID()]; ok {
-			pruned[w.GetID()] = s
+			if s, ok := workloadIDToSource[w.GetID()]; ok {
+				pruned[w.GetID()] = s
+			}
 		}
 	}
 	return out, pruned

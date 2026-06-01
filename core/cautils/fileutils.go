@@ -153,6 +153,11 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 }
 
 func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
+	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
+	if isKustomizeDirectory(input) {
+		return nil
+	}
+
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
