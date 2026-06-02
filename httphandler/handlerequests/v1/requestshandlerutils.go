@@ -94,8 +94,13 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		if store != nil && config.GetAccount() == "" {
 			pr := result.GetResults()
 
+			// StorePostureReportResults persists to the operator storage backend
+			// (CRD/ConfigMap). This runs after HandleResults has already written
+			// the valid JSON to OutputDir, so a failure here is a persistence
+			// problem, not a scan failure. Log it and let the poller read the
+			// valid result rather than overwriting it with a failed artifact.
 			if err := store.StorePostureReportResults(ctx, pr); err != nil {
-				return nil, writeScanErrorToFile(err, scanID)
+				logger.L().Ctx(ctx).Error("failed to persist scan results to storage", helpers.String("scanID", scanID), helpers.Error(err))
 			}
 		} else {
 			logger.L().Debug("storage is not initialized - skipping storing results")
