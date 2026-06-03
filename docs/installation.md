@@ -80,7 +80,7 @@ sudo apt update
 sudo apt install kubescape
 ```
 
-For other Debian-based or RPM-based distributions, see the [OpenSUSE Build Service](https://software.opensuse.org/download.html?project=home%3Akubescape&package=kubescape).
+For other Debian-based or RPM-based distributions, see the [openSUSE Build Service](https://software.opensuse.org/download.html?project=home%3Akubescape&package=kubescape).
 
 ### Arch Linux
 
