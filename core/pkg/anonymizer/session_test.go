@@ -638,7 +638,17 @@ func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
 		assert.NotEqual(t, "main", repo.DefaultBranch)
 		assert.NotEqual(t, "https://github.com/jijo-OO7/kubescape", repo.RemoteURL)
 
-		assert.Equal(t, "/home/devjijo/work/kubescape", repo.LocalRootPath)
+		assert.NotEqual(
+			t,
+			"/home/devjijo/work/kubescape",
+			repo.LocalRootPath,
+		)
+
+		assert.Contains(
+			t,
+			repo.LocalRootPath,
+			"git-",
+		)
 
 		assert.Contains(t, repo.Repo, "git-")
 		assert.Contains(t, repo.Owner, "git-")

@@ -378,5 +378,9 @@ func anonymizeRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, ma
 		repo.RemoteURL = mapping.GetOrCreate("git", repo.RemoteURL)
 	}
 
+	if repo.LocalRootPath != "" {
+		repo.LocalRootPath = mapping.GetOrCreate("git", repo.LocalRootPath)
+	}
+
 	anonymizeLastCommit(&repo.LastCommit, mapping)
 }
