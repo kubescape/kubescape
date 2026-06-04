@@ -667,3 +667,50 @@ func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
 		assert.Contains(t, repo.LastCommit.Message, "git-")
 	}
 }
+
+func TestTransformRepoContextMetadata(t *testing.T) {
+	repo := &reporthandlingv2.RepoContextMetadata{
+		Provider:      "github",
+		Repo:          "demo-repository",
+		Owner:         "demo-owner",
+		Branch:        "feature/demo-work",
+		DefaultBranch: "main",
+		RemoteURL:     "https://github.com/demo-owner/demo-repository",
+		LocalRootPath: "/workspace/demo-repository",
+		LastCommit: reporthandling.LastCommit{
+			Hash:           "demo-commit-hash",
+			CommitterName:  "Demo User",
+			CommitterEmail: "demo@example.com",
+			Message:        "demo commit message",
+		},
+	}
+
+	transformRepoContextMetadata(
+		repo,
+		NewMappingTransformer(),
+	)
+
+	assert.NotEqual(t, "demo-repository", repo.Repo)
+	assert.NotEqual(t, "demo-owner", repo.Owner)
+	assert.NotEqual(t, "feature/demo-work", repo.Branch)
+	assert.NotEqual(t, "main", repo.DefaultBranch)
+	assert.NotEqual(t, "https://github.com/demo-owner/demo-repository", repo.RemoteURL)
+	assert.NotEqual(t, "/workspace/demo-repository", repo.LocalRootPath)
+
+	assert.Contains(t, repo.Repo, "git-")
+	assert.Contains(t, repo.Owner, "git-")
+	assert.Contains(t, repo.Branch, "git-")
+	assert.Contains(t, repo.DefaultBranch, "git-")
+	assert.Contains(t, repo.RemoteURL, "git-")
+	assert.Contains(t, repo.LocalRootPath, "git-")
+
+	assert.NotEqual(t, "demo-commit-hash", repo.LastCommit.Hash)
+	assert.NotEqual(t, "Demo User", repo.LastCommit.CommitterName)
+	assert.NotEqual(t, "demo@example.com", repo.LastCommit.CommitterEmail)
+	assert.NotEqual(t, "demo commit message", repo.LastCommit.Message)
+
+	assert.Contains(t, repo.LastCommit.Hash, "git-")
+	assert.Contains(t, repo.LastCommit.CommitterName, "git-")
+	assert.Contains(t, repo.LastCommit.CommitterEmail, "git-")
+	assert.Contains(t, repo.LastCommit.Message, "git-")
+}
