@@ -47,7 +47,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Kubescape
-        run: curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | bash
+        run: |
+          curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | bash
+          echo "$HOME/.kubescape/bin" >> "$GITHUB_PATH"
 
       - name: Run Kubescape scan
         run: |
@@ -70,6 +72,11 @@ After the workflow runs, navigate to **Security → Code scanning** in your repo
 If your manifests are in a subdirectory, pass the path directly to Kubescape:
 
 ```yaml
+- name: Install Kubescape
+  run: |
+    curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | bash
+    echo "$HOME/.kubescape/bin" >> "$GITHUB_PATH"
+
 - name: Run Kubescape scan
   run: |
     kubescape scan ./k8s/ \
@@ -81,6 +88,11 @@ If your manifests are in a subdirectory, pass the path directly to Kubescape:
 You can also scan Helm charts or Kustomize directories by pointing to their root:
 
 ```yaml
+- name: Install Kubescape
+  run: |
+    curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | bash
+    echo "$HOME/.kubescape/bin" >> "$GITHUB_PATH"
+
 - name: Run Kubescape scan
   run: |
     kubescape scan ./charts/my-app/ \
@@ -94,6 +106,11 @@ You can also scan Helm charts or Kustomize directories by pointing to their root
 To limit the scan to a particular compliance framework, use the `framework` subcommand:
 
 ```yaml
+- name: Install Kubescape
+  run: |
+    curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | bash
+    echo "$HOME/.kubescape/bin" >> "$GITHUB_PATH"
+
 - name: Run Kubescape scan (NSA framework)
   run: |
     kubescape scan framework nsa . \
@@ -102,19 +119,23 @@ To limit the scan to a particular compliance framework, use the `framework` subc
   continue-on-error: true
 ```
 
-Supported frameworks include `nsa`, `mitre`, `cis-v1.23-t1.0.1`, `soc2`, and others. Run `kubescape list frameworks` to see the full list.
+Supported frameworks include `nsa`, `mitre`, and `cis-v1.23-t1.0.1`. Run `kubescape list frameworks` to see the full list.
 
 ## Setting a Compliance Threshold
 
 To fail the workflow when the compliance score falls below a threshold, use `--compliance-threshold`. Combine this with `continue-on-error: true` on the scan step so the SARIF upload still runs:
 
 ```yaml
+- name: Install Kubescape
+  run: |
+    curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | bash
+    echo "$HOME/.kubescape/bin" >> "$GITHUB_PATH"
+
 - name: Run Kubescape scan
   run: |
     kubescape scan . \
       --format sarif \
-      --output results.sarif \
-      --compliance-threshold 80
+      --output results.sarif
   continue-on-error: true
 
 - name: Upload SARIF to GitHub Code Scanning
@@ -199,7 +220,9 @@ To block pull requests that introduce new security findings, configure a branch 
 5. Optionally enable **Require branches to be up to date before merging**.
 6. Click **Save changes**.
 
-With this rule in place, a pull request cannot be merged if the Kubescape scan step exits with a non-zero code (i.e., when a compliance threshold is set and not met).
+With this rule in place, the Kubescape workflow check must pass before a pull request can be merged.
+
+> **Note:** The Basic Example and the official-action example both use `continue-on-error: true` on the scan step, which marks the step as failed but lets the overall job succeed. Branch protection gates on the job conclusion, so those workflows will always pass the check regardless of findings. To block merges on security findings, use the **Setting a Compliance Threshold** pattern above, where the dedicated `Enforce compliance threshold` step has no `continue-on-error` and fails the job when the threshold is not met. Alternatively, configure a failure severity under **Settings → Code security → Code scanning** to have GitHub itself block the merge.
 
 ## Troubleshooting
 
@@ -214,6 +237,7 @@ With this rule in place, a pull request cannot be merged if the Kubescape scan s
 
 The scan step failed before writing the file. Check the workflow logs. Common causes:
 
+- `kubescape: command not found` — the PATH was not persisted after install. Ensure the Install Kubescape step includes `echo "$HOME/.kubescape/bin" >> "$GITHUB_PATH"`.
 - No Kubernetes manifest files found at the scanned path.
 - Kubescape installation failed (network issue or missing `curl`/`bash`).
 
