@@ -266,4 +266,7 @@ func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
 
 	_, ok := sessionObj.InfoMap[preSeededGVR]
 	assert.True(t, ok, "GVR pull-failure entry must survive host-sensor collection; host infoMap must be merged, not replace sessionObj.InfoMap")
+
+	_, ok = sessionObj.InfoMap["KubeletInfo"]
+	assert.True(t, ok, "host-sensor infoMap entries must be present in sessionObj.InfoMap after merge")
 }
