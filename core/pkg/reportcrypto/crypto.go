@@ -29,6 +29,11 @@ func GenerateDEK() ([]byte, error) {
 	return dek, nil
 }
 
+// formatCiphertext builds the canonical ENC[AES256_GCM,...] envelope.
+func formatCiphertext(nonce string, ciphertext string) string {
+	return fmt.Sprintf("%s%s,%s%s", prefix, nonce, ciphertext, suffix)
+}
+
 // EncryptString encrypts plaintext using AES-256-GCM and returns
 // a SOPS-inspired ciphertext representation:
 //
@@ -55,11 +60,7 @@ func EncryptString(plaintext string, dek []byte) (string, error) {
 
 	ciphertext := gcm.Seal(nil, nonce, []byte(plaintext), nil)
 
-	return fmt.Sprintf(
-		"ENC[AES256_GCM,%s,%s]",
-		base64.StdEncoding.EncodeToString(nonce),
-		base64.StdEncoding.EncodeToString(ciphertext),
-	), nil
+	return formatCiphertext(base64.StdEncoding.EncodeToString(nonce), base64.StdEncoding.EncodeToString(ciphertext)), nil
 }
 
 // DecryptString decrypts a ciphertext produced by EncryptString.
