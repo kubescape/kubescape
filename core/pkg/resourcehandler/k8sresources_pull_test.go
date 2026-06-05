@@ -7,6 +7,9 @@ import (
 	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
+	"github.com/kubescape/opa-utils/objectsenvelopes/hostsensor"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -206,4 +209,61 @@ func TestGetResources_ScanAbortedOnContextCancellation(t *testing.T) {
 	assert.True(t,
 		errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled),
 		"error should wrap the context error so callers can use errors.Is(err, context.DeadlineExceeded)")
+}
+
+type stubHostSensor struct {
+	infoMap map[string]apis.StatusInfo
+}
+
+func (s *stubHostSensor) Init(_ context.Context) error { return nil }
+func (s *stubHostSensor) TearDown() error              { return nil }
+func (s *stubHostSensor) CollectResources(_ context.Context) ([]hostsensor.HostSensorDataEnvelope, map[string]apis.StatusInfo, error) {
+	return nil, s.infoMap, nil
+}
+
+// TestGetResources_HostSensorInfoMapMerged is a regression test for the bug
+// where the host-sensor infoMap replaced sessionObj.InfoMap wholesale instead
+// of being merged into it, silently discarding GVR pull-failure entries that
+// recordFailedQueryStatuses had written earlier.
+func TestGetResources_HostSensorInfoMapMerged(t *testing.T) {
+	k8sinterface.InitializeMapResourcesMock()
+	handler := getResourceHandlerMock()
+	handler.k8s.DynamicClient = &mockDynamicClient{
+		listFunc: func(_ context.Context, _ metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+			return &unstructured.UnstructuredList{}, nil
+		},
+	}
+	handler.hostSensorHandler = &stubHostSensor{
+		infoMap: map[string]apis.StatusInfo{
+			"KubeletInfo": {InnerStatus: apis.StatusSkipped, InnerInfo: "node-1: connection refused"},
+		},
+	}
+
+	rule := mockRule("host-sensor-rule", nil, "")
+	rule.Match = []reporthandling.RuleMatchObjects{{
+		APIGroups:   []string{""},
+		APIVersions: []string{"v1"},
+		Resources:   []string{"KubeletInfo"},
+	}}
+	control := mockControl("host-control", nil)
+	control.Rules = []reporthandling.PolicyRule{rule}
+	framework := mockFramework("host-framework", nil)
+	framework.Controls = []reporthandling.Control{control}
+
+	scanInfo := &cautils.ScanInfo{}
+	scanInfo.HostSensorEnabled.SetBool(true)
+	sessionObj := cautils.NewOPASessionObj(context.Background(), nil, nil, scanInfo)
+	sessionObj.Policies = append(sessionObj.Policies, *framework)
+
+	const preSeededGVR = "/v1/networkpolicies"
+	sessionObj.InfoMap[preSeededGVR] = apis.StatusInfo{
+		InnerInfo:   "networkpolicies is forbidden",
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusNotEvaluated,
+	}
+
+	_, _, _, _, _ = handler.GetResources(context.Background(), sessionObj, scanInfo)
+
+	_, ok := sessionObj.InfoMap[preSeededGVR]
+	assert.True(t, ok, "GVR pull-failure entry must survive host-sensor collection; host infoMap must be merged, not replace sessionObj.InfoMap")
 }
