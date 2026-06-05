@@ -15,9 +15,9 @@ import (
 
 // anonymizeSession rewrites sensitive resource identifiers and metadata while
 // preserving internal referential integrity across the full OPA session.
-func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
+func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) error {
 	if session == nil {
-		return
+		return nil
 	}
 
 	idMapping := make(map[string]string)
@@ -116,17 +116,28 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 	session.ResourceAttackTracks = newResourceAttackTracks
 	repoTransformer := NewMappingTransformer()
 	if session.Metadata != nil {
-		transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, repoTransformer)
+		if err := transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, repoTransformer); err != nil {
+			return err
+		}
 	}
 
 	if session.Report != nil {
 
-		transformRepoContextMetadata(session.Report.Metadata.ContextMetadata.RepoContextMetadata, repoTransformer)
+		if err := transformRepoContextMetadata(
+			session.Report.Metadata.ContextMetadata.RepoContextMetadata,
+			repoTransformer,
+		); err != nil {
+			return err
+		}
 
 		for controlID, control := range session.Report.SummaryDetails.Controls {
 			remappedResourceIDs := control.ResourceIDs
 
-			originalResourceIDs := make(map[string]apis.ScanningStatus, len(control.ResourceIDs.All()))
+			originalResourceIDs := make(
+				map[string]apis.ScanningStatus,
+				len(control.ResourceIDs.All()),
+			)
+
 			for resourceID, status := range control.ResourceIDs.All() {
 				originalResourceIDs[resourceID] = status
 			}
@@ -134,14 +145,24 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 			remappedResourceIDs.Clear()
 
 			for oldID, status := range originalResourceIDs {
-				newID := resolveMappedID(mapping, idMapping, oldID, "ref")
-				remappedResourceIDs.Append(status, newID)
+				newID := resolveMappedID(
+					mapping,
+					idMapping,
+					oldID,
+					"ref",
+				)
+
+				remappedResourceIDs.Append(
+					status,
+					newID,
+				)
 			}
 
 			control.ResourceIDs = remappedResourceIDs
 			session.Report.SummaryDetails.Controls[controlID] = control
 		}
 	}
+	return nil
 }
 
 // resolveMappedID preserves referential integrity when IDs are rewritten during
@@ -355,50 +376,105 @@ func transformValue(
 	transformer Transformer,
 	prefix string,
 	value string,
-) string {
+) (string, error) {
 	if value == "" {
-		return value
+		return value, nil
 	}
 
-	transformed, err := transformer.Transform(prefix, value)
-	if err != nil {
-		return ""
-	}
-
-	return transformed
+	return transformer.Transform(
+		prefix,
+		value,
+	)
 }
 
 func transformRepoContextMetadata(
 	repo *reporthandlingv2.RepoContextMetadata,
 	transformer Transformer,
-) {
+) error {
 	if repo == nil {
-		return
+		return nil
 	}
 
-	repo.Repo = transformValue(transformer, "git", repo.Repo)
-	repo.Owner = transformValue(transformer, "git", repo.Owner)
-	repo.Branch = transformValue(transformer, "git", repo.Branch)
-	repo.DefaultBranch = transformValue(transformer, "git", repo.DefaultBranch)
-	repo.RemoteURL = transformValue(transformer, "git", repo.RemoteURL)
-	repo.LocalRootPath = transformValue(transformer, "git", repo.LocalRootPath)
+	var err error
 
-	transformLastCommit(
-		&repo.LastCommit,
-		transformer,
-	)
+	repo.Repo, err = transformValue(transformer, "git", repo.Repo)
+	if err != nil {
+		return err
+	}
+
+	repo.Owner, err = transformValue(transformer, "git", repo.Owner)
+	if err != nil {
+		return err
+	}
+
+	repo.Branch, err = transformValue(transformer, "git", repo.Branch)
+	if err != nil {
+		return err
+	}
+
+	repo.DefaultBranch, err = transformValue(transformer, "git", repo.DefaultBranch)
+	if err != nil {
+		return err
+	}
+
+	repo.RemoteURL, err = transformValue(transformer, "git", repo.RemoteURL)
+	if err != nil {
+		return err
+	}
+
+	repo.LocalRootPath, err = transformValue(transformer, "git", repo.LocalRootPath)
+	if err != nil {
+		return err
+	}
+
+	return transformLastCommit(&repo.LastCommit, transformer)
 }
 
 func transformLastCommit(
 	commit *reporthandling.LastCommit,
 	transformer Transformer,
-) {
+) error {
 	if commit == nil {
-		return
+		return nil
 	}
 
-	commit.Hash = transformValue(transformer, "git", commit.Hash)
-	commit.CommitterName = transformValue(transformer, "git", commit.CommitterName)
-	commit.CommitterEmail = transformValue(transformer, "git", commit.CommitterEmail)
-	commit.Message = transformValue(transformer, "git", commit.Message)
+	var err error
+
+	commit.Hash, err = transformValue(
+		transformer,
+		"git",
+		commit.Hash,
+	)
+	if err != nil {
+		return err
+	}
+
+	commit.CommitterName, err = transformValue(
+		transformer,
+		"git",
+		commit.CommitterName,
+	)
+	if err != nil {
+		return err
+	}
+
+	commit.CommitterEmail, err = transformValue(
+		transformer,
+		"git",
+		commit.CommitterEmail,
+	)
+	if err != nil {
+		return err
+	}
+
+	commit.Message, err = transformValue(
+		transformer,
+		"git",
+		commit.Message,
+	)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -3,6 +3,8 @@ package anonymizer
 import (
 	"testing"
 
+	"errors"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -18,6 +20,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingTransformer struct{}
+
+func (f *failingTransformer) Transform(prefix string, value string) (string, error) {
+	return "", errors.New("transform failed")
+}
 
 type metadataOnly struct{}
 
@@ -769,4 +777,20 @@ func TestTransformRepoContextMetadata_EncryptionTransformer(
 		"demo-repository",
 		decryptedRepo,
 	)
+}
+
+func TestTransformRepoContextMetadata_Error(
+	t *testing.T,
+) {
+	repo := &reporthandlingv2.RepoContextMetadata{
+		Repo: "demo-repository",
+	}
+
+	err := transformRepoContextMetadata(
+		repo,
+		&failingTransformer{},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transform failed")
 }
