@@ -585,6 +585,11 @@ func TestResolvePolicyName(t *testing.T) {
 			controlID: "C-9999",
 			wantErr:   "unsupported control ID",
 		},
+		{
+			name:      "control not present in released CEL library",
+			controlID: "C-0013",
+			wantErr:   "unsupported control ID",
+		},
 	}
 
 	for _, tt := range tests {
