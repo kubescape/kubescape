@@ -2,6 +2,7 @@ package fixhandler
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -939,6 +940,34 @@ func TestNewFixHandler_ClusterReportUnsupportedTarget(t *testing.T) {
 			assert.NotContains(t, err.Error(), invalid)
 		})
 	}
+}
+
+func TestNewFixHandler_ClusterReportRoundTrip(t *testing.T) {
+	// Regression test for the round-trip case: a cluster report marshaled from
+	// reporthandlingv2 types. Cluster is the zero enum value (0) and scanningTarget
+	// is tagged omitempty, so scanMetadata serializes as {} with no scanningTarget
+	// key. Such a report must surface "unsupported scanning target", not
+	// "invalid report file" — it is recognized by its clusterContextMetadata.
+	var report reporthandlingv2.PostureReport
+	report.Metadata.ScanMetadata.ScanningTarget = reporthandlingv2.Cluster
+	report.Metadata.ContextMetadata.ClusterContextMetadata = &reporthandlingv2.ClusterMetadata{ContextName: "dev"}
+
+	reportJSON, err := json.Marshal(report)
+	require.NoError(t, err)
+	// sanity-check the round-trip really dropped scanningTarget
+	require.Contains(t, string(reportJSON), `"scanMetadata":{}`)
+
+	tmpFile, err := os.CreateTemp("", "report-*.json")
+	require.NoError(t, err)
+	defer os.Remove(tmpFile.Name())
+	_, err = tmpFile.Write(reportJSON)
+	require.NoError(t, err)
+	tmpFile.Close()
+
+	_, err = NewFixHandler(&metav1.FixInfo{ReportFile: tmpFile.Name()})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported scanning target")
+	assert.NotContains(t, err.Error(), "invalid report file")
 }
 
 func TestNewFixHandler_EmptyReportGUID(t *testing.T) {

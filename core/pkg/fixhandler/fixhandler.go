@@ -83,10 +83,24 @@ func validateReportStructure(raw []byte, report *reporthandlingv2.PostureReport)
 	if hasSupportedLocalContext(report) {
 		return nil
 	}
+	// Recognize cluster/remote reports (scanMetadata can be empty since Cluster is enum 0 + omitempty) so isSupportedScanningTarget returns the precise error
+	if hasRecognizedScanContext(report) {
+		return nil
+	}
 	if looksLikeKubescapeReport(raw) {
 		return nil
 	}
 	return fmt.Errorf(invalidReportFileErr)
+}
+
+// hasRecognizedScanContext reports whether the report carries scan context metadata for any scan type (cluster, remote repo, file, dir, gitlocal)
+func hasRecognizedScanContext(report *reporthandlingv2.PostureReport) bool {
+	ctx := report.Metadata.ContextMetadata
+	return ctx.ClusterContextMetadata != nil ||
+		ctx.RepoContextMetadata != nil ||
+		ctx.FileContextMetadata != nil ||
+		ctx.DirectoryContextMetadata != nil ||
+		ctx.HelmContextMetadata != nil
 }
 
 func hasSupportedLocalContext(report *reporthandlingv2.PostureReport) bool {
