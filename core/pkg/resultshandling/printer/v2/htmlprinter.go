@@ -42,15 +42,18 @@ func NewHtmlPrinter() *HtmlPrinter {
 }
 
 func (hp *HtmlPrinter) SetWriter(ctx context.Context, outputFile string) {
-	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
-			outputFile = htmlOutputFile
-		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != htmlOutputExt {
-			outputFile = outputFile + htmlOutputExt
-		}
+	outputFile = strings.TrimSpace(outputFile)
+	if outputFile == "" {
+		// Raw HTML markup must never fall back to stdout on a TTY.
+		outputFile = htmlOutputFile + htmlOutputExt
+		logger.L().Info("no --output specified for html format; writing to default file",
+			helpers.String("filename", outputFile))
+	} else if filepath.Ext(outputFile) != htmlOutputExt {
+		outputFile = outputFile + htmlOutputExt
 	}
-	hp.writer = printer.GetWriter(ctx, outputFile)
+	// HTML must never fall back to stdout on file-create errors either
+	// (e.g. read-only cwd) — use the no-stdout-fallback helper.
+	hp.writer = printer.GetWriterNoStdoutFallback(ctx, outputFile, "kubescape-report-*"+htmlOutputExt)
 }
 
 func (hp *HtmlPrinter) PrintNextSteps() {
@@ -158,6 +161,9 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
 			control := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, resourceControl.GetID())
+			if control == nil {
+				continue
+			}
 			ctlResult := buildResourceControlResult(resourceControl, control)
 
 			ctlResults = append(ctlResults, ctlResult)
@@ -165,4 +171,10 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	}
 
 	return ctlResults
+}
+
+func (p *HtmlPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
 }

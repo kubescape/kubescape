@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/armosec/utils-go/boolutils"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -28,6 +29,27 @@ import (
 var scanImpl = scan // Override for testing
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{}
+
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("scan panicked: %v", r)
+			logger.L().Ctx(scanReq.ctx).Error("scan panic recovered", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			responseMsg := err.Error()
+			if persistErr := writeScanErrorToFile(err, scanReq.scanID); persistErr != nil {
+				logger.L().Ctx(scanReq.ctx).Error("failed to persist panic error to file", helpers.String("ID", scanReq.scanID), helpers.Error(persistErr))
+				responseMsg = persistErr.Error()
+			}
+			handler.state.setNotBusy(scanReq.scanID)
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = responseMsg
+				select {
+				case scanReq.resp <- response:
+				default:
+				}
+			}
+		}
+	}()
 
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
 	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
@@ -84,7 +106,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		return nil, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
-		return nil, err
+		return nil, writeScanErrorToFile(err, scanID)
 	}
 
 	if !skipPersistence {
@@ -93,8 +115,13 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		if store != nil && config.GetAccount() == "" {
 			pr := result.GetResults()
 
+			// StorePostureReportResults persists to the operator storage backend
+			// (CRD/ConfigMap). This runs after HandleResults has already written
+			// the valid JSON to OutputDir, so a failure here is a persistence
+			// problem, not a scan failure. Log it and let the poller read the
+			// valid result rather than overwriting it with a failed artifact.
 			if err := store.StorePostureReportResults(ctx, pr); err != nil {
-				return nil, err
+				logger.L().Ctx(ctx).Error("failed to persist scan results to storage", helpers.String("scanID", scanID), helpers.Error(err))
 			}
 		} else {
 			logger.L().Debug("storage is not initialized - skipping storing results")
@@ -106,54 +133,83 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 	return nil, nil
 }
 
+// ScanFailedError carries the plaintext error written by writeScanErrorToFile.
+// readResultsFile returns this when the only artifact for a scan ID is under
+// FailedOutputDir, so the Results handler can surface the real scan failure
+// instead of a JSON parse error.
+type ScanFailedError struct {
+	Message string
+}
+
+func (e *ScanFailedError) Error() string {
+	return e.Message
+}
+
 func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
-	if fileName := searchFile(fileID); fileName != "" {
-		f, err := os.ReadFile(fileName)
-		if err != nil {
-			return nil, err
-		}
-		postureReport := &reporthandlingv2.PostureReport{}
-		err = json.Unmarshal(f, postureReport)
-		return postureReport, err
+	parsedUUID, err := uuid.Parse(fileID)
+	if err != nil {
+		logger.L().Warning("invalid scan ID requested", helpers.String("ID", fileID), helpers.Error(err))
+		return nil, fmt.Errorf("invalid scan ID format")
 	}
-	return nil, fmt.Errorf("file %s not found", fileID)
+	cleanID := parsedUUID.String()
+
+	extensions := []string{"", ".json"}
+
+	// Failed artifacts win over success artifacts. HandleResults writes the
+	// JSON output before later failure points (e.g. StorePostureReportResults),
+	// so when both files exist the failed one is the source of truth and the
+	// success file is stale data that must not mask the failure.
+	for _, ext := range extensions {
+		path := filepath.Join(FailedOutputDir, cleanID+ext)
+		f, err := os.ReadFile(path)
+		if err == nil {
+			return nil, &ScanFailedError{Message: string(f)}
+		}
+	}
+
+	for _, ext := range extensions {
+		path := filepath.Join(OutputDir, cleanID+ext)
+		f, err := os.ReadFile(path)
+		if err == nil {
+			postureReport := &reporthandlingv2.PostureReport{}
+			err = json.Unmarshal(f, postureReport)
+			return postureReport, err
+		}
+	}
+
+	return nil, fmt.Errorf("file %s not found", cleanID)
 }
 
 func removeResultDirs() {
-	os.ReadDir(OutputDir)
-	os.ReadDir(FailedOutputDir)
-}
-func removeResultsFile(fileID string) error {
-	if fileName := searchFile(fileID); fileName != "" {
-		return os.Remove(fileName)
+	if err := os.RemoveAll(OutputDir); err != nil {
+		logger.L().Error("failed to remove output directory", helpers.String("path", OutputDir), helpers.Error(err))
 	}
-	return nil // no files found to delete
-}
-func searchFile(fileID string) string {
-	if fileName, _ := findFile(OutputDir, fileID); fileName != "" {
-		return fileName
+	if err := os.RemoveAll(FailedOutputDir); err != nil {
+		logger.L().Error("failed to remove failed output directory", helpers.String("path", FailedOutputDir), helpers.Error(err))
 	}
-	if fileName, _ := findFile(FailedOutputDir, fileID); fileName != "" {
-		return fileName
-	}
-	return ""
 }
 
-func findFile(targetDir string, fileName string) (string, error) {
-	var files []string
-	err := filepath.Walk(targetDir, func(path string, info os.FileInfo, err error) error {
-		files = append(files, path)
-		return nil
-	})
+func removeResultsFile(fileID string) error {
+	parsedUUID, err := uuid.Parse(fileID)
 	if err != nil {
-		return "", err
+		logger.L().Warning("invalid scan ID requested", helpers.String("ID", fileID), helpers.Error(err))
+		return nil // Invalid ID means no file to delete
 	}
-	for i := range files {
-		if strings.Contains(files[i], fileName) {
-			return files[i], nil
+	cleanID := parsedUUID.String()
+
+	dirs := []string{OutputDir, FailedOutputDir}
+	extensions := []string{"", ".json"}
+
+	for _, dir := range dirs {
+		for _, ext := range extensions {
+			path := filepath.Join(dir, cleanID+ext)
+			err := os.Remove(path)
+			if err != nil && !os.IsNotExist(err) {
+				logger.L().Warning("failed to remove result file", helpers.String("path", path), helpers.Error(err))
+			}
 		}
 	}
-	return "", nil
+	return nil
 }
 
 func getScanCommand(scanRequest *utilsmetav1.PostScanRequest, scanID string) *cautils.ScanInfo {
@@ -181,17 +237,21 @@ func defaultScanInfo() *cautils.ScanInfo {
 	scanInfo := &cautils.ScanInfo{}
 	scanInfo.FailThreshold = 100
 	scanInfo.ComplianceThreshold = 0
-	scanInfo.AccountID = envToString("KS_ACCOUNT_ID", config.GetAccount())         // publish results to Kubescape SaaS
-	scanInfo.AccessKey = envToString("KS_ACCESS_KEY", config.GetAccessKey())       // publish results to Kubescape SaaS
-	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")         // namespaces to exclude
-	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")          // namespaces to include
-	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")             // path to host scan YAML
-	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")                // output format version
-	scanInfo.Format = envToString("KS_FORMAT", "json")                             // default output should be json
-	scanInfo.Submit = envToBool("KS_SUBMIT", false)                                // publish results to Kubescape SaaS
-	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                             // do not publish results to Kubescape SaaS
-	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)                   // print rego rules
-	scanInfo.HostSensorEnabled.SetBool(envToBool("KS_ENABLE_HOST_SCANNER", false)) // enable host scanner
+	scanInfo.AccountID = envToString("KS_ACCOUNT_ID", config.GetAccount())   // publish results to Kubescape SaaS
+	scanInfo.AccessKey = envToString("KS_ACCESS_KEY", config.GetAccessKey()) // publish results to Kubescape SaaS
+	scanInfo.ExcludedNamespaces = envToString("KS_EXCLUDE_NAMESPACES", "")   // namespaces to exclude
+	scanInfo.IncludeNamespaces = envToString("KS_INCLUDE_NAMESPACES", "")    // namespaces to include
+	scanInfo.HostSensorYamlPath = envToString("KS_HOST_SCAN_YAML", "")       // path to host scan YAML
+	scanInfo.FormatVersion = envToString("KS_FORMAT_VERSION", "v2")          // output format version
+	scanInfo.Format = envToString("KS_FORMAT", "json")                       // default output should be json
+	scanInfo.Submit = envToBool("KS_SUBMIT", false)                          // publish results to Kubescape SaaS
+	scanInfo.Local = envToBool("KS_KEEP_LOCAL", false)                       // do not publish results to Kubescape SaaS
+	scanInfo.EnableRegoPrint = envToBool("KS_REGO_PRINT", false)             // print rego rules
+	// Only set HostSensorEnabled when explicitly configured; leaving it nil allows
+	// auto-detection of node-agent CRDs in getHostSensorHandler.
+	if val, ok := os.LookupEnv("KS_ENABLE_HOST_SCANNER"); ok {
+		scanInfo.HostSensorEnabled.SetBool(boolutils.StringToBool(val))
+	}
 	if !envToBool("KS_DOWNLOAD_ARTIFACTS", false) {
 		scanInfo.UseArtifactsFrom = getter.DefaultLocalStore // Load files from cache (this will prevent kubescape fom downloading the artifacts every time)
 	}
@@ -213,17 +273,22 @@ func envToString(env string, defaultValue string) string {
 	return defaultValue
 }
 
-func writeScanErrorToFile(err error, scanID string) error {
-	if e := os.MkdirAll(filepath.Dir(FailedOutputDir), os.ModePerm); e != nil {
+func writeScanErrorToFile(err error, scanID string) (e error) {
+	if e = os.MkdirAll(FailedOutputDir, os.ModePerm); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to create directory. reason: %s", err.Error(), e.Error())
 	}
-	f, e := os.Create(filepath.Join(filepath.Dir(FailedOutputDir), scanID))
+	var f *os.File
+	f, e = os.Create(filepath.Join(FailedOutputDir, scanID))
 	if e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to open file for writing. reason: %s", err.Error(), e.Error())
 	}
-	defer f.Close()
+	defer func() {
+		if cerr := f.Close(); cerr != nil {
+			e = fmt.Errorf("%w; failed to close scan error file: %w", e, cerr)
+		}
+	}()
 
-	if _, e := f.Write([]byte(err.Error())); e != nil {
+	if _, e = f.Write([]byte(err.Error())); e != nil {
 		return fmt.Errorf("failed to scan. reason: '%s'. failed to save error in file - failed to write. reason: %s", err.Error(), e.Error())
 	}
 	return fmt.Errorf("failed to scan. reason: '%s'", err.Error())

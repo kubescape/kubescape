@@ -72,3 +72,9 @@ func (jsonPrinter *JsonPrinter) ActionPrint(ctx context.Context, opaSessionObj *
 		printer.LogOutputFile(jsonPrinter.writer.Name())
 	}
 }
+
+func (p *JsonPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
+	}
+}

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites errors="0" failures="16" tests="24" name="Kubescape Scanning">
+  <testsuite tests="24" name="NSA" errors="0" failures="16" id="0" skipped="3" timestamp="2024-03-14T09:15:26Z">
+    <properties>
+      <property name="complianceScore" value="19.65"></property>
+    </properties>
+    <testcase classname="NSA" name="Exec into container">
+      <failure message="Exec into container failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0002&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="API server insecure port is enabled"></testcase>
+    <testcase classname="NSA" name="Resource limits">
+      <failure message="Resource limits failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0009&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Applications credentials in configuration files">
+      <skipped message="configuration: Control configurations are empty"></skipped>
+    </testcase>
+    <testcase classname="NSA" name="Non-root containers">
+      <failure message="Non-root containers failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0013&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Allow privilege escalation">
+      <failure message="Allow privilege escalation failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0016&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Immutable container filesystem">
+      <failure message="Immutable container filesystem failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0017&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Ingress and Egress blocked">
+      <failure message="Ingress and Egress blocked failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0030&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Automatic mapping of service account">
+      <failure message="Automatic mapping of service account failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0034&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Cluster-admin binding">
+      <failure message="Cluster-admin binding failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0035&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Host PID/IPC privileges">
+      <failure message="Host PID/IPC privileges failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0038&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="HostNetwork access"></testcase>
+    <testcase classname="NSA" name="Container hostPort"></testcase>
+    <testcase classname="NSA" name="Insecure capabilities">
+      <failure message="Insecure capabilities failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0046&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Cluster internal networking">
+      <failure message="Cluster internal networking failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0054&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Linux hardening">
+      <failure message="Linux hardening failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0055&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Privileged container">
+      <failure message="Privileged container failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0057&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="CVE-2021-25741 - Using symlink for arbitrary host file system access."></testcase>
+    <testcase classname="NSA" name="CVE-2021-25742-nginx-ingress-snippet-annotation-vulnerability"></testcase>
+    <testcase classname="NSA" name="Secret/ETCD encryption enabled">
+      <failure message="Secret/ETCD encryption enabled failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0066&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Audit logs enabled">
+      <failure message="Audit logs enabled failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0067&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="PSP enabled">
+      <failure message="PSP enabled failed on 0 resource(s)" type="Control">Remediation: &#xA;More details: https://hub.armosec.io/docs/c-0068&#xA;&#xA;</failure>
+    </testcase>
+    <testcase classname="NSA" name="Disable anonymous access to Kubelet service">
+      <skipped message="This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"></skipped>
+    </testcase>
+    <testcase classname="NSA" name="Enforce Kubelet client TLS authentication">
+      <skipped message="This control requires the host-scanner capability. To activate the host scanner capability, proceed with the installation of the kubescape operator chart found here: https://github.com/kubescape/helm-charts/tree/main/charts/kubescape-cloud-operator"></skipped>
+    </testcase>
+  </testsuite>
+</testsuites>

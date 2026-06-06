@@ -2,6 +2,7 @@ package opaprocessor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/open-policy-agent/opa/v1/storage"
 	opaprint "github.com/open-policy-agent/opa/v1/topdown/print"
 	"go.opentelemetry.io/otel"
+	"k8s.io/client-go/tools/record"
 )
 
 const ScoreConfigPath = "/resources/config"
@@ -40,28 +42,30 @@ type OPAProcessor struct {
 	clusterName          string
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
-	opaRegisterOnce   sync.Once
-	excludeNamespaces []string
-	includeNamespaces []string
-	printEnabled      bool
-	compiledModules   map[string]*ast.Compiler
-	compiledMu        sync.RWMutex
+	exceptionEventRecorder record.EventRecorder
+	opaRegisterOnce        sync.Once
+	excludeNamespaces      []string
+	includeNamespaces      []string
+	printEnabled           bool
+	compiledModules        map[string]*ast.Compiler
+	compiledMu             sync.RWMutex
 }
 
-func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool) *OPAProcessor {
+func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
 	if regoDependenciesData != nil && sessionObj != nil {
 		regoDependenciesData.PostureControlInputs = sessionObj.RegoInputData.PostureControlInputs
 		regoDependenciesData.DataControlInputs = sessionObj.RegoInputData.DataControlInputs
 	}
 
 	return &OPAProcessor{
-		OPASessionObj:        sessionObj,
-		regoDependenciesData: regoDependenciesData,
-		clusterName:          clusterName,
-		excludeNamespaces:    split(excludeNamespaces),
-		includeNamespaces:    split(includeNamespaces),
-		printEnabled:         enableRegoPrint,
-		compiledModules:      make(map[string]*ast.Compiler),
+		OPASessionObj:          sessionObj,
+		regoDependenciesData:   regoDependenciesData,
+		clusterName:            clusterName,
+		exceptionEventRecorder: exceptionEventRecorder,
+		excludeNamespaces:      split(excludeNamespaces),
+		includeNamespaces:      split(includeNamespaces),
+		printEnabled:           enableRegoPrint,
+		compiledModules:        make(map[string]*ast.Compiler),
 	}
 }
 
@@ -72,19 +76,20 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	ConvertFrameworksToSummaryDetails(&opap.Report.SummaryDetails, opap.Policies, opap.AllPolicies)
 
 	// process
-	if err := opap.Process(ctx, opap.AllPolicies, progressListener); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
-		// Return error?
+	processErr := opap.Process(ctx, opap.AllPolicies, progressListener)
+	if processErr != nil {
+		logger.L().Ctx(ctx).Warning(processErr.Error())
 	}
 
 	// edit results
 	opap.updateResults(ctx)
 
-	//TODO: review this location
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
-	_ = scorewrapper.Calculate(score.EPostureReportV2)
+	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
+	}
 
-	return nil
+	return processErr
 }
 
 // Process OPA policies (rules) on all configured controls.
@@ -99,6 +104,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		defer progressListener.Stop()
 	}
 
+	var processErrs []error
 	for _, toPin := range policies.Controls {
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
@@ -108,7 +114,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 
 		resourcesAssociatedControl, err := opap.processControl(ctx, &control)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning(err.Error())
+			processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
 		}
 
 		if len(resourcesAssociatedControl) == 0 {
@@ -126,7 +132,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 		}
 	}
 
-	return nil
+	return errors.Join(processErrs...)
 }
 
 func (opap *OPAProcessor) loggerStartScanning() {
@@ -154,11 +160,11 @@ func (opap *OPAProcessor) loggerDoneScanning() {
 func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthandling.Control) (map[string]resourcesresults.ResourceAssociatedControl, error) {
 	resourcesAssociatedControl := make(map[string]resourcesresults.ResourceAssociatedControl)
 
+	var ruleErrs []error
 	for i := range control.Rules {
 		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning(err.Error())
-			continue
+			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
 		}
 
 		// append failed rules to controls
@@ -182,7 +188,7 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 		}
 	}
 
-	return resourcesAssociatedControl, nil
+	return resourcesAssociatedControl, errors.Join(ruleErrs...)
 }
 
 // processRule processes a single policy rule, with some extra fixed control inputs.
@@ -194,6 +200,7 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 
 	ruleRegoDependenciesData := opap.makeRegoDeps(rule.ControlConfigInputs, fixedControlInputs)
 
+	var evalErrs []error
 	resourcesPerNS := getAllSupportedObjects(opap.K8SResources, opap.ExternalResources, opap.AllResources, rule)
 	for i := range resourcesPerNS {
 		resourceToScan := resourcesPerNS[i]
@@ -205,6 +212,8 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			resourceToScan, // NOTE: this uses the initial snapshot of AllResources
 		)
 		if err != nil {
+			evalErrs = append(evalErrs, fmt.Errorf("aggregator failed for namespace %q: %w", i, err))
+			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, resourceToScan, err)
 			continue
 		}
 
@@ -217,27 +226,65 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 		// the failed resources are a subgroup of the enumeratedData, so we store the enumeratedData like it was the input data
 		enumeratedData, err := opap.enumerateData(ctx, rule, inputRawResources)
 		if err != nil {
+			evalErrs = append(evalErrs, fmt.Errorf("enumerator failed for namespace %q: %w", i, err))
+			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 			continue
 		}
 
 		inputResources = objectsenvelopes.ListMapToMeta(enumeratedData)
 
-		for i, inputResource := range inputResources {
+		for _, inputResource := range inputResources {
 			if opap.skipNamespace(inputResource.GetNamespace()) {
 				continue
 			}
-			resources[inputResource.GetID()] = &resourcesresults.ResourceAssociatedRule{
-				Name:                  rule.Name,
-				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
-				Status:                apis.StatusPassed,
-			}
-			opap.AllResources[inputResource.GetID()] = inputResources[i]
+			opap.AllResources[inputResource.GetID()] = inputResource
 		}
 
 		ruleResponses, err := opap.runOPAOnSingleRule(ctx, rule, inputRawResources, ruleData, ruleRegoDependenciesData)
 		if err != nil {
+			evalErrs = append(evalErrs, fmt.Errorf("rego eval failed for namespace %q: %w", i, err))
+			opap.markResourcesSkipped(resources, rule, ruleRegoDependenciesData, inputResources, err)
 			continue
-			// return resources, allResources, err
+		}
+
+		// Build the set of failed IDs so we can correctly mark the remainder as passed.
+		// Resources are only written to the result map after a successful OPA evaluation,
+		// preventing stale StatusPassed entries when evaluation fails.
+		// Failed entries are pre-seeded with rule metadata so the loop below can
+		// find them and attach paths/status without losing Name/ControlConfigurations.
+		failedIDs := make(map[string]struct{})
+		for _, ruleResponse := range ruleResponses {
+			for _, failedResource := range objectsenvelopes.ListMapToMeta(ruleResponse.GetFailedResources()) {
+				if opap.skipNamespace(failedResource.GetNamespace()) {
+					continue
+				}
+				id := failedResource.GetID()
+				failedIDs[id] = struct{}{}
+				if _, exists := resources[id]; exists {
+					continue
+				}
+				resources[id] = &resourcesresults.ResourceAssociatedRule{
+					Name:                  rule.Name,
+					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+				}
+			}
+		}
+		for _, inputResource := range inputResources {
+			if opap.skipNamespace(inputResource.GetNamespace()) {
+				continue
+			}
+			id := inputResource.GetID()
+			if _, failed := failedIDs[id]; failed {
+				continue
+			}
+			if existing, ok := resources[id]; ok && (existing.Status == apis.StatusFailed || existing.Status == apis.StatusSkipped) {
+				continue
+			}
+			resources[id] = &resourcesresults.ResourceAssociatedRule{
+				Name:                  rule.Name,
+				ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
+				Status:                apis.StatusPassed,
+			}
 		}
 
 		// ruleResponse to ruleResult
@@ -277,7 +324,38 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 			}
 		}
 	}
-	return resources, nil
+	return resources, errors.Join(evalErrs...)
+}
+
+// markResourcesSkipped seeds the result map with StatusSkipped entries for every
+// in-scope input resource and records the OPA error in opap.InfoMap. Without
+// this, an evaluation failure would leave the resources absent from the rule's
+// output: a sibling rule that passed could then drive the parent control to
+// StatusPassed, masking the fact that this rule never completed.
+func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.ResourceAssociatedRule, rule *reporthandling.PolicyRule, deps resources.RegoDependenciesData, inputResources []workloadinterface.IMetadata, evalErr error) {
+	statusInfo := apis.StatusInfo{
+		InnerInfo:   evalErr.Error(),
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusUnknown,
+	}
+	for _, inputResource := range inputResources {
+		if opap.skipNamespace(inputResource.GetNamespace()) {
+			continue
+		}
+		id := inputResource.GetID()
+		if existing, ok := out[id]; ok && existing.Status == apis.StatusFailed {
+			continue // don't downgrade a definitive failure to skipped
+		}
+		out[id] = &resourcesresults.ResourceAssociatedRule{
+			Name:                  rule.Name,
+			ControlConfigurations: deps.PostureControlInputs,
+			Status:                apis.StatusSkipped,
+			SubStatus:             apis.SubStatusUnknown,
+		}
+		if opap.InfoMap != nil {
+			opap.InfoMap[id] = statusInfo
+		}
+	}
 }
 
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID
@@ -331,7 +409,7 @@ func (opap *OPAProcessor) runRegoOnK8s(ctx context.Context, rule *reporthandling
 
 	results, err := opap.regoEval(ctx, k8sObjects, compiled, &store)
 	if err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		return nil, fmt.Errorf("rule '%s': rego eval failed: %w", rule.Name, err)
 	}
 
 	return results, nil
@@ -390,11 +468,16 @@ func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandlin
 //
 // If some extra fixedControlInputs are provided, they are merged into the "posture" control inputs.
 func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConfigInputs, fixedControlInputs map[string][]string) resources.RegoDependenciesData {
-	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlConfigInputs(configInputs) // get store
+	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlConfigInputs(configInputs)
 
-	// merge configurable control input and fixed control input
+	clonedPostureInputs := make(map[string][]string, len(postureControlInputs)+len(fixedControlInputs))
+
+	for k, v := range postureControlInputs {
+		clonedPostureInputs[k] = slices.Clone(v)
+	}
+
 	for k, v := range fixedControlInputs {
-		postureControlInputs[k] = v
+		clonedPostureInputs[k] = slices.Clone(v)
 	}
 
 	dataControlInputs := map[string]string{
@@ -403,7 +486,7 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConf
 
 	return resources.RegoDependenciesData{
 		DataControlInputs:    dataControlInputs,
-		PostureControlInputs: postureControlInputs,
+		PostureControlInputs: clonedPostureInputs,
 	}
 }
 
@@ -428,10 +511,17 @@ func (opap *OPAProcessor) skipNamespace(ns string) bool {
 }
 
 func split(namespaces string) []string {
-	if namespaces == "" {
-		return nil
+	parts := strings.Split(namespaces, ",")
+	result := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			result = append(result, part)
+		}
 	}
-	return strings.Split(namespaces, ",")
+
+	return result
 }
 
 func (opap *OPAProcessor) getCompiledRule(ctx context.Context, ruleName, ruleData string, printEnabled bool) (*ast.Compiler, error) {

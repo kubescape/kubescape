@@ -73,6 +73,18 @@ func TestContentNewlinesMatchTarget(t *testing.T) {
 			"\n",
 			"first line\n\n\nsecond line\n",
 		},
+		{
+			"No trailing newline",
+			"first line\r\nsecond line",
+			"\n",
+			"first line\nsecond line",
+		},
+		{
+			"Single line no newline",
+			"single line",
+			"\r\n",
+			"single line",
+		},
 	}
 
 	for _, tc := range cases {

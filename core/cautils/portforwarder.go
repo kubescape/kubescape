@@ -24,6 +24,7 @@ type portForward struct {
 	localPort string
 	stopChan  chan struct{}
 	readyChan chan struct{}
+	errChan   chan error
 	out       *bytes.Buffer
 	errOut    *bytes.Buffer
 }
@@ -35,10 +36,26 @@ func getPortForwardingPort() string {
 	return DefaultPortForwardPortValue
 }
 
+func splitHostAndBasePath(host string) (string, string, error) {
+	if !strings.Contains(host, "://") {
+		return host, "", nil
+	}
+
+	baseURL, err := url.Parse(host)
+	if err != nil {
+		return "", "", err
+	}
+
+	return baseURL.Host, strings.TrimRight(baseURL.Path, "/"), nil
+}
+
 func CreatePortForwarder(k8sClient *k8sinterface.KubernetesApi, pod *v1.Pod, forwardingPort, namespace string) (OperatorConnector, error) {
 	path := fmt.Sprintf("/api/v1/namespaces/%s/pods/%s/portforward", namespace, pod.Name)
-	hostIP := strings.TrimLeft(k8sClient.K8SConfig.Host, "htps:/")
-	serverURL := &url.URL{Scheme: "https", Path: path, Host: hostIP}
+	hostIP, basePath, err := splitHostAndBasePath(k8sClient.K8SConfig.Host)
+	if err != nil {
+		return nil, err
+	}
+	serverURL := &url.URL{Scheme: "https", Path: basePath + path, Host: hostIP}
 
 	roundTripper, upgrader, err := spdy.RoundTripperFor(k8sClient.K8SConfig)
 	if err != nil {
@@ -59,13 +76,22 @@ func CreatePortForwarder(k8sClient *k8sinterface.KubernetesApi, pod *v1.Pod, for
 		localPort:     getPortForwardingPort(),
 		stopChan:      stopChan,
 		readyChan:     readyChan,
+		errChan:       make(chan error, 1),
 		out:           out,
 		errOut:        errOut,
 	}, nil
 }
 
-func (p *portForward) waitForPortForwardReadiness() struct{} {
-	return <-p.readyChan
+func (p *portForward) waitForPortForwardReadiness() error {
+	select {
+	case <-p.readyChan:
+		return nil
+	case err := <-p.errChan:
+		if err == nil {
+			err = fmt.Errorf("port-forward exited before becoming ready: %s", strings.TrimSpace(p.errOut.String()))
+		}
+		return err
+	}
 }
 
 func (p *portForward) GetPortForwardLocalhost() string {
@@ -78,9 +104,7 @@ func (p *portForward) StopPortForwarder() {
 
 func (p *portForward) StartPortForwarder() error {
 	go func() {
-		p.ForwardPorts()
+		p.errChan <- p.ForwardPorts()
 	}()
-	p.waitForPortForwardReadiness()
-
-	return nil
+	return p.waitForPortForwardReadiness()
 }

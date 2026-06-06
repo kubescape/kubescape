@@ -43,7 +43,7 @@ func Test_getOperatorPod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			k8sClient := k8sinterface.KubernetesApi{
 				KubernetesClient: fake.NewClientset(),
-				Context:          context.TODO(),
+				Context:          context.Background(),
 			}
 
 			var createdOperatorPod *v1.Pod
@@ -80,4 +80,12 @@ func Test_getOperatorPod(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_getOperatorPod_nilClient(t *testing.T) {
+	_, err := getOperatorPod(nil, kubescapeNamespace)
+	assert.EqualError(t, err, "kubernetes client is not initialised")
+
+	_, err = getOperatorPod(&k8sinterface.KubernetesApi{}, kubescapeNamespace)
+	assert.EqualError(t, err, "kubernetes client is not initialised")
 }

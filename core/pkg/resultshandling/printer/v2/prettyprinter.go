@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 
@@ -21,7 +22,6 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
-	"k8s.io/utils/strings/slices"
 )
 
 var _ printer.IPrinter = &PrettyPrinter{}
@@ -128,6 +128,8 @@ func (pp *PrettyPrinter) ActionPrint(_ context.Context, opaSessionObj *cautils.O
 		pp.printOverview(opaSessionObj, pp.verboseMode)
 
 		pp.mainPrinter.PrintConfigurationsScanning(&opaSessionObj.Report.SummaryDetails, sortedControlIDs, opaSessionObj.TopWorkloadsByScore)
+
+		pp.printScanCoverage(opaSessionObj.ScanCoverage)
 
 		// When writing to Stdout, we aren’t really writing to an output file,
 		// so no need to print that we are
@@ -325,5 +327,48 @@ func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 		return false
 	default:
 		return true
+	}
+}
+
+// printScanCoverage prints a "Scan Coverage" warning block when GVR pull
+// failures caused controls to be skipped or partial data was collected.
+// Nothing is printed on a clean scan.
+func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
+	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 {
+		return
+	}
+
+	fmt.Fprintf(pp.writer, "\n%s\n", getSeparator("─"))
+	fmt.Fprintf(pp.writer, "Scan Coverage Warning\n")
+	fmt.Fprintf(pp.writer, "%s\n", getSeparator("─"))
+
+	if len(coverage.FailedGVRPulls) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following resource types could not be collected:\n")
+		for _, f := range coverage.FailedGVRPulls {
+			fmt.Fprintf(pp.writer, "  • %s: %s\n", f.GVR, f.Error)
+		}
+	}
+
+	if len(coverage.NotEvaluatedControls) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following controls were NOT evaluated (all required resource types failed to pull):\n")
+		for _, c := range coverage.NotEvaluatedControls {
+			fmt.Fprintf(pp.writer, "  • %s (missing: %s)\n", c.ControlID, strings.Join(c.MissingGVRs, ", "))
+		}
+	}
+
+	if len(coverage.PartialGVRPulls) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following resource types were only partially collected (some namespace/name selectors failed):\n")
+		for _, p := range coverage.PartialGVRPulls {
+			fmt.Fprintf(pp.writer, "  • %s (selector: %q): %s\n", p.GVR, p.Selector, p.Error)
+		}
+		fmt.Fprintf(pp.writer, "\nControls depending on these resource types were evaluated against incomplete data.\n")
+	}
+
+	fmt.Fprintf(pp.writer, "\nTo fix this, ensure the scanning identity has list/get permissions on the missing resource types.\n")
+}
+
+func (p *PrettyPrinter) CloseWriter() {
+	if p.writer != nil && p.writer != os.Stdout {
+		p.writer.Close()
 	}
 }

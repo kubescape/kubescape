@@ -1,6 +1,7 @@
 package cautils
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"gopkg.in/yaml.v3"
@@ -33,10 +35,20 @@ const (
 type Chart struct {
 	Name string
 	Path string
+	// Provenance links this rendered source back to its template and the
+	// .Values keys that template reads. Zero value when extraction failed
+	// or no static refs were found — callers must tolerate empty fields.
+	Provenance helmprovenance.Provenance
 }
 
-// LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names
-func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[string][]workloadinterface.IMetadata, map[string]Chart) {
+// LoadResourcesFromHelmCharts scans a given path (recursively) for helm charts, renders the templates and returns a map of workloads and a map of chart names.
+// Helm value overrides and release identity supplied via valueOpts are merged over the chart defaults before rendering.
+// Pass an empty HelmValueOptions{} to render with chart defaults only (preserves prior behavior).
+//
+// If user-supplied overrides cannot be parsed (bad --set syntax, missing -f file, unreadable
+// --set-file path, etc.) the error is returned to the caller. We deliberately do not silently
+// fall back to chart defaults — scanning the wrong manifests is worse than failing fast.
+func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts HelmValueOptions) (map[string][]workloadinterface.IMetadata, map[string]Chart, error) {
 	directories, _ := listDirs(basePath)
 	helmDirectories := make([]string, 0)
 	for _, dir := range directories {
@@ -45,27 +57,64 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string) (map[stri
 		}
 	}
 
+	// Parse user-supplied value overrides once; reuse for every chart we render.
+	var userValues map[string]interface{}
+	if !valueOpts.IsEmpty() {
+		var err error
+		userValues, err = valueOpts.MergeValues()
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to parse Helm value overrides: %w", err)
+		}
+	}
+	releaseOpts := valueOpts.ReleaseOptions()
+
 	sourceToWorkloads := map[string][]workloadinterface.IMetadata{}
 	sourceToChart := make(map[string]Chart, 0)
 	for _, helmDir := range helmDirectories {
 		chart, err := NewHelmChart(helmDir)
 		if err == nil {
-			wls, errs := chart.GetWorkloadsWithDefaultValues()
+			values := chart.GetDefaultValues()
+			if userValues != nil {
+				values = mergeMaps(values, userValues)
+			}
+			wls, errs := chart.GetWorkloadsWithOptions(values, releaseOpts)
 			if len(errs) > 0 {
 				logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering of Helm chart template '%s', failed: %v", chart.GetName(), errs))
 				continue
 			}
 			chartName := chart.GetName()
+			prov := chart.Provenance()
 			for k, v := range wls {
 				sourceToWorkloads[k] = v
 				sourceToChart[k] = Chart{
-					Name: chartName,
-					Path: helmDir,
+					Name:       chartName,
+					Path:       helmDir,
+					Provenance: prov[k],
 				}
 			}
 		}
 	}
-	return sourceToWorkloads, sourceToChart
+	return sourceToWorkloads, sourceToChart, nil
+}
+
+// mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
+// This mirrors helm.sh/helm/v3 internal `chartutil.CoalesceTables` semantics for values overlay
+// and is used to layer user --set/-f values over a chart's defaults before rendering.
+func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(base))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range override {
+		if vMap, ok := v.(map[string]interface{}); ok {
+			if baseMap, ok := out[k].(map[string]interface{}); ok {
+				out[k] = mergeMaps(baseMap, vMap)
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
 }
 
 // If the contents at given path is a Kustomize Directory, LoadResourcesFromKustomizeDirectory will
@@ -104,6 +153,11 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 }
 
 func LoadResourcesFromFiles(ctx context.Context, input, rootPath string) map[string][]workloadinterface.IMetadata {
+	// skip the plain-YAML glob for a kustomize directory; the kustomize render handles it
+	if isKustomizeDirectory(input) {
+		return nil
+	}
+
 	files, errs := listFiles(input)
 	if len(errs) > 0 {
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("%v", errs))
@@ -218,15 +272,20 @@ func listFilesOrDirectories(pattern string, onlyDirectories bool) ([]string, []e
 	return paths, errs
 }
 
-func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, error) {
-	defer recover()
+func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, _ error) {
+	yamlObjs = []workloadinterface.IMetadata{}
+	defer func() {
+		if r := recover(); r != nil {
+			logger.L().Warning(fmt.Sprintf("panic during YAML parsing: %v", r))
+		}
+	}()
 
-	r := bytes.NewReader(yamlFile)
-	dec := yaml.NewDecoder(r)
-	yamlObjs := []workloadinterface.IMetadata{}
-
-	var t interface{}
-	for dec.Decode(&t) == nil {
+	for i, doc := range splitYAMLDocuments(yamlFile) {
+		var t interface{}
+		if err := yaml.Unmarshal(doc, &t); err != nil {
+			logger.L().Warning(fmt.Sprintf("skipping malformed YAML document %d: %v", i+1, err))
+			continue
+		}
 		j := convertYamlToJson(t)
 		if j == nil {
 			continue
@@ -244,7 +303,43 @@ func readYamlFile(yamlFile []byte) ([]workloadinterface.IMetadata, error) {
 		}
 	}
 
-	return yamlObjs, nil
+	return
+}
+
+func splitYAMLDocuments(data []byte) [][]byte {
+	var docs [][]byte
+	var current bytes.Buffer
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, bufio.MaxScanTokenSize), len(data)+1)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if isYAMLDocumentSeparator(line) {
+			if doc := bytes.TrimSpace(current.Bytes()); len(doc) > 0 {
+				docs = append(docs, append([]byte{}, doc...))
+			}
+			current.Reset()
+			continue
+		}
+		current.Write(line)
+		current.WriteByte('\n')
+	}
+	if err := scanner.Err(); err != nil {
+		logger.L().Warning(fmt.Sprintf("error scanning YAML input: %v", err))
+	}
+	if doc := bytes.TrimSpace(current.Bytes()); len(doc) > 0 {
+		docs = append(docs, append([]byte{}, doc...))
+	}
+	return docs
+}
+
+func isYAMLDocumentSeparator(line []byte) bool {
+	line = bytes.TrimRight(line, "\r")
+	if !bytes.HasPrefix(line, []byte("---")) {
+		return false
+	}
+	rest := bytes.TrimLeft(line[3:], " \t")
+	return len(rest) == 0 || rest[0] == '#'
 }
 
 func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, error) {
@@ -290,11 +385,11 @@ func convertYamlToJson(i interface{}) interface{} {
 }
 
 func IsYaml(filePath string) bool {
-	return slices.Contains(YAML_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
+	return slices.Contains(YAML_PREFIX, strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), ".")))
 }
 
 func IsJson(filePath string) bool {
-	return slices.Contains(JSON_PREFIX, strings.ReplaceAll(filepath.Ext(filePath), ".", ""))
+	return slices.Contains(JSON_PREFIX, strings.ToLower(strings.TrimPrefix(filepath.Ext(filePath), ".")))
 }
 
 func glob(root, pattern string, onlyDirectories bool) ([]string, error) {

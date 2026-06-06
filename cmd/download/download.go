@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kubescape/go-logger"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/core"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -67,16 +66,15 @@ func GetDownloadCmd(ks meta.IKubescape) *cobra.Command {
 				downloadInfo.Path, downloadInfo.FileName = filepath.Split(downloadInfo.Path)
 			}
 
-			if len(args) == 0 {
-				return fmt.Errorf("no arguements provided")
-			}
-
 			downloadInfo.Target = args[0]
 			if len(args) >= 2 {
+				if args[1] == "" && (args[0] == "framework" || args[0] == "control") {
+					return fmt.Errorf("name cannot be empty for %s download", args[0])
+				}
 				downloadInfo.Identifier = args[1]
 			}
 			if err := ks.Download(&downloadInfo); err != nil {
-				logger.L().Fatal(err.Error())
+				return err
 			}
 			return nil
 		},

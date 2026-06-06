@@ -165,7 +165,7 @@ func (lc *LocalConfig) UpdateCachedConfig() error {
 
 func (lc *LocalConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
 	}
 	return nil
 }
@@ -247,7 +247,7 @@ func (c *ClusterConfig) UpdateCachedConfig() error {
 
 func (c *ClusterConfig) DeleteCachedConfig(ctx context.Context) error {
 	if err := DeleteConfigFile(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		logger.L().Ctx(ctx).Warning("failed to delete cached config", helpers.Error(err))
 	}
 	return nil
 }
@@ -258,7 +258,9 @@ func (c *ClusterConfig) GetContextName() string {
 func (c *ClusterConfig) ToMapString() map[string]interface{} {
 	m := map[string]interface{}{}
 	if bc, err := json.Marshal(c.configObj); err == nil {
-		json.Unmarshal(bc, &m)
+		if err := json.Unmarshal(bc, &m); err != nil {
+			logger.L().Error("failed to unmarshal config", helpers.Error(err))
+		}
 	}
 	return m
 }
@@ -338,11 +340,20 @@ func existsConfigFile() bool {
 func updateConfigFile(configObj *ConfigObj) error {
 	fullPath := ConfigFileFullPath()
 	dir := filepath.Dir(fullPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-
-	return os.WriteFile(fullPath, configObj.Config(), 0664) //nolint:gosec
+	// Tighten permissions on pre-existing directory in case it was
+	// created with broader permissions by an older version.
+	if err := os.Chmod(dir, 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(fullPath, configObj.Config(), 0600); err != nil {
+		return err
+	}
+	// Tighten permissions on pre-existing file in case it was created
+	// with broader permissions by an older version.
+	return os.Chmod(fullPath, 0600)
 }
 
 func (c *ClusterConfig) GenerateAccountID() (string, error) {
@@ -434,19 +445,16 @@ func GetConfigMapNamespace() string {
 }
 
 func updateCredentials(configObj *ConfigObj, accountID, accessKey string) {
+	// Explicit flags take precedence over env vars; env vars are only applied as fallback.
 	if accessKey != "" {
 		configObj.AccessKey = accessKey
-	}
-
-	if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
+	} else if envAccessKey := os.Getenv(accessKeyEnvVar); envAccessKey != "" {
 		configObj.AccessKey = envAccessKey
 	}
 
 	if accountID != "" {
 		configObj.AccountID = accountID
-	}
-
-	if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
+	} else if envAccountID := os.Getenv(accountIdEnvVar); envAccountID != "" {
 		configObj.AccountID = envAccountID
 	}
 }
@@ -496,6 +504,22 @@ func initializeCloudAPI(c ITenantConfig) *v1.KSCloudAPI {
 			logger.L().Debug("updating Access Key from config", helpers.Int("old (len)", len(ksCloud.GetAccessKey())), helpers.Int("new (len)", len(val)))
 			ksCloud.SetAccessKey(val)
 		}
+
+		// Back-propagate URLs from connector to configObj when configObj has no URL but connector does.
+		// This handles the API_URL-based live service discovery path where initializeSaaSEnv sets URLs
+		// on the global connector before any scan runs, but configObj.CloudReportURL is never populated
+		// (e.g. when running without services.json and without KS_CLOUD_REPORT_URL env var).
+		if co := c.GetConfigObj(); co != nil {
+			if co.CloudReportURL == "" && ksCloud.GetCloudReportURL() != "" {
+				logger.L().Debug("updating Cloud Report URL in config from connector", helpers.String("cloudReportURL", ksCloud.GetCloudReportURL()))
+				co.CloudReportURL = ksCloud.GetCloudReportURL()
+			}
+			if co.CloudAPIURL == "" && ksCloud.GetCloudAPIURL() != "" {
+				logger.L().Debug("updating Cloud API URL in config from connector", helpers.String("cloudAPIURL", ksCloud.GetCloudAPIURL()))
+				co.CloudAPIURL = ksCloud.GetCloudAPIURL()
+			}
+		}
+
 		getter.SetKSCloudAPIConnector(ksCloud)
 	} else {
 		logger.L().Debug("initializing KS Cloud API from config", helpers.String("accountID", c.GetAccountID()), helpers.String("cloudAPIURL", c.GetCloudAPIURL()), helpers.String("cloudReportURL", c.GetCloudReportURL()))

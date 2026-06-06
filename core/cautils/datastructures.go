@@ -16,6 +16,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/prioritization"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // K8SResources map[<api group>/<api version>/<resource>][]<resourceID>
@@ -61,15 +62,18 @@ type OPASessionObj struct {
 	Metadata              *reporthandlingv2.Metadata
 	InfoMap               map[string]apis.StatusInfo         // Map errors of resources to StatusInfo
 	ResourceToControlsMap map[string][]string                // map[<apigroup/apiversion/resource>] = [<control_IDs>]
+	ScanCoverage          ScanCoverage                       // runtime coverage gaps (failed GVR pulls + not-evaluated controls)
+	PartialGVRFailures    []PartialGVRPull                   // per-selector LIST failures for GVRs that were partially collected
 	SessionID             string                             // SessionID
 	Policies              []reporthandling.Framework         // list of frameworks to scan
 	Exceptions            []armotypes.PostureExceptionPolicy // list of exceptions to apply on scan results
 	OmitRawResources      bool                               // omit raw resources from output
 	SingleResourceScan    workloadinterface.IWorkload        // single resource scan
 	TopWorkloadsByScore   []reporthandling.IResource
-	TemplateMapping       map[string]MappingNodes // Map chart obj to template (only for rendering from path)
 	TriggeredByCLI        bool
-	LabelsToCopy          []string // Labels to copy from workloads to scan reports
+	LabelsToCopy          []string                    // Labels to copy from workloads to scan reports
+	VAPPolicies           []unstructured.Unstructured // ValidatingAdmissionPolicy resources collected from the cluster
+	VAPBindings           []unstructured.Unstructured // ValidatingAdmissionPolicyBinding resources collected from the cluster
 }
 
 func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework, k8sResources K8SResources, scanInfo *ScanInfo) *OPASessionObj {
@@ -92,7 +96,6 @@ func NewOPASessionObj(ctx context.Context, frameworks []reporthandling.Framework
 		Metadata:              scanInfoToScanMetadata(ctx, scanInfo),
 		OmitRawResources:      scanInfo.OmitRawResources,
 		TriggeredByCLI:        scanInfo.TriggeredByCLI,
-		TemplateMapping:       make(map[string]MappingNodes, clusterSize/10),
 		LabelsToCopy:          scanInfo.LabelsToCopy,
 	}
 }
@@ -129,19 +132,24 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 	}
 
 	// set top workloads according to number of top workloads
+	topWorkloads := make([]reporthandling.IResource, 0, TopWorkloadsNumber)
 	for i := 0; i < TopWorkloadsNumber; i++ {
 		if i >= len(topWorkloadsSorted) {
 			break
 		}
+
 		source := sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID]
+
 		wlObj := &reporthandling.Resource{
 			IMetadata: sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
 			Source:    &source,
 		}
 
-		sessionObj.TopWorkloadsByScore = append(sessionObj.TopWorkloadsByScore, wlObj)
+		topWorkloads = append(topWorkloads, wlObj)
 		count++
 	}
+
+	sessionObj.TopWorkloadsByScore = topWorkloads
 }
 
 func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources map[string]int) {

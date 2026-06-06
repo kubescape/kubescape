@@ -85,7 +85,7 @@ jobs:
 
             - name: Generate GitHub App token
               id: app-token
-              uses: actions/create-github-app-token@v1
+              uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1.12.0
               with:
                   app-id: ${{ secrets.E2E_DISPATCH_APP_ID }}
                   private-key: ${{ secrets.E2E_DISPATCH_APP_PRIVATE_KEY }}
@@ -236,7 +236,7 @@ jobs:
 
             - name: Upload failed step logs
               if: failure()
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
               with:
                   name: failed-e2e-logs-attempt-${{ github.run_attempt }}
                   path: failed_*.txt

@@ -9,6 +9,7 @@ import (
 
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func onlineBoutiquePath() string {
@@ -31,7 +32,7 @@ func TestListFiles(t *testing.T) {
 }
 
 func TestLoadResourcesFromFiles(t *testing.T) {
-	workloads := LoadResourcesFromFiles(context.TODO(), onlineBoutiquePath(), "")
+	workloads := LoadResourcesFromFiles(context.Background(), onlineBoutiquePath(), "")
 	assert.Equal(t, 12, len(workloads))
 
 	for i, w := range workloads {
@@ -44,8 +45,26 @@ func TestLoadResourcesFromFiles(t *testing.T) {
 	}
 }
 
+func TestLoadResourcesFromFiles_SupportsMixedCaseExtensions(t *testing.T) {
+	o, _ := os.Getwd()
+	testDir := filepath.Join(o, "testdata", "mixed_extensions")
+	workloads := LoadResourcesFromFiles(context.Background(), testDir, "")
+	assert.Equal(t, 2, len(workloads))
+
+	expectedFiles := []string{
+		filepath.Join(testDir, "pod.yaml"),
+		filepath.Join(testDir, "service.YAML"),
+	}
+
+	for _, ef := range expectedFiles {
+		_, ok := workloads[ef]
+		assert.True(t, ok, "Expected workload for file %s", ef)
+	}
+}
+
 func TestLoadResourcesFromHelmCharts(t *testing.T) {
-	sourceToWorkloads, sourceToChartName := LoadResourcesFromHelmCharts(context.TODO(), helmChartPath())
+	sourceToWorkloads, sourceToChartName, err := LoadResourcesFromHelmCharts(context.Background(), helmChartPath(), HelmValueOptions{})
+	assert.NoError(t, err)
 	assert.Equal(t, 6, len(sourceToWorkloads))
 
 	for file, workloads := range sourceToWorkloads {
@@ -144,11 +163,35 @@ func TestIsYaml(t *testing.T) {
 			want: true,
 		},
 		{
+			path: "temp.YAML",
+			want: true,
+		},
+		{
+			path: "temp.yml",
+			want: true,
+		},
+		{
+			path: "temp.Yml",
+			want: true,
+		},
+		{
+			path: "temp.Yaml",
+			want: true,
+		},
+		{
 			path: "temp.json",
 			want: false,
 		},
 		{
+			path: "temp.Json",
+			want: false,
+		},
+		{
 			path: "random.txt",
+			want: false,
+		},
+		{
+			path: "no-ext",
 			want: false,
 		},
 	}
@@ -170,11 +213,31 @@ func TestIsJson(t *testing.T) {
 			want: false,
 		},
 		{
+			path: "temp.yml",
+			want: false,
+		},
+		{
 			path: "temp.json",
 			want: true,
 		},
 		{
+			path: "temp.JSON",
+			want: true,
+		},
+		{
+			path: "temp.Json",
+			want: true,
+		},
+		{
+			path: "temp.Yaml",
+			want: false,
+		},
+		{
 			path: "random.txt",
+			want: false,
+		},
+		{
+			path: "no-ext",
 			want: false,
 		},
 	}
@@ -197,7 +260,31 @@ func TestGetFileFormat(t *testing.T) {
 			want: YAML_FILE_FORMAT,
 		},
 		{
+			path: "temp.YAML",
+			want: YAML_FILE_FORMAT,
+		},
+		{
+			path: "temp.yml",
+			want: YAML_FILE_FORMAT,
+		},
+		{
+			path: "temp.Yml",
+			want: YAML_FILE_FORMAT,
+		},
+		{
+			path: "temp.Yaml",
+			want: YAML_FILE_FORMAT,
+		},
+		{
 			path: "temp.json",
+			want: JSON_FILE_FORMAT,
+		},
+		{
+			path: "temp.JSON",
+			want: JSON_FILE_FORMAT,
+		},
+		{
+			path: "temp.Json",
 			want: JSON_FILE_FORMAT,
 		},
 		{
@@ -211,5 +298,21 @@ func TestGetFileFormat(t *testing.T) {
 			assert.Equal(t, tt.want, getFileFormat(tt.path))
 		})
 	}
+}
 
+func TestIsFileAndIsDir(t *testing.T) {
+	tempDir := t.TempDir()
+	tempFile := filepath.Join(tempDir, "test_file.txt")
+	err := os.WriteFile(tempFile, []byte("test"), 0644)
+	require.NoError(t, err)
+
+	assert.True(t, isDir(tempDir))
+	assert.False(t, isFile(tempDir))
+
+	assert.True(t, isFile(tempFile))
+	assert.False(t, isDir(tempFile))
+
+	missingPath := filepath.Join(tempDir, "missing-path")
+	assert.False(t, isFile(missingPath))
+	assert.False(t, isDir(missingPath))
 }

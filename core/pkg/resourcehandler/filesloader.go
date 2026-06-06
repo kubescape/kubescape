@@ -40,13 +40,14 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 		var workloads []workloadinterface.IMetadata
 		var err error
 
+		helmValueOpts := helmValueOptionsFromScanInfo(scanInfo)
 		if scanInfo.ChartPath != "" && scanInfo.FilePath != "" {
-			workloadIDToSource, workloads, _ = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath)
+			workloadIDToSource, workloads, err = getWorkloadFromHelmChart(ctx, scanInfo.InputPatterns[path], scanInfo.ChartPath, scanInfo.FilePath, helmValueOpts)
 		} else {
-			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path])
-			if err != nil {
-				return nil, allResources, nil, nil, err
-			}
+			workloadIDToSource, workloads, err = getResourcesFromPath(ctx, scanInfo.InputPatterns[path], helmValueOpts)
+		}
+		if err != nil {
+			return nil, allResources, nil, nil, err
 		}
 		if len(workloads) == 0 {
 			continue
@@ -54,7 +55,6 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 
 		for k, v := range workloadIDToSource {
 			sessionObj.ResourceSource[k] = v
-			sessionObj.TemplateMapping[k] = cautils.MappingNodes{}
 		}
 
 		// map all resources: map["/apiVersion/version/kind"][]<k8s workloads>
@@ -100,7 +100,24 @@ func (fileHandler *FileResourceHandler) GetResources(ctx context.Context, sessio
 func (fileHandler *FileResourceHandler) GetCloudProvider() string {
 	return ""
 }
-func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+
+// helmValueOptionsFromScanInfo extracts the user-supplied Helm value/release flags from ScanInfo
+// into the cautils.HelmValueOptions used by chart rendering.
+func helmValueOptionsFromScanInfo(scanInfo *cautils.ScanInfo) cautils.HelmValueOptions {
+	if scanInfo == nil {
+		return cautils.HelmValueOptions{}
+	}
+	return cautils.HelmValueOptions{
+		ValueFiles:       scanInfo.HelmValueFiles,
+		Values:           scanInfo.HelmSetValues,
+		StringValues:     scanInfo.HelmSetStringValues,
+		FileValues:       scanInfo.HelmSetFileValues,
+		ReleaseName:      scanInfo.HelmReleaseName,
+		ReleaseNamespace: scanInfo.HelmReleaseNamespace,
+	}
+}
+
+func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	clonedRepo := cautils.GetClonedPath(path)
 
 	if clonedRepo != "" {
@@ -114,7 +131,10 @@ func getWorkloadFromHelmChart(ctx context.Context, path, helmPath, workloadPath 
 	// Get repo root
 	repoRoot, gitRepo := extractGitRepo(clonedRepo)
 
-	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, helmPath)
+	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, helmPath, helmValueOpts)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	wlSource, ok := helmSourceToWorkloads[workloadPath]
 	if !ok {
@@ -163,16 +183,19 @@ func getWorkloadSourceHelmChart(repoRoot string, source string, gitRepo *cautils
 	}
 
 	return reporthandling.Source{
-		Path:          repoRoot,
-		HelmPath:      helmChart.Path,
-		RelativePath:  source,
-		FileType:      reporthandling.SourceTypeHelmChart,
-		HelmChartName: helmChart.Name,
-		LastCommit:    lastCommit,
+		Path:             repoRoot,
+		HelmPath:         helmChart.Path,
+		RelativePath:     source,
+		FileType:         reporthandling.SourceTypeHelmChart,
+		HelmChartName:    helmChart.Name,
+		HelmTemplateFile: helmChart.Provenance.TemplateFile,
+		HelmValuesPaths:  helmChart.Provenance.ValuesPaths,
+		HelmTemplateLine: helmChart.Provenance.TemplateLine,
+		LastCommit:       lastCommit,
 	}
 }
 
-func getResourcesFromPath(ctx context.Context, path string) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
+func getResourcesFromPath(ctx context.Context, path string, helmValueOpts cautils.HelmValueOptions) (map[string]reporthandling.Source, []workloadinterface.IMetadata, error) {
 	workloadIDToSource := make(map[string]reporthandling.Source)
 	var workloads []workloadinterface.IMetadata
 
@@ -260,7 +283,10 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 	}
 
 	// load resources from helm charts
-	helmSourceToWorkloads, helmSourceToChart := cautils.LoadResourcesFromHelmCharts(ctx, path)
+	helmSourceToWorkloads, helmSourceToChart, err := cautils.LoadResourcesFromHelmCharts(ctx, path, helmValueOpts)
+	if err != nil {
+		return nil, nil, err
+	}
 	for source, ws := range helmSourceToWorkloads {
 		workloads = append(workloads, ws...)
 		helmChart := helmSourceToChart[source]
@@ -325,6 +351,9 @@ func getResourcesFromPath(ctx context.Context, path string) (map[string]reportha
 			workloadIDToSource[ws[i].GetID()] = workloadSource
 		}
 	}
+
+	// backstop: drop cross-provider identity collisions the path-level kustomize skip can't see (e.g. helm + raw YAML)
+	workloads, workloadIDToSource = dedupWorkloads(workloads, workloadIDToSource)
 
 	return workloadIDToSource, workloads, nil
 }

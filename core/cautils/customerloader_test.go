@@ -5,8 +5,10 @@ import (
 	"os"
 	"testing"
 
+	v1 "github.com/kubescape/backend/pkg/client/v1"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -236,6 +238,33 @@ func Test_initializeCloudAPI(t *testing.T) {
 	}
 }
 
+// Test_initializeCloudAPI_backPropagatesURLsFromConnector verifies that when the global
+// connector already has URLs (e.g. set by initializeSaaSEnv via live service discovery)
+// but configObj has no URLs (e.g. no services.json and no KS_CLOUD_REPORT_URL env var),
+// initializeCloudAPI back-propagates the connector URLs into configObj so that
+// setSubmitBehavior can see a non-empty CloudReportURL and allow result submission.
+func Test_initializeCloudAPI_backPropagatesURLsFromConnector(t *testing.T) {
+	// Pre-populate the global connector with URLs (simulating initializeSaaSEnv via API_URL discovery)
+	presetCloud, err := v1.NewKSCloudAPI("https://api.example.com", "https://report.example.com", "test-account", "test-key")
+	require.NoError(t, err)
+	getter.SetKSCloudAPIConnector(presetCloud)
+
+	// Config with empty URLs (simulating no services.json and no KS_CLOUD_REPORT_URL env var)
+	cfg := &ClusterConfig{
+		configObj: &ConfigObj{
+			AccountID:      "test-account",
+			CloudReportURL: "",
+			CloudAPIURL:    "",
+		},
+	}
+
+	initializeCloudAPI(cfg)
+
+	// configObj should now have URLs from the connector
+	assert.Equal(t, "https://report.example.com", cfg.configObj.CloudReportURL)
+	assert.Equal(t, "https://api.example.com", cfg.configObj.CloudAPIURL)
+}
+
 func TestGetConfigMapNamespace(t *testing.T) {
 	tests := []struct {
 		name string
@@ -353,5 +382,37 @@ func TestUpdateEmptyFields(t *testing.T) {
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudAPIURL, tests[i].outCo.CloudAPIURL)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.CloudReportURL, tests[i].outCo.CloudReportURL)
 		checkIsUpdateCorrectly(t, beforeChangesOutCO.ClusterName, tests[i].outCo.ClusterName)
+	}
+}
+
+func TestUpdateCredentials_FlagTakesPrecedenceOverEnv(t *testing.T) {
+	// Regression test: explicit flag values must not be overwritten by env vars.
+	t.Setenv(accountIdEnvVar, "env-account-id")
+	t.Setenv(accessKeyEnvVar, "env-access-key")
+
+	configObj := &ConfigObj{}
+	updateCredentials(configObj, "flag-account-id", "flag-access-key")
+
+	if configObj.AccountID != "flag-account-id" {
+		t.Errorf("expected AccountID=flag-account-id, got %s", configObj.AccountID)
+	}
+	if configObj.AccessKey != "flag-access-key" {
+		t.Errorf("expected AccessKey=flag-access-key, got %s", configObj.AccessKey)
+	}
+}
+
+func TestUpdateCredentials_EnvAppliedWhenNoFlag(t *testing.T) {
+	// Env vars should apply as fallback when no flag value is provided.
+	t.Setenv(accountIdEnvVar, "env-account-id")
+	t.Setenv(accessKeyEnvVar, "env-access-key")
+
+	configObj := &ConfigObj{}
+	updateCredentials(configObj, "", "")
+
+	if configObj.AccountID != "env-account-id" {
+		t.Errorf("expected AccountID=env-account-id, got %s", configObj.AccountID)
+	}
+	if configObj.AccessKey != "env-access-key" {
+		t.Errorf("expected AccessKey=env-access-key, got %s", configObj.AccessKey)
 	}
 }

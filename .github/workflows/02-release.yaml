@@ -28,20 +28,20 @@ jobs:
       repository-projects: read
       statuses: read
       security-events: read
-      attestations: read
+      attestations: write
       artifact-metadata: read
     runs-on: ubuntu-large
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: "1.25"
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.9"
 
@@ -56,34 +56,34 @@ jobs:
           sudo rm -rf /var/lib/apt/lists/*
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.5.0
+        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 # v3.5.0
 
       - name: Create Cosign Key
         run: echo "${{ secrets.COSIGN_PRIVATE_KEY_V1 }}" > cosign.key
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Login to Quay.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: quay.io
           username: ${{ secrets.QUAYIO_REGISTRY_USERNAME }}
           password: ${{ secrets.QUAYIO_REGISTRY_PASSWORD }}
 
-      - uses: anchore/sbom-action/download-syft@v0
+      - uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         name: Setup Syft
 
       - name: Create k8s Kind Cluster
-        uses: helm/kind-action@v1.10.0
+        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0
         with:
           cluster_name: kubescape-e2e
 
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6.4.0
         with:
           distribution: goreleaser
           version: latest
@@ -103,11 +103,22 @@ jobs:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
 
+      - name: Attest build provenance
+        if: (github.event_name != 'workflow_dispatch' || inputs.skip_publish != true) && hashFiles('dist/**/*.tar.gz') != ''
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            dist/**/*.tar.gz
+            dist/**/kubescape
+            dist/**/kubescape.exe
+            dist/**/ksserver
+            dist/**/downloader
+
       - name: Update new version in krew-index
         if: github.event_name != 'workflow_dispatch' || inputs.skip_publish != true
-        uses: rajatjindal/krew-release-bot@v0.0.47
+        uses: rajatjindal/krew-release-bot@3d9faef30a82761d610544f62afddca00993eef9 # v0.0.47
         with:
-          krew_template_file: .krew.yaml
+          krew_template_file: dist/krew/kubescape.yaml
 
       - name: List collected system-test results (debug)
         if: always()
@@ -116,7 +127,7 @@ jobs:
           ls -laR test-results/system-tests || true
 
       - name: System Tests Report
-        uses: mikepenz/action-junit-report@v5
+        uses: mikepenz/action-junit-report@3585e9575db828022551b4231f165eb59a0e74e3 # v5.6.2
         if: always()
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

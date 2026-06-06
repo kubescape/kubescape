@@ -1,11 +1,13 @@
 package scan
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"strings"
 
 	"github.com/kubescape/go-logger"
+	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/kubescape/kubescape/v3/core/meta"
@@ -25,6 +27,9 @@ var scanCmdExamples = fmt.Sprintf(`
   # Scan and save the results in the JSON format
   %[1]s scan --format json --output results.json
 
+  # Scan and save the results in multiple format in a single scan
+  %[1]s scan --format json,html,junit --output result
+
   # Display all resources
   %[1]s scan --verbose
 
@@ -39,9 +44,22 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd := &cobra.Command{
 		Use:     "scan",
 		Short:   "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations",
-		Long:    `The action you want to perform`,
+		Long:    `Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.`,
 		Example: scanCmdExamples,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if scanInfo.FailThresholdSeverity != "" {
+				if err := shared.ValidateSeverity(scanInfo.FailThresholdSeverity); err != nil {
+					return err
+				}
+			}
+			if f := cmd.Flags().Lookup("format"); f != nil && f.Changed && scanInfo.Format == "" {
+				return fmt.Errorf("format cannot be empty, supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif")
+			}
+			requestedView := scanInfo.View
+			if err := validateFrameworkScanInfo(&scanInfo); err != nil {
+				return err
+			}
+			scanInfo.View = requestedView
 			if scanInfo.View == string(cautils.SecurityViewType) {
 				setSecurityViewScanInfo(args, &scanInfo)
 
@@ -72,8 +90,9 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().StringVar(&scanInfo.UseArtifactsFrom, "use-artifacts-from", "", "Load artifacts from local directory. If not used will download them")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.ExcludedNamespaces, "exclude-namespaces", "e", "", "Namespaces to exclude from scanning. e.g: --exclude-namespaces ns-a,ns-b. Notice, when running with `exclude-namespace` kubescape does not scan cluster-scoped objects.")
 
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 100, "Failure threshold is the percent above which the command fails and returns exit code 1")
-	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1")
+	scanCmd.PersistentFlags().Float32VarP(&scanInfo.FailThreshold, "fail-threshold", "t", 100, "Failure threshold is the percent above which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', and '--view resource|control'")
+	scanCmd.PersistentFlags().Float32VarP(&scanInfo.ComplianceThreshold, "compliance-threshold", "", 0, "Compliance threshold is the percent below which the command fails and returns exit code 1. Applies to 'scan framework', 'scan control', and '--view resource|control'")
+	scanCmd.PersistentFlags().Float32Var(&scanInfo.FailCoverageThreshold, "fail-coverage-below", 0, "Minimum percentage of controls that must be evaluated (0 to disable). If coverage drops below this threshold the command returns exit code 1")
 
 	scanCmd.PersistentFlags().StringVar(&scanInfo.FailThresholdSeverity, "severity-threshold", "", "Severity threshold is the severity of failed controls at which the command fails and returns exit code 1")
 	scanCmd.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "pretty-printer", `Output file format. Supported formats: "pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"`)
@@ -93,8 +112,26 @@ func GetScanCommand(ks meta.IKubescape) *cobra.Command {
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.EnableRegoPrint, "enable-rego-prints", "", false, "Enable sending to rego prints to the logs (use with debug log level: -l debug)")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.ScanImages, "scan-images", "", false, "Scan resources images")
 	scanCmd.PersistentFlags().BoolVarP(&scanInfo.UseDefaultMatchers, "use-default-matchers", "", true, "Use default matchers (true) or CPE matchers (false) for image scanning")
+	scanCmd.PersistentFlags().BoolVar(&scanInfo.Hide, "hide", false, "Hide sensitive identifiers (namespace, resource names, container names, images) in results")
 	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.LabelsToCopy, "labels-to-copy", nil, "Labels to copy from workloads to scan reports for easy identification. e.g: --labels-to-copy=app,team,environment")
 	scanCmd.PersistentFlags().StringVar(&scanInfo.ListingURL, "grype-db-url", "", "Grype vulnerability database URL")
+	scanCmd.PersistentFlags().DurationVar(&scanInfo.ScanTimeout, "scan-timeout", 0, "Maximum duration for the scan (e.g. 5m, 30s, 1h). 0 means no timeout. When the timeout is reached the scan exits with a non-zero code.")
+
+	// Helm value override flags. Mirror `helm install` so users can pass overrides through verbatim
+	// when scanning a Helm chart directory. Note: -f is already taken by --format, so --values is long-only.
+	//
+	// Flag-binding choices match upstream Helm (helm.sh/helm/v3 cmd/helm/flags.go) exactly:
+	//   --values     -> StringSliceVar : Helm splits on commas, so `--values a.yaml,b.yaml` is two files.
+	//   --set        -> StringArrayVar : verbatim; commas inside the value belong to the strvals parser
+	//                                    and must survive (e.g. `--set tolerations={a,b}`).
+	//   --set-string -> StringArrayVar : same reasoning as --set.
+	//   --set-file   -> StringArrayVar : same reasoning as --set.
+	scanCmd.PersistentFlags().StringSliceVar(&scanInfo.HelmValueFiles, "values", nil, "Specify Helm values in a YAML file or a URL when scanning a Helm chart (can specify multiple, or separate paths with commas)")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetValues, "set", nil, "Set Helm values on the command line when scanning a Helm chart (can specify multiple, e.g. --set key1=val1 --set key2=val2)")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetStringValues, "set-string", nil, "Set Helm STRING values on the command line when scanning a Helm chart (can specify multiple)")
+	scanCmd.PersistentFlags().StringArrayVar(&scanInfo.HelmSetFileValues, "set-file", nil, "Set Helm values from respective files specified via the command line (can specify multiple)")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseName, "release-name", "", "Helm release name made available as .Release.Name when rendering the chart")
+	scanCmd.PersistentFlags().StringVar(&scanInfo.HelmReleaseNamespace, "release-namespace", "", "Helm release namespace made available as .Release.Namespace when rendering the chart")
 
 	scanCmd.PersistentFlags().MarkDeprecated("fail-threshold", "use '--compliance-threshold' flag instead. Flag will be removed at 1.Dec.2023")
 	scanCmd.PersistentFlags().MarkDeprecated("create-account", "Create account is no longer supported. In case of a missing Account ID and a configured backend server, a new account id will be generated automatically by Kubescape. Feel free to contact the Kubescape maintainers for more information.")
@@ -136,7 +173,28 @@ func setSecurityViewScanInfo(args []string, scanInfo *cautils.ScanInfo) {
 	}
 }
 
+// applyTimeout wraps ks with a deadline context when ScanTimeout > 0 and
+// returns a cleanup function that cancels the context and restores the
+// original. The caller must defer the returned function so the deadline
+// covers both ks.Scan() and results.HandleResults().
+//
+//	defer applyTimeout(scanInfo, ks)()
+func applyTimeout(scanInfo *cautils.ScanInfo, ks meta.IKubescape) func() {
+	if scanInfo.ScanTimeout <= 0 {
+		return func() {}
+	}
+	originalCtx := ks.Context()
+	timeoutCtx, cancel := context.WithTimeout(originalCtx, scanInfo.ScanTimeout)
+	ks.SetContext(timeoutCtx)
+	return func() {
+		cancel()
+		ks.SetContext(originalCtx)
+	}
+}
+
 func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
+	defer applyTimeout(&scanInfo, ks)()
+
 	results, err := ks.Scan(&scanInfo)
 	if err != nil {
 		return err
@@ -147,6 +205,7 @@ func securityScan(scanInfo cautils.ScanInfo, ks meta.IKubescape) error {
 	}
 
 	enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), &scanInfo, terminateOnExceedingSeverity)
+	enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), &scanInfo)
 
 	return nil
 }

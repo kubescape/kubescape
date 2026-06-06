@@ -9,7 +9,7 @@ import (
 )
 
 func TestGetUpdateCmd(t *testing.T) {
-	ks := core.NewKubescape(context.TODO())
+	ks := core.NewKubescape(context.Background())
 	cmd := GetUpdateCmd(ks)
 	assert.NotNil(t, cmd)
 

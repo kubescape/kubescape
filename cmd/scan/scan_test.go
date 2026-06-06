@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"errors"
 	"os"
 	"reflect"
 	"testing"
@@ -11,10 +12,12 @@ import (
 	"github.com/kubescape/kubescape/v3/cmd/shared"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	resultshandlingpkg "github.com/kubescape/kubescape/v3/core/pkg/resultshandling"
 	v1 "github.com/kubescape/opa-utils/httpserver/apis/v1"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestExceedsSeverity(t *testing.T) {
@@ -372,6 +375,158 @@ func TestGetScanCommand(t *testing.T) {
 	// Verify the command name and short description
 	assert.Equal(t, "scan", cmd.Use)
 	assert.Equal(t, "Scan a Kubernetes cluster or YAML files for image vulnerabilities and misconfigurations", cmd.Short)
-	assert.Equal(t, "The action you want to perform", cmd.Long)
+	assert.Equal(t, "Scan a Kubernetes cluster, YAML files, Helm charts, Kustomize directories, Git repositories, or container images for security misconfigurations and vulnerabilities.", cmd.Long)
 	assert.Equal(t, scanCmdExamples, cmd.Example)
+}
+
+func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	f := cmd.PersistentFlags().Lookup("scan-timeout")
+	require.NotNil(t, f, "--scan-timeout flag must be registered on the scan command")
+	assert.Equal(t, "duration", f.Value.Type(),
+		"--scan-timeout must be a duration flag (accepts values like 5m, 30s, 1h)")
+	assert.Equal(t, "0s", f.DefValue,
+		"--scan-timeout default must be 0s (no timeout)")
+}
+
+func TestGetScanCommand_ScanTimeoutFlagParsed(t *testing.T) {
+	tests := []struct {
+		name    string
+		flagVal string
+		want    time.Duration
+	}{
+		{"five minutes", "5m", 5 * time.Minute},
+		{"thirty seconds", "30s", 30 * time.Second},
+		{"one hour", "1h", time.Hour},
+		{"zero means no timeout", "0", 0},
+		{"complex duration", "1h30m", 90 * time.Minute},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mockKubescape := &mocks.MockIKubescape{}
+			cmd := GetScanCommand(mockKubescape)
+
+			err := cmd.PersistentFlags().Set("scan-timeout", tt.flagVal)
+			require.NoError(t, err, "setting --scan-timeout=%s should not produce an error", tt.flagVal)
+
+			f := cmd.PersistentFlags().Lookup("scan-timeout")
+			assert.Equal(t, tt.want.String(), f.Value.String(),
+				"parsed duration for --scan-timeout=%s is incorrect", tt.flagVal)
+		})
+	}
+}
+
+func TestGetScanCommand_ScanTimeoutFlagInherited(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	for _, sub := range cmd.Commands() {
+		t.Run(sub.Name(), func(t *testing.T) {
+			f := sub.InheritedFlags().Lookup("scan-timeout")
+			require.NotNil(t, f,
+				"subcommand %q must inherit --scan-timeout from the parent scan command",
+				sub.Name())
+		})
+	}
+}
+
+func TestScanInfo_ScanTimeoutField(t *testing.T) {
+	tests := []struct {
+		name    string
+		timeout time.Duration
+	}{
+		{"no timeout (zero value)", 0},
+		{"five minutes", 5 * time.Minute},
+		{"one millisecond", time.Millisecond},
+		{"twenty-four hours", 24 * time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			si := &cautils.ScanInfo{ScanTimeout: tt.timeout}
+			assert.Equal(t, tt.timeout, si.ScanTimeout)
+		})
+	}
+}
+
+// contextTrackingKubescape is a test-local IKubescape that records what
+// context was active when Scan() was called, so we can assert the deadline.
+// Scan() returns a sentinel error so securityScan exits before HandleResults,
+// avoiding a nil-pointer dereference on the stub ResultsHandler.
+type contextTrackingKubescape struct {
+	mocks.MockIKubescape
+	ctx            context.Context
+	scanCalledWith context.Context
+}
+
+func (m *contextTrackingKubescape) Context() context.Context       { return m.ctx }
+func (m *contextTrackingKubescape) SetContext(ctx context.Context) { m.ctx = ctx }
+func (m *contextTrackingKubescape) Scan(_ *cautils.ScanInfo) (*resultshandlingpkg.ResultsHandler, error) {
+	m.scanCalledWith = m.ctx
+	return nil, errors.New("stub: scan not implemented in test")
+}
+
+func TestSecurityScan_TimeoutDeadlineActiveForScan(t *testing.T) {
+	ks := &contextTrackingKubescape{ctx: context.Background()}
+	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
+
+	_ = securityScan(scanInfo, ks)
+
+	_, hasDeadline := ks.scanCalledWith.Deadline()
+	assert.True(t, hasDeadline, "Scan() must receive a context with a deadline when ScanTimeout > 0")
+}
+
+func TestSecurityScan_TimeoutContextRestoredAfterReturn(t *testing.T) {
+	originalCtx := context.Background()
+	ks := &contextTrackingKubescape{ctx: originalCtx}
+	scanInfo := cautils.ScanInfo{ScanTimeout: time.Minute}
+
+	_ = securityScan(scanInfo, ks)
+
+	_, hasDeadline := ks.Context().Deadline()
+	assert.False(t, hasDeadline, "original context must be restored on ks after securityScan returns")
+}
+
+func TestSecurityScan_ZeroTimeoutNoDeadline(t *testing.T) {
+	ks := &contextTrackingKubescape{ctx: context.Background()}
+	scanInfo := cautils.ScanInfo{ScanTimeout: 0}
+
+	_ = securityScan(scanInfo, ks)
+
+	_, hasDeadline := ks.scanCalledWith.Deadline()
+	assert.False(t, hasDeadline, "Scan() must not receive a deadline when ScanTimeout is 0")
+}
+
+// coverageWouldFail mirrors the gate logic in enforceCoverageThreshold so we
+// can test it without triggering os.Exit.
+func coverageWouldFail(notEvaluated, totalControls int, threshold float32) bool {
+	if threshold <= 0 || totalControls == 0 {
+		return false
+	}
+	pct := float32(totalControls-notEvaluated) / float32(totalControls) * 100
+	return pct < threshold
+}
+
+func Test_enforceCoverageThreshold(t *testing.T) {
+	tests := []struct {
+		name          string
+		notEvaluated  int
+		totalControls int
+		threshold     float32
+		wantFail      bool
+	}{
+		{"threshold disabled (0) never fails", 10, 10, 0, false},
+		{"all controls evaluated passes", 0, 10, 80, false},
+		{"coverage exactly at threshold passes", 2, 10, 80, false},
+		{"coverage below threshold fails", 5, 10, 80, true},
+		{"zero total controls never fails", 0, 0, 50, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.wantFail, coverageWouldFail(tt.notEvaluated, tt.totalControls, tt.threshold))
+		})
+	}
 }

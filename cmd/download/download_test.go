@@ -39,15 +39,11 @@ func TestGetViewCmd_Args(t *testing.T) {
 	assert.Equal(t, "", downloadCmd.Long)
 	assert.Equal(t, downloadExample, downloadCmd.Example)
 
-	err := downloadCmd.RunE(&cobra.Command{}, []string{})
-	expectedErrorMessage := "no arguements provided"
-	assert.Equal(t, expectedErrorMessage, err.Error())
-
-	err = downloadCmd.RunE(&cobra.Command{}, []string{"config"})
+	err := downloadCmd.RunE(&cobra.Command{}, []string{"artifacts"})
 	assert.Nil(t, err)
 
 	err = downloadCmd.Args(&cobra.Command{}, []string{})
-	expectedErrorMessage = "policy type required, supported: artifacts,attack-tracks,control,controls-inputs,exceptions,framework"
+	expectedErrorMessage := "policy type required, supported: artifacts,attack-tracks,control,controls-inputs,exceptions,framework"
 	assert.Equal(t, expectedErrorMessage, err.Error())
 
 	err = downloadCmd.Args(&cobra.Command{}, []string{"invalid"})

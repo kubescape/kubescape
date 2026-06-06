@@ -10,6 +10,7 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/kubescape/v3/cmd/completion"
 	"github.com/kubescape/kubescape/v3/cmd/config"
+	"github.com/kubescape/kubescape/v3/cmd/diff"
 	"github.com/kubescape/kubescape/v3/cmd/download"
 	"github.com/kubescape/kubescape/v3/cmd/fix"
 	"github.com/kubescape/kubescape/v3/cmd/list"
@@ -58,9 +59,9 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 		PersistentPreRun: func(cmd *cobra.Command, args []string) {
 			k8sinterface.SetClusterContextName(rootInfo.KubeContext)
 			initLogger()
-			initLoggerLevel()
+			initLoggerLevel(cmd)
 			initEnvironment()
-			initCacheDir()
+			initCacheDir(cmd)
 		},
 	}
 
@@ -97,6 +98,7 @@ func getRootCmd(ks meta.IKubescape, ksVersion, ksCommit, ksDate string) *cobra.C
 	rootCmd.AddCommand(config.GetConfigCmd(ks))
 	rootCmd.AddCommand(update.GetUpdateCmd(ks))
 	rootCmd.AddCommand(fix.GetFixCmd(ks))
+	rootCmd.AddCommand(diff.GetDiffCmd(ks))
 	rootCmd.AddCommand(patch.GetPatchCmd(ks))
 	rootCmd.AddCommand(vap.GetVapHelperCmd())
 	rootCmd.AddCommand(operator.GetOperatorCmd(ks))

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -73,12 +75,11 @@ func (bpf *BoolPtrFlag) SetBool(val bool) {
 }
 
 func (bpf *BoolPtrFlag) Set(val string) error {
-	switch val {
-	case "true":
-		bpf.SetBool(true)
-	case "false":
-		bpf.SetBool(false)
+	parsed, err := strconv.ParseBool(val)
+	if err != nil {
+		return err
 	}
+	bpf.SetBool(parsed)
 	return nil
 }
 
@@ -108,6 +109,7 @@ type ScanInfo struct {
 	UseDefault            bool                         // Load framework from cached file (instead of download). Use when running offline
 	UseArtifactsFrom      string                       // Load artifacts from local path. Use when running offline
 	VerboseMode           bool                         // Display all the input resources and not only failed resources
+	Hide                  bool                         // Hide sensitive identifiers (names, namespaces, images) in results
 	View                  string                       //
 	Format                string                       // Format results (table, json, junit ...)
 	Output                string                       // Store results in an output file, Output file name
@@ -120,6 +122,7 @@ type ScanInfo struct {
 	FailThreshold         float32                      // DEPRECATED - Failure score threshold
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
+	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
 	Submit                bool                         // Submit results to Kubescape Cloud BE
 	ScanID                string                       // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls
@@ -138,8 +141,15 @@ type ScanInfo struct {
 	ScanType              ScanTypes
 	ScanImages            bool
 	UseDefaultMatchers    bool
+	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
 	ChartPath             string
 	FilePath              string
+	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)
+	HelmSetValues         []string // --set: Helm value overrides as key=value (repeatable)
+	HelmSetStringValues   []string // --set-string: forced-string Helm value overrides
+	HelmSetFileValues     []string // --set-file: Helm value overrides whose value is read from a file
+	HelmReleaseName       string   // --release-name: Helm release name made available as .Release.Name during render
+	HelmReleaseNamespace  string   // --release-namespace: Helm release namespace made available as .Release.Namespace
 	LabelsToCopy          []string // Labels to copy from workloads to scan reports
 	scanningContext       *ScanningContext
 	cleanups              []func()
@@ -165,6 +175,10 @@ func (scanInfo *ScanInfo) Cleanup() {
 	for _, cleanup := range scanInfo.cleanups {
 		cleanup()
 	}
+}
+
+func (scanInfo *ScanInfo) AddCleanup(cleanup func()) {
+	scanInfo.cleanups = append(scanInfo.cleanups, cleanup)
 }
 
 func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
@@ -205,19 +219,46 @@ func (scanInfo *ScanInfo) setUseArtifactsFrom(ctx context.Context) {
 func (scanInfo *ScanInfo) setUseFrom() {
 	if scanInfo.UseDefault {
 		for _, policy := range scanInfo.PolicyIdentifier {
-			scanInfo.UseFrom = append(scanInfo.UseFrom, getter.GetDefaultPath(policy.Identifier+".json"))
+			path, err := getter.PolicyCachePath(policy.Identifier)
+			if err != nil {
+				logger.L().Warning("skipping default cache lookup for policy", helpers.String("identifier", policy.Identifier), helpers.Error(err))
+				continue
+			}
+			scanInfo.UseFrom = append(scanInfo.UseFrom, path)
 		}
 	}
 }
 
-// Formats returns a slice of output formats that have been requested for a given scan
+// Formats returns a slice of output formats that have been requested for a given scan.
+// Empty entries and surrounding whitespace are dropped so that inputs like
+// "json,,pdf" or "json, ,pdf" do not produce blank format strings.
 func (scanInfo *ScanInfo) Formats() []string {
-	formatString := scanInfo.Format
-	if formatString != "" {
-		return strings.Split(scanInfo.Format, ",")
-	} else {
+	if scanInfo.Format == "" {
 		return []string{}
 	}
+
+	var cleaned []string
+	for _, f := range strings.Split(scanInfo.Format, ",") {
+		if v := strings.TrimSpace(f); v != "" {
+			cleaned = append(cleaned, v)
+		}
+	}
+
+	return unique(cleaned)
+}
+
+func unique(items []string) []string {
+	seen := map[string]bool{}
+	result := []string{}
+
+	for _, item := range items {
+		if !seen[item] {
+			seen[item] = true
+			result = append(result, item)
+		}
+	}
+
+	return result
 }
 
 func (scanInfo *ScanInfo) SetScanType(scanType ScanTypes) {
@@ -244,6 +285,22 @@ func (scanInfo *ScanInfo) contains(policyName string) bool {
 	return false
 }
 
+// splitNamespaceList parses a comma-separated namespace list (as accepted by
+// --exclude-namespaces / --include-namespaces) into a clean slice. Empty
+// entries and surrounding whitespace are dropped.
+func splitNamespaceList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthandlingv2.Metadata {
 	metadata := &reporthandlingv2.Metadata{}
 
@@ -251,13 +308,12 @@ func scanInfoToScanMetadata(ctx context.Context, scanInfo *ScanInfo) *reporthand
 	metadata.ScanMetadata.FormatVersion = scanInfo.FormatVersion
 	metadata.ScanMetadata.Submit = scanInfo.Submit
 
-	// TODO - Add excluded and included namespaces
-	// if len(scanInfo.ExcludedNamespaces) > 1 {
-	// 	opaSessionObj.Metadata.ScanMetadata.ExcludedNamespaces = strings.Split(scanInfo.ExcludedNamespaces[1:], ",")
-	// }
-	// if len(scanInfo.IncludeNamespaces) > 1 {
-	// 	opaSessionObj.Metadata.ScanMetadata.IncludeNamespaces = strings.Split(scanInfo.IncludeNamespaces[1:], ",")
-	// }
+	if ns := splitNamespaceList(scanInfo.ExcludedNamespaces); len(ns) > 0 {
+		metadata.ScanMetadata.ExcludedNamespaces = ns
+	}
+	if ns := splitNamespaceList(scanInfo.IncludeNamespaces); len(ns) > 0 {
+		metadata.ScanMetadata.IncludeNamespaces = ns
+	}
 
 	// scan type
 	if len(scanInfo.PolicyIdentifier) > 0 {

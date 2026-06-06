@@ -2,6 +2,7 @@ package resultshandling
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -50,7 +51,7 @@ func TestResultsHandlerHandleResultsPrintsResultsToUI(t *testing.T) {
 	rh := NewResultsHandler(reporter, printers, uiPrinter)
 	rh.SetData(fakeScanData)
 
-	err := rh.HandleResults(context.TODO(), &cautils.ScanInfo{})
+	err := rh.HandleResults(context.Background(), &cautils.ScanInfo{})
 	assert.NoError(t, err)
 
 	want := 1
@@ -116,7 +117,7 @@ func TestValidatePrinter(t *testing.T) {
 			name:      "junit format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.JunitResultFormat,
-			expectErr: errors.New("format \"junit\"is not supported for image scanning"),
+			expectErr: errors.New("format \"junit\" is not supported for image scanning"),
 		},
 		{
 			name:      "sarif format for image scan should not return error",
@@ -134,13 +135,13 @@ func TestValidatePrinter(t *testing.T) {
 			name:      "html format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.HtmlFormat,
-			expectErr: errors.New("format \"html\"is not supported for image scanning"),
+			expectErr: errors.New("format \"html\" is not supported for image scanning"),
 		},
 		{
 			name:      "prometheus format for image scan should return error",
 			scanType:  cautils.ScanTypeImage,
 			format:    printer.PrometheusFormat,
-			expectErr: errors.New("format \"prometheus\"is not supported for image scanning"),
+			expectErr: errors.New("format \"prometheus\" is not supported for image scanning"),
 		},
 		{
 			name:        "sarif format for cluster context should return error",
@@ -166,11 +167,23 @@ func TestValidatePrinter(t *testing.T) {
 			format:      printer.SARIFFormat,
 			expectErr:   nil,
 		},
+		{
+			name:      "pdf format for image scan should return error",
+			scanType:  cautils.ScanTypeImage,
+			format:    printer.PdfFormat,
+			expectErr: errors.New("format \"pdf\" is not supported for image scanning"),
+		},
+		{
+			name:      "pdf format for cluster scan should not return error",
+			scanType:  cautils.ScanTypeCluster,
+			format:    printer.PdfFormat,
+			expectErr: nil,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format)
+			_, got := ValidatePrinter(tt.scanType, tt.scanContext, tt.format)
 
 			assert.Equal(t, tt.expectErr, got)
 		})
@@ -258,4 +271,95 @@ func TestNewPrinter(t *testing.T) {
 			assert.NotNil(t, p)
 		})
 	}
+}
+
+func makeResultsHandler(complianceScore, riskScore float32) *ResultsHandler {
+	fakeScanData := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				Score:           riskScore,
+				ComplianceScore: complianceScore,
+			},
+		},
+		Metadata: &reporthandlingv2.Metadata{},
+	}
+	rh := NewResultsHandler(&DummyReporter{}, nil, &SpyPrinter{})
+	rh.SetData(fakeScanData)
+	return rh
+}
+
+func TestGetComplianceScore(t *testing.T) {
+	tests := []struct {
+		name            string
+		complianceScore float32
+		want            float32
+	}{
+		{name: "zero score", complianceScore: 0, want: 0},
+		{name: "full score", complianceScore: 100, want: 100},
+		{name: "partial score", complianceScore: 67.5, want: 67.5},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rh := makeResultsHandler(tt.complianceScore, 0)
+			assert.Equal(t, tt.want, rh.GetComplianceScore())
+		})
+	}
+}
+
+func TestGetRiskScore(t *testing.T) {
+	tests := []struct {
+		name      string
+		riskScore float32
+		want      float32
+	}{
+		{name: "zero risk", riskScore: 0, want: 0},
+		{name: "full risk", riskScore: 100, want: 100},
+		{name: "partial risk", riskScore: 42.0, want: 42.0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rh := makeResultsHandler(0, tt.riskScore)
+			assert.Equal(t, tt.want, rh.GetRiskScore())
+		})
+	}
+}
+
+func TestSetDataGetData(t *testing.T) {
+	rh := NewResultsHandler(&DummyReporter{}, nil, &SpyPrinter{})
+	assert.Nil(t, rh.GetData())
+
+	data := &cautils.OPASessionObj{
+		Report: &reporthandlingv2.PostureReport{
+			SummaryDetails: reportsummary.SummaryDetails{
+				ComplianceScore: 55.0,
+			},
+		},
+	}
+	rh.SetData(data)
+	assert.Equal(t, data, rh.GetData())
+	assert.Equal(t, float32(55.0), rh.GetComplianceScore())
+}
+
+func TestGetResults(t *testing.T) {
+	rh := makeResultsHandler(80.0, 60.0)
+	results := rh.GetResults()
+	assert.NotNil(t, results)
+}
+
+func TestToJson(t *testing.T) {
+	rh := makeResultsHandler(75.0, 50.0)
+	data, err := rh.ToJson()
+	assert.NoError(t, err)
+	assert.NotEmpty(t, data)
+
+	// verify it is valid JSON
+	var out map[string]interface{}
+	assert.NoError(t, json.Unmarshal(data, &out))
+}
+
+func TestGetComplianceScoreAndRiskScoreAreIndependent(t *testing.T) {
+	rh := makeResultsHandler(80.0, 40.0)
+	assert.Equal(t, float32(80.0), rh.GetComplianceScore())
+	assert.Equal(t, float32(40.0), rh.GetRiskScore())
+	assert.NotEqual(t, rh.GetComplianceScore(), rh.GetRiskScore())
 }

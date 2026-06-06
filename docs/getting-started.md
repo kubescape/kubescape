@@ -10,6 +10,8 @@ The best way to get started with Kubescape is to download it to the machine you 
 - [Run your first scan](#run-your-first-scan)
 - [Usage](#usage)
   - [Misconfigurations Scanning](#misconfigurations-scanning)
+    - [Output Formats](#output-formats)
+    - [Compliance Score](#compliance-score)
   - [Image Scanning](#image-scanning)
   - [Auto-Fix Misconfigurations](#auto-fix-misconfigurations)
   - [Image Patching](#image-patching)
@@ -206,25 +208,31 @@ kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 
 Objects with exceptions will be presented as `exclude` and not `fail`.
 
-[See more examples about exceptions.](/examples/exceptions/README.md)
+[See more examples about exceptions.](../examples/exceptions/README.md)
 
-#### Scan Helm charts 
+#### Scan Helm charts
 
-```bash
-kubescape scan </path/to/directory>
-```
-
+Kubescape automatically detects a Helm chart directory by the 
+presence of a `Chart.yaml` file.
+ ```bash
+    kubescape scan /path/to/helm/chart/directory
+ ```
 > **Note**  
-> Kubescape will load the default VALUES file.
+> Kubescape will load the default `values.yaml` file. To use a 
+> custom values file, use the `--helm-values` flag.
 
-#### Scan a Kustomize directory 
+#### Scan a Kustomize directory
 
+Kubescape automatically detects a Kustomize directory by the 
+presence of a `kustomization.yaml`, `kustomization.yml`, or `kustomization` file.
 ```bash
-kubescape scan </path/to/directory>
+kubescape scan /path/to/kustomize/directory
 ```
-
 > **Note**  
-> Kubescape will generate Kubernetes YAML objects using a `kustomize` file and scan them for security.
+> Kubescape will generate Kubernetes YAML objects using the 
+> `kustomization.yaml` file and scan them for security.
+> If a directory contains both `Chart.yaml` and 
+> `kustomization.yaml`, Kubescape will treat it as a Helm chart.
 
 #### Trigger in cluster components for scanning your cluster
 
@@ -244,29 +252,38 @@ kubescape operator scan vulnerabilities
 
 We offer two important metrics to assess compliance:
 
-- Control Compliance Score: This score measures the compliance of individual controls within a framework. It is calculated by evaluating the ratio of resources that passed to the total number of resources evaluated against that control.
+- Control Compliance Score: This score measures the compliance of individual controls within a framework. It is calculated by evaluating the ratio of resources that passed to the total number of resources evaluated against that control. To check against a threshold, use the resource or control view:
     ```bash
-    kubescape scan --compliance-threshold <SCORE_VALUE[float32]>
+    kubescape scan --view resource  --compliance-threshold <SCORE_VALUE[float32]>
+    kubescape scan --view control   --compliance-threshold <SCORE_VALUE[float32]>
+    kubescape scan control <CONTROL_ID> --compliance-threshold <SCORE_VALUE[float32]>
     ```
 - Framework Compliance Score: This score provides an overall assessment of your cluster's compliance with a specific framework. It is calculated by averaging the Control Compliance Scores of all controls within the framework.
     ```bash
     kubescape scan framework <FRAMEWORK_NAME> --compliance-threshold <SCORE_VALUE[float32]>
     ```
 
-### Output formats
+`--compliance-threshold` (compliance score) and the deprecated
+`--fail-threshold` (risk score) apply to the framework/control
+subcommands and to `--view resource|control`. The default
+`kubescape scan <path>` (security view) does not evaluate against
+these score thresholds, so use one of the forms above when you want
+the exit code to reflect the score.
 
-#### JSON:
+### Output Formats
+
+#### JSON
 
 ```bash
 kubescape scan --format json --output results.json
 ```
 
-#### junit XML: 
+#### JUnit XML
 
 ```bash
 kubescape scan --format junit --output results.xml
 ```
-#### SARIF: 
+#### SARIF
 
 SARIF is a standard format for the output of static analysis tools. It is supported by many tools, including GitHub Code Scanning and Azure DevOps. [Read more about SARIF](https://docs.github.com/en/code-security/secure-coding/sarif-support-for-code-scanning/about-sarif-support-for-code-scanning).
 
@@ -280,6 +297,12 @@ kubescape scan --format sarif --output results.sarif
 
 ```bash
 kubescape scan --format html --output results.html
+```
+
+#### PDF
+
+```bash
+kubescape scan --format pdf --output report.pdf
 ```
 
 ## Offline/air-gapped environment support
@@ -450,7 +473,7 @@ kubescape patch -i nginx:1.22 -a tcp://0.0.0.0:$BUILDKIT_PORT
 > **Note**  
 > Image patching can only fix OS-level vulnerabilities, not application-level ones.
 
-For more details, see the [Patch Command Documentation](/cmd/patch/README.md).
+For more details, see the [Patch Command Documentation](../cmd/patch/README.md).
 
 ## Validating Admission Policies (VAP)
 

@@ -12,6 +12,56 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 )
 
+// bucketControlsByCategory groups every control by the category it carries in
+// its own metadata (sub-category preferred when present). Unlike the previous
+// hardcoded-ID approach this never silently drops controls added to the rego
+// library after the printer was last updated.
+func bucketControlsByCategory(controlSummaries []reportsummary.IControlSummary) map[string]CategoryControls {
+	mapCategoriesToCtrlSummary := map[string][]reportsummary.IControlSummary{}
+	mapCategoryIDToName := make(map[string]string)
+
+	for i := range controlSummaries {
+		cat := controlSummaries[i].GetCategory()
+		if cat == nil {
+			continue
+		}
+		catID, catName := cat.ID, cat.Name
+		if cat.SubCategory != nil && cat.SubCategory.ID != "" {
+			catID, catName = cat.SubCategory.ID, cat.SubCategory.Name
+		}
+		if _, ok := mapCategoriesToCtrlSummary[catID]; !ok {
+			mapCategoryIDToName[catID] = catName
+			mapCategoriesToCtrlSummary[catID] = []reportsummary.IControlSummary{}
+		}
+		mapCategoriesToCtrlSummary[catID] = append(mapCategoriesToCtrlSummary[catID], controlSummaries[i])
+	}
+
+	return buildCategoryToControlsMap(mapCategoriesToCtrlSummary, mapCategoryIDToName)
+}
+
+// categoryRenderOrder returns preferredOrder entries that are present in
+// categoriesToControls (in that order), then any other category IDs found in
+// categoriesToControls appended alphabetically. This guarantees no bucket is
+// silently skipped while preserving the curated ordering for known categories.
+func categoryRenderOrder(preferredOrder []string, categoriesToControls map[string]CategoryControls) []string {
+	out := make([]string, 0, len(categoriesToControls))
+	seen := make(map[string]bool, len(preferredOrder))
+	for _, id := range preferredOrder {
+		if _, ok := categoriesToControls[id]; ok {
+			out = append(out, id)
+			seen[id] = true
+		}
+	}
+	extras := make([]string, 0)
+	for id := range categoriesToControls {
+		if !seen[id] {
+			extras = append(extras, id)
+		}
+	}
+	sort.Strings(extras)
+	return append(out, extras...)
+}
+
 // returns map of category ID to category controls (name and controls)
 // controls will be on the map only if the are in the mapClusterControlsToCategories map
 func mapCategoryToSummary(controlSummaries []reportsummary.IControlSummary, mapDisplayCtrlIDToCategory map[string]string) map[string]CategoryControls {

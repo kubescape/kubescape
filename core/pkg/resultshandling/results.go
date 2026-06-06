@@ -12,6 +12,7 @@ import (
 	printerv1 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v1"
 	printerv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter"
+	"github.com/kubescape/kubescape/v3/core/pkg/vapreconcile"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 )
 
@@ -76,18 +77,25 @@ func (rh *ResultsHandler) GetResults() *reporthandlingv2.PostureReport {
 
 // HandleResults handles all necessary actions for the scan results
 func (rh *ResultsHandler) HandleResults(ctx context.Context, scanInfo *cautils.ScanInfo) error {
+	if len(rh.ScanData.VAPPolicies) > 0 {
+		index := vapreconcile.BuildIndex(rh.ScanData.VAPPolicies, rh.ScanData.VAPBindings)
+		vapreconcile.EnrichSummary(rh.ScanData.Report.SummaryDetails.Controls, index)
+	}
+
 	// Display scan results in the UI first to give immediate value.
 
 	rh.UiPrinter.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
 
 	rh.UiPrinter.PrintNextSteps()
+	closePrinter(rh.UiPrinter)
 
 	// Then print to output files
-	for _, printer := range rh.PrinterObjs {
-		printer.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
+	for _, p := range rh.PrinterObjs {
+		p.ActionPrint(ctx, rh.ScanData, rh.ImageScanData)
 		if rh.ScanData != nil {
-			printer.Score(rh.GetComplianceScore())
+			p.Score(rh.GetComplianceScore())
 		}
+		closePrinter(p)
 	}
 
 	// We should submit only after printing results, so a user can see
@@ -132,14 +140,16 @@ func NewPrinter(ctx context.Context, printFormat string, scanInfo *cautils.ScanI
 	}
 }
 
-func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string) error {
+func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningContext, printFormat string) (bool, error) {
 	if scanType == cautils.ScanTypeImage {
 		// supported types for image scanning
 		switch printFormat {
-		case printer.JsonFormat, printer.PrettyFormat, printer.SARIFFormat:
-			return nil
+		case printer.JsonFormat, printer.SARIFFormat:
+			return false, nil
+		case printer.PrettyFormat:
+			return true, nil
 		default:
-			return fmt.Errorf("format \"%s\"is not supported for image scanning", printFormat)
+			return false, fmt.Errorf("format \"%s\" is not supported for image scanning", printFormat)
 		}
 	}
 
@@ -147,11 +157,27 @@ func ValidatePrinter(scanType cautils.ScanTypes, scanContext cautils.ScanningCon
 		// supported types for SARIF
 		switch scanContext {
 		case cautils.ContextDir, cautils.ContextFile, cautils.ContextGitLocal, cautils.ContextGitRemote:
-			return nil
+			return false, nil
 		default:
-			return fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
+			return false, fmt.Errorf("format \"%s\" is only supported when scanning local files", printFormat)
 		}
 	}
 
-	return nil
+	switch printFormat {
+	case printer.JsonFormat, printer.HtmlFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat:
+		return false, nil
+	default:
+		return true, nil
+	}
+}
+
+// closePrinter closes p's output writer if p implements the optional
+// printerCloser interface. This avoids widening the public IPrinter interface.
+func closePrinter(p printer.IPrinter) {
+	type printerCloser interface {
+		CloseWriter()
+	}
+	if c, ok := p.(printerCloser); ok {
+		c.CloseWriter()
+	}
 }

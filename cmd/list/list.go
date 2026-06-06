@@ -1,7 +1,6 @@
 package list
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -42,7 +41,7 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 			supported := strings.Join(core.ListSupportActions(), ",")
 
 			if len(args) < 1 {
-				return fmt.Errorf("policy type requeued, supported: %s", supported)
+				return fmt.Errorf("policy type required, supported: %s", supported)
 			}
 			if !slices.Contains(core.ListSupportActions(), args[0]) {
 				return fmt.Errorf("invalid parameter '%s'. Supported parameters: %s", args[0], supported)
@@ -53,10 +52,6 @@ func GetListCmd(ks meta.IKubescape) *cobra.Command {
 
 			if err := flagValidationList(&listPolicies); err != nil {
 				return err
-			}
-
-			if len(args) < 1 {
-				return errors.New("no arguements provided")
 			}
 
 			listPolicies.Target = args[0]

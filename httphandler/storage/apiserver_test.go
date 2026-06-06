@@ -87,8 +87,35 @@ func Test_getControlsMapFromResult(t *testing.T) {
 		},
 	}
 
-	actual := getControlsMapFromResult(context.TODO(), &scanResult, controlSummaries)
+	actual := getControlsMapFromResult(context.Background(), &scanResult, controlSummaries)
 	assert.Len(t, actual, len(scanResult.AssociatedControls))
+	if assert.Len(t, actual["C-002"].Rules, 1) {
+		assert.Equal(t, []string{"resource-1"}, actual["C-002"].Rules[0].RelatedResourcesIDs)
+	}
+}
+
+func TestParseControlSeverity_Nil(t *testing.T) {
+	assert.NotPanics(t, func() {
+		result := parseControlSeverity(nil)
+		assert.Equal(t, v1beta1.ControlSeverity{}, result)
+	})
+}
+
+func TestGetControlsMapFromResult_MissingControl(t *testing.T) {
+	scanResult := resourcesresults.Result{
+		AssociatedControls: []resourcesresults.ResourceAssociatedControl{
+			{
+				ControlID: "C-MISSING",
+				Status:    apis.StatusInfo{InnerStatus: apis.StatusFailed},
+			},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		actual := getControlsMapFromResult(context.Background(), &scanResult, reportsummary.ControlSummaries{})
+		assert.Contains(t, actual, "C-MISSING")
+		assert.Equal(t, v1beta1.ControlSeverity{}, actual["C-MISSING"].Severity)
+	})
 }
 
 type FakeMetadata struct {
@@ -523,12 +550,24 @@ func TestMergeMaps(t *testing.T) {
 			new:      map[string]string{},
 			expected: map[string]string{},
 		},
+		{
+			name:     "merge with nil existing map",
+			existing: nil,
+			new:      map[string]string{"key1": "value1"},
+			expected: map[string]string{"key1": "value1"},
+		},
+		{
+			name:     "merge with both maps nil",
+			existing: nil,
+			new:      nil,
+			expected: map[string]string{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mergeMaps(tt.existing, tt.new)
-			assert.Equal(t, tt.expected, tt.existing)
+			result := mergeMaps(tt.existing, tt.new)
+			assert.Equal(t, tt.expected, result)
 		})
 	}
 }

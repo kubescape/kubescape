@@ -16,3 +16,7 @@ dist/
 # Test output files
 customFilename.pdf
 customFilename.xml
+FETCH_HEAD
+tallation.md
+nginx:latest.json
+results.json

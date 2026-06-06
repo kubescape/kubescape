@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/google/uuid"
@@ -19,6 +18,9 @@ import (
 	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"go.opentelemetry.io/otel"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // getKubernetesApi
@@ -29,14 +31,40 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 	return k8sinterface.NewKubernetesApi()
 }
 
+func getExceptionsK8sClient(ctx context.Context) client.Client {
+	if !k8sinterface.IsConnectedToCluster() {
+		return nil
+	}
+	config := k8sinterface.GetK8sConfig()
+	if config == nil {
+		return nil
+	}
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to add corev1 scheme", helpers.Error(err))
+		return nil
+	}
+	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to create controller-runtime client", helpers.Error(err))
+		return nil
+	}
+	return k8sClient
+}
+
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
+	var primary getter.IExceptionsGetter
+
 	if useExceptions != "" {
 		// load exceptions from file
-		return getter.NewLoadPolicy([]string{useExceptions})
+		primary = getter.NewLoadPolicy([]string{useExceptions})
+		return primary
 	}
 	if accountID != "" {
 		// download exceptions from Kubescape Cloud backend
-		return getter.GetKSCloudAPIConnector()
+		primary = getter.GetKSCloudAPIConnector()
+		k8sClient := getExceptionsK8sClient(ctx)
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
 	// download exceptions from GitHub
 	if downloadReleasedPolicy == nil {
@@ -44,9 +72,13 @@ func getExceptionsGetter(ctx context.Context, useExceptions string, accountID st
 	}
 	if err := downloadReleasedPolicy.SetRegoObjects(); err != nil { // if failed to pull attack tracks, fallback to cache
 		logger.L().Ctx(ctx).Warning("failed to get exceptions from github release, loading attack tracks from cache", helpers.Error(err))
-		return getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+		primary = getter.NewLoadPolicy([]string{getter.GetDefaultPath(cautils.LocalExceptionsFilename)})
+		k8sClient := getExceptionsK8sClient(ctx)
+		return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 	}
-	return downloadReleasedPolicy
+	primary = downloadReleasedPolicy
+	k8sClient := getExceptionsK8sClient(ctx)
+	return getter.NewMergedExceptionsGetter(primary, getter.NewCRDExceptionsGetter(k8sClient))
 
 }
 
@@ -96,7 +128,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 		_ = getter.GetKSCloudAPIConnector()
 	}
 	rbacObjects := getRBACHandler(tenantConfig, k8s, scanInfo.Submit)
-	return resourcehandler.NewK8sResourceHandler(k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
+	return resourcehandler.NewK8sResourceHandler(ctx, k8s, hostSensorHandler, rbacObjects, tenantConfig.GetContextName())
 }
 
 // getHostSensorHandler yields a IHostSensor that knows how to collect a host's scanned resources.
@@ -113,18 +145,23 @@ func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *
 	case hostSensorVal != nil && *hostSensorVal:
 		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, scanInfo.HostSensorYamlPath)
 		if err != nil {
-			logger.L().Ctx(ctx).Warning(fmt.Sprintf("failed to create host scanner: %s", err.Error()))
-
+			logger.L().Ctx(ctx).Warning("failed to create host scanner", helpers.Error(err))
 			return hostsensorutils.NewHostSensorHandlerMock()
 		}
 
 		return hostSensorHandler
 
 	case hostSensorVal == nil && wantsHostSensorControls:
-		// TODO: we need to determine which controls need the host scanner
-		scanInfo.HostSensorEnabled.SetBool(false)
-
-		fallthrough
+		// Auto-detect: if node-agent CRDs are available, use them without requiring --enable-host-scanner.
+		hostSensorHandler, err := hostsensorutils.NewHostSensorHandler(k8s, "")
+		if err != nil {
+			logger.L().Ctx(ctx).Debug("node-agent not available, host sensor disabled", helpers.Error(err))
+			scanInfo.HostSensorEnabled.SetBool(false)
+			return hostsensorutils.NewHostSensorHandlerMock()
+		}
+		logger.L().Ctx(ctx).Info("node-agent detected, using CRD-based host sensor")
+		scanInfo.HostSensorEnabled.SetBool(true)
+		return hostSensorHandler
 
 	default:
 		return hostsensorutils.NewHostSensorHandlerMock()
@@ -215,8 +252,12 @@ func getPolicyGetter(ctx context.Context, loadPoliciesFromFile []string, account
 
 }
 
-// setConfigInputsGetter sets the config input getter - local file/github release/Kubescape Cloud API
-func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IControlsInputsGetter {
+// setConfigInputsGetter sets the config input getter with the following precedence:
+//  1. Local file (--controls-config flag)
+//  2. Kubescape Cloud API (if accountID configured)
+//  3. ControlInput CRD in-cluster (if connected to cluster and CRD exists)
+//  4. Defaults from regolibrary GitHub releases
+func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy, useCRD bool) getter.IControlsInputsGetter {
 	if len(ControlsInputs) > 0 {
 		return getter.NewLoadPolicy([]string{ControlsInputs})
 	}
@@ -224,6 +265,18 @@ func getConfigInputsGetter(ctx context.Context, ControlsInputs string, accountID
 		g := getter.GetKSCloudAPIConnector() // download config from Kubescape Cloud backend
 		return g
 	}
+
+	// Try to read control inputs from the ControlInput CRD in-cluster (live cluster scans only)
+	if useCRD {
+		if crdInputs, err := getter.NewCRDControlInputs(); err == nil {
+			if _, crdErr := crdInputs.GetControlsInputs(""); crdErr == nil {
+				logger.L().Ctx(ctx).Info("using ControlInput CRD for control configuration")
+				return crdInputs
+			}
+			logger.L().Ctx(ctx).Debug("ControlInput CRD found but default resource not available, falling back")
+		}
+	}
+
 	if downloadReleasedPolicy == nil {
 		downloadReleasedPolicy = getter.NewDownloadReleasedPolicy()
 	}

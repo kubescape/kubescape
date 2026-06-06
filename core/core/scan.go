@@ -12,6 +12,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
+	"github.com/kubescape/kubescape/v3/core/pkg/anonymizer"
 	"github.com/kubescape/kubescape/v3/core/pkg/hostsensorutils"
 	"github.com/kubescape/kubescape/v3/core/pkg/opaprocessor"
 	"github.com/kubescape/kubescape/v3/core/pkg/policyhandler"
@@ -78,6 +79,7 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 	if err := hostSensorHandler.Init(ctxHostScanner); err != nil {
 		logger.L().Ctx(ctxHostScanner).Error("failed to init host scanner", helpers.Error(err))
 		hostSensorHandler = hostsensorutils.NewHostSensorHandlerMock()
+		scanInfo.HostSensorEnabled.SetBool(false)
 	}
 	spanHostScanner.End()
 
@@ -109,17 +111,27 @@ func getInterfaces(ctx context.Context, scanInfo *cautils.ScanInfo) componentInt
 
 func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterName string) []printer.IPrinter {
 	formats := scanInfo.Formats()
-
+	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
 	for _, format := range formats {
-		if err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format); err != nil {
+		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
+		if err != nil {
 			logger.L().Ctx(ctx).Fatal(err.Error())
+		}
+
+		if usesPrettyPrinter && containPrettyPrinter {
+			continue
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
 		printerHandler.SetWriter(ctx, scanInfo.Output)
 		outputPrinters = append(outputPrinters, printerHandler)
+
+		if usesPrettyPrinter {
+			containPrettyPrinter = true
+		}
 	}
+
 	return outputPrinters
 }
 
@@ -146,7 +158,7 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 
 	// set policy getter only after setting the customerGUID
 	scanInfo.PolicyGetter = getPolicyGetter(ctxInit, scanInfo.UseFrom, interfaces.tenantConfig.GetAccountID(), scanInfo.FrameworkScan, downloadReleasedPolicy)
-	scanInfo.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
+	scanInfo.ControlsInputsGetter = getConfigInputsGetter(ctxInit, scanInfo.ControlsInputs, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy, scanInfo.GetScanningContext() == cautils.ContextCluster)
 	scanInfo.ExceptionsGetter = getExceptionsGetter(ctxInit, scanInfo.UseExceptions, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 	scanInfo.AttackTracksGetter = getAttackTracksGetter(ctxInit, scanInfo.AttackTracks, interfaces.tenantConfig.GetAccountID(), downloadReleasedPolicy)
 
@@ -191,9 +203,10 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	defer spanOpa.End()
 
 	deps := resources.NewRegoDependenciesData(k8sinterface.GetK8sConfig(), interfaces.tenantConfig.GetContextName())
-	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint)
+	var exceptionRecorder = newSecurityExceptionEventRecorder()
+	reportResults := opaprocessor.NewOPAProcessor(scanData, deps, interfaces.tenantConfig.GetContextName(), scanInfo.ExcludedNamespaces, scanInfo.IncludeNamespaces, scanInfo.EnableRegoPrint, exceptionRecorder)
 	if err = reportResults.ProcessRulesListener(ctxOpa, cautils.NewProgressHandler("")); err != nil {
-		// TODO - do something
+		logger.L().Ctx(ctxOpa).Error("failed to process rules", helpers.Error(err))
 		return resultsHandling, fmt.Errorf("%w", err)
 	}
 
@@ -217,9 +230,12 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	// ========================= results handling =====================
 	resultsHandling.SetData(scanData)
 
-	// if resultsHandling.GetRiskScore() > float32(scanInfo.FailThreshold) {
-	// 	return resultsHandling, fmt.Errorf("scan risk-score %.2f is above permitted threshold %.2f", resultsHandling.GetRiskScore(), scanInfo.FailThreshold)
-	// }
+	if scanInfo.Hide {
+		/* logger.L().Info("anonymizer hook triggered")  //used for debuging pipeline right now will be removed in suceeding phase */
+		if err := anonymizer.Apply(resultsHandling); err != nil {
+			logger.L().Warning("failed to hide sensitive fields", helpers.Error(err))
+		}
+	}
 
 	return resultsHandling, nil
 }

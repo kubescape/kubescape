@@ -86,18 +86,19 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 
 	// get exceptions
 	if exceptions, err = policyHandler.getExceptions(); err != nil {
-		logger.L().Ctx(ctx).Warning("failed to load exceptions", helpers.Error(err))
+		logger.L().Ctx(ctx).StopError("Failed to load exceptions", helpers.Error(err))
+	} else {
+		logger.L().StopSuccess("Loaded exceptions")
 	}
 
-	logger.L().StopSuccess("Loaded exceptions")
 	logger.L().Start("Loading account configurations...")
 
 	// get account configuration
 	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
-		logger.L().Ctx(ctx).Warning(err.Error())
+		logger.L().Ctx(ctx).StopError("Failed to load account configurations", helpers.Error(err))
+	} else {
+		logger.L().StopSuccess("Loaded account configurations")
 	}
-
-	logger.L().StopSuccess("Loaded account configurations")
 
 	return policies, exceptions, controlInputs, nil
 }
@@ -157,9 +158,13 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			}
 			if receivedFramework != nil {
 				frameworks = append(frameworks, *receivedFramework)
-				cache := getter.GetDefaultPath(rule.Identifier + ".json")
 				if _, ok := policyHandler.getters.PolicyGetter.(*getter.LoadPolicy); ok {
 					continue // skip caching for local files
+				}
+				cache, err := getter.PolicyCachePath(rule.Identifier)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("skipping framework cache write", helpers.String("identifier", rule.Identifier), helpers.Error(err))
+					continue
 				}
 				if err := getter.SaveInFile(receivedFramework, cache); err != nil {
 					logger.L().Ctx(ctx).Warning("failed to cache framework", helpers.String("file", cache), helpers.Error(err))
@@ -179,7 +184,11 @@ func (policyHandler *PolicyHandler) downloadScanPolicies(ctx context.Context, po
 			if receivedControl != nil {
 				f.Controls = append(f.Controls, *receivedControl)
 
-				cache := getter.GetDefaultPath(policy.Identifier + ".json")
+				cache, err := getter.PolicyCachePath(policy.Identifier)
+				if err != nil {
+					logger.L().Ctx(ctx).Warning("skipping control cache write", helpers.String("identifier", policy.Identifier), helpers.Error(err))
+					continue
+				}
 				if err := getter.SaveInFile(receivedControl, cache); err != nil {
 					logger.L().Ctx(ctx).Warning("failed to cache control", helpers.String("file", cache), helpers.Error(err))
 				}

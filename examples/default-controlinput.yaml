@@ -1,0 +1,155 @@
+apiVersion: kubescape.io/v1
+kind: ControlInput
+metadata:
+  name: default
+  labels:
+    app.kubernetes.io/name: kubescape
+    app.kubernetes.io/component: operator
+spec:
+  controls:
+    unclassified_cipher:
+      - TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+      - TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+      - TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA384
+      - TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA384
+      - TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256
+      - TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256
+      - TLS_RSA_WITH_AES_256_GCM_SHA384
+      - TLS_RSA_WITH_AES_128_GCM_SHA256
+      - TLS_RSA_WITH_AES_256_CBC_SHA256
+      - TLS_RSA_WITH_AES_128_CBC_SHA256
+    sensitiveKeyNames:
+      - aws_access_key_id
+      - aws_secret_access_key
+      - azure_batchai_storage_account
+      - azure_batchai_storage_key
+      - azure_batch_account
+      - azure_batch_key
+      - secret
+      - key
+      - password
+      - pwd
+      - token
+      - jwt
+      - bearer
+      - credential
+    sensitiveValues:
+      - BEGIN \w+ PRIVATE KEY
+      - PRIVATE KEY
+      - eyJhbGciO
+      - JWT
+      - Bearer
+      - _key_
+      - _secret_
+    insecureCapabilities:
+      - SETPCAP
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_MODULE
+      - SYS_RAWIO
+      - SYS_PTRACE
+      - SYS_ADMIN
+      - SYS_BOOT
+      - MAC_OVERRIDE
+      - MAC_ADMIN
+      - PERFMON
+      - ALL
+      - BPF
+    untrustedRegistries:
+      - docker.io
+      - gcr.io
+      - quay.io
+      - registry.hub.docker.com
+    imageRepositoryAllowList:
+      - gcr.io
+    publicRegistries:
+      - docker.io
+      - gcr.io
+      - quay.io
+      - registry.hub.docker.com
+    recommendedLabels:
+      - app
+      - tier
+      - phase
+      - version
+      - owner
+      - env
+    k8sRecommendedLabels:
+      - app.kubernetes.io/name
+      - app.kubernetes.io/instance
+      - app.kubernetes.io/version
+      - app.kubernetes.io/component
+      - app.kubernetes.io/part-of
+      - app.kubernetes.io/managed-by
+      - app.kubernetes.io/created-by
+    listOfDangerousArtifacts:
+      - bin/bash
+      - sbin/sh
+      - bin/ksh
+      - bin/tcsh
+      - bin/zsh
+      - usr/bin/scsh
+      - bin/csh
+      - bin/busybox
+      - usr/bin/busybox
+    servicesNames:
+      - nifi-service
+      - argo-server
+      - minio
+      - postgres
+      - workflow-controller-metrics
+      - weave-scope-app
+      - kubernetes-dashboard
+    wlKnownNames:
+      - coredns
+      - kube-proxy
+      - event-exporter-gke
+      - kube-dns
+      - 17-default-backend
+      - metrics-server
+      - ca-audit
+      - ca-dashboard-aggregator
+      - ca-notification-server
+      - ca-ocimage
+      - ca-oracle
+      - ca-posture
+      - ca-rbac
+      - ca-vuln-scan
+      - ca-webhook
+      - ca-websocket
+      - clair-clair
+    sensitiveInterfaces:
+      - nifi
+      - argo-server
+      - weave-scope-app
+      - kubeflow
+      - kubernetes-dashboard
+      - jenkins
+      - prometheus-deployment
+    cpuLimitMin:
+      - "0.5"
+    cpuLimitMax:
+      - "5"
+    cpuRequestMin:
+      - "0.1"
+    cpuRequestMax:
+      - "5"
+    memoryLimitMin:
+      - 0.25Gi
+    memoryLimitMax:
+      - 4Gi
+    memoryRequestMin:
+      - 0.125Gi
+    memoryRequestMax:
+      - 4Gi
+    maxCriticalVulnerabilities:
+      - "5"
+    maxHighVulnerabilities:
+      - "10"
+    cloudProvider:
+      - ""
+    sensitiveKeyNamesAllowed: []
+    sensitiveValuesAllowed:
+      - ''

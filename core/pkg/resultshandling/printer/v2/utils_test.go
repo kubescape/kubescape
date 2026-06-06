@@ -3,15 +3,23 @@ package printer
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
 	"github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer/v2/prettyprinter/tableprinter/imageprinter"
+	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func minimalPostureReport() *reporthandlingv2.PostureReport {
+	return &reporthandlingv2.PostureReport{}
+}
 
 func TestExtractCVEs(t *testing.T) {
 	tests := []struct {
@@ -882,4 +890,80 @@ func TestExtractResourceLabels(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestConvertToPostureReport_PartialOnlyCoverageAttached verifies that a
+// ScanCoverage containing only PartialGVRPulls (no whole-GVR failures, no
+// NotEvaluatedControls) is still attached to the serialized report. Prior to
+// the fix, the guard only checked FailedGVRPulls and NotEvaluatedControls, so
+// a partial-only scan would produce a JSON/API response with no scanCoverage
+// field at all — hiding the incomplete-data condition from consumers.
+func TestConvertToPostureReport_PartialOnlyCoverageAttached(t *testing.T) {
+	coverage := &cautils.ScanCoverage{
+		PartialGVRPulls: []cautils.PartialGVRPull{
+			{GVR: "/v1/pods", Selector: "metadata.namespace=prod", Error: "forbidden for prod"},
+		},
+	}
+
+	result := ConvertToPostureReportWithSeverityLabelsAndCoverage(nil, nil, nil, coverage)
+	require.Nil(t, result, "nil report should return nil")
+
+	// Use a minimal non-nil report so we can inspect the ScanCoverage field.
+	result = ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		minimalPostureReport(),
+		nil, nil, coverage,
+	)
+	require.NotNil(t, result)
+	require.NotNil(t, result.ScanCoverage, "ScanCoverage must be attached when PartialGVRPulls is non-empty")
+	assert.Len(t, result.ScanCoverage.PartialGVRPulls, 1)
+	assert.Equal(t, "/v1/pods", result.ScanCoverage.PartialGVRPulls[0].GVR)
+}
+
+// TestConvertToPostureReport_NilCoverageNotAttached verifies that a nil
+// coverage pointer (clean scan) produces a nil ScanCoverage in the output.
+func TestConvertToPostureReport_NilCoverageNotAttached(t *testing.T) {
+	result := ConvertToPostureReportWithSeverityLabelsAndCoverage(
+		minimalPostureReport(),
+		nil, nil, nil,
+	)
+	require.NotNil(t, result)
+	assert.Nil(t, result.ScanCoverage)
+}
+
+// TestFinalizeResults_SetsGenerationTimeWhenZero is the regression test for
+// kubescape/kubescape#2325: JSON reports were emitting
+// "generationTime":"0001-01-01T00:00:00Z" because nothing on the scan path
+// ever assigned ReportGenerationTime. FinalizeResults is the single funnel
+// for both file output and SaaS submission, so the fix lives there.
+func TestFinalizeResults_SetsGenerationTimeWhenZero(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	require.True(t, session.Report.ReportGenerationTime.IsZero(),
+		"precondition: mock starts with the zero-value time that #2325 reported")
+
+	before := time.Now().UTC()
+	report := FinalizeResults(session)
+	after := time.Now().UTC()
+
+	require.NotNil(t, report)
+	assert.False(t, report.ReportGenerationTime.IsZero(),
+		"FinalizeResults must populate ReportGenerationTime")
+	assert.False(t, session.Report.ReportGenerationTime.IsZero(),
+		"FinalizeResults must also write back to the session so downstream consumers see it")
+	assert.Equal(t, session.Report.ReportGenerationTime, report.ReportGenerationTime)
+	assert.WithinDuration(t, before, report.ReportGenerationTime, after.Sub(before)+time.Second)
+}
+
+// TestFinalizeResults_PreservesExistingGenerationTime ensures we don't clobber
+// a timestamp that the caller has already set (e.g. when callers eventually
+// thread a real scan-start time through Scan(...)).
+func TestFinalizeResults_PreservesExistingGenerationTime(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	preset := time.Date(2024, 3, 14, 9, 15, 26, 0, time.UTC)
+	session.Report.ReportGenerationTime = preset
+
+	report := FinalizeResults(session)
+
+	require.NotNil(t, report)
+	assert.Equal(t, preset, report.ReportGenerationTime)
+	assert.Equal(t, preset, session.Report.ReportGenerationTime)
 }

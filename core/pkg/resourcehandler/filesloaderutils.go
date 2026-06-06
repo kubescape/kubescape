@@ -8,20 +8,63 @@ import (
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling"
 )
+
+// providerRank ranks discovery providers so rendered output wins over raw file input.
+func providerRank(fileType string) int {
+	switch fileType {
+	case reporthandling.SourceTypeKustomizeDirectory, reporthandling.SourceTypeHelmChart:
+		return 2
+	case reporthandling.SourceTypeYaml, reporthandling.SourceTypeJson:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// resourceIdentity returns the path-independent k8s identity tuple used for dedup.
+func resourceIdentity(w workloadinterface.IMetadata) string {
+	return fmt.Sprintf("%s/%s/%s/%s", w.GetApiVersion(), w.GetNamespace(), w.GetKind(), w.GetName())
+}
+
+// dedupWorkloads drops lower-ranked cross-provider duplicates only; same-rank duplicates are kept.
+func dedupWorkloads(workloads []workloadinterface.IMetadata, workloadIDToSource map[string]reporthandling.Source) ([]workloadinterface.IMetadata, map[string]reporthandling.Source) {
+	maxRank := make(map[string]int, len(workloads))
+	for _, w := range workloads {
+		key := resourceIdentity(w)
+		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
+		if rank > maxRank[key] {
+			maxRank[key] = rank
+		}
+	}
+
+	out := make([]workloadinterface.IMetadata, 0, len(workloads))
+	pruned := make(map[string]reporthandling.Source, len(workloads))
+	for _, w := range workloads {
+		rank := providerRank(workloadIDToSource[w.GetID()].FileType)
+		if rank == maxRank[resourceIdentity(w)] {
+			out = append(out, w)
+			if s, ok := workloadIDToSource[w.GetID()]; ok {
+				pruned[w.GetID()] = s
+			}
+		}
+	}
+	return out, pruned
+}
 
 func addWorkloadsToResourcesMap(allResources map[string][]workloadinterface.IMetadata, workloads []workloadinterface.IMetadata) {
 	for i := range workloads {
 		groupVersionResource, err := k8sinterface.GetGroupVersionResource(workloads[i].GetKind())
 		if err != nil {
-			// TODO - print warning
+			logger.L().Warning("unsupported/unmapped object kind", helpers.String("kind", workloads[i].GetKind()), helpers.String("id", workloads[i].GetID()), helpers.Error(err))
 			continue
 		}
 
 		if k8sinterface.IsTypeWorkload(workloads[i].GetObject()) {
 			w := workloadinterface.NewWorkloadObj(workloads[i].GetObject())
 			if groupVersionResource.Group != w.GetGroup() || groupVersionResource.Version != w.GetVersion() {
-				// TODO - print warning
+				logger.L().Warning("workload GroupVersion mismatch", helpers.String("id", workloads[i].GetID()), helpers.String("kind", workloads[i].GetKind()), helpers.String("expectedGroup", groupVersionResource.Group), helpers.String("actualGroup", w.GetGroup()), helpers.String("expectedVersion", groupVersionResource.Version), helpers.String("actualVersion", w.GetVersion()))
 				continue
 			}
 		}

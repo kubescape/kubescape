@@ -1,6 +1,8 @@
 package printer
 
 import (
+	"time"
+
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -62,6 +64,7 @@ type PostureReportWithSeverity struct {
 	Results              []ResultWithSeverity              `json:"results,omitempty"`
 	Metadata             reporthandlingv2.Metadata         `json:"metadata,omitempty"`
 	ResourceLabels       map[string]map[string]string      `json:"resourceLabels,omitempty"` // map[resourceID]map[labelKey]labelValue - extracted labels from workloads
+	ScanCoverage         *cautils.ScanCoverage             `json:"scanCoverage,omitempty"`
 }
 
 // enrichControlsWithSeverity adds severity field to controls based on scoreFactor
@@ -110,6 +113,12 @@ func ConvertToPostureReportWithSeverity(report *reporthandlingv2.PostureReport) 
 // ConvertToPostureReportWithSeverityAndLabels converts PostureReport to PostureReportWithSeverity
 // and extracts specified labels from workloads
 func ConvertToPostureReportWithSeverityAndLabels(report *reporthandlingv2.PostureReport, labelsToCopy []string, allResources map[string]workloadinterface.IMetadata) *PostureReportWithSeverity {
+	return ConvertToPostureReportWithSeverityLabelsAndCoverage(report, labelsToCopy, allResources, nil)
+}
+
+// ConvertToPostureReportWithSeverityLabelsAndCoverage converts PostureReport to PostureReportWithSeverity,
+// extracts specified labels from workloads, and attaches scan coverage gaps.
+func ConvertToPostureReportWithSeverityLabelsAndCoverage(report *reporthandlingv2.PostureReport, labelsToCopy []string, allResources map[string]workloadinterface.IMetadata, coverage *cautils.ScanCoverage) *PostureReportWithSeverity {
 	if report == nil {
 		return nil
 	}
@@ -120,6 +129,12 @@ func ConvertToPostureReportWithSeverityAndLabels(report *reporthandlingv2.Postur
 	var resourceLabels map[string]map[string]string
 	if len(labelsToCopy) > 0 && allResources != nil {
 		resourceLabels = extractResourceLabels(allResources, labelsToCopy)
+	}
+
+	// only attach coverage when there is something to show
+	var scanCoverage *cautils.ScanCoverage
+	if coverage != nil && (len(coverage.FailedGVRPulls) > 0 || len(coverage.NotEvaluatedControls) > 0 || len(coverage.PartialGVRPulls) > 0) {
+		scanCoverage = coverage
 	}
 
 	return &PostureReportWithSeverity{
@@ -144,6 +159,7 @@ func ConvertToPostureReportWithSeverityAndLabels(report *reporthandlingv2.Postur
 		Results:        enrichedResults,
 		Metadata:       report.Metadata,
 		ResourceLabels: resourceLabels,
+		ScanCoverage:   scanCoverage,
 	}
 }
 
@@ -181,6 +197,9 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 
 // FinalizeResults finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
+	if data.Report.ReportGenerationTime.IsZero() {
+		data.Report.ReportGenerationTime = time.Now().UTC()
+	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
 		Metadata:             *data.Metadata,

@@ -11,8 +11,10 @@ import (
 type MockIKubescape struct{}
 
 func (m *MockIKubescape) Context() context.Context {
-	return context.TODO()
+	return context.Background()
 }
+
+func (m *MockIKubescape) SetContext(_ context.Context) {}
 
 func (m *MockIKubescape) Scan(_ *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {
 	return nil, nil
@@ -39,6 +41,10 @@ func (m *MockIKubescape) DeleteCachedConfig(_ *metav1.DeleteConfig) error {
 }
 
 func (m *MockIKubescape) Fix(_ *metav1.FixInfo) error {
+	return nil
+}
+
+func (m *MockIKubescape) Diff(_ *metav1.DiffInfo) error {
 	return nil
 }
 

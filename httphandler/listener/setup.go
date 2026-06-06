@@ -31,7 +31,7 @@ const (
 
 // SetupHTTPListener set up listening http servers
 func SetupHTTPListener() error {
-	keyPair, err := loadTLSKey("", "") // TODO - support key and crt files
+	keyPair, err := loadTLSKey(getCertFile(), getKeyFile())
 	if err != nil {
 		return err
 	}
@@ -79,8 +79,11 @@ func SetupHTTPListener() error {
 }
 
 func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
-	if keyFile == "" || certFile == "" {
+	switch {
+	case certFile == "" && keyFile == "":
 		return nil, nil
+	case certFile == "" || keyFile == "":
+		return nil, fmt.Errorf("both KS_CERT_FILE and KS_KEY_FILE must be set to enable TLS (got certFile=%q, keyFile=%q)", certFile, keyFile)
 	}
 
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
@@ -99,6 +102,14 @@ func getPort() string {
 		return p
 	}
 	return "8080"
+}
+
+func getCertFile() string {
+	return os.Getenv("KS_CERT_FILE")
+}
+
+func getKeyFile() string {
+	return os.Getenv("KS_KEY_FILE")
 }
 
 func servePprof() {

@@ -20,7 +20,7 @@ func TestGetOperatorScanVulnerabilitiesCmd(t *testing.T) {
 
 	// Verify the command name and short description
 	assert.Equal(t, "vulnerabilities", cmd.Use)
-	assert.Equal(t, "Vulnerabilities use for scan your cluster vulnerabilities using Kubescape operator in the in cluster components", cmd.Short)
+	assert.Equal(t, "Scan your cluster for vulnerabilities using the Kubescape Operator in-cluster components", cmd.Short)
 	assert.Equal(t, "", cmd.Long)
 	assert.Equal(t, operatorScanVulnerabilitiesExamples, cmd.Example)
 

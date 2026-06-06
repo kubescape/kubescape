@@ -5,17 +5,18 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils/helmprovenance"
 	"github.com/kubescape/opa-utils/objectsenvelopes/localworkload"
 	helmchart "helm.sh/helm/v3/pkg/chart"
 	helmloader "helm.sh/helm/v3/pkg/chart/loader"
 	helmchartutil "helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
+	helmvalues "helm.sh/helm/v3/pkg/cli/values"
 	helmdownloader "helm.sh/helm/v3/pkg/downloader"
 	helmengine "helm.sh/helm/v3/pkg/engine"
 	helmgetter "helm.sh/helm/v3/pkg/getter"
@@ -125,14 +126,42 @@ func (hc *HelmChart) GetDefaultValues() map[string]interface{} {
 	return hc.chart.Values
 }
 
+// Provenance returns per-template Helm provenance keyed by the same absolute
+// source path that GetWorkloads* uses for workloads, so callers can join the
+// two maps directly. Keys for templates that produced no workloads (e.g.
+// NOTES.txt, helpers) are still included; callers should ignore them.
+func (hc *HelmChart) Provenance() map[string]helmprovenance.Provenance {
+	raw := helmprovenance.Extract(hc.chart)
+	out := make(map[string]helmprovenance.Provenance, len(raw))
+	for enginePath, p := range raw {
+		// enginePath looks like "<chartName>/templates/foo.yaml" — drop
+		// the chart-name prefix and join under the chart's on-disk path,
+		// mirroring the conversion in GetWorkloadsWithOptions.
+		idx := strings.Index(enginePath, "/")
+		if idx == -1 {
+			continue
+		}
+		out[filepath.Join(hc.path, enginePath[idx:])] = p
+	}
+	return out
+}
+
 // GetWorkloadsWithDefaultValues renders chart template using the default values and returns a map of source file to its workloads
 func (hc *HelmChart) GetWorkloadsWithDefaultValues() (map[string][]workloadinterface.IMetadata, []error) {
 	return hc.GetWorkloads(hc.GetDefaultValues())
 }
 
-// GetWorkloads renders chart template using the provided values and returns a map of source (absolute) file path to its workloads
+// GetWorkloads renders chart template using the provided values and returns a map of source (absolute) file path to its workloads.
+// Equivalent to GetWorkloadsWithOptions(values, ReleaseOptions{}).
 func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]workloadinterface.IMetadata, []error) {
-	vals, err := helmchartutil.ToRenderValues(hc.chart, values, helmchartutil.ReleaseOptions{}, nil)
+	return hc.GetWorkloadsWithOptions(values, helmchartutil.ReleaseOptions{})
+}
+
+// GetWorkloadsWithOptions renders chart template using the provided values and Helm release options
+// (release name/namespace), returning a map of source (absolute) file path to its workloads.
+// Charts that reference .Release.Name or .Release.Namespace require these options to render.
+func (hc *HelmChart) GetWorkloadsWithOptions(values map[string]interface{}, releaseOpts helmchartutil.ReleaseOptions) (map[string][]workloadinterface.IMetadata, []error) {
+	vals, err := helmchartutil.ToRenderValues(hc.chart, values, releaseOpts, nil)
 	if err != nil {
 		return nil, []error{err}
 	}
@@ -170,19 +199,46 @@ func (hc *HelmChart) GetWorkloads(values map[string]interface{}) (map[string][]w
 	return workloads, errs
 }
 
-func (hc *HelmChart) AddCommentToTemplate() {
-	for index, t := range hc.chart.Templates {
-		if IsYaml(strings.ToLower(t.Name)) {
-			var newLines []string
-			originalTemplate := string(t.Data)
-			lines := strings.Split(originalTemplate, "\n")
+// HelmValueOptions describes the user-supplied Helm value overrides and release identity
+// to apply when rendering Helm charts during a scan. It mirrors the inputs accepted by
+// `helm install` so the kubescape CLI flags and the helm-kubescape plugin can pass values
+// through verbatim.
+type HelmValueOptions struct {
+	ValueFiles       []string // -f / --values
+	Values           []string // --set
+	StringValues     []string // --set-string
+	FileValues       []string // --set-file
+	ReleaseName      string
+	ReleaseNamespace string
+}
 
-			for index, line := range lines {
-				comment := " #This is the " + strconv.Itoa(index+1) + " line"
-				newLines = append(newLines, line+comment)
-			}
-			templateWithComment := strings.Join(newLines, "\n")
-			hc.chart.Templates[index].Data = []byte(templateWithComment)
-		}
+// IsEmpty reports whether no Helm value overrides or release identity have been set.
+func (o HelmValueOptions) IsEmpty() bool {
+	return len(o.ValueFiles) == 0 &&
+		len(o.Values) == 0 &&
+		len(o.StringValues) == 0 &&
+		len(o.FileValues) == 0 &&
+		o.ReleaseName == "" &&
+		o.ReleaseNamespace == ""
+}
+
+// MergeValues parses and merges the user-supplied value overrides using Helm's own
+// merger (the same code path used by `helm install -f ... --set ...`). The resulting
+// map is the final user-supplied values that should be merged over the chart defaults.
+func (o HelmValueOptions) MergeValues() (map[string]interface{}, error) {
+	opts := helmvalues.Options{
+		ValueFiles:   o.ValueFiles,
+		Values:       o.Values,
+		StringValues: o.StringValues,
+		FileValues:   o.FileValues,
+	}
+	return opts.MergeValues(helmgetter.All(cli.New()))
+}
+
+// ReleaseOptions returns the Helm ReleaseOptions for use with chartutil.ToRenderValues.
+func (o HelmValueOptions) ReleaseOptions() helmchartutil.ReleaseOptions {
+	return helmchartutil.ReleaseOptions{
+		Name:      o.ReleaseName,
+		Namespace: o.ReleaseNamespace,
 	}
 }

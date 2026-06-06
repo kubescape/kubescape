@@ -15,14 +15,17 @@ import (
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/cautils/getter"
 	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
 )
+
+var isTerminal = isatty.IsTerminal
 
 func initLogger() {
 	if rootInfo.LoggerName == "" {
 		if l := os.Getenv("KS_LOGGER_NAME"); l != "" {
 			rootInfo.LoggerName = l
 		} else {
-			if isatty.IsTerminal(os.Stdout.Fd()) {
+			if isTerminal(os.Stdout.Fd()) {
 				rootInfo.LoggerName = iconlogger.LoggerName
 			} else {
 				rootInfo.LoggerName = zaplogger.LoggerName
@@ -33,10 +36,23 @@ func initLogger() {
 	logger.InitLogger(rootInfo.LoggerName)
 }
 
-func initLoggerLevel() {
-	if rootInfo.Logger == helpers.InfoLevel.String() {
-	} else if l := os.Getenv("KS_LOGGER"); l != "" {
-		rootInfo.Logger = l
+func initLoggerLevel(cmd *cobra.Command) {
+	loggerExplicit := false
+	if cmd != nil {
+		// Persistent flags are parsed on the root while traversing to the subcommand.
+		// cmd.Flag("logger") on a child can be a merged copy that never gets Changed=true;
+		// the root flag holds the authoritative parse state (see cobra Traverse + ParseFlags).
+		r := cmd.Root()
+		if lf := r.Flag("logger"); lf != nil {
+			loggerExplicit = lf.Changed
+		} else if lf := cmd.Flag("logger"); lf != nil {
+			loggerExplicit = lf.Changed
+		}
+	}
+	if !loggerExplicit && rootInfo.Logger == helpers.InfoLevel.String() {
+		if l := os.Getenv("KS_LOGGER"); l != "" {
+			rootInfo.Logger = l
+		}
 	}
 
 	if err := logger.L().SetLevel(rootInfo.Logger); err != nil {
@@ -44,16 +60,28 @@ func initLoggerLevel() {
 	}
 }
 
-func initCacheDir() {
-	if rootInfo.CacheDir != getter.DefaultLocalStore {
-		getter.DefaultLocalStore = rootInfo.CacheDir
-	} else if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
-		getter.DefaultLocalStore = cacheDir
-	} else {
-		return // using default cache dir location
+func initCacheDir(cmd *cobra.Command) {
+	cacheDirExplicit := false
+	if cmd != nil {
+		// Persistent flags are parsed on the root while traversing to the subcommand.
+		// cmd.Flag("cache-dir") on a child can be a merged copy that never gets Changed=true;
+		// the root flag holds the authoritative parse state (see cobra Traverse + ParseFlags).
+		r := cmd.Root()
+		if f := r.Flag("cache-dir"); f != nil {
+			cacheDirExplicit = f.Changed
+		} else if f := cmd.Flag("cache-dir"); f != nil {
+			cacheDirExplicit = f.Changed
+		}
 	}
-
-	logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+	if !cacheDirExplicit {
+		if cacheDir := os.Getenv("KS_CACHE_DIR"); cacheDir != "" {
+			getter.DefaultLocalStore = cacheDir
+			logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+		}
+	} else {
+		getter.DefaultLocalStore = rootInfo.CacheDir
+		logger.L().Debug("cache dir updated", helpers.String("path", getter.DefaultLocalStore))
+	}
 }
 func initEnvironment() {
 	if rootInfo.DiscoveryServerURL == "" {

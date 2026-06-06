@@ -9,7 +9,7 @@ import (
 
 // The function should return a non-nil pointer.
 func TestNewKubescape_ReturnsNonNilPointer(t *testing.T) {
-	ctx := context.TODO()
+	ctx := context.Background()
 	k := NewKubescape(ctx)
 	assert.NotNil(t, k)
 }
@@ -21,6 +21,6 @@ func TestNewKubescape_DoesNotPanic(t *testing.T) {
 			t.Errorf("Function panicked: %v", r)
 		}
 	}()
-	ctx := context.TODO()
+	ctx := context.Background()
 	NewKubescape(ctx)
 }

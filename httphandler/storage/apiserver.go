@@ -112,7 +112,7 @@ func (a *APIServerStore) GetWorkloadConfigurationScanResult(ctx context.Context,
 		logger.L().Debug("empty name provided, skipping workload scan result retrieval")
 		return &v1beta1.WorkloadConfigurationScan{}, nil
 	}
-	manifest, err := a.StorageClient.WorkloadConfigurationScans(namespace).Get(context.Background(), name, metav1.GetOptions{})
+	manifest, err := a.StorageClient.WorkloadConfigurationScans(namespace).Get(ctx, name, metav1.GetOptions{})
 	switch {
 	case errors.IsNotFound(err):
 		logger.L().Debug("workload configuration scan manifest not found in storage",
@@ -184,22 +184,22 @@ func (a *APIServerStore) BuildWorkloadConfigurationScan(ctx context.Context, rep
 // StoreWorkloadConfigurationScanResult stores a WorkloadConfigurationScan manifest
 func (a *APIServerStore) StoreWorkloadConfigurationScanResult(ctx context.Context, manifest *v1beta1.WorkloadConfigurationScan) error {
 	namespace := manifest.GetNamespace()
-	_, err := a.StorageClient.WorkloadConfigurationScans(namespace).Create(context.Background(), manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.WorkloadConfigurationScans(namespace).Create(ctx, manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.WorkloadConfigurationScans(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.WorkloadConfigurationScans(namespace).Get(ctx, manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
 			// update the workload configuration scan manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = mergeWorkloadConfigurationScanSpec(result.Spec, manifest.Spec)
 			// try to send the updated workload configuration scan manifest
-			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.WorkloadConfigurationScans(namespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -283,22 +283,22 @@ func (a *APIServerStore) StoreWorkloadConfigurationScanResultSummary(ctx context
 		},
 	}
 
-	_, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(context.Background(), &manifest, metav1.CreateOptions{})
+	_, err := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Create(ctx, &manifest, metav1.CreateOptions{})
 	switch {
 	case errors.IsAlreadyExists(err):
 		retryErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 			// retrieve the latest version before attempting update
 			// RetryOnConflict uses exponential backoff to avoid exhausting the apiserver
-			result, getErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Get(context.Background(), manifest.Name, metav1.GetOptions{})
+			result, getErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Get(ctx, manifest.Name, metav1.GetOptions{})
 			if getErr != nil {
 				return getErr
 			}
 			// update the manifest
-			mergeMaps(result.Annotations, manifest.Annotations)
-			mergeMaps(result.Labels, manifest.Labels)
+			result.Annotations = mergeMaps(result.Annotations, manifest.Annotations)
+			result.Labels = mergeMaps(result.Labels, manifest.Labels)
 			result.Spec = mergeWorkloadConfigurationScanSummarySpec(result.Spec, manifest.Spec)
 			// try to send the updated manifest
-			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(context.Background(), result, metav1.UpdateOptions{})
+			_, updateErr := a.StorageClient.WorkloadConfigurationScanSummaries(namespace).Update(ctx, result, metav1.UpdateOptions{})
 			return updateErr
 		})
 		if retryErr != nil {
@@ -350,10 +350,10 @@ func getManifestObjectLabelsAndAnnotations(clusterName string, resource workload
 	}
 	labels := make(map[string]string)
 	labels[helpersv1.ApiGroupMetadataKey], labels[helpersv1.ApiVersionMetadataKey] = k8sinterface.SplitApiVersion(resource.GetApiVersion())
-	labels[helpersv1.KindMetadataKey] = resource.GetKind()
-	labels[helpersv1.NameMetadataKey] = resource.GetName()
+	labels[helpersv1.RelatedKindMetadataKey] = resource.GetKind()
+	labels[helpersv1.RelatedNameMetadataKey] = resource.GetName()
 	if k8sinterface.IsResourceInNamespaceScope(resource.GetKind()) {
-		labels[helpersv1.NamespaceMetadataKey] = resource.GetNamespace()
+		labels[helpersv1.RelatedNamespaceMetadataKey] = resource.GetNamespace()
 	}
 
 	if len(relatedObjects) > 0 {
@@ -458,6 +458,9 @@ func getControlsSummaryMapFromScannedControlMap(ctx context.Context, scannedCont
 }
 
 func parseControlSeverity(controlSummary reportsummary.IControlSummary) v1beta1.ControlSeverity {
+	if controlSummary == nil {
+		return v1beta1.ControlSeverity{}
+	}
 	scoreFactor := controlSummary.GetScoreFactor()
 	severity := apis.ControlSeverityToString(scoreFactor)
 
@@ -486,7 +489,7 @@ func parseScannedControlRules(control *resourcesresults.ResourceAssociatedContro
 
 		controlConfigurations := ruleToControlConfigurations(rule)
 
-		relatedResourceIds := []string{}
+		relatedResourceIds := make([]string, len(rule.RelatedResourcesIDs))
 		copy(relatedResourceIds, rule.RelatedResourcesIDs)
 		rules[i] = v1beta1.ScannedControlRule{
 			Name: rule.GetName(),
@@ -540,8 +543,12 @@ func parseWorkloadScanRelatedObjectList(relatedObjects []workloadinterface.IMeta
 }
 
 // mergeMaps merges new into existing, overwriting existing keys with new values
-func mergeMaps(existing, new map[string]string) {
+func mergeMaps(existing, new map[string]string) map[string]string {
+	if existing == nil {
+		existing = make(map[string]string)
+	}
 	for k, v := range new {
 		existing[k] = v
 	}
+	return existing
 }

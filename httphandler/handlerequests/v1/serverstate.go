@@ -1,6 +1,9 @@
 package v1
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 type serverState struct {
 	statusID map[string]bool
@@ -44,6 +47,16 @@ func (s *serverState) len() int {
 	l := len(s.statusID)
 	s.mtx.RUnlock()
 	return l
+}
+
+func (s *serverState) removeAllIfIdle(removeFn func()) error {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	if len(s.statusID) > 0 {
+		return fmt.Errorf("cannot delete all results while a scan is in progress")
+	}
+	removeFn()
+	return nil
 }
 
 func newServerState() *serverState {
