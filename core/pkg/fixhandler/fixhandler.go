@@ -120,13 +120,11 @@ func looksLikeKubescapeReport(raw []byte) bool {
 	if len(shape.Metadata) == 0 {
 		return false
 	}
-	// require kubescape-specific metadata: scanMetadata.scanningTarget must be present (use *int to distinguish absent from zero)
+	// Require a non-empty scanMetadata object, but don't gate on scanningTarget
 	var metaShape struct {
-		ScanMetadata struct {
-			ScanningTarget *int `json:"scanningTarget"`
-		} `json:"scanMetadata"`
+		ScanMetadata map[string]json.RawMessage `json:"scanMetadata"`
 	}
-	if err := json.Unmarshal(shape.Metadata, &metaShape); err != nil || metaShape.ScanMetadata.ScanningTarget == nil {
+	if err := json.Unmarshal(shape.Metadata, &metaShape); err != nil || len(metaShape.ScanMetadata) == 0 {
 		return false
 	}
 	return len(shape.GenerationTime) > 0 ||
@@ -135,7 +133,6 @@ func looksLikeKubescapeReport(raw []byte) bool {
 		len(shape.Resources) > 0 ||
 		len(shape.Attributes) > 0
 }
-
 
 func isSupportedScanningTarget(report *reporthandlingv2.PostureReport) error {
 	scanningTarget := report.Metadata.ScanMetadata.ScanningTarget
