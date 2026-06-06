@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/hostsensor"
+	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,6 +66,39 @@ func TestAddInfoToMap(t *testing.T) {
 			addInfoToMap(tc.Resource, result, tc.Err)
 
 			require.EqualValues(t, tc.Expected, result)
+		})
+	}
+}
+
+// TestAddInfoToMap_KeysMatchResourceGroupToString is a regression test for the
+// bug where addInfoToMap used JoinResourceTriplets while collectHostResources
+// used ResourceGroupToString, causing a key mismatch that silently dropped
+// host-sensor CRD pull failures from scan coverage.
+func TestAddInfoToMap_KeysMatchResourceGroupToString(t *testing.T) {
+	t.Parallel()
+	testErr := errors.New("failed to list CRDs")
+
+	for _, resource := range []hostsensor.HostSensorResource{
+		hostsensor.KubeletInfo,
+		hostsensor.KubeletConfiguration,
+		hostsensor.CNIInfo,
+	} {
+		resource := resource
+		t.Run(string(resource), func(t *testing.T) {
+			t.Parallel()
+			group, version := k8sinterface.SplitApiVersion(hostsensor.MapHostSensorResourceToApiGroup(resource))
+			expectedKeys := k8sinterface.ResourceGroupToString(group, version, resource.String())
+
+			result := make(map[string]apis.StatusInfo)
+			addInfoToMap(resource, result, testErr)
+
+			require.Len(t, result, len(expectedKeys))
+			for _, key := range expectedKeys {
+				info, ok := result[key]
+				require.True(t, ok, "key %q not found in infoMap", key)
+				assert.Equal(t, apis.StatusSkipped, info.InnerStatus)
+				assert.Equal(t, testErr.Error(), info.InnerInfo)
+			}
 		})
 	}
 }
