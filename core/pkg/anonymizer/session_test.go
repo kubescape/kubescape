@@ -6,6 +6,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/reportcrypto"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/attacktrack/v1alpha1"
@@ -15,6 +16,7 @@ import (
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type metadataOnly struct{}
@@ -638,7 +640,17 @@ func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
 		assert.NotEqual(t, "main", repo.DefaultBranch)
 		assert.NotEqual(t, "https://github.com/jijo-OO7/kubescape", repo.RemoteURL)
 
-		assert.Equal(t, "/home/devjijo/work/kubescape", repo.LocalRootPath)
+		assert.NotEqual(
+			t,
+			"/home/devjijo/work/kubescape",
+			repo.LocalRootPath,
+		)
+
+		assert.Contains(
+			t,
+			repo.LocalRootPath,
+			"git-",
+		)
 
 		assert.Contains(t, repo.Repo, "git-")
 		assert.Contains(t, repo.Owner, "git-")
@@ -656,4 +668,105 @@ func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
 		assert.Contains(t, repo.LastCommit.CommitterEmail, "git-")
 		assert.Contains(t, repo.LastCommit.Message, "git-")
 	}
+}
+
+func TestTransformRepoContextMetadata(t *testing.T) {
+	repo := &reporthandlingv2.RepoContextMetadata{
+		Provider:      "github",
+		Repo:          "demo-repository",
+		Owner:         "demo-owner",
+		Branch:        "feature/demo-work",
+		DefaultBranch: "main",
+		RemoteURL:     "https://github.com/demo-owner/demo-repository",
+		LocalRootPath: "/workspace/demo-repository",
+		LastCommit: reporthandling.LastCommit{
+			Hash:           "demo-commit-hash",
+			CommitterName:  "Demo User",
+			CommitterEmail: "demo@example.com",
+			Message:        "demo commit message",
+		},
+	}
+
+	transformRepoContextMetadata(
+		repo,
+		NewMappingTransformer(),
+	)
+
+	assert.NotEqual(t, "demo-repository", repo.Repo)
+	assert.NotEqual(t, "demo-owner", repo.Owner)
+	assert.NotEqual(t, "feature/demo-work", repo.Branch)
+	assert.NotEqual(t, "main", repo.DefaultBranch)
+	assert.NotEqual(t, "https://github.com/demo-owner/demo-repository", repo.RemoteURL)
+	assert.NotEqual(t, "/workspace/demo-repository", repo.LocalRootPath)
+
+	assert.Contains(t, repo.Repo, "git-")
+	assert.Contains(t, repo.Owner, "git-")
+	assert.Contains(t, repo.Branch, "git-")
+	assert.Contains(t, repo.DefaultBranch, "git-")
+	assert.Contains(t, repo.RemoteURL, "git-")
+	assert.Contains(t, repo.LocalRootPath, "git-")
+
+	assert.NotEqual(t, "demo-commit-hash", repo.LastCommit.Hash)
+	assert.NotEqual(t, "Demo User", repo.LastCommit.CommitterName)
+	assert.NotEqual(t, "demo@example.com", repo.LastCommit.CommitterEmail)
+	assert.NotEqual(t, "demo commit message", repo.LastCommit.Message)
+
+	assert.Contains(t, repo.LastCommit.Hash, "git-")
+	assert.Contains(t, repo.LastCommit.CommitterName, "git-")
+	assert.Contains(t, repo.LastCommit.CommitterEmail, "git-")
+	assert.Contains(t, repo.LastCommit.Message, "git-")
+}
+
+func TestTransformRepoContextMetadata_EncryptionTransformer(
+	t *testing.T,
+) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	transformer := NewEncryptionTransformer(dek)
+
+	repo := &reporthandlingv2.RepoContextMetadata{
+		Provider:      "github",
+		Repo:          "demo-repository",
+		Owner:         "demo-owner",
+		Branch:        "feature/demo-work",
+		DefaultBranch: "main",
+		RemoteURL:     "https://github.com/demo-owner/demo-repository",
+		LocalRootPath: "/workspace/demo-repository",
+		LastCommit: reporthandling.LastCommit{
+			Hash:           "demo-commit-hash",
+			CommitterName:  "Demo User",
+			CommitterEmail: "demo@example.com",
+			Message:        "demo commit message",
+		},
+	}
+
+	transformRepoContextMetadata(
+		repo,
+		transformer,
+	)
+
+	assert.Contains(t, repo.Repo, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.Owner, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.Branch, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.DefaultBranch, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.RemoteURL, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.LocalRootPath, "ENC[AES256_GCM,")
+
+	assert.Contains(t, repo.LastCommit.Hash, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.LastCommit.CommitterName, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.LastCommit.CommitterEmail, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.LastCommit.Message, "ENC[AES256_GCM,")
+
+	decryptedRepo, err := reportcrypto.DecryptString(
+		repo.Repo,
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"demo-repository",
+		decryptedRepo,
+	)
 }

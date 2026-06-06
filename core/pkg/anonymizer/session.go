@@ -114,14 +114,14 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) {
 		newResourceAttackTracks[newID] = attackTrack
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
-
+	repoTransformer := NewMappingTransformer()
 	if session.Metadata != nil {
-		anonymizeRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, mapping)
+		transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, repoTransformer)
 	}
 
 	if session.Report != nil {
 
-		anonymizeRepoContextMetadata(session.Report.Metadata.ContextMetadata.RepoContextMetadata, mapping)
+		transformRepoContextMetadata(session.Report.Metadata.ContextMetadata.RepoContextMetadata, repoTransformer)
 
 		for controlID, control := range session.Report.SummaryDetails.Controls {
 			remappedResourceIDs := control.ResourceIDs
@@ -351,32 +351,54 @@ func anonymizeLastCommit(commit *reporthandling.LastCommit, mapping *Mapping) {
 	}
 }
 
-// anonymizeRepoContextMetadata anonymizes repository identity metadata while
-// preserving operational fields required by downstream consumers.
-func anonymizeRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, mapping *Mapping) {
+func transformValue(
+	transformer Transformer,
+	prefix string,
+	value string,
+) string {
+	if value == "" {
+		return value
+	}
+
+	transformed, err := transformer.Transform(prefix, value)
+	if err != nil {
+		return ""
+	}
+
+	return transformed
+}
+
+func transformRepoContextMetadata(
+	repo *reporthandlingv2.RepoContextMetadata,
+	transformer Transformer,
+) {
 	if repo == nil {
 		return
 	}
 
-	if repo.Repo != "" {
-		repo.Repo = mapping.GetOrCreate("git", repo.Repo)
+	repo.Repo = transformValue(transformer, "git", repo.Repo)
+	repo.Owner = transformValue(transformer, "git", repo.Owner)
+	repo.Branch = transformValue(transformer, "git", repo.Branch)
+	repo.DefaultBranch = transformValue(transformer, "git", repo.DefaultBranch)
+	repo.RemoteURL = transformValue(transformer, "git", repo.RemoteURL)
+	repo.LocalRootPath = transformValue(transformer, "git", repo.LocalRootPath)
+
+	transformLastCommit(
+		&repo.LastCommit,
+		transformer,
+	)
+}
+
+func transformLastCommit(
+	commit *reporthandling.LastCommit,
+	transformer Transformer,
+) {
+	if commit == nil {
+		return
 	}
 
-	if repo.Owner != "" {
-		repo.Owner = mapping.GetOrCreate("git", repo.Owner)
-	}
-
-	if repo.Branch != "" {
-		repo.Branch = mapping.GetOrCreate("git", repo.Branch)
-	}
-
-	if repo.DefaultBranch != "" {
-		repo.DefaultBranch = mapping.GetOrCreate("git", repo.DefaultBranch)
-	}
-
-	if repo.RemoteURL != "" {
-		repo.RemoteURL = mapping.GetOrCreate("git", repo.RemoteURL)
-	}
-
-	anonymizeLastCommit(&repo.LastCommit, mapping)
+	commit.Hash = transformValue(transformer, "git", commit.Hash)
+	commit.CommitterName = transformValue(transformer, "git", commit.CommitterName)
+	commit.CommitterEmail = transformValue(transformer, "git", commit.CommitterEmail)
+	commit.Message = transformValue(transformer, "git", commit.Message)
 }

@@ -269,3 +269,39 @@ func TestScan_WhenScanFails_Returns500WithErrorType(t *testing.T) {
 		t.Errorf("Scan failure: response.Response is empty; want scan error message")
 	}
 }
+
+func TestScan_WhenScanPanics_RecoversAndReturns500(t *testing.T) {
+	defer func(o scanner) { scanImpl = o }(scanImpl)
+	scanImpl = func(_ context.Context, _ *cautils.ScanInfo, _ string, _ bool) (*reporthandlingv2.PostureReport, error) {
+		panic("boom")
+	}
+
+	h := NewHTTPHandler(false)
+	rq := httptest.NewRequest(http.MethodPost, "/scan?wait=true", testBody(t))
+	w := httptest.NewRecorder()
+
+	// Must not crash the test process — the panic recovery in executeScan must
+	// contain the failure to a single scan and keep the operator alive.
+	h.Scan(w, rq)
+
+	rs := w.Result()
+	if rs.StatusCode != http.StatusInternalServerError {
+		t.Errorf("Scan panic: HTTP status = %d; want %d", rs.StatusCode, http.StatusInternalServerError)
+	}
+
+	var resp utilsmetav1.Response
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode Scan panic response: %v", err)
+	}
+	if resp.Type != utilsapisv1.ErrorScanResponseType {
+		t.Errorf("Scan panic: response.Type = %q; want %q", resp.Type, utilsapisv1.ErrorScanResponseType)
+	}
+	if resp.Response == "" {
+		t.Errorf("Scan panic: response.Response is empty; want panic message")
+	}
+
+	// The scan slot must be released so the operator is not stuck busy forever.
+	if h.state.isBusy("") {
+		t.Errorf("Scan panic: handler state is still busy after recovery; scan slot must be released")
+	}
+}

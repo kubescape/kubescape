@@ -159,8 +159,8 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 				// using hostSensor mock
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				if len(infoMap) > 0 {
-					sessionObj.InfoMap = infoMap
+				for k, v := range infoMap {
+					sessionObj.InfoMap[k] = v
 				}
 			}
 			cautils.StopSpinner()

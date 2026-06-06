@@ -30,6 +30,27 @@ var scanImpl = scan // Override for testing
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{}
 
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("scan panicked: %v", r)
+			logger.L().Ctx(scanReq.ctx).Error("scan panic recovered", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			responseMsg := err.Error()
+			if persistErr := writeScanErrorToFile(err, scanReq.scanID); persistErr != nil {
+				logger.L().Ctx(scanReq.ctx).Error("failed to persist panic error to file", helpers.String("ID", scanReq.scanID), helpers.Error(persistErr))
+				responseMsg = persistErr.Error()
+			}
+			handler.state.setNotBusy(scanReq.scanID)
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = responseMsg
+				select {
+				case scanReq.resp <- response:
+				default:
+				}
+			}
+		}
+	}()
+
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
 	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
