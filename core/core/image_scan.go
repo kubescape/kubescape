@@ -42,7 +42,7 @@ type VulnerabilitiesIgnorePolicy struct {
 	Severities      []string `json:"severities"`
 }
 
-// Loads excpetion policies from exceptions json object.
+// Loads exception policies from exceptions json object.
 func GetImageExceptionsFromFile(filePath string) ([]VulnerabilitiesIgnorePolicy, error) {
 	// Read the JSON file
 	jsonFile, err := os.ReadFile(filePath)
