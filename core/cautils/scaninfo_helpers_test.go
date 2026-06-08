@@ -90,6 +90,9 @@ func TestBoolPtrFlag_GetBool(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// isHTTPURL
+// ---------------------------------------------------------------------------
 func TestNewBoolPtr(t *testing.T) {
 	t.Run("with non-nil pointer", func(t *testing.T) {
 		b := true

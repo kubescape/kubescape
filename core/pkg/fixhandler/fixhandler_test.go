@@ -678,6 +678,9 @@ func TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths(t *tes
 	helmRes := &reporthandling.Resource{
 		Object: helmObj,
 		Source: &reporthandling.Source{
+			FileType:      reporthandling.SourceTypeHelmChart,
+			HelmPath:      "/charts/myapp",
+			HelmChartName: "myapp",
 			FileType:         reporthandling.SourceTypeHelmChart,
 			HelmPath:         "/charts/myapp",
 			HelmChartName:    "myapp",
@@ -724,6 +727,7 @@ func TestPrepareHelmSuggestions_RoutesHelmAwayFromYqAndCarriesValuesPaths(t *tes
 	s := suggestions[0]
 	assert.Equal(t, "myapp", s.ChartName)
 	assert.Equal(t, "/charts/myapp", s.ChartPath)
+
 	assert.Equal(t, "templates/deployment.yaml", s.TemplateFile)
 	assert.Equal(t, []string{"image.tag", "replicaCount"}, s.ValuesPaths)
 	assert.Len(t, s.FixPaths, 1)
@@ -769,11 +773,16 @@ func TestPrepareHelmSuggestions_MixedHelmAndYamlResources(t *testing.T) {
 	helmRes := &reporthandling.Resource{
 		Object: helmObj,
 		Source: &reporthandling.Source{
+			FileType:      reporthandling.SourceTypeHelmChart,
+			HelmPath:      "/charts/myapp",
+			HelmChartName: "myapp",
+
 			FileType:         reporthandling.SourceTypeHelmChart,
 			HelmPath:         "/charts/myapp",
 			HelmChartName:    "myapp",
 			HelmTemplateFile: "templates/deployment.yaml",
 			HelmValuesPaths:  []string{"image.tag"},
+
 		},
 	}
 	helmResID := helmRes.GetID()
@@ -817,7 +826,9 @@ func TestPrepareHelmSuggestions_MixedHelmAndYamlResources(t *testing.T) {
 	suggestions := h.PrepareHelmSuggestions(context.TODO())
 	assert.Len(t, suggestions, 1, "exactly the Helm resource should produce a HelmFixSuggestion")
 	assert.Equal(t, "myapp", suggestions[0].ChartName)
+
 	assert.Equal(t, []string{"image.tag"}, suggestions[0].ValuesPaths)
+
 }
 
 func TestGetFilePathAndIndex(t *testing.T) {
