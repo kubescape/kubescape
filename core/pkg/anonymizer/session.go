@@ -395,39 +395,74 @@ func transformRepoContextMetadata(
 		return nil
 	}
 
+	repoCopy := *repo
+
 	var err error
 
-	repo.Repo, err = transformValue(transformer, "git", repo.Repo)
+	repoCopy.Repo, err = transformValue(
+		transformer,
+		"git",
+		repoCopy.Repo,
+	)
 	if err != nil {
 		return err
 	}
 
-	repo.Owner, err = transformValue(transformer, "git", repo.Owner)
+	repoCopy.Owner, err = transformValue(
+		transformer,
+		"git",
+		repoCopy.Owner,
+	)
 	if err != nil {
 		return err
 	}
 
-	repo.Branch, err = transformValue(transformer, "git", repo.Branch)
+	repoCopy.Branch, err = transformValue(
+		transformer,
+		"git",
+		repoCopy.Branch,
+	)
 	if err != nil {
 		return err
 	}
 
-	repo.DefaultBranch, err = transformValue(transformer, "git", repo.DefaultBranch)
+	repoCopy.DefaultBranch, err = transformValue(
+		transformer,
+		"git",
+		repoCopy.DefaultBranch,
+	)
 	if err != nil {
 		return err
 	}
 
-	repo.RemoteURL, err = transformValue(transformer, "git", repo.RemoteURL)
+	repoCopy.RemoteURL, err = transformValue(
+		transformer,
+		"git",
+		repoCopy.RemoteURL,
+	)
 	if err != nil {
 		return err
 	}
 
-	repo.LocalRootPath, err = transformValue(transformer, "git", repo.LocalRootPath)
+	repoCopy.LocalRootPath, err = transformValue(
+		transformer,
+		"git",
+		repoCopy.LocalRootPath,
+	)
 	if err != nil {
 		return err
 	}
 
-	return transformLastCommit(&repo.LastCommit, transformer)
+	if err := transformLastCommit(
+		&repoCopy.LastCommit,
+		transformer,
+	); err != nil {
+		return err
+	}
+
+	*repo = repoCopy
+
+	return nil
 }
 
 func transformLastCommit(
@@ -438,43 +473,47 @@ func transformLastCommit(
 		return nil
 	}
 
+	commitCopy := *commit
+
 	var err error
 
-	commit.Hash, err = transformValue(
+	commitCopy.Hash, err = transformValue(
 		transformer,
 		"git",
-		commit.Hash,
+		commitCopy.Hash,
 	)
 	if err != nil {
 		return err
 	}
 
-	commit.CommitterName, err = transformValue(
+	commitCopy.CommitterName, err = transformValue(
 		transformer,
 		"git",
-		commit.CommitterName,
+		commitCopy.CommitterName,
 	)
 	if err != nil {
 		return err
 	}
 
-	commit.CommitterEmail, err = transformValue(
+	commitCopy.CommitterEmail, err = transformValue(
 		transformer,
 		"git",
-		commit.CommitterEmail,
+		commitCopy.CommitterEmail,
 	)
 	if err != nil {
 		return err
 	}
 
-	commit.Message, err = transformValue(
+	commitCopy.Message, err = transformValue(
 		transformer,
 		"git",
-		commit.Message,
+		commitCopy.Message,
 	)
 	if err != nil {
 		return err
 	}
+
+	*commit = commitCopy
 
 	return nil
 }
