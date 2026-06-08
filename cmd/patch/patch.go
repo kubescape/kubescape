@@ -17,7 +17,7 @@ import (
 
 var patchCmdExamples = fmt.Sprintf(`
   # Patch the nginx:1.22 image
-  1) sudo buildkitd        # start buildkitd service, run in seperate terminal
+  1) sudo buildkitd        # start buildkitd service, run in separate terminal
   2) sudo %[1]s patch --image docker.io/library/nginx:1.22   # patch the image
 
   # The patch command can also be run without sudo privileges
