@@ -94,7 +94,7 @@ func validateReportStructure(raw []byte, report *reporthandlingv2.PostureReport)
 	return errors.New(invalidReportFileErr)
 }
 
-// hasRecognizedScanContext reports whether the report carries scan context metadata for any scan type (cluster, remote repo, file, dir, gitlocal)
+// hasRecognizedScanContext reports whether the report carries any known context metadata type (Cluster, Repo, File, Directory, or Helm)
 func hasRecognizedScanContext(report *reporthandlingv2.PostureReport) bool {
 	ctx := report.Metadata.ContextMetadata
 	return ctx.ClusterContextMetadata != nil ||
