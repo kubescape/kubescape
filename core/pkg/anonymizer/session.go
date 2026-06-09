@@ -15,7 +15,7 @@ import (
 
 // anonymizeSession rewrites sensitive resource identifiers and metadata while
 // preserving internal referential integrity across the full OPA session.
-func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) error {
+func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping, repoTransformer Transformer) error {
 	if session == nil {
 		return nil
 	}
@@ -114,7 +114,7 @@ func anonymizeSession(session *cautils.OPASessionObj, mapping *Mapping) error {
 		newResourceAttackTracks[newID] = attackTrack
 	}
 	session.ResourceAttackTracks = newResourceAttackTracks
-	repoTransformer := NewMappingTransformer()
+
 	if session.Metadata != nil {
 		if err := transformRepoContextMetadata(session.Metadata.ContextMetadata.RepoContextMetadata, repoTransformer); err != nil {
 			return err
@@ -372,11 +372,7 @@ func anonymizeLastCommit(commit *reporthandling.LastCommit, mapping *Mapping) {
 	}
 }
 
-func transformValue(
-	transformer Transformer,
-	prefix string,
-	value string,
-) (string, error) {
+func transformValue(transformer Transformer, prefix string, value string) (string, error) {
 	if value == "" {
 		return value, nil
 	}
@@ -387,10 +383,7 @@ func transformValue(
 	)
 }
 
-func transformRepoContextMetadata(
-	repo *reporthandlingv2.RepoContextMetadata,
-	transformer Transformer,
-) error {
+func transformRepoContextMetadata(repo *reporthandlingv2.RepoContextMetadata, transformer Transformer) error {
 	if repo == nil {
 		return nil
 	}
@@ -465,10 +458,7 @@ func transformRepoContextMetadata(
 	return nil
 }
 
-func transformLastCommit(
-	commit *reporthandling.LastCommit,
-	transformer Transformer,
-) error {
+func transformLastCommit(commit *reporthandling.LastCommit, transformer Transformer) error {
 	if commit == nil {
 		return nil
 	}
