@@ -3,6 +3,7 @@ package fixhandler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -90,7 +91,7 @@ func validateReportStructure(raw []byte, report *reporthandlingv2.PostureReport)
 	if looksLikeKubescapeReport(raw) {
 		return nil
 	}
-	return fmt.Errorf(invalidReportFileErr)
+	return errors.New(invalidReportFileErr)
 }
 
 // hasRecognizedScanContext reports whether the report carries scan context metadata for any scan type (cluster, remote repo, file, dir, gitlocal)
