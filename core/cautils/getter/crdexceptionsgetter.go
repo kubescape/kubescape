@@ -81,6 +81,12 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 	for i := range seList.Items {
 		policies, convErr := convertCRDObjectToPosturePolicies(&seList.Items[i], "SecurityException", g.k8sClient)
 		if convErr != nil {
+			// Partial application: skip this one CRD but keep the rest, and make the
+			// drop observable instead of silently swallowing it.
+			logger.L().Warning("skipping SecurityException that failed to convert to posture exceptions",
+				helpers.String("name", seList.Items[i].GetName()),
+				helpers.String("namespace", seList.Items[i].GetNamespace()),
+				helpers.Error(convErr))
 			continue
 		}
 		out = append(out, policies...)
@@ -93,6 +99,11 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 	for i := range cseList.Items {
 		policies, convErr := convertCRDObjectToPosturePolicies(&cseList.Items[i], "ClusterSecurityException", g.k8sClient)
 		if convErr != nil {
+			// Partial application: skip this one CRD but keep the rest, and make the
+			// drop observable instead of silently swallowing it.
+			logger.L().Warning("skipping ClusterSecurityException that failed to convert to posture exceptions",
+				helpers.String("name", cseList.Items[i].GetName()),
+				helpers.Error(convErr))
 			continue
 		}
 		out = append(out, policies...)
