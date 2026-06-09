@@ -272,6 +272,7 @@ func anonymizeUnstructuredReference(
 	ref["name"] = mapping.GetOrCreate("ref", name)
 }
 
+// isSensitiveEnvValue reports whether an env var value looks like a secret.
 func isSensitiveEnvValue(value string) bool {
 	value = strings.ToLower(value)
 
@@ -294,24 +295,22 @@ func isSensitiveEnvValue(value string) bool {
 	return false
 }
 
+// isSensitiveEnvName reports whether an env var name looks like a credential.
 func isSensitiveEnvName(name string) bool {
 	name = strings.ToLower(name)
 
-	// Normalize the name by removing common separators
+	// strip common separators so APIKEY matches api_key
 	normalized := name
 	for _, sep := range []string{"_", "-", ".", " "} {
 		normalized = strings.ReplaceAll(normalized, sep, "")
 	}
 
-	// Patterns are matched against the separator-normalized name
 	sensitivePatterns := []string{
 		"password",
 		"passwd",
 		"pwd",
 		"secret",
-		"secretkey",
 		"token",
-		"authtoken",
 		"apikey",
 		"accesskey",
 		"privatekey",
