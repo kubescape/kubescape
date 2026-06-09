@@ -186,10 +186,12 @@ func buildResourceDesignators(
 ) ([]map[string]string, error) {
 	designators := make([]map[string]string, 0, 2)
 
+	// A namespaced SecurityException is implicitly scoped to its own namespace. That
+	// scope is carried per resource designator below (and as a fallback when no
+	// resources/objectSelector narrow it); it must NOT be added as a standalone
+	// designator here, or it would be OR'd with the narrower ones and widen the
+	// exception back to the whole namespace.
 	namespace := obj.GetNamespace()
-	if kind == "SecurityException" && namespace != "" {
-		designators = append(designators, map[string]string{identifiers.AttributeNamespace: namespace})
-	}
 
 	// objectSelector constrains the exception to workloads carrying matching labels.
 	// matchLabels are flattened into every resource designator so the existing label
@@ -282,8 +284,14 @@ func buildResourceDesignators(
 	}
 
 	// Ensure the exception has at least one scope designator, otherwise exception processor ignores it.
+	// A namespaced SecurityException with no narrowing falls back to its whole namespace;
+	// a cluster-scoped one falls back to all kinds.
 	if len(designators) == 0 && !namespaceSelectorFound {
-		designators = append(designators, map[string]string{identifiers.AttributeKind: "*"})
+		if kind == "SecurityException" && namespace != "" {
+			designators = append(designators, map[string]string{identifiers.AttributeNamespace: namespace})
+		} else {
+			designators = append(designators, map[string]string{identifiers.AttributeKind: "*"})
+		}
 	}
 
 	// AND objectSelector.matchLabels into every designator produced above.

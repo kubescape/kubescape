@@ -175,6 +175,73 @@ func TestConvertCRDObjectToPosturePolicies_FrameworkName(t *testing.T) {
 	}
 }
 
+func TestBuildResourceDesignators_NamespacedScopeIsNotWidened(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources []map[string]any
+		selector  map[string]any
+		want      []map[string]string
+	}{
+		{
+			name:      "resources narrow the scope without a bare-namespace designator",
+			resources: []map[string]any{{"kind": "Deployment", "name": "web"}},
+			want: []map[string]string{
+				{
+					identifiers.AttributeNamespace: "team-a",
+					identifiers.AttributeKind:      "Deployment",
+					identifiers.AttributeName:      "web",
+				},
+			},
+		},
+		{
+			name: "no narrowing falls back to the whole namespace",
+			want: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+		},
+		{
+			name:      "objectSelector AND resources is a strict intersection",
+			resources: []map[string]any{{"kind": "Deployment", "name": "web"}},
+			selector:  map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			want: []map[string]string{
+				{
+					identifiers.AttributeNamespace: "team-a",
+					identifiers.AttributeKind:      "Deployment",
+					identifiers.AttributeName:      "web",
+					"app":                          "nginx",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			match := map[string]any{}
+			if tc.selector != nil {
+				match["objectSelector"] = tc.selector
+			}
+			if len(tc.resources) > 0 {
+				resources := make([]any, 0, len(tc.resources))
+				for _, res := range tc.resources {
+					resources = append(resources, res)
+				}
+				match["resources"] = resources
+			}
+			obj := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "kubescape.io/v1beta1",
+				"kind":       "SecurityException",
+				"metadata":   map[string]any{"name": "se-scoped", "namespace": "team-a"},
+				"spec": map[string]any{
+					"match":   match,
+					"posture": []any{map[string]any{"controlID": "C-0034", "action": "ignore"}},
+				},
+			}}
+
+			got, err := buildResourceDesignators(obj, "SecurityException", nil)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tc.want, got)
+		})
+	}
+}
+
 func TestBuildResourceDesignators_ObjectSelector(t *testing.T) {
 	tests := []struct {
 		name      string
