@@ -2,11 +2,15 @@
 
 This guide explains how to integrate Kubescape with [Harbor](https://goharbor.io), the open-source container registry. The integration uses the [harbor-scanner-kubescape](https://github.com/Onyx2406/harbor-scanner-kubescape) adapter, which implements the [Harbor Pluggable Scanner API v1.2](https://github.com/goharbor/pluggable-scanner-spec) and allows Harbor to use Kubescape as an alternative scanner to Trivy and Clair.
 
-> **Note:** The Harbor scanner adapter is currently pending acceptance by the Harbor project. Once accepted, it will be available as an official pluggable scanner in Harbor's scanner registry.
+> **⚠️ Community / Experimental Integration**
+>
+> The [harbor-scanner-kubescape](https://github.com/Onyx2406/harbor-scanner-kubescape) adapter is a community project that is pending donation to the `goharbor` organization. The Helm chart is currently published under a personal namespace (`onyx2406`), and no stable release has been tagged yet. This means the adapter pod may fail to start until the donation lands and an official image is published.
+>
+> This guide is provided for evaluation purposes only and is **not officially supported** by the Kubescape project. Once the adapter is accepted into `goharbor` and a tagged release is available, this guide will be updated with pinned versions.
 
 ## Prerequisites
 
-- A running Harbor instance (v2.0 or later)
+- A running Harbor instance (v2.4 or later)
 - A Kubernetes cluster with the Kubescape operator installed, including the `kubevuln` component
 - Helm 3
 - `kubectl` configured to access your cluster
@@ -15,7 +19,7 @@ This guide explains how to integrate Kubescape with [Harbor](https://goharbor.io
 
 The adapter bridges Harbor's scanning workflow with Kubescape's `kubevuln` component for image vulnerability analysis.
 
-```
+```text
 Harbor → harbor-scanner-kubescape → kubevuln (Kubescape)
                                          ↓
                                    Grype + Syft
