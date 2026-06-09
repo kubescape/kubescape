@@ -207,7 +207,9 @@ func buildResourceDesignators(
 	// objectSelector constrains the exception to workloads carrying matching labels.
 	// matchLabels are flattened into every resource designator so the existing label
 	// comparator (opa-utils compareLabels) enforces them, AND-combined with the other
-	// match fields per the design doc. matchExpressions cannot be represented as
+	// match fields per the design doc. Note: matchLabels are matched against the
+	// resource's own top-level metadata.labels (workload.GetLabels()), not the
+	// pod-template/selector labels. matchExpressions cannot be represented as
 	// key->value attributes, so they are best-effort for v1beta1: a warning is emitted
 	// and the rest of the exception still applies (partial application, never fail-closed).
 	objectSelectorLabels, err := objectSelectorMatchLabels(obj, kind)
