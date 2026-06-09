@@ -9,7 +9,9 @@ func Apply(resultsHandler *resultshandling.ResultsHandler) error {
 
 	mapping := NewMapping()
 
-	anonymizeSession(resultsHandler.ScanData, mapping)
+	if err := anonymizeSession(resultsHandler.ScanData, mapping); err != nil {
+		return err
+	}
 
 	return nil
 }

@@ -3,6 +3,8 @@ package anonymizer
 import (
 	"testing"
 
+	"errors"
+
 	"github.com/armosec/armoapi-go/armotypes"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
@@ -18,6 +20,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failingTransformer struct{}
+
+func (f *failingTransformer) Transform(prefix string, value string) (string, error) {
+	return "", errors.New("transform failed")
+}
 
 type metadataOnly struct{}
 
@@ -687,10 +695,11 @@ func TestTransformRepoContextMetadata(t *testing.T) {
 		},
 	}
 
-	transformRepoContextMetadata(
+	err := transformRepoContextMetadata(
 		repo,
 		NewMappingTransformer(),
 	)
+	require.NoError(t, err)
 
 	assert.NotEqual(t, "demo-repository", repo.Repo)
 	assert.NotEqual(t, "demo-owner", repo.Owner)
@@ -741,10 +750,11 @@ func TestTransformRepoContextMetadata_EncryptionTransformer(
 		},
 	}
 
-	transformRepoContextMetadata(
+	err = transformRepoContextMetadata(
 		repo,
 		transformer,
 	)
+	require.NoError(t, err)
 
 	assert.Contains(t, repo.Repo, "ENC[AES256_GCM,")
 	assert.Contains(t, repo.Owner, "ENC[AES256_GCM,")
@@ -768,5 +778,40 @@ func TestTransformRepoContextMetadata_EncryptionTransformer(
 		t,
 		"demo-repository",
 		decryptedRepo,
+	)
+}
+
+func TestTransformRepoContextMetadata_Error(
+	t *testing.T,
+) {
+	repo := &reporthandlingv2.RepoContextMetadata{
+		Repo:          "demo-repository",
+		Owner:         "demo-owner",
+		Branch:        "feature/demo-work",
+		DefaultBranch: "main",
+		RemoteURL:     "https://github.com/demo-owner/demo-repository",
+		LocalRootPath: "/workspace/demo-repository",
+	}
+
+	err := transformRepoContextMetadata(
+		repo,
+		&failingTransformer{},
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "transform failed")
+	assert.Equal(t, "demo-repository", repo.Repo)
+	assert.Equal(t, "demo-owner", repo.Owner)
+	assert.Equal(t, "feature/demo-work", repo.Branch)
+	assert.Equal(t, "main", repo.DefaultBranch)
+	assert.Equal(
+		t,
+		"https://github.com/demo-owner/demo-repository",
+		repo.RemoteURL,
+	)
+	assert.Equal(
+		t,
+		"/workspace/demo-repository",
+		repo.LocalRootPath,
 	)
 }

@@ -231,9 +231,8 @@ func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsH
 	resultsHandling.SetData(scanData)
 
 	if scanInfo.Hide {
-		/* logger.L().Info("anonymizer hook triggered")  //used for debuging pipeline right now will be removed in succeeding phase */
 		if err := anonymizer.Apply(resultsHandling); err != nil {
-			logger.L().Warning("failed to hide sensitive fields", helpers.Error(err))
+			return nil, fmt.Errorf("failed to hide sensitive fields: %w", err)
 		}
 	}
 
