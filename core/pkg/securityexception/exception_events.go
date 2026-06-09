@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	securityExceptionAPIVersion = "kubescape.io/v1"
+	securityExceptionAPIVersion = "kubescape.io/v1beta1"
 	crdKindAttribute            = "securityExceptionKind"
 	crdNameAttribute            = "securityExceptionName"
 	crdNamespaceAttribute       = "securityExceptionNamespace"

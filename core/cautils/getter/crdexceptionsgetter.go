@@ -3,6 +3,7 @@ package getter
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 
 const (
 	securityExceptionGroup   = "kubescape.io"
-	securityExceptionVersion = "v1"
+	securityExceptionVersion = "v1beta1"
 )
 
 var (
@@ -153,7 +154,10 @@ func convertCRDObjectToPosturePolicies(
 		if !ok {
 			action = ""
 		}
-		policy, err := convertSecurityExceptionToPosturePolicy(name, controlID, "", action, expiresAt, reason, resources)
+		// frameworkName scopes the exception to a single framework; an empty value
+		// (field omitted) applies the exception framework-wide.
+		frameworkName, _ := item["frameworkName"].(string)
+		policy, err := convertSecurityExceptionToPosturePolicy(name, controlID, frameworkName, action, expiresAt, reason, resources)
 		if err != nil {
 			continue
 		}
@@ -187,17 +191,15 @@ func buildResourceDesignators(
 		designators = append(designators, map[string]string{identifiers.AttributeNamespace: namespace})
 	}
 
-	_, objectSelectorFound, err := unstructured.NestedFieldNoCopy(obj.Object, "spec", "match", "objectSelector")
+	// objectSelector constrains the exception to workloads carrying matching labels.
+	// matchLabels are flattened into every resource designator so the existing label
+	// comparator (opa-utils compareLabels) enforces them, AND-combined with the other
+	// match fields per the design doc. matchExpressions cannot be represented as
+	// key->value attributes, so they are best-effort for v1beta1: a warning is emitted
+	// and the rest of the exception still applies (partial application, never fail-closed).
+	objectSelectorLabels, err := objectSelectorMatchLabels(obj, kind)
 	if err != nil {
-		return nil, fmt.Errorf("read objectSelector: %w", err)
-	}
-	if objectSelectorFound {
-		logger.L().Warning("SecurityException CRD uses unsupported spec.match.objectSelector; skipping",
-			helpers.String("name", obj.GetName()),
-			helpers.String("namespace", namespace),
-			helpers.String("kind", kind),
-		)
-		return nil, fmt.Errorf("spec.match.objectSelector is not supported")
+		return nil, err
 	}
 
 	namespaceSelectorFound := false
@@ -284,7 +286,55 @@ func buildResourceDesignators(
 		designators = append(designators, map[string]string{identifiers.AttributeKind: "*"})
 	}
 
+	// AND objectSelector.matchLabels into every designator produced above.
+	if len(objectSelectorLabels) > 0 {
+		for _, designator := range designators {
+			for k, v := range objectSelectorLabels {
+				designator[k] = v
+			}
+		}
+	}
+
 	return designators, nil
+}
+
+// objectSelectorMatchLabels decodes spec.match.objectSelector and returns its
+// matchLabels as regex-escaped designator attributes (the label comparator treats
+// values as regexes). matchExpressions are not representable as key->value attributes
+// and are logged as best-effort rather than failing the exception.
+func objectSelectorMatchLabels(obj *unstructured.Unstructured, kind string) (map[string]string, error) {
+	selectorRaw, found, err := unstructured.NestedFieldCopy(obj.Object, "spec", "match", "objectSelector")
+	if err != nil {
+		return nil, fmt.Errorf("read objectSelector: %w", err)
+	}
+	if !found {
+		return nil, nil
+	}
+	selectorMap, ok := selectorRaw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("objectSelector has unexpected type")
+	}
+	labelSelector := metav1.LabelSelector{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(selectorMap, &labelSelector); err != nil {
+		return nil, fmt.Errorf("decode objectSelector: %w", err)
+	}
+
+	if len(labelSelector.MatchExpressions) > 0 {
+		logger.L().Warning("SecurityException spec.match.objectSelector.matchExpressions is best-effort for v1beta1 and is not applied; matchLabels (if any) still apply",
+			helpers.String("name", obj.GetName()),
+			helpers.String("namespace", obj.GetNamespace()),
+			helpers.String("kind", kind),
+		)
+	}
+
+	if len(labelSelector.MatchLabels) == 0 {
+		return nil, nil
+	}
+	escaped := make(map[string]string, len(labelSelector.MatchLabels))
+	for k, v := range labelSelector.MatchLabels {
+		escaped[k] = regexp.QuoteMeta(v)
+	}
+	return escaped, nil
 }
 
 // resolveNamespaceSelector returns namespace names matching a label selector.
