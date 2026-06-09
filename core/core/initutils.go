@@ -18,6 +18,9 @@ import (
 	reporterv2 "github.com/kubescape/kubescape/v3/core/pkg/resultshandling/reporter/v2"
 	"github.com/kubescape/rbac-utils/rbacscanner"
 	"go.opentelemetry.io/otel"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // getKubernetesApi
@@ -26,6 +29,27 @@ func getKubernetesApi() *k8sinterface.KubernetesApi {
 		return nil
 	}
 	return k8sinterface.NewKubernetesApi()
+}
+
+func getExceptionsK8sClient(ctx context.Context) client.Client {
+	if !k8sinterface.IsConnectedToCluster() {
+		return nil
+	}
+	config := k8sinterface.GetK8sConfig()
+	if config == nil {
+		return nil
+	}
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		logger.L().Ctx(ctx).Warning("failed to add corev1 scheme", helpers.Error(err))
+		return nil
+	}
+	k8sClient, err := client.New(config, client.Options{Scheme: scheme})
+	if err != nil {
+		logger.L().Ctx(ctx).Warning("failed to create controller-runtime client", helpers.Error(err))
+		return nil
+	}
+	return k8sClient
 }
 
 func getExceptionsGetter(ctx context.Context, useExceptions string, accountID string, downloadReleasedPolicy *getter.DownloadReleasedPolicy) getter.IExceptionsGetter {
@@ -108,7 +132,7 @@ func getResourceHandler(ctx context.Context, scanInfo *cautils.ScanInfo, tenantC
 //
 // A noop sensor is returned whenever host scanning is disabled or an error prevented the scanner to properly deploy.
 func getHostSensorHandler(ctx context.Context, scanInfo *cautils.ScanInfo, k8s *k8sinterface.KubernetesApi) hostsensorutils.IHostSensor {
-	const wantsHostSensorControls = true // defaults to disabling the scanner if not explictly enabled (TODO(fredbi): should be addressed by injecting ScanInfo defaults)
+	const wantsHostSensorControls = true // defaults to disabling the scanner if not explicitly enabled (TODO(fredbi): should be addressed by injecting ScanInfo defaults)
 	hostSensorVal := scanInfo.HostSensorEnabled.Get()
 
 	switch {

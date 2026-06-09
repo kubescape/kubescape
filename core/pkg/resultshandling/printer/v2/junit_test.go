@@ -616,9 +616,9 @@ func TestJunitMultiFrameworkSharedControl(t *testing.T) {
 // testsSuites. This unit test pins the loop itself.
 func TestAggregateSuiteCounts(t *testing.T) {
 	cases := []struct {
-		name                                 string
-		in                                   []JUnitTestSuite
-		wantTests, wantFailures, wantErrors  int
+		name                                string
+		in                                  []JUnitTestSuite
+		wantTests, wantFailures, wantErrors int
 	}{
 		{
 			name: "empty slice yields zeros",
@@ -650,4 +650,29 @@ func TestAggregateSuiteCounts(t *testing.T) {
 			assert.Equal(t, tc.wantErrors, gotErrors, "errors")
 		})
 	}
+}
+
+func TestTestCases_MissingControl(t *testing.T) {
+	session := cautils.NewOPASessionObjMock()
+	session.Report = &reporthandlingv2.PostureReport{
+		SummaryDetails: reportsummary.SummaryDetails{
+			Controls: reportsummary.ControlSummaries{},
+		},
+	}
+
+	externalControls := reportsummary.ControlSummaries{
+		"C-MISSING": {
+			ControlID:  "C-MISSING",
+			Name:       "missing",
+			StatusInfo: apis.StatusInfo{InnerStatus: apis.StatusPassed},
+		},
+	}
+
+	assert.NotPanics(t, func() {
+		cases := testsCases(session, &externalControls, "TestSuite")
+		if assert.Len(t, cases, 1) {
+			assert.Equal(t, "missing", cases[0].Name)
+			assert.Nil(t, cases[0].Failure)
+		}
+	})
 }

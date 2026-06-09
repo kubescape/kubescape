@@ -1,6 +1,8 @@
 package printer
 
 import (
+	"time"
+
 	v5 "github.com/anchore/grype/grype/db/v5"
 	"github.com/anchore/grype/grype/match"
 	"github.com/kubescape/k8s-interface/workloadinterface"
@@ -195,6 +197,9 @@ func extractResourceLabels(allResources map[string]workloadinterface.IMetadata, 
 
 // FinalizeResults finalize the results objects by copying data from map to lists
 func FinalizeResults(data *cautils.OPASessionObj) *reporthandlingv2.PostureReport {
+	if data.Report.ReportGenerationTime.IsZero() {
+		data.Report.ReportGenerationTime = time.Now().UTC()
+	}
 	report := reporthandlingv2.PostureReport{
 		SummaryDetails:       data.Report.SummaryDetails,
 		Metadata:             *data.Metadata,

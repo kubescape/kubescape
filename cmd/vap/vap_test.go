@@ -471,6 +471,28 @@ func TestCreatePolicyBindingCmdValidation(t *testing.T) {
 		err := cmd.Execute()
 		assert.NoError(t, err)
 	})
+
+	t.Run("known parameterized control requires parameter reference", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0012"})
+		err := cmd.Execute()
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "requires --parameter-reference")
+	})
+
+	t.Run("known parameterized control accepts parameter reference", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0001", "--parameter-reference", "basic-control-configuration"})
+		err := cmd.Execute()
+		assert.NoError(t, err)
+	})
+
+	t.Run("known non-parameterized control does not require parameter reference", func(t *testing.T) {
+		cmd := getCreatePolicyBindingCmd()
+		cmd.SetArgs([]string{"--name", "my-binding", "--control", "C-0016"})
+		err := cmd.Execute()
+		assert.NoError(t, err)
+	})
 }
 
 func TestGetDeployLibraryCmd(t *testing.T) {

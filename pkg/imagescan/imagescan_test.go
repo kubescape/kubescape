@@ -7,10 +7,111 @@ import (
 	"testing"
 
 	"github.com/adrg/xdg"
+
+	"github.com/anchore/grype/grype/match"
+	grypepkg "github.com/anchore/grype/grype/pkg"
 	"github.com/anchore/grype/grype/vulnerability"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type thresholdStubVulnerabilityProvider struct {
+	metadataByID map[string]*vulnerability.Metadata
+	errByID      map[string]error
+}
+
+func (s thresholdStubVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
+	return nil
+}
+
+func (s thresholdStubVulnerabilityProvider) FindVulnerabilities(...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+
+func (s thresholdStubVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	if err, ok := s.errByID[ref.ID]; ok {
+		return nil, err
+	}
+
+	if metadata, ok := s.metadataByID[ref.ID]; ok {
+		return metadata, nil
+	}
+
+	return nil, errors.New("metadata not found")
+}
+
+func (s thresholdStubVulnerabilityProvider) Close() error {
+	return nil
+}
+
+func makeThresholdTestMatch(id string) match.Match {
+	return match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{
+				ID:        id,
+				Namespace: "nvd",
+			},
+		},
+		Package: grypepkg.Package{
+			ID:      grypepkg.ID("pkg-" + id),
+			Name:    "pkg-" + id,
+			Version: "1.0.0",
+		},
+	}
+}
+
+type stubVulnerabilityProvider struct {
+	metadataByID map[string]*vulnerability.Metadata
+	errByID      map[string]error
+}
+
+func (s stubVulnerabilityProvider) PackageSearchNames(grypepkg.Package) []string {
+	return nil
+}
+
+func (s stubVulnerabilityProvider) FindVulnerabilities(...vulnerability.Criteria) ([]vulnerability.Vulnerability, error) {
+	return nil, nil
+}
+
+func (s stubVulnerabilityProvider) VulnerabilityMetadata(ref vulnerability.Reference) (*vulnerability.Metadata, error) {
+	if err, ok := s.errByID[ref.ID]; ok {
+		return nil, err
+	}
+
+	if metadata, ok := s.metadataByID[ref.ID]; ok {
+		return metadata, nil
+	}
+
+	return nil, errors.New("metadata not found")
+}
+
+func (s stubVulnerabilityProvider) Close() error {
+	return nil
+}
+
+func makeTestMatch(id string) match.Match {
+	return match.Match{
+		Vulnerability: vulnerability.Vulnerability{
+			Reference: vulnerability.Reference{
+				ID:        id,
+				Namespace: "nvd",
+			},
+		},
+		Package: grypepkg.Package{
+			ID:      grypepkg.ID("pkg-" + id),
+			Name:    "pkg-" + id,
+			Version: "1.0.0",
+		},
+	}
+}
+
+func matchIDs(matches match.Matches) []string {
+	ids := make([]string, 0, matches.Count())
+	for m := range matches.Enumerate() {
+		ids = append(ids, m.Vulnerability.ID)
+	}
+	return ids
+}
 
 func TestParseSeverity(t *testing.T) {
 	tests := []struct {
@@ -195,6 +296,60 @@ func TestNewScanServiceWithMatchersIntegration(t *testing.T) {
 	assert.False(t, svcWithoutDefault.useDefaultMatchers)
 }
 
+func TestExceedsSeverityThreshold(t *testing.T) {
+	provider := thresholdStubVulnerabilityProvider{
+		metadataByID: map[string]*vulnerability.Metadata{
+			"CVE-high": {Severity: vulnerability.HighSeverity.String()},
+			"CVE-low":  {Severity: vulnerability.LowSeverity.String()},
+		},
+		errByID: map[string]error{
+			"CVE-error": errors.New("lookup failed"),
+		},
+	}
+
+	tests := []struct {
+		name      string
+		threshold vulnerability.Severity
+		matches   match.Matches
+		want      bool
+	}{
+		{
+			name:      "unknown threshold never fails the scan",
+			threshold: vulnerability.UnknownSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-high"),
+			),
+			want: false,
+		},
+		{
+			name:      "match equal to threshold fails the scan",
+			threshold: vulnerability.HighSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-high"),
+				makeThresholdTestMatch("CVE-low"),
+			),
+			want: true,
+		},
+		{
+			name:      "metadata errors are ignored when no remaining match exceeds threshold",
+			threshold: vulnerability.MediumSeverity,
+			matches: match.NewMatches(
+				makeThresholdTestMatch("CVE-error"),
+				makeThresholdTestMatch("CVE-low"),
+			),
+			want: false,
+		},
+	}
+
+	svc := &Service{vp: provider}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, svc.ExceedsSeverityThreshold(tt.threshold, tt.matches))
+		})
+	}
+}
+
 func TestValidateDBLoad(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -353,4 +508,41 @@ func TestNewDefaultDBConfig_SanitizationHarden(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFilterMatchesBasedOnSeverity(t *testing.T) {
+	provider := stubVulnerabilityProvider{
+		metadataByID: map[string]*vulnerability.Metadata{
+			"CVE-high": {
+				Severity: "high",
+			},
+			"CVE-medium": {
+				Severity: "medium",
+			},
+		},
+		errByID: map[string]error{
+			"CVE-error": errors.New("lookup failed"),
+		},
+	}
+
+	remainingMatches := match.NewMatches(
+		makeTestMatch("CVE-high"),
+		makeTestMatch("CVE-medium"),
+		makeTestMatch("CVE-error"),
+	)
+
+	t.Run("nil severity exceptions keep all matches", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity(nil, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
+	})
+
+	t.Run("empty severity exceptions keep all matches", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity([]string{}, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-high", "CVE-medium", "CVE-error"}, matchIDs(filtered))
+	})
+
+	t.Run("excluded severities are removed and metadata errors are skipped", func(t *testing.T) {
+		filtered := filterMatchesBasedOnSeverity([]string{"HIGH"}, remainingMatches, provider)
+		assert.ElementsMatch(t, []string{"CVE-medium"}, matchIDs(filtered))
+	})
 }

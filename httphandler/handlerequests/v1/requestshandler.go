@@ -2,6 +2,7 @@ package v1
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
@@ -210,9 +211,20 @@ func (handler *HTTPHandler) Results(w http.ResponseWriter, r *http.Request) {
 		logger.L().Info("requesting results", helpers.String("ID", resultsQueryParams.ScanID))
 
 		if res, err := readResultsFile(resultsQueryParams.ScanID); err != nil {
-			logger.L().Info("scan result not found", helpers.String("ID", resultsQueryParams.ScanID))
-			w.WriteHeader(http.StatusNoContent)
-			response.Response = err.Error()
+			var scanFailed *ScanFailedError
+			if errors.As(err, &scanFailed) {
+				logger.L().Info("scan failed", helpers.String("ID", resultsQueryParams.ScanID), helpers.String("reason", scanFailed.Message))
+				w.WriteHeader(http.StatusInternalServerError)
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = scanFailed.Message
+				if !resultsQueryParams.KeepResults && !isLatestFallback {
+					defer removeResultsFile(resultsQueryParams.ScanID)
+				}
+			} else {
+				logger.L().Info("scan result not found", helpers.String("ID", resultsQueryParams.ScanID))
+				w.WriteHeader(http.StatusNoContent)
+				response.Response = err.Error()
+			}
 		} else {
 			logger.L().Info("scan result found", helpers.String("ID", resultsQueryParams.ScanID))
 			w.WriteHeader(http.StatusOK)

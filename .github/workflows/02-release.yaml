@@ -28,7 +28,7 @@ jobs:
       repository-projects: read
       statuses: read
       security-events: read
-      attestations: read
+      attestations: write
       artifact-metadata: read
     runs-on: ubuntu-large
     steps:
@@ -102,6 +102,17 @@ jobs:
           SECRET_KEY: ${{ secrets.SECRET_KEY_PROD }}
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Attest build provenance
+        if: (github.event_name != 'workflow_dispatch' || inputs.skip_publish != true) && hashFiles('dist/**/*.tar.gz') != ''
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-path: |
+            dist/**/*.tar.gz
+            dist/**/kubescape
+            dist/**/kubescape.exe
+            dist/**/ksserver
+            dist/**/downloader
 
       - name: Update new version in krew-index
         if: github.event_name != 'workflow_dispatch' || inputs.skip_publish != true

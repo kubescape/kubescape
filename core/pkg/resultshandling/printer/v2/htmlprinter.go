@@ -161,6 +161,9 @@ func buildResourceControlResultTable(resourceControls []resourcesresults.Resourc
 	for _, resourceControl := range resourceControls {
 		if resourceControl.GetStatus(nil).IsFailed() {
 			control := summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, resourceControl.GetID())
+			if control == nil {
+				continue
+			}
 			ctlResult := buildResourceControlResult(resourceControl, control)
 
 			ctlResults = append(ctlResults, ctlResult)

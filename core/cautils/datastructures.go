@@ -132,19 +132,24 @@ func (sessionObj *OPASessionObj) SetTopWorkloads() {
 	}
 
 	// set top workloads according to number of top workloads
+	topWorkloads := make([]reporthandling.IResource, 0, TopWorkloadsNumber)
 	for i := 0; i < TopWorkloadsNumber; i++ {
 		if i >= len(topWorkloadsSorted) {
 			break
 		}
+
 		source := sessionObj.ResourceSource[topWorkloadsSorted[i].ResourceID]
+
 		wlObj := &reporthandling.Resource{
 			IMetadata: sessionObj.AllResources[topWorkloadsSorted[i].ResourceID],
 			Source:    &source,
 		}
 
-		sessionObj.TopWorkloadsByScore = append(sessionObj.TopWorkloadsByScore, wlObj)
+		topWorkloads = append(topWorkloads, wlObj)
 		count++
 	}
+
+	sessionObj.TopWorkloadsByScore = topWorkloads
 }
 
 func (sessionObj *OPASessionObj) SetMapNamespaceToNumberOfResources(mapNamespaceToNumberOfResources map[string]int) {

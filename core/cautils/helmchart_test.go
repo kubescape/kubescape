@@ -103,7 +103,7 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
 
 		if strings.Contains(expectedFile, "cronjob.yaml") {
 			jsonBytes, _ := json.Marshal(fileToWorkloads[expectedFile][0].GetObject())
-			s.Contains(string(jsonBytes), "\"imagePullPolicy\":\"Never\"", "Expected to overriden value of imagePullPolicy to be 'Never'")
+			s.Contains(string(jsonBytes), "\"imagePullPolicy\":\"Never\"", "Expected to overridden value of imagePullPolicy to be 'Never'")
 		}
 	}
 }

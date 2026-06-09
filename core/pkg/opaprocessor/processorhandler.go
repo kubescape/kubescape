@@ -43,12 +43,12 @@ type OPAProcessor struct {
 	regoDependenciesData *resources.RegoDependenciesData
 	*cautils.OPASessionObj
 	exceptionEventRecorder record.EventRecorder
-	opaRegisterOnce   sync.Once
-	excludeNamespaces []string
-	includeNamespaces []string
-	printEnabled      bool
-	compiledModules   map[string]*ast.Compiler
-	compiledMu        sync.RWMutex
+	opaRegisterOnce        sync.Once
+	excludeNamespaces      []string
+	includeNamespaces      []string
+	printEnabled           bool
+	compiledModules        map[string]*ast.Compiler
+	compiledMu             sync.RWMutex
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
@@ -58,14 +58,14 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 	}
 
 	return &OPAProcessor{
-		OPASessionObj:        sessionObj,
-		regoDependenciesData: regoDependenciesData,
-		clusterName:          clusterName,
+		OPASessionObj:          sessionObj,
+		regoDependenciesData:   regoDependenciesData,
+		clusterName:            clusterName,
 		exceptionEventRecorder: exceptionEventRecorder,
-		excludeNamespaces:    split(excludeNamespaces),
-		includeNamespaces:    split(includeNamespaces),
-		printEnabled:         enableRegoPrint,
-		compiledModules:      make(map[string]*ast.Compiler),
+		excludeNamespaces:      split(excludeNamespaces),
+		includeNamespaces:      split(includeNamespaces),
+		printEnabled:           enableRegoPrint,
+		compiledModules:        make(map[string]*ast.Compiler),
 	}
 }
 
@@ -260,6 +260,9 @@ func (opap *OPAProcessor) processRule(ctx context.Context, rule *reporthandling.
 				}
 				id := failedResource.GetID()
 				failedIDs[id] = struct{}{}
+				if _, exists := resources[id]; exists {
+					continue
+				}
 				resources[id] = &resourcesresults.ResourceAssociatedRule{
 					Name:                  rule.Name,
 					ControlConfigurations: ruleRegoDependenciesData.PostureControlInputs,
@@ -465,11 +468,16 @@ func (opap *OPAProcessor) enumerateData(ctx context.Context, rule *reporthandlin
 //
 // If some extra fixedControlInputs are provided, they are merged into the "posture" control inputs.
 func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConfigInputs, fixedControlInputs map[string][]string) resources.RegoDependenciesData {
-	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlConfigInputs(configInputs) // get store
+	postureControlInputs := opap.regoDependenciesData.GetFilteredPostureControlConfigInputs(configInputs)
 
-	// merge configurable control input and fixed control input
+	clonedPostureInputs := make(map[string][]string, len(postureControlInputs)+len(fixedControlInputs))
+
+	for k, v := range postureControlInputs {
+		clonedPostureInputs[k] = slices.Clone(v)
+	}
+
 	for k, v := range fixedControlInputs {
-		postureControlInputs[k] = v
+		clonedPostureInputs[k] = slices.Clone(v)
 	}
 
 	dataControlInputs := map[string]string{
@@ -478,7 +486,7 @@ func (opap *OPAProcessor) makeRegoDeps(configInputs []reporthandling.ControlConf
 
 	return resources.RegoDependenciesData{
 		DataControlInputs:    dataControlInputs,
-		PostureControlInputs: postureControlInputs,
+		PostureControlInputs: clonedPostureInputs,
 	}
 }
 

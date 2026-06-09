@@ -26,8 +26,8 @@ func ReportV2ToV1(opaSessionObj *OPASessionObj) *reporthandling.PostureReport {
 		fwv1.Name = ""
 
 		fwv1.ControlReports = append(fwv1.ControlReports, controlReportV2ToV1(opaSessionObj, "", opaSessionObj.Report.SummaryDetails.Controls)...)
-		frameworks = append(frameworks, fwv1)
 		fwv1.Score = opaSessionObj.Report.SummaryDetails.Score
+		frameworks = append(frameworks, fwv1)
 	}
 
 	// setup counters and score

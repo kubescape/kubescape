@@ -1,6 +1,7 @@
 package opaprocessor
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -48,7 +49,7 @@ func Test_verify(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := verify(tt.args.img, tt.args.key)
+			got, err := verify(context.Background(), tt.args.img, tt.args.key)
 			if !tt.wantErr(t, err, fmt.Sprintf("verify(%v, %v)", tt.args.img, tt.args.key)) {
 				return
 			}

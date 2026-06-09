@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/armosec/armoapi-go/armotypes"
@@ -59,35 +60,30 @@ func (lp *LoadPolicy) GetControl(controlID string) (*reporthandling.Control, err
 		return nil, ErrIDRequired
 	}
 
-	// NOTE: this assumes that only the first path contains either a valid control descriptor or a framework descriptor
-	filePath := lp.filePath()
-	buf, err := os.ReadFile(filePath)
-
-	if err != nil {
-		return nil, err
-	}
-
-	// check if the file is a control descriptor: a ControlID field is populated.
-	var control reporthandling.Control
-	if err = json.Unmarshal(buf, &control); err == nil && control.ControlID != "" {
-		if strings.EqualFold(controlID, control.ControlID) {
-			return &control, nil
+	for _, filePath := range lp.filePaths {
+		buf, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
 		}
 
-		return nil, fmt.Errorf("controlID: %s: %w", controlID, ErrControlNotMatching)
-	}
+		// check if the file is a control descriptor: a ControlID field is populated.
+		var control reporthandling.Control
+		if err = json.Unmarshal(buf, &control); err == nil && control.ControlID != "" {
+			if strings.EqualFold(controlID, control.ControlID) {
+				return &control, nil
+			}
+			continue
+		}
 
-	// check if the file is a framework descriptor
-	var framework reporthandling.Framework
-	if err = json.Unmarshal(buf, &framework); err != nil {
-		return nil, err
-	}
-
-	for _, toPin := range framework.Controls {
-		ctrl := toPin
-
-		if strings.EqualFold(ctrl.ControlID, controlID) {
-			return &ctrl, nil
+		// check if the file is a framework descriptor
+		var framework reporthandling.Framework
+		if err = json.Unmarshal(buf, &framework); err == nil {
+			for _, toPin := range framework.Controls {
+				ctrl := toPin
+				if strings.EqualFold(ctrl.ControlID, controlID) {
+					return &ctrl, nil
+				}
+			}
 		}
 	}
 
@@ -174,27 +170,77 @@ func (lp *LoadPolicy) ListFrameworks() ([]string, error) {
 	return frameworkNames, nil
 }
 
-// ListControls returns the list of controls for this framework.
-//
-// At this moment, controls are listed for one single configured framework.
+// ListControls returns the list of controls in the format "id|name|frameworks".
 func (lp *LoadPolicy) ListControls() ([]string, error) {
-	controlIDs := make([]string, 0, 100)
-	filePath := lp.filePath()
-	buf, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, err
+	type controlInfo struct {
+		id         string
+		name       string
+		frameworks []string
 	}
 
-	var framework reporthandling.Framework
-	if err = json.Unmarshal(buf, &framework); err != nil {
-		return nil, err
+	controlsMap := make(map[string]*controlInfo)
+	var orderedIDs []string
+
+	for _, filePath := range lp.filePaths {
+		buf, err := os.ReadFile(filePath)
+		if err != nil {
+			continue
+		}
+
+		// check if the file is a control descriptor: a ControlID field is populated.
+		var control reporthandling.Control
+		if err = json.Unmarshal(buf, &control); err == nil && control.ControlID != "" {
+			info, exists := controlsMap[control.ControlID]
+			if !exists {
+				info = &controlInfo{id: control.ControlID}
+				controlsMap[control.ControlID] = info
+				orderedIDs = append(orderedIDs, control.ControlID)
+			}
+			if info.name == "" {
+				info.name = control.Name
+			}
+			continue
+		}
+
+		// check if the file is a framework descriptor
+		var framework reporthandling.Framework
+		if err = json.Unmarshal(buf, &framework); err == nil && framework.Name != "" {
+			isAllControls := strings.EqualFold(framework.Name, "allcontrols")
+			for _, ctrl := range framework.Controls {
+				info, exists := controlsMap[ctrl.ControlID]
+				if !exists {
+					info = &controlInfo{id: ctrl.ControlID}
+					controlsMap[ctrl.ControlID] = info
+					orderedIDs = append(orderedIDs, ctrl.ControlID)
+				}
+				if info.name == "" {
+					info.name = ctrl.Name
+				}
+				if !isAllControls {
+					found := false
+					for _, fw := range info.frameworks {
+						if strings.EqualFold(fw, framework.Name) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						info.frameworks = append(info.frameworks, framework.Name)
+					}
+				}
+			}
+		}
 	}
 
-	for _, ctrl := range framework.Controls {
-		controlIDs = append(controlIDs, ctrl.ControlID)
+	results := make([]string, 0, len(orderedIDs))
+	for _, id := range orderedIDs {
+		info := controlsMap[id]
+		sort.Strings(info.frameworks)
+		entry := fmt.Sprintf("%s|%s|%s", info.id, info.name, strings.Join(info.frameworks, ", "))
+		results = append(results, entry)
 	}
 
-	return controlIDs, nil
+	return results, nil
 }
 
 // GetExceptions retrieves configured exceptions.

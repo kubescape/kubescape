@@ -30,6 +30,27 @@ var scanImpl = scan // Override for testing
 func (handler *HTTPHandler) executeScan(scanReq *scanRequestParams) {
 	response := &utilsmetav1.Response{}
 
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("scan panicked: %v", r)
+			logger.L().Ctx(scanReq.ctx).Error("scan panic recovered", helpers.String("ID", scanReq.scanID), helpers.Error(err))
+			responseMsg := err.Error()
+			if persistErr := writeScanErrorToFile(err, scanReq.scanID); persistErr != nil {
+				logger.L().Ctx(scanReq.ctx).Error("failed to persist panic error to file", helpers.String("ID", scanReq.scanID), helpers.Error(persistErr))
+				responseMsg = persistErr.Error()
+			}
+			handler.state.setNotBusy(scanReq.scanID)
+			if scanReq.scanQueryParams.ReturnResults {
+				response.Type = utilsapisv1.ErrorScanResponseType
+				response.Response = responseMsg
+				select {
+				case scanReq.resp <- response:
+				default:
+				}
+			}
+		}
+	}()
+
 	logger.L().Info("scan triggered", helpers.String("ID", scanReq.scanID))
 	_, err := scanImpl(scanReq.ctx, scanReq.scanInfo, scanReq.scanID, scanReq.scanQueryParams.SkipPersistence)
 	if err != nil {
@@ -85,7 +106,7 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		return nil, writeScanErrorToFile(err, scanID)
 	}
 	if err := result.HandleResults(ctx, scanInfo); err != nil {
-		return nil, err
+		return nil, writeScanErrorToFile(err, scanID)
 	}
 
 	if !skipPersistence {
@@ -94,8 +115,13 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 		if store != nil && config.GetAccount() == "" {
 			pr := result.GetResults()
 
+			// StorePostureReportResults persists to the operator storage backend
+			// (CRD/ConfigMap). This runs after HandleResults has already written
+			// the valid JSON to OutputDir, so a failure here is a persistence
+			// problem, not a scan failure. Log it and let the poller read the
+			// valid result rather than overwriting it with a failed artifact.
 			if err := store.StorePostureReportResults(ctx, pr); err != nil {
-				return nil, err
+				logger.L().Ctx(ctx).Error("failed to persist scan results to storage", helpers.String("scanID", scanID), helpers.Error(err))
 			}
 		} else {
 			logger.L().Debug("storage is not initialized - skipping storing results")
@@ -107,6 +133,18 @@ func scan(ctx context.Context, scanInfo *cautils.ScanInfo, scanID string, skipPe
 	return nil, nil
 }
 
+// ScanFailedError carries the plaintext error written by writeScanErrorToFile.
+// readResultsFile returns this when the only artifact for a scan ID is under
+// FailedOutputDir, so the Results handler can surface the real scan failure
+// instead of a JSON parse error.
+type ScanFailedError struct {
+	Message string
+}
+
+func (e *ScanFailedError) Error() string {
+	return e.Message
+}
+
 func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 	parsedUUID, err := uuid.Parse(fileID)
 	if err != nil {
@@ -115,20 +153,30 @@ func readResultsFile(fileID string) (*reporthandlingv2.PostureReport, error) {
 	}
 	cleanID := parsedUUID.String()
 
-	dirs := []string{OutputDir, FailedOutputDir}
 	extensions := []string{"", ".json"}
 
-	for _, dir := range dirs {
-		for _, ext := range extensions {
-			path := filepath.Join(dir, cleanID+ext)
-			f, err := os.ReadFile(path)
-			if err == nil {
-				postureReport := &reporthandlingv2.PostureReport{}
-				err = json.Unmarshal(f, postureReport)
-				return postureReport, err
-			}
+	// Failed artifacts win over success artifacts. HandleResults writes the
+	// JSON output before later failure points (e.g. StorePostureReportResults),
+	// so when both files exist the failed one is the source of truth and the
+	// success file is stale data that must not mask the failure.
+	for _, ext := range extensions {
+		path := filepath.Join(FailedOutputDir, cleanID+ext)
+		f, err := os.ReadFile(path)
+		if err == nil {
+			return nil, &ScanFailedError{Message: string(f)}
 		}
 	}
+
+	for _, ext := range extensions {
+		path := filepath.Join(OutputDir, cleanID+ext)
+		f, err := os.ReadFile(path)
+		if err == nil {
+			postureReport := &reporthandlingv2.PostureReport{}
+			err = json.Unmarshal(f, postureReport)
+			return postureReport, err
+		}
+	}
+
 	return nil, fmt.Errorf("file %s not found", cleanID)
 }
 

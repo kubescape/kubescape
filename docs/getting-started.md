@@ -208,7 +208,7 @@ kubescape scan --exceptions examples/exceptions/exclude-kube-namespaces.json
 
 Objects with exceptions will be presented as `exclude` and not `fail`.
 
-[See more examples about exceptions.](/examples/exceptions/README.md)
+[See more examples about exceptions.](../examples/exceptions/README.md)
 
 #### Scan Helm charts
 
@@ -473,7 +473,7 @@ kubescape patch -i nginx:1.22 -a tcp://0.0.0.0:$BUILDKIT_PORT
 > **Note**  
 > Image patching can only fix OS-level vulnerabilities, not application-level ones.
 
-For more details, see the [Patch Command Documentation](/cmd/patch/README.md).
+For more details, see the [Patch Command Documentation](../cmd/patch/README.md).
 
 ## Validating Admission Policies (VAP)
 

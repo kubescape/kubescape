@@ -96,7 +96,7 @@ func TestResultsDeleteAll(t *testing.T) {
 
 	h.Results(w, rq)
 	rs := w.Result()
-	
+
 	if rs.StatusCode != http.StatusOK {
 		t.Errorf("Expected StatusOK (200), got %v", rs.StatusCode)
 	}
@@ -107,7 +107,7 @@ func TestResultsDeleteAll(t *testing.T) {
 
 	h.Results(w, rq)
 	rs = w.Result()
-	
+
 	if rs.StatusCode != http.StatusBadRequest {
 		t.Errorf("Expected StatusBadRequest (400) for missing ScanID, got %v", rs.StatusCode)
 	}

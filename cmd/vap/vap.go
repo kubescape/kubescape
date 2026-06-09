@@ -95,6 +95,10 @@ func getCreatePolicyBindingCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			normalizedControlID := strings.ToUpper(strings.TrimSpace(controlID))
+			if normalizedControlID != "" && parameterReference == "" && celAdmissionControlsRequiringParams[normalizedControlID] {
+				return fmt.Errorf("control %s requires --parameter-reference because its CEL policy uses params", normalizedControlID)
+			}
 			if err := isValidK8sObjectName(resolvedPolicyName); err != nil {
 				return fmt.Errorf("invalid policy name %s: %w", resolvedPolicyName, err)
 			}
@@ -183,6 +187,22 @@ var celAdmissionPolicyByControlID = map[string]string{
 	"C-0270": "kubescape-c-0270-deny-resources-with-cpu-limit-not-set",
 	"C-0271": "kubescape-c-0271-deny-resources-with-memory-limit-not-set",
 	"C-0280": "kubescape-c-0280-deny-access-to-csr-approval-subresource",
+}
+
+var celAdmissionControlsRequiringParams = map[string]bool{
+	"C-0001": true,
+	"C-0004": true,
+	"C-0012": true,
+	"C-0020": true,
+	"C-0046": true,
+	"C-0050": true,
+	"C-0076": true,
+	"C-0077": true,
+	"C-0078": true,
+	"C-0268": true,
+	"C-0269": true,
+	"C-0270": true,
+	"C-0271": true,
 }
 
 func resolvePolicyName(policyName, controlID string) (string, error) {

@@ -35,6 +35,7 @@ func anonymizePodSpecs(node interface{}, mapping *Mapping) {
 		anonymizeContainerList(v, "initContainers", mapping)
 		anonymizeEphemeralContainerList(v, "ephemeralContainers", mapping)
 		anonymizeImagePullSecrets(v, mapping)
+		anonymizeServiceAccountName(v, mapping)
 
 		for _, child := range v {
 			anonymizePodSpecs(child, mapping)
@@ -361,5 +362,29 @@ func anonymizeImagePullSecrets(
 		}
 
 		obj["imagePullSecrets"] = refs
+	}
+}
+
+// anonymizeServiceAccountName anonymizes pod-level service account references
+// across both typed and unstructured workload representations.
+func anonymizeServiceAccountName(
+	obj map[string]interface{},
+	mapping *Mapping,
+) {
+	for _, key := range []string{
+		"serviceAccountName",
+		"serviceAccount",
+	} {
+		rawName, ok := obj[key]
+		if !ok || rawName == nil {
+			continue
+		}
+
+		name, ok := rawName.(string)
+		if !ok || name == "" {
+			continue
+		}
+
+		obj[key] = mapping.GetOrCreate("sa", name)
 	}
 }
