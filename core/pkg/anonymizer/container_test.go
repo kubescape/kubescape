@@ -793,7 +793,7 @@ func TestIsSensitiveEnvName_SeparatorlessVariants(t *testing.T) {
 }
 
 func TestAnonymizeUnstructuredEnv_LeaksApiKeyValue(t *testing.T) {
-	const secret = "AKIAIOSFODNN7EXAMPLE"
+	const secret = "AKIAIOSFODNN7EXAMPLE" //nolint:gosec // G101: AWS example access key ID, test fixture, not a real credential
 
 	container := map[string]interface{}{
 		"env": []interface{}{
