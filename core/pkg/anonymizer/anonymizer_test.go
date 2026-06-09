@@ -88,4 +88,36 @@ func TestApplyEncrypted(t *testing.T) {
 		"demo-repository",
 		decryptedRepo,
 	)
+
+	assert.Contains(
+		t,
+		repo.LastCommit.Message,
+		"ENC[AES256_GCM,",
+	)
+
+	decryptedMessage, err := reportcrypto.DecryptString(
+		repo.LastCommit.Message,
+		dek,
+	)
+	require.NoError(t, err)
+
+	assert.Equal(
+		t,
+		"demo commit",
+		decryptedMessage,
+	)
+}
+
+func TestApplyEncrypted_InvalidDEK(t *testing.T) {
+	handler := &resultshandling.ResultsHandler{
+		ScanData: &cautils.OPASessionObj{},
+	}
+
+	err := ApplyEncrypted(
+		handler,
+		[]byte("bad"),
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid DEK length")
 }
