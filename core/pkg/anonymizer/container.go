@@ -297,26 +297,36 @@ func isSensitiveEnvValue(value string) bool {
 func isSensitiveEnvName(name string) bool {
 	name = strings.ToLower(name)
 
+	// Normalize the name by removing common separators
+	normalized := name
+	for _, sep := range []string{"_", "-", ".", " "} {
+		normalized = strings.ReplaceAll(normalized, sep, "")
+	}
+
+	// Patterns are matched against the separator-normalized name
 	sensitivePatterns := []string{
 		"password",
 		"passwd",
 		"pwd",
 		"secret",
+		"secretkey",
 		"token",
-		"api_key",
-		"access_key",
+		"authtoken",
+		"apikey",
+		"accesskey",
+		"privatekey",
 		"credential",
-		"database_url",
-		"db_url",
-		"redis_url",
-		"mongo_uri",
-		"mongodb_uri",
+		"databaseurl",
+		"dburl",
+		"redisurl",
+		"mongouri",
+		"mongodburi",
 		"dsn",
-		"connection_string",
+		"connectionstring",
 	}
 
 	for _, pattern := range sensitivePatterns {
-		if strings.Contains(name, pattern) {
+		if strings.Contains(normalized, pattern) {
 			return true
 		}
 	}

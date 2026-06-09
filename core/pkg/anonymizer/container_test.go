@@ -763,3 +763,52 @@ func TestAnonymizeContainerList_InvalidType(t *testing.T) {
 		anonymizeContainerList(obj, "containers", mapping)
 	})
 }
+
+func TestIsSensitiveEnvName_SeparatorlessVariants(t *testing.T) {
+	cases := map[string]bool{
+		"API_KEY":          true,
+		"APIKEY":           true,
+		"ACCESS_KEY":       true,
+		"ACCESSKEY":        true,
+		"PRIVATEKEY":       true,
+		"PRIVATE_KEY":      true,
+		"SECRETKEY":        true,
+		"AUTHTOKEN":        true,
+		"AUTH_TOKEN":       true,
+		"app.api-key":      true,
+		"CREDENTIAL":       true,
+		"DATABASE_URL":     true,
+		"DATABASEURL":      true,
+		"CONNECTIONSTRING": true,
+		"NORMAL_ENV":       false,
+		"PORT":             false,
+		"LOG_LEVEL":        false,
+	}
+
+	for name, want := range cases {
+		if got := isSensitiveEnvName(name); got != want {
+			t.Errorf("isSensitiveEnvName(%q) = %v, want %v", name, got, want)
+		}
+	}
+}
+
+func TestAnonymizeUnstructuredEnv_LeaksApiKeyValue(t *testing.T) {
+	const secret = "AKIAIOSFODNN7EXAMPLE"
+
+	container := map[string]interface{}{
+		"env": []interface{}{
+			map[string]interface{}{
+				"name":  "APIKEY",
+				"value": secret,
+			},
+		},
+	}
+
+	mapping := NewMapping()
+	anonymizeUnstructuredEnv(container, mapping)
+
+	got := container["env"].([]interface{})[0].(map[string]interface{})["value"].(string)
+	if got == secret {
+		t.Fatalf("env var APIKEY value was not anonymized; secret leaked into output")
+	}
+}
