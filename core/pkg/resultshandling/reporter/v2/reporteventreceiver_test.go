@@ -2,6 +2,9 @@ package reporter
 
 import (
 	"context"
+	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/opa-utils/reporthandling"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	"math/rand"
 	"os"
 	"strconv"
@@ -378,4 +381,62 @@ func captureStdout(t testing.TB) (*os.File, func()) {
 		os.Stdout = saved
 		mxStdio.Unlock()
 	}
+}
+
+func TestSetResults_ChunkBoundary(t *testing.T) {
+	reporter := NewReportEventReceiver(
+		&TenantConfigMock{
+			clusterName: "test",
+			accountID:   "1234",
+		},
+		"",
+		SubmitContextScan,
+		getter.GetKSCloudAPIConnector(),
+	)
+
+	reportObj := &reporthandlingv2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{
+				ResourceID: "resource-1",
+			},
+		},
+		Results: []resourcesresults.Result{},
+	}
+
+	counter := MAX_REPORT_SIZE - 1
+	reportCounter := 0
+
+	results := map[string]resourcesresults.Result{
+		"resource-1": {
+			ResourceID: "resource-1",
+		},
+	}
+
+	opaSession := mockOPASessionObj(t)
+	require.NotEmpty(t, opaSession.AllResources)
+	var resourceMetadata workloadinterface.IMetadata
+	for _, r := range opaSession.AllResources {
+		resourceMetadata = r
+		break
+	}
+
+	allResources := map[string]workloadinterface.IMetadata{
+		"resource-1": resourceMetadata,
+	}
+
+	resourceSources := map[string]reporthandling.Source{
+		"resource-1": {},
+	}
+
+	err := reporter.setResults(
+		reportObj,
+		results,
+		allResources,
+		resourceSources,
+		nil,
+		&counter,
+		&reportCounter,
+	)
+
+	require.NoError(t, err)
 }

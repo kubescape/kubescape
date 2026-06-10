@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -241,8 +241,11 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 				logger.L().Ctx(ctx).Warning("Skipping invalid resource path: " + resourcePath)
 				skipReason = "skipped: invalid resource path"
 			} else {
-				absolutePath = path.Join(h.localBasePath, relativePath)
+
+				absolutePath = resolveResourcePath(h.localBasePath, relativePath)
+
 				documentIndex = idx
+
 				if _, err := os.Stat(absolutePath); err != nil {
 					logger.L().Ctx(ctx).Warning("Skipping missing file: " + absolutePath)
 					skipReason = "skipped: file not found"
@@ -344,6 +347,12 @@ func (h *FixHandler) PrepareResourcesToFix(ctx context.Context) []ResourceFixInf
 	return resourcesToFix
 }
 
+func resolveResourcePath(basePath, resourcePath string) string {
+	if isAbsolutePath(resourcePath) {
+		return resourcePath
+	}
+
+	return filepath.Join(basePath, resourcePath)
 // PrepareHelmSuggestions collects fix guidance for resources whose Source is a
 // Helm chart. We never auto-edit template files for these: the fix paths are
 // keyed against rendered YAML, and the previous attempts at mapping rendered
@@ -582,6 +591,15 @@ func (h *FixHandler) getFilePathAndIndex(filePathWithIndex string) (filePath str
 	}
 
 	return filePath, documentIndex, nil
+}
+
+func isAbsolutePath(p string) bool {
+	if filepath.IsAbs(p) {
+		return true
+	}
+
+	matched, _ := regexp.MatchString(`^[a-zA-Z]:\\`, p)
+	return matched
 }
 
 func ApplyFixToContent(ctx context.Context, yamlAsString, yamlExpression string) (fixedString string, err error) {
