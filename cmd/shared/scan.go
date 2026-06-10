@@ -3,11 +3,20 @@ package shared
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
+	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
+)
+
+// ScanFormats and ImageScanFormats list the output formats supported by the scan commands.
+// They are built from the printer.*Format constants to keep a single source of truth.
+var (
+	ScanFormats      = []string{printer.PrettyFormat, printer.JsonFormat, printer.JunitResultFormat, printer.PrometheusFormat, printer.PdfFormat, printer.HtmlFormat, printer.SARIFFormat}
+	ImageScanFormats = []string{printer.PrettyFormat, printer.JsonFormat, printer.SARIFFormat}
 )
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
@@ -40,6 +49,27 @@ func ValidateSeverity(severity string) error {
 	}
 	return ErrUnknownSeverity
 
+}
+
+// ValidateScanFormat returns an error if any comma-separated entry in format is not a supported format.
+func ValidateScanFormat(format string, supported []string) error {
+	var entries int
+	for _, f := range strings.Split(format, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		entries++
+		if !slices.Contains(supported, f) {
+			return fmt.Errorf("invalid format %q, supported formats: %s", f, strings.Join(supported, ", "))
+		}
+	}
+	// Reject separator/whitespace-only input (e.g. "," or " ") that resolves to no format.
+	// A truly empty value is left to the caller's "format cannot be empty" check.
+	if entries == 0 && strings.TrimSpace(format) != "" {
+		return fmt.Errorf("invalid format %q, supported formats: %s", format, strings.Join(supported, ", "))
+	}
+	return nil
 }
 
 // TerminateOnExceedingSeverity terminates the program if the result exceeds the severity threshold
