@@ -86,9 +86,10 @@ func TestResolveMappedID(t *testing.T) {
 func TestAnonymizeSession_NilSession(t *testing.T) {
 	mapping := NewMapping()
 
-	assert.NotPanics(t, func() {
-		anonymizeSession(nil, mapping)
-	})
+	require.NoError(
+		t,
+		anonymizeSession(nil, mapping, NewMappingTransformer()),
+	)
 }
 
 func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
@@ -112,7 +113,9 @@ func TestAnonymizeSession_NamesAndNamespacesReplaced(t *testing.T) {
 	}
 
 	mapping := NewMapping()
-	anonymizeSession(session, mapping)
+
+	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	require.NoError(t, err)
 
 	for _, resource := range session.AllResources {
 		assert.NotEqual(t, "my-secret-pod", resource.GetName())
@@ -201,7 +204,8 @@ func TestAnonymizeSession_IDConsistencyAcrossMaps(t *testing.T) {
 	}
 
 	mapping := NewMapping()
-	anonymizeSession(session, mapping)
+	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	require.NoError(t, err)
 
 	var newID string
 	for id := range session.AllResources {
@@ -375,7 +379,8 @@ func TestAnonymizeSession_LabelHandling(t *testing.T) {
 			}
 
 			mapping := NewMapping()
-			anonymizeSession(session, mapping)
+			err := anonymizeSession(session, mapping, NewMappingTransformer())
+			require.NoError(t, err)
 
 			for _, resource := range session.AllResources {
 				workload, ok := resource.(workloadinterface.IWorkload)
@@ -560,7 +565,8 @@ func TestAnonymizeSession_Annotations(t *testing.T) {
 			mapping := NewMapping()
 
 			assert.NotPanics(t, func() {
-				anonymizeSession(session, mapping)
+				err := anonymizeSession(session, mapping, NewMappingTransformer())
+				require.NoError(t, err)
 			})
 
 			for _, resource := range session.AllResources {
@@ -628,7 +634,8 @@ func TestAnonymizeSession_RepoContextMetadata(t *testing.T) {
 	}
 
 	mapping := NewMapping()
-	anonymizeSession(session, mapping)
+	err := anonymizeSession(session, mapping, NewMappingTransformer())
+	require.NoError(t, err)
 
 	for _, repo := range []*reporthandlingv2.RepoContextMetadata{
 		session.Metadata.ContextMetadata.RepoContextMetadata,
