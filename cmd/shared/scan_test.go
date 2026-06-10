@@ -110,6 +110,8 @@ func TestValidateScanFormat(t *testing.T) {
 		{"valid comma-separated formats", "json,html,junit", ScanFormats, false},
 		{"comma-separated with whitespace and empty entry", "json, ,html", ScanFormats, false},
 		{"empty string is not an invalid format", "", ScanFormats, false},
+		{"separator-only input is rejected", ",", ScanFormats, true},
+		{"whitespace-and-separator-only input is rejected", " , ", ScanFormats, true},
 		{"invalid format", "xml", ScanFormats, true},
 		{"mixed valid and invalid formats", "json,xml", ScanFormats, true},
 		{"valid image format", "sarif", ImageScanFormats, false},
