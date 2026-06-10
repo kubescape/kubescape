@@ -3,11 +3,18 @@ package shared
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	reporthandlingapis "github.com/kubescape/opa-utils/reporthandling/apis"
+)
+
+// ScanFormats and ImageScanFormats list the output formats supported by the scan commands.
+var (
+	ScanFormats      = []string{"pretty-printer", "json", "junit", "prometheus", "pdf", "html", "sarif"}
+	ImageScanFormats = []string{"pretty-printer", "json", "sarif"}
 )
 
 var ErrUnknownSeverity = fmt.Errorf("unknown severity. Supported severities are: %s", strings.Join(reporthandlingapis.GetSupportedSeverities(), ", "))
@@ -40,6 +47,20 @@ func ValidateSeverity(severity string) error {
 	}
 	return ErrUnknownSeverity
 
+}
+
+// ValidateScanFormat returns an error if any comma-separated entry in format is not a supported format.
+func ValidateScanFormat(format string, supported []string) error {
+	for _, f := range strings.Split(format, ",") {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if !slices.Contains(supported, f) {
+			return fmt.Errorf("invalid format %q, supported formats: %s", f, strings.Join(supported, ", "))
+		}
+	}
+	return nil
 }
 
 // TerminateOnExceedingSeverity terminates the program if the result exceeds the severity threshold

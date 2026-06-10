@@ -69,6 +69,20 @@ func TestGetImageCmd_RunE_FormatFlagEmpty(t *testing.T) {
 	assert.Equal(t, "format cannot be empty, supported formats: pretty-printer, json, sarif", err.Error())
 }
 
+func TestGetImageCmd_RunE_FormatFlagInvalid(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	scanInfo := cautils.ScanInfo{}
+
+	cmd := getImageCmd(mockKubescape, &scanInfo)
+	parent := &cobra.Command{}
+	parent.PersistentFlags().StringVarP(&scanInfo.Format, "format", "f", "", "")
+	parent.AddCommand(cmd)
+	assert.NoError(t, parent.PersistentFlags().Set("format", "xml"))
+
+	err := cmd.RunE(cmd, []string{"nginx"})
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, sarif`)
+}
+
 func TestGetImageCmd_RunE_Success(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	scanInfo := cautils.ScanInfo{}

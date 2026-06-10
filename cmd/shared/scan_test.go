@@ -98,6 +98,38 @@ func TestTerminateOnExceedingSeverity(t *testing.T) {
 	}
 }
 
+func TestValidateScanFormat(t *testing.T) {
+	testCases := []struct {
+		Description string
+		Format      string
+		Supported   []string
+		WantErr     bool
+	}{
+		{"valid single format", "json", ScanFormats, false},
+		{"valid default format", "pretty-printer", ScanFormats, false},
+		{"valid comma-separated formats", "json,html,junit", ScanFormats, false},
+		{"comma-separated with whitespace and empty entry", "json, ,html", ScanFormats, false},
+		{"empty string is not an invalid format", "", ScanFormats, false},
+		{"invalid format", "xml", ScanFormats, true},
+		{"mixed valid and invalid formats", "json,xml", ScanFormats, true},
+		{"valid image format", "sarif", ImageScanFormats, false},
+		{"format unsupported for image scanning", "junit", ImageScanFormats, true},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.Description, func(t *testing.T) {
+			err := ValidateScanFormat(testCase.Format, testCase.Supported)
+			if testCase.WantErr {
+				if err == nil {
+					t.Errorf("expected an error for format %q, got nil", testCase.Format)
+				}
+			} else if err != nil {
+				t.Errorf("expected no error for format %q, got: %v", testCase.Format, err)
+			}
+		})
+	}
+}
+
 func TestValidateSeverity(t *testing.T) {
 	testCases := []struct {
 		Description string
