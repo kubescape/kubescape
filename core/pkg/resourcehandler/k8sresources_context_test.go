@@ -192,3 +192,48 @@ func TestScanInfo_ScanTimeout(t *testing.T) {
 		})
 	}
 }
+
+func TestPullResources_PostPullContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	handler := &K8sResourceHandler{
+		k8s: &k8sinterface.KubernetesApi{
+			DynamicClient: &mockDynamicClient{
+				listFunc: func(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+					cancel()
+
+					return &unstructured.UnstructuredList{
+						Items: []unstructured.Unstructured{
+							{},
+						},
+					}, nil
+				},
+			},
+		},
+	}
+
+	qrs := QueryableResources{
+		"//v1/pods": QueryableResource{
+			GroupVersionResourceTriplet: "//v1/pods",
+		},
+	}
+
+	k8sResources, allResources, failedQueries := handler.pullResources(ctx, qrs, &EmptySelector{})
+
+	ids, ok := k8sResources["//v1/pods"]
+	assert.True(t, ok)
+	assert.Empty(t, ids)
+
+	assert.Empty(t, allResources)
+	assert.NotEmpty(t, failedQueries)
+
+	hasCanceled := false
+	for _, f := range failedQueries {
+		if errors.Is(f.err, context.Canceled) {
+			hasCanceled = true
+			break
+		}
+	}
+
+	assert.True(t, hasCanceled)
+}
