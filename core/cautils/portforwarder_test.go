@@ -3,6 +3,7 @@ package cautils
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kubescape/k8s-interface/k8sinterface"
 	"github.com/stretchr/testify/assert"
@@ -223,5 +224,24 @@ func Test_GetPortForwardLocalhost(t *testing.T) {
 			result := pf.GetPortForwardLocalhost()
 			assert.Equal(t, tc.result+":"+getPortForwardingPort(), result)
 		})
+	}
+}
+func TestStopPortForwarder_Idempotent(t *testing.T) {
+	p := &portForward{
+		stopChan: make(chan struct{}, 1),
+	}
+
+	done := make(chan struct{})
+
+	go func() {
+		p.StopPortForwarder()
+		p.StopPortForwarder()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("StopPortForwarder blocked on repeated stop")
 	}
 }
