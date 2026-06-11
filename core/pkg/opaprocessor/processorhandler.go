@@ -54,6 +54,9 @@ type OPAProcessor struct {
 	// control. If exceeded, the control is recorded as not evaluated instead
 	// of stalling or aborting the whole scan.
 	ControlTimeout time.Duration
+	// TimedOutControls maps controlID to the reason its evaluation was
+	// aborted after exceeding ControlTimeout.
+	TimedOutControls map[string]string
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
@@ -71,6 +74,7 @@ func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *re
 		includeNamespaces:      split(includeNamespaces),
 		printEnabled:           enableRegoPrint,
 		compiledModules:        make(map[string]*ast.Compiler),
+		TimedOutControls:       make(map[string]string),
 	}
 }
 
@@ -87,9 +91,9 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	}
 
 	// rebuild ScanCoverage so controls that timed out during evaluation
-	// (recorded in InfoMap by markControlTimedOut) are reflected in
+	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
 	// NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.PartialGVRFailures)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures)
 
 	// edit results
 	opap.updateResults(ctx)
@@ -382,18 +386,14 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 	}
 }
 
-// markControlTimedOut records in opap.InfoMap that a control's evaluation was
-// aborted after exceeding ControlTimeout, so it surfaces as a not-evaluated
-// control instead of silently stalling the scan.
+// markControlTimedOut records in opap.TimedOutControls that a control's
+// evaluation was aborted after exceeding ControlTimeout, so it surfaces as a
+// not-evaluated control instead of silently stalling the scan.
 func (opap *OPAProcessor) markControlTimedOut(control *reporthandling.Control, timeout time.Duration) {
-	if opap.InfoMap == nil {
-		return
+	if opap.TimedOutControls == nil {
+		opap.TimedOutControls = make(map[string]string)
 	}
-	opap.InfoMap[control.ControlID] = apis.StatusInfo{
-		InnerStatus: apis.StatusSkipped,
-		SubStatus:   apis.SubStatusNotEvaluated,
-		InnerInfo:   fmt.Sprintf("control evaluation timed out after %s", timeout),
-	}
+	opap.TimedOutControls[control.ControlID] = fmt.Sprintf("control evaluation timed out after %s", timeout)
 }
 
 // appendPaths appends the failedPaths, fixPaths and fixCommand to the paths slice with the resourceID

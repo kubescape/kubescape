@@ -138,7 +138,7 @@ func TestAddInfoToMap_BuildScanCoverageRecognizesHostSensorFailure(t *testing.T)
 		expectedKey: {"C-0001"},
 	}
 
-	coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil)
+	coverage := cautils.BuildScanCoverage(infoMap, resourceToControlsMap, nil, nil)
 
 	require.Len(t, coverage.FailedGVRPulls, 1)
 	assert.Equal(t, expectedKey, coverage.FailedGVRPulls[0].GVR)

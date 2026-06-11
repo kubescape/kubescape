@@ -47,10 +47,13 @@ type NotEvaluatedControl struct {
 }
 
 // BuildScanCoverage derives a ScanCoverage from the InfoMap,
-// ResourceToControlsMap, and any partial GVR pull failures on the session.
+// ResourceToControlsMap, timedOutControls, and any partial GVR pull failures
+// on the session.
 //
 // A control is considered NotEvaluated when every GVR listed in
-// ResourceToControlsMap for that control appears in InfoMap as a pull failure.
+// ResourceToControlsMap for that control appears in InfoMap as a pull failure,
+// or when it appears in timedOutControls because its evaluation was aborted
+// (e.g. by exceeding --control-timeout).
 // Controls with at least one successfully fetched GVR are not included.
 //
 // InfoMap is mixed-purpose: it holds whole-GVR pull failures (keyed by GVR
@@ -60,27 +63,28 @@ type NotEvaluatedControl struct {
 //
 // partialPulls carries per-selector LIST failures for GVRs that were partially
 // collected; they are included as-is in ScanCoverage.PartialGVRPulls.
-func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, partialPulls []PartialGVRPull) ScanCoverage {
+func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull) ScanCoverage {
 	coverage := ScanCoverage{
 		PartialGVRPulls: partialPulls,
 	}
 
-	if len(infoMap) == 0 {
-		return coverage
-	}
+	notEvaluated := make(map[string]NotEvaluatedControl, len(timedOutControls))
 
-	notEvaluated := make(map[string]NotEvaluatedControl)
-
-	// eval-phase: controls whose evaluation was aborted (e.g. --control-timeout)
-	// are recorded directly in InfoMap keyed by controlID with SubStatusNotEvaluated.
-	for controlID, statusInfo := range infoMap {
-		if statusInfo.InnerStatus != apis.StatusSkipped || statusInfo.SubStatus != apis.SubStatusNotEvaluated {
-			continue
-		}
+	for controlID, reason := range timedOutControls {
 		notEvaluated[controlID] = NotEvaluatedControl{
 			ControlID: controlID,
-			Reason:    statusInfo.InnerInfo,
+			Reason:    reason,
 		}
+	}
+
+	if len(infoMap) == 0 {
+		for _, ne := range notEvaluated {
+			coverage.NotEvaluatedControls = append(coverage.NotEvaluatedControls, ne)
+		}
+		sort.Slice(coverage.NotEvaluatedControls, func(i, j int) bool {
+			return coverage.NotEvaluatedControls[i].ControlID < coverage.NotEvaluatedControls[j].ControlID
+		})
+		return coverage
 	}
 
 	if len(resourceToControlsMap) > 0 {
