@@ -5,38 +5,58 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-
+	"strconv"
+	"time"
 	"github.com/gorilla/mux"
 	"github.com/kubescape/backend/pkg/versioncheck"
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
 	"github.com/kubescape/kubescape/v3/core/metrics"
 	"github.com/kubescape/kubescape/v3/httphandler/docs"
-	handlerequestsv1 "github.com/kubescape/kubescape/v3/httphandler/handlerequests/v1"
-	"go.opentelemetry.io/contrib/instrumentation/github.com/gorilla/mux/otelmux"
-)
+		ReadTimeout:       getDurationFromEnv(envReadTimeout, defaultReadTimeout),
 
-const (
-	// v1 paths
-	v1PathPrefix            = "/v1"
-	v1ScanPath              = "/scan"
-	v1StatusPath            = "/status"
-	v1ResultsPath           = "/results"
-	v1PrometheusMetricsPath = "/metrics"
-
-	// healtcheck paths
-	livePath  = "/livez"
-	readyPath = "/readyz"
-)
-
-// SetupHTTPListener set up listening http servers
-func SetupHTTPListener() error {
-	keyPair, err := loadTLSKey(getCertFile(), getKeyFile())
-	if err != nil {
-		return err
+func getDurationFromEnv(envVar string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(envVar); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			logger.L().Warning("invalid duration for env var, using default",
+				helpers.String("env", envVar),
+				helpers.String("value", value),
+				helpers.Error(err),
+				helpers.String("default", defaultValue.String()))
+			return defaultValue
+		}
+		if parsed < 0 {
+			logger.L().Warning("negative duration for env var, using default",
+				helpers.String("env", envVar),
+				helpers.String("value", value),
+				helpers.String("default", defaultValue.String()))
+			return defaultValue
+		}
+		return parsed
 	}
-	server := &http.Server{
-		Addr: fmt.Sprintf(":%s", getPort()), // TODO - support loading port from config/env
+
+	return defaultValue
+}
+
+func getMaxHeaderBytes() int {
+	if value := os.Getenv(envMaxHeaderBytes); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			logger.L().Warning("invalid max header bytes value, using default",
+				helpers.String("env", envMaxHeaderBytes),
+				helpers.String("value", value),
+				helpers.Int("default", defaultMaxHeaderBytes))
+			return defaultMaxHeaderBytes
+		}
+		return parsed
+	}
+
+	return defaultMaxHeaderBytes
+}
+		WriteTimeout:      getDurationFromEnv(envWriteTimeout, defaultWriteTimeout),
+		IdleTimeout:       getDurationFromEnv(envIdleTimeout, defaultIdleTimeout),
+		MaxHeaderBytes:    getMaxHeaderBytes(),
 	}
 	if keyPair != nil {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
@@ -104,12 +124,53 @@ func getPort() string {
 	return "8080"
 }
 
+<<<<<<< HEAD
 func getCertFile() string {
 	return os.Getenv("KS_CERT_FILE")
 }
 
 func getKeyFile() string {
 	return os.Getenv("KS_KEY_FILE")
+=======
+func getDurationFromEnv(envVar string, defaultValue time.Duration) time.Duration {
+	if value := os.Getenv(envVar); value != "" {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			logger.L().Warning("invalid duration for env var, using default",
+				helpers.String("env", envVar),
+				helpers.String("value", value),
+				helpers.Error(err),
+				helpers.String("default", defaultValue.String()))
+			return defaultValue
+		}
+		if parsed < 0 {
+			logger.L().Warning("negative duration for env var, using default",
+				helpers.String("env", envVar),
+				helpers.String("value", value),
+				helpers.String("default", defaultValue.String()))
+			return defaultValue
+		}
+		return parsed
+	}
+
+	return defaultValue
+}
+
+func getMaxHeaderBytes() int {
+	if value := os.Getenv(envMaxHeaderBytes); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed <= 0 {
+			logger.L().Warning("invalid max header bytes value, using default",
+				helpers.String("env", envMaxHeaderBytes),
+				helpers.String("value", value),
+				helpers.Int("default", defaultMaxHeaderBytes))
+			return defaultMaxHeaderBytes
+		}
+		return parsed
+	}
+
+	return defaultMaxHeaderBytes
+>>>>>>> 7173a590 (Add HTTP server timeouts and header limits)
 }
 
 func servePprof() {
@@ -117,7 +178,15 @@ func servePprof() {
 		// start pprof server -> https://pkg.go.dev/net/http/pprof
 		if logger.L().GetLevel() == helpers.DebugLevel.String() {
 			logger.L().Info("starting pprof server", helpers.String("port", "6060"))
-			logger.L().Error(http.ListenAndServe(":6060", nil).Error())
+			pprofServer := &http.Server{
+				Addr:              ":6060",
+				ReadHeaderTimeout: getDurationFromEnv(envReadHeaderTimeout, defaultReadHeaderTimeout),
+				ReadTimeout:       getDurationFromEnv(envReadTimeout, defaultReadTimeout),
+				WriteTimeout:      getDurationFromEnv(envWriteTimeout, defaultWriteTimeout),
+				IdleTimeout:       getDurationFromEnv(envIdleTimeout, defaultIdleTimeout),
+				MaxHeaderBytes:    getMaxHeaderBytes(),
+			}
+			logger.L().Error(pprofServer.ListenAndServe().Error())
 		}
 	}()
 }
