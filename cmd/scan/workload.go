@@ -36,8 +36,6 @@ var (
 	ErrInvalidWorkloadIdentifier = errors.New("invalid workload identifier")
 )
 
-var namespace string
-
 // controlCmd represents the control command
 func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Command {
 	workloadCmd := &cobra.Command{
@@ -75,7 +73,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			}
 			kind, name, err := parseWorkloadIdentifierString(args[0])
 			if err != nil {
-				return fmt.Errorf("invalid input: %s", err.Error())
+				return fmt.Errorf("invalid input: %w", err)
 			}
 
 			setWorkloadScanInfo(scanInfo, kind, name)
@@ -96,7 +94,7 @@ func getWorkloadCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comma
 			return nil
 		},
 	}
-	workloadCmd.PersistentFlags().StringVarP(&namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
+	workloadCmd.PersistentFlags().StringVarP(&scanInfo.Namespace, "namespace", "n", "", "Namespace of the workload. Default will be empty.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.FilePath, "file-path", "", "Path to the workload file.")
 	workloadCmd.PersistentFlags().StringVar(&scanInfo.ChartPath, "chart-path", "", "Path to the helm chart the workload is part of. Must be used with --file-path.")
 
@@ -108,7 +106,7 @@ func setWorkloadScanInfo(scanInfo *cautils.ScanInfo, kind string, name string) {
 	scanInfo.ScanImages = true
 
 	scanInfo.ScanObject = &objectsenvelopes.ScanObject{}
-	scanInfo.ScanObject.SetNamespace(namespace)
+	scanInfo.ScanObject.SetNamespace(scanInfo.Namespace)
 	scanInfo.ScanObject.SetKind(kind)
 	scanInfo.ScanObject.SetName(name)
 

@@ -80,13 +80,7 @@ func TestSetWorkloadScanInfo(t *testing.T) {
 		t.Run(
 			tc.Description,
 			func(t *testing.T) {
-				prevNamespace := namespace
-				t.Cleanup(func() {
-					namespace = prevNamespace
-				})
-				namespace = tc.namespace
-
-				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath}
+				scanInfo := &cautils.ScanInfo{FilePath: tc.filePath, Namespace: tc.namespace}
 				setWorkloadScanInfo(scanInfo, tc.kind, tc.name)
 
 				if scanInfo.ScanType != tc.want.ScanType {
