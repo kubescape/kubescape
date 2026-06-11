@@ -2,7 +2,22 @@ package reportcrypto
 
 import (
 	"encoding/base64"
+	"fmt"
 )
+
+// validateMasterKey validates that a master key is suitable
+// for wrapping and unwrapping DEKs.
+func validateMasterKey(masterKey []byte) error {
+	if len(masterKey) != dekSize {
+		return fmt.Errorf(
+			"invalid master key length: got %d, want %d",
+			len(masterKey),
+			dekSize,
+		)
+	}
+
+	return nil
+}
 
 // WrapDEK encrypts a DEK using the provided master key
 // and returns a base64-encoded encrypted representation
@@ -13,6 +28,10 @@ func WrapDEK(
 ) (string, error) {
 
 	if err := ValidateDEK(dek); err != nil {
+		return "", err
+	}
+
+	if err := validateMasterKey(masterKey); err != nil {
 		return "", err
 	}
 
@@ -33,6 +52,10 @@ func UnwrapDEK(
 	wrappedDEK string,
 	masterKey []byte,
 ) ([]byte, error) {
+
+	if err := validateMasterKey(masterKey); err != nil {
+		return nil, err
+	}
 
 	dekString, err := DecryptString(
 		wrappedDEK,
