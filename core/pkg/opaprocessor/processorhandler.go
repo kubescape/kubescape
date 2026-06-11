@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/armosec/armoapi-go/armotypes"
 	mapset "github.com/deckarep/golang-set/v2"
@@ -49,6 +50,10 @@ type OPAProcessor struct {
 	printEnabled           bool
 	compiledModules        map[string]*ast.Compiler
 	compiledMu             sync.RWMutex
+	// ControlTimeout, when non-zero, bounds the evaluation time of a single
+	// control. If exceeded, the control is recorded as not evaluated instead
+	// of stalling or aborting the whole scan.
+	ControlTimeout time.Duration
 }
 
 func NewOPAProcessor(sessionObj *cautils.OPASessionObj, regoDependenciesData *resources.RegoDependenciesData, clusterName string, excludeNamespaces string, includeNamespaces string, enableRegoPrint bool, exceptionEventRecorder record.EventRecorder) *OPAProcessor {
@@ -81,6 +86,11 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 		logger.L().Ctx(ctx).Warning(processErr.Error())
 	}
 
+	// rebuild ScanCoverage so controls that timed out during evaluation
+	// (recorded in InfoMap by markControlTimedOut) are reflected in
+	// NotEvaluatedControls alongside any collection-phase failures
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.PartialGVRFailures)
+
 	// edit results
 	opap.updateResults(ctx)
 
@@ -112,7 +122,21 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 
 		control := toPin
 
-		resourcesAssociatedControl, err := opap.processControl(ctx, &control)
+		var resourcesAssociatedControl map[string]resourcesresults.ResourceAssociatedControl
+		var err error
+
+		if opap.ControlTimeout > 0 {
+			cctx, cancel := context.WithTimeout(ctx, opap.ControlTimeout)
+			resourcesAssociatedControl, err = opap.processControl(cctx, &control)
+			if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
+				opap.markControlTimedOut(&control, opap.ControlTimeout)
+				err = nil
+			}
+			cancel()
+		} else {
+			resourcesAssociatedControl, err = opap.processControl(ctx, &control)
+		}
+
 		if err != nil {
 			processErrs = append(processErrs, fmt.Errorf("control %q: %w", control.ControlID, err))
 		}
@@ -355,6 +379,20 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 		if opap.InfoMap != nil {
 			opap.InfoMap[id] = statusInfo
 		}
+	}
+}
+
+// markControlTimedOut records in opap.InfoMap that a control's evaluation was
+// aborted after exceeding ControlTimeout, so it surfaces as a not-evaluated
+// control instead of silently stalling the scan.
+func (opap *OPAProcessor) markControlTimedOut(control *reporthandling.Control, timeout time.Duration) {
+	if opap.InfoMap == nil {
+		return
+	}
+	opap.InfoMap[control.ControlID] = apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusNotEvaluated,
+		InnerInfo:   fmt.Sprintf("control evaluation timed out after %s", timeout),
 	}
 }
 

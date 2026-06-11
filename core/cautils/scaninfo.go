@@ -142,6 +142,7 @@ type ScanInfo struct {
 	ScanImages            bool
 	UseDefaultMatchers    bool
 	ScanTimeout           time.Duration // Maximum duration for the entire scan (0 = no timeout)
+	ControlTimeout        time.Duration // Maximum duration for evaluating a single control (0 = no timeout)
 	ChartPath             string
 	FilePath              string
 	HelmValueFiles        []string // -f / --values: paths to Helm values YAML files (repeatable)

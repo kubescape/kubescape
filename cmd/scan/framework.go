@@ -42,6 +42,7 @@ var (
 
 	ErrSecurityViewNotSupported = errors.New("security view is not supported for framework scan")
 	ErrBadThreshold             = errors.New("bad argument: out of range threshold")
+	ErrControlTimeoutTooHigh    = errors.New("--control-timeout must be lower than --scan-timeout")
 	ErrKeepLocalOrSubmit        = errors.New("you can use `keep-local` or `submit`, but not both")
 	ErrOmitRawResourcesOrSubmit = errors.New("you can use `omit-raw-resources` or `submit`, but not both")
 )
@@ -246,6 +247,9 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 	if scanInfo.Submit && scanInfo.OmitRawResources {
 		return ErrOmitRawResourcesOrSubmit
 	}
+	if err := validateControlTimeout(scanInfo); err != nil {
+		return err
+	}
 	severity := scanInfo.FailThresholdSeverity
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
@@ -253,6 +257,16 @@ func validateFrameworkScanInfo(scanInfo *cautils.ScanInfo) error {
 
 	// Validate the user's credentials
 	return cautils.ValidateAccountID(scanInfo.AccountID)
+}
+
+// validateControlTimeout ensures --control-timeout, when set alongside
+// --scan-timeout, leaves room for at least one control to be evaluated
+// before the overall scan deadline expires.
+func validateControlTimeout(scanInfo *cautils.ScanInfo) error {
+	if scanInfo.ControlTimeout > 0 && scanInfo.ScanTimeout > 0 && scanInfo.ControlTimeout >= scanInfo.ScanTimeout {
+		return ErrControlTimeoutTooHigh
+	}
+	return nil
 }
 
 // validateThresholdsOnly validates only the numeric threshold ranges
@@ -269,5 +283,5 @@ func validateThresholdsOnly(scanInfo *cautils.ScanInfo) error {
 	if 100 < scanInfo.FailCoverageThreshold || 0 > scanInfo.FailCoverageThreshold {
 		return ErrBadThreshold
 	}
-	return nil
+	return validateControlTimeout(scanInfo)
 }
