@@ -3,6 +3,7 @@ package getter
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 
 const (
 	securityExceptionGroup   = "kubescape.io"
-	securityExceptionVersion = "v1"
+	securityExceptionVersion = "v1beta1"
 )
 
 var (
@@ -80,6 +81,12 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 	for i := range seList.Items {
 		policies, convErr := convertCRDObjectToPosturePolicies(&seList.Items[i], "SecurityException", g.k8sClient)
 		if convErr != nil {
+			// Partial application: skip this one CRD but keep the rest, and make the
+			// drop observable instead of silently swallowing it.
+			logger.L().Warning("skipping SecurityException that failed to convert to posture exceptions",
+				helpers.String("name", seList.Items[i].GetName()),
+				helpers.String("namespace", seList.Items[i].GetNamespace()),
+				helpers.Error(convErr))
 			continue
 		}
 		out = append(out, policies...)
@@ -92,6 +99,11 @@ func (g *CRDExceptionsGetter) GetExceptions(_ string) ([]armotypes.PostureExcept
 	for i := range cseList.Items {
 		policies, convErr := convertCRDObjectToPosturePolicies(&cseList.Items[i], "ClusterSecurityException", g.k8sClient)
 		if convErr != nil {
+			// Partial application: skip this one CRD but keep the rest, and make the
+			// drop observable instead of silently swallowing it.
+			logger.L().Warning("skipping ClusterSecurityException that failed to convert to posture exceptions",
+				helpers.String("name", cseList.Items[i].GetName()),
+				helpers.Error(convErr))
 			continue
 		}
 		out = append(out, policies...)
@@ -153,7 +165,10 @@ func convertCRDObjectToPosturePolicies(
 		if !ok {
 			action = ""
 		}
-		policy, err := convertSecurityExceptionToPosturePolicy(name, controlID, "", action, expiresAt, reason, resources)
+		// frameworkName scopes the exception to a single framework; an empty value
+		// (field omitted) applies the exception framework-wide.
+		frameworkName, _ := item["frameworkName"].(string)
+		policy, err := convertSecurityExceptionToPosturePolicy(name, controlID, frameworkName, action, expiresAt, reason, resources)
 		if err != nil {
 			continue
 		}
@@ -182,22 +197,24 @@ func buildResourceDesignators(
 ) ([]map[string]string, error) {
 	designators := make([]map[string]string, 0, 2)
 
+	// A namespaced SecurityException is implicitly scoped to its own namespace. That
+	// scope is carried per resource designator below (and as a fallback when no
+	// resources/objectSelector narrow it); it must NOT be added as a standalone
+	// designator here, or it would be OR'd with the narrower ones and widen the
+	// exception back to the whole namespace.
 	namespace := obj.GetNamespace()
-	if kind == "SecurityException" && namespace != "" {
-		designators = append(designators, map[string]string{identifiers.AttributeNamespace: namespace})
-	}
 
-	_, objectSelectorFound, err := unstructured.NestedFieldNoCopy(obj.Object, "spec", "match", "objectSelector")
+	// objectSelector constrains the exception to workloads carrying matching labels.
+	// matchLabels are flattened into every resource designator so the existing label
+	// comparator (opa-utils compareLabels) enforces them, AND-combined with the other
+	// match fields per the design doc. Note: matchLabels are matched against the
+	// resource's own top-level metadata.labels (workload.GetLabels()), not the
+	// pod-template/selector labels. matchExpressions cannot be represented as
+	// key->value attributes, so they are best-effort for v1beta1: a warning is emitted
+	// and the rest of the exception still applies (partial application, never fail-closed).
+	objectSelectorLabels, err := objectSelectorMatchLabels(obj, kind)
 	if err != nil {
-		return nil, fmt.Errorf("read objectSelector: %w", err)
-	}
-	if objectSelectorFound {
-		logger.L().Warning("SecurityException CRD uses unsupported spec.match.objectSelector; skipping",
-			helpers.String("name", obj.GetName()),
-			helpers.String("namespace", namespace),
-			helpers.String("kind", kind),
-		)
-		return nil, fmt.Errorf("spec.match.objectSelector is not supported")
+		return nil, err
 	}
 
 	namespaceSelectorFound := false
@@ -280,11 +297,65 @@ func buildResourceDesignators(
 	}
 
 	// Ensure the exception has at least one scope designator, otherwise exception processor ignores it.
+	// A namespaced SecurityException with no narrowing falls back to its whole namespace;
+	// a cluster-scoped one falls back to all kinds.
 	if len(designators) == 0 && !namespaceSelectorFound {
-		designators = append(designators, map[string]string{identifiers.AttributeKind: "*"})
+		if kind == "SecurityException" && namespace != "" {
+			designators = append(designators, map[string]string{identifiers.AttributeNamespace: namespace})
+		} else {
+			designators = append(designators, map[string]string{identifiers.AttributeKind: "*"})
+		}
+	}
+
+	// AND objectSelector.matchLabels into every designator produced above.
+	if len(objectSelectorLabels) > 0 {
+		for _, designator := range designators {
+			for k, v := range objectSelectorLabels {
+				designator[k] = v
+			}
+		}
 	}
 
 	return designators, nil
+}
+
+// objectSelectorMatchLabels decodes spec.match.objectSelector and returns its
+// matchLabels as regex-escaped designator attributes (the label comparator treats
+// values as regexes). matchExpressions are not representable as key->value attributes
+// and are logged as best-effort rather than failing the exception.
+func objectSelectorMatchLabels(obj *unstructured.Unstructured, kind string) (map[string]string, error) {
+	selectorRaw, found, err := unstructured.NestedFieldCopy(obj.Object, "spec", "match", "objectSelector")
+	if err != nil {
+		return nil, fmt.Errorf("read objectSelector: %w", err)
+	}
+	if !found {
+		return nil, nil
+	}
+	selectorMap, ok := selectorRaw.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("objectSelector has unexpected type")
+	}
+	labelSelector := metav1.LabelSelector{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(selectorMap, &labelSelector); err != nil {
+		return nil, fmt.Errorf("decode objectSelector: %w", err)
+	}
+
+	if len(labelSelector.MatchExpressions) > 0 {
+		logger.L().Warning("SecurityException spec.match.objectSelector.matchExpressions is best-effort for v1beta1 and is not applied; matchLabels (if any) still apply",
+			helpers.String("name", obj.GetName()),
+			helpers.String("namespace", obj.GetNamespace()),
+			helpers.String("kind", kind),
+		)
+	}
+
+	if len(labelSelector.MatchLabels) == 0 {
+		return nil, nil
+	}
+	escaped := make(map[string]string, len(labelSelector.MatchLabels))
+	for k, v := range labelSelector.MatchLabels {
+		escaped[k] = regexp.QuoteMeta(v)
+	}
+	return escaped, nil
 }
 
 // resolveNamespaceSelector returns namespace names matching a label selector.
