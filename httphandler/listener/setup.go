@@ -1,10 +1,15 @@
 package listener
 
 import (
+	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -27,16 +32,22 @@ const (
 	// healtcheck paths
 	livePath  = "/livez"
 	readyPath = "/readyz"
+
+	// shutdownGracePeriod is the maximum time to wait for in-flight
+	// requests to complete before forcing the server to stop.
+	shutdownGracePeriod = 30 * time.Second
 )
 
-// SetupHTTPListener set up listening http servers
-func SetupHTTPListener() error {
+// SetupHTTPListener sets up the HTTP server and blocks until the server
+// is shut down. On SIGTERM or SIGINT the server drains in-flight requests
+// for up to shutdownGracePeriod before returning.
+func SetupHTTPListener(ctx context.Context) error {
 	keyPair, err := loadTLSKey(getCertFile(), getKeyFile())
 	if err != nil {
 		return err
 	}
 	server := &http.Server{
-		Addr: fmt.Sprintf(":%s", getPort()), // TODO - support loading port from config/env
+		Addr: fmt.Sprintf(":%s", getPort()),
 	}
 	if keyPair != nil {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}
@@ -72,10 +83,50 @@ func SetupHTTPListener() error {
 
 	servePprof()
 
-	if keyPair != nil {
-		return server.ListenAndServeTLS("", "")
+	// Start the server in a goroutine so we can listen for shutdown signals.
+	errCh := make(chan error, 1)
+	go func() {
+		var listenErr error
+		if keyPair != nil {
+			listenErr = server.ListenAndServeTLS("", "")
+		} else {
+			listenErr = server.ListenAndServe()
+		}
+		// ErrServerClosed is returned by Shutdown — not an error.
+		if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+			errCh <- listenErr
+		}
+		close(errCh)
+	}()
+
+	// Block until a termination signal or a listener error.
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGTERM, syscall.SIGINT)
+	defer signal.Stop(sigCh)
+	select {
+	case sig := <-sigCh:
+		logger.L().Info("received shutdown signal, draining in-flight requests",
+			helpers.String("signal", sig.String()))
+	case err := <-errCh:
+		// Listener failed to start (e.g. port conflict).
+		return err
+	case <-ctx.Done():
+		logger.L().Info("context cancelled, shutting down server")
 	}
-	return server.ListenAndServe()
+
+	// Graceful shutdown: give in-flight requests time to complete.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownGracePeriod)
+	defer cancel()
+
+	logger.L().Info("shutting down HTTP server",
+		helpers.String("gracePeriod", shutdownGracePeriod.String()))
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("server shutdown error: %w", err)
+	}
+
+	logger.L().Info("HTTP server stopped gracefully")
+	return nil
 }
 
 func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
@@ -88,7 +139,7 @@ func loadTLSKey(certFile, keyFile string) (*tls.Certificate, error) {
 
 	pair, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load key pair: %v", err)
+		return nil, fmt.Errorf("failed to load key pair: %w", err)
 	}
 	return &pair, nil
 }

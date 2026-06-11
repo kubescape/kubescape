@@ -75,7 +75,9 @@ func main() {
 	initializeStorage(clusterName, cfg)
 	// traces will be created by otelmux.Middleware in SetupHTTPListener()
 
-	logger.L().Ctx(ctx).Fatal(listener.SetupHTTPListener().Error())
+	if err := listener.SetupHTTPListener(ctx); err != nil {
+		logger.L().Ctx(ctx).Fatal(err.Error())
+	}
 }
 
 func initializeStorage(clusterName string, cfg config.Config) {
