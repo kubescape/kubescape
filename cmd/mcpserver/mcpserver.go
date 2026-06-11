@@ -194,7 +194,7 @@ func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mc
 	// Get the vulnerability manifest
 	manifest, err := ksServer.ksClient.VulnerabilityManifests(namespace).Get(ctx, manifestName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get vulnerability manifest: %s", err)
+		return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 	}
 
 	var responseJson []byte
@@ -206,7 +206,7 @@ func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mc
 		}
 		responseJson, err = json.Marshal(cveList)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve list: %s", err)
+			return nil, fmt.Errorf("failed to marshal cve list: %w", err)
 		}
 	} else {
 		// CVE details
@@ -218,7 +218,7 @@ func (ksServer *KubescapeMcpserver) ReadResource(ctx context.Context, request mc
 		}
 		responseJson, err = json.Marshal(match)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve details: %s", err)
+			return nil, fmt.Errorf("failed to marshal cve details: %w", err)
 		}
 	}
 
@@ -241,11 +241,11 @@ func (ksServer *KubescapeMcpserver) ReadConfigurationResource(ctx context.Contex
 	manifestName := parts[1]
 	manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespace).Get(ctx, manifestName, metav1.GetOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to get configuration manifest: %s", err)
+		return nil, fmt.Errorf("failed to get configuration manifest: %w", err)
 	}
 	responseJson, err := json.Marshal(manifest)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal configuration manifest: %s", err)
+		return nil, fmt.Errorf("failed to marshal configuration manifest: %w", err)
 	}
 	return []mcp.ResourceContents{mcp.TextResourceContents{
 		URI:  uri,
@@ -327,7 +327,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 
 		content, err := json.Marshal(result)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %s", err)
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -356,7 +356,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get vulnerability manifest: %s", err)
+			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 		}
 		var cveList []v1beta1.Vulnerability
 		for _, match := range manifest.Spec.Payload.Matches {
@@ -364,7 +364,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		responseJson, err := json.Marshal(cveList)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve list: %s", err)
+			return nil, fmt.Errorf("failed to marshal cve list: %w", err)
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -401,7 +401,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		manifest, err := ksServer.ksClient.VulnerabilityManifests(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get vulnerability manifest: %s", err)
+			return nil, fmt.Errorf("failed to get vulnerability manifest: %w", err)
 		}
 		var match []v1beta1.Match
 		for _, m := range manifest.Spec.Payload.Matches {
@@ -411,7 +411,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		responseJson, err := json.Marshal(match)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal cve details: %s", err)
+			return nil, fmt.Errorf("failed to marshal cve details: %w", err)
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -454,7 +454,7 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		content, err := json.Marshal(result)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal result: %s", err)
+			return nil, fmt.Errorf("failed to marshal result: %w", err)
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -483,11 +483,11 @@ func (ksServer *KubescapeMcpserver) CallTool(ctx context.Context, name string, a
 		}
 		manifest, err := ksServer.ksClient.WorkloadConfigurationScans(namespaceStr).Get(ctx, manifestNameStr, metav1.GetOptions{})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get configuration manifest: %s", err)
+			return nil, fmt.Errorf("failed to get configuration manifest: %w", err)
 		}
 		responseJson, err := json.Marshal(manifest)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal configuration manifest: %s", err)
+			return nil, fmt.Errorf("failed to marshal configuration manifest: %w", err)
 		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
@@ -508,7 +508,7 @@ func mcpServerEntrypoint() error {
 	// Create a kubernetes client and verify it's working
 	client, err := CreateKsObjectConnection("default", 10*time.Second)
 	if err != nil {
-		return fmt.Errorf("failed to create kubernetes client: %v", err)
+		return fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
 
 	// Create a new MCP server
@@ -531,7 +531,7 @@ func mcpServerEntrypoint() error {
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
-		return fmt.Errorf("server error: %v", err)
+		return fmt.Errorf("server error: %w", err)
 	}
 	return nil
 }
