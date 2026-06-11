@@ -36,18 +36,24 @@ type PartialGVRPull struct {
 	Error    string `json:"error"`
 }
 
-// NotEvaluatedControl records a control that was skipped because every GVR it
-// depends on failed to pull.
+// NotEvaluatedControl records a control that was not evaluated, either
+// because every GVR it depends on failed to pull (MissingGVRs is set) or
+// because its evaluation was aborted during the OPA processing phase, e.g.
+// by exceeding --control-timeout (Reason is set).
 type NotEvaluatedControl struct {
 	ControlID   string   `json:"controlID"`
-	MissingGVRs []string `json:"missingGVRs"`
+	MissingGVRs []string `json:"missingGVRs,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
 }
 
 // BuildScanCoverage derives a ScanCoverage from the InfoMap,
-// ResourceToControlsMap, and any partial GVR pull failures on the session.
+// ResourceToControlsMap, timedOutControls, and any partial GVR pull failures
+// on the session.
 //
 // A control is considered NotEvaluated when every GVR listed in
-// ResourceToControlsMap for that control appears in InfoMap as a pull failure.
+// ResourceToControlsMap for that control appears in InfoMap as a pull failure,
+// or when it appears in timedOutControls because its evaluation was aborted
+// (e.g. by exceeding --control-timeout).
 // Controls with at least one successfully fetched GVR are not included.
 //
 // InfoMap is mixed-purpose: it holds whole-GVR pull failures (keyed by GVR
@@ -57,76 +63,97 @@ type NotEvaluatedControl struct {
 //
 // partialPulls carries per-selector LIST failures for GVRs that were partially
 // collected; they are included as-is in ScanCoverage.PartialGVRPulls.
-func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, partialPulls []PartialGVRPull) ScanCoverage {
+func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull) ScanCoverage {
 	coverage := ScanCoverage{
 		PartialGVRPulls: partialPulls,
 	}
 
-	if len(infoMap) == 0 || len(resourceToControlsMap) == 0 {
+	notEvaluated := make(map[string]NotEvaluatedControl, len(timedOutControls))
+
+	for controlID, reason := range timedOutControls {
+		notEvaluated[controlID] = NotEvaluatedControl{
+			ControlID: controlID,
+			Reason:    reason,
+		}
+	}
+
+	if len(infoMap) == 0 {
+		for _, ne := range notEvaluated {
+			coverage.NotEvaluatedControls = append(coverage.NotEvaluatedControls, ne)
+		}
+		sort.Slice(coverage.NotEvaluatedControls, func(i, j int) bool {
+			return coverage.NotEvaluatedControls[i].ControlID < coverage.NotEvaluatedControls[j].ControlID
+		})
 		return coverage
 	}
 
-	// collect failed GVR pulls from InfoMap, filtering out resource-level
-	// eval skips by requiring the key to be a known GVR
-	for gvr, statusInfo := range infoMap {
-		if statusInfo.InnerStatus != apis.StatusSkipped {
-			continue
+	if len(resourceToControlsMap) > 0 {
+		// collect failed GVR pulls from InfoMap, filtering out resource-level
+		// eval skips by requiring the key to be a known GVR
+		for gvr, statusInfo := range infoMap {
+			if statusInfo.InnerStatus != apis.StatusSkipped {
+				continue
+			}
+			if _, isGVR := resourceToControlsMap[gvr]; !isGVR {
+				continue
+			}
+			coverage.FailedGVRPulls = append(coverage.FailedGVRPulls, FailedGVRPull{
+				GVR:   gvr,
+				Error: statusInfo.InnerInfo,
+			})
 		}
-		if _, isGVR := resourceToControlsMap[gvr]; !isGVR {
-			continue
+
+		if len(coverage.FailedGVRPulls) > 0 {
+			// build a set of failed GVRs for fast lookup
+			failedGVRs := make(map[string]struct{}, len(coverage.FailedGVRPulls))
+			for _, f := range coverage.FailedGVRPulls {
+				failedGVRs[f.GVR] = struct{}{}
+			}
+
+			// invert ResourceToControlsMap: controlID -> set of GVRs it depends on
+			controlToGVRs := make(map[string]map[string]struct{})
+			for gvr, controlIDs := range resourceToControlsMap {
+				for _, controlID := range controlIDs {
+					if _, ok := controlToGVRs[controlID]; !ok {
+						controlToGVRs[controlID] = make(map[string]struct{})
+					}
+					controlToGVRs[controlID][gvr] = struct{}{}
+				}
+			}
+
+			// a control is not-evaluated only when ALL its GVRs are in the failed set
+			for controlID, gvrSet := range controlToGVRs {
+				if _, ok := notEvaluated[controlID]; ok {
+					continue
+				}
+				missingGVRs := make([]string, 0, len(gvrSet))
+				allFailed := true
+				for gvr := range gvrSet {
+					if _, failed := failedGVRs[gvr]; failed {
+						missingGVRs = append(missingGVRs, gvr)
+					} else {
+						allFailed = false
+						break
+					}
+				}
+				if allFailed && len(missingGVRs) == len(gvrSet) {
+					sort.Strings(missingGVRs)
+					notEvaluated[controlID] = NotEvaluatedControl{
+						ControlID:   controlID,
+						MissingGVRs: missingGVRs,
+					}
+				}
+			}
 		}
-		coverage.FailedGVRPulls = append(coverage.FailedGVRPulls, FailedGVRPull{
-			GVR:   gvr,
-			Error: statusInfo.InnerInfo,
+
+		sort.Slice(coverage.FailedGVRPulls, func(i, j int) bool {
+			return coverage.FailedGVRPulls[i].GVR < coverage.FailedGVRPulls[j].GVR
 		})
 	}
 
-	if len(coverage.FailedGVRPulls) == 0 {
-		return coverage
+	for _, ne := range notEvaluated {
+		coverage.NotEvaluatedControls = append(coverage.NotEvaluatedControls, ne)
 	}
-
-	// build a set of failed GVRs for fast lookup
-	failedGVRs := make(map[string]struct{}, len(coverage.FailedGVRPulls))
-	for _, f := range coverage.FailedGVRPulls {
-		failedGVRs[f.GVR] = struct{}{}
-	}
-
-	// invert ResourceToControlsMap: controlID -> set of GVRs it depends on
-	controlToGVRs := make(map[string]map[string]struct{})
-	for gvr, controlIDs := range resourceToControlsMap {
-		for _, controlID := range controlIDs {
-			if _, ok := controlToGVRs[controlID]; !ok {
-				controlToGVRs[controlID] = make(map[string]struct{})
-			}
-			controlToGVRs[controlID][gvr] = struct{}{}
-		}
-	}
-
-	// a control is not-evaluated only when ALL its GVRs are in the failed set
-	for controlID, gvrSet := range controlToGVRs {
-		missingGVRs := make([]string, 0, len(gvrSet))
-		allFailed := true
-		for gvr := range gvrSet {
-			if _, failed := failedGVRs[gvr]; failed {
-				missingGVRs = append(missingGVRs, gvr)
-			} else {
-				allFailed = false
-				break
-			}
-		}
-		if allFailed && len(missingGVRs) == len(gvrSet) {
-			sort.Strings(missingGVRs)
-			coverage.NotEvaluatedControls = append(coverage.NotEvaluatedControls, NotEvaluatedControl{
-				ControlID:   controlID,
-				MissingGVRs: missingGVRs,
-			})
-		}
-	}
-
-	// stable, deterministic output for JSON / golden tests
-	sort.Slice(coverage.FailedGVRPulls, func(i, j int) bool {
-		return coverage.FailedGVRPulls[i].GVR < coverage.FailedGVRPulls[j].GVR
-	})
 	sort.Slice(coverage.NotEvaluatedControls, func(i, j int) bool {
 		return coverage.NotEvaluatedControls[i].ControlID < coverage.NotEvaluatedControls[j].ControlID
 	})

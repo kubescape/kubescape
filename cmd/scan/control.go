@@ -139,6 +139,10 @@ func validateControlScanInfo(scanInfo *cautils.ScanInfo) error {
 		return ErrOmitRawResourcesOrSubmit
 	}
 
+	if err := validateControlTimeout(scanInfo); err != nil {
+		return err
+	}
+
 	if err := shared.ValidateSeverity(severity); severity != "" && err != nil {
 		return err
 	}
