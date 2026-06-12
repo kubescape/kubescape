@@ -95,7 +95,7 @@ To scan a container image for vulnerabilities, add a separate step:
     command: kubescape scan image nginx:latest
 ```
 
-> **Note:** Image scanning requires Docker access. If your job uses the `docker` executor, use the `setup_remote_docker` step. For full Docker access without extra configuration, use the `machine` executor instead (see [Troubleshooting](#image-scan-fails-in-circleci)).
+> **Note:** Kubescape pulls images directly from the registry using Syft/Grype and does not require a Docker daemon for registry-hosted images. `--format junit` is not supported for image scans — use `pretty-printer`, `json`, or `sarif` instead.
 
 ### Step 6 — Save Scan Results as Artifacts
 
@@ -162,9 +162,9 @@ Kubescape behaviour is controlled via CLI flags passed to the `kubescape scan` c
 | Flag | Default | Description |
 |---|---|---|
 | `--compliance-threshold` | `0` | Minimum compliance score (0–100). The job fails if the score is below this value. |
-| `--format` | `pretty-printer` | Output format. Accepted values: `pretty-printer`, `json`, `junit`, `sarif`. |
+| `--format` | `pretty-printer` | Output format for manifest scans. Accepted values: `pretty-printer`, `json`, `junit`, `sarif`. Image scans support `pretty-printer`, `json`, and `sarif` only (no `junit`). |
 | `--output` | stdout | Path to write the scan results file. |
-| `--severity-threshold` | `none` | Fail the job if any vulnerability at or above this severity is found. Accepted values: `low`, `medium`, `high`, `critical`. |
+| `--severity-threshold` | (unset) | Fail the job if any vulnerability at or above this severity is found. Accepted values: `low`, `medium`, `high`, `critical`. |
 | `--exceptions` | — | Path to an exceptions file to suppress known findings. |
 
 ### Scanning Multiple Frameworks
@@ -197,35 +197,11 @@ This means the compliance score is below the `--compliance-threshold` value. Rev
 
 ### Image scan fails in CircleCI
 
-Container image scanning requires Docker access. When using the `docker` executor, add `setup_remote_docker` before the scan step:
+Kubescape pulls images directly from the registry using Syft/Grype and does not require a Docker daemon for registry-hosted images. The `cimg/base` executor works without any additional Docker configuration.
 
-```yaml
-- setup_remote_docker:
-    docker_layer_caching: true
-- run:
-    name: Scan container image
-    command: kubescape scan image nginx:latest
-```
+If the scan fails, verify the image name and tag are correct and the registry is publicly accessible.
 
-Alternatively, use the `machine` executor for full Docker access without extra configuration:
-
-```yaml
-jobs:
-  image-scan:
-    machine:
-      image: ubuntu-2204:current
-    steps:
-      - checkout
-      - run:
-          name: Install Kubescape
-          command: |
-            curl -s https://raw.githubusercontent.com/kubescape/kubescape/master/install.sh | /bin/bash
-            echo 'export PATH=$PATH:$HOME/.kubescape/bin' >> $BASH_ENV
-            source $BASH_ENV
-      - run:
-          name: Scan container image
-          command: kubescape scan image nginx:latest
-```
+A Docker daemon is only needed if scanning a locally built image that has not been pushed to a registry yet. In that case, build and push the image to a registry first, then scan it with `kubescape scan image`.
 
 ### No resources found during scan
 
