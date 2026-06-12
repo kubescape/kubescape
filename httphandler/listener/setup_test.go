@@ -113,3 +113,52 @@ func TestGetOffline(t *testing.T) {
 		}
 	})
 }
+
+func TestGetDurationFromEnv(t *testing.T) {
+	t.Run("returns default when unset", func(t *testing.T) {
+		t.Setenv(envReadTimeout, "")
+		assert.Equal(t, defaultReadTimeout, getDurationFromEnv(envReadTimeout, defaultReadTimeout))
+	})
+
+	t.Run("returns parsed duration when valid", func(t *testing.T) {
+		t.Setenv(envReadTimeout, "45s")
+		assert.Equal(t, 45*time.Second, getDurationFromEnv(envReadTimeout, defaultReadTimeout))
+	})
+
+	t.Run("returns default on invalid duration", func(t *testing.T) {
+		t.Setenv(envReadTimeout, "not-a-duration")
+		assert.Equal(t, defaultReadTimeout, getDurationFromEnv(envReadTimeout, defaultReadTimeout))
+	})
+
+	t.Run("returns default on negative duration", func(t *testing.T) {
+		t.Setenv(envReadTimeout, "-5s")
+		assert.Equal(t, defaultReadTimeout, getDurationFromEnv(envReadTimeout, defaultReadTimeout))
+	})
+
+	t.Run("returns default on zero duration", func(t *testing.T) {
+		t.Setenv(envReadTimeout, "0s")
+		assert.Equal(t, defaultReadTimeout, getDurationFromEnv(envReadTimeout, defaultReadTimeout))
+	})
+}
+
+func TestGetMaxHeaderBytes(t *testing.T) {
+	t.Run("returns default when unset", func(t *testing.T) {
+		t.Setenv(envMaxHeaderBytes, "")
+		assert.Equal(t, defaultMaxHeaderBytes, getMaxHeaderBytes())
+	})
+
+	t.Run("returns parsed integer when valid", func(t *testing.T) {
+		t.Setenv(envMaxHeaderBytes, "2048")
+		assert.Equal(t, 2048, getMaxHeaderBytes())
+	})
+
+	t.Run("returns default on invalid integer", func(t *testing.T) {
+		t.Setenv(envMaxHeaderBytes, "not-a-number")
+		assert.Equal(t, defaultMaxHeaderBytes, getMaxHeaderBytes())
+	})
+
+	t.Run("returns default on non-positive integer", func(t *testing.T) {
+		t.Setenv(envMaxHeaderBytes, "0")
+		assert.Equal(t, defaultMaxHeaderBytes, getMaxHeaderBytes())
+	})
+}
