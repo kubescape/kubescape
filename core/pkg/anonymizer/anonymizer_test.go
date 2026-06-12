@@ -72,24 +72,50 @@ func TestApplyEncrypted(t *testing.T) {
 	assert.Equal(t, "AES256_GCM", metadata.KEKAlgorithm)
 	assert.NotEmpty(t, metadata.EncryptedDEK)
 
-	unwrappedDEK, err := reportcrypto.UnwrapDEK(metadata.EncryptedDEK, masterKey)
+	unwrappedDEK, err := reportcrypto.UnwrapDEK(
+		metadata.EncryptedDEK,
+		masterKey,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, dek, unwrappedDEK)
 
+	if handler.ScanData.Report != nil {
+		require.NotNil(
+			t,
+			handler.ScanData.Report.Metadata.EncryptionMetadata,
+		)
+
+		assert.Equal(
+			t,
+			metadata,
+			handler.ScanData.Report.Metadata.EncryptionMetadata,
+		)
+	}
+
 	repo := handler.ScanData.Metadata.ContextMetadata.RepoContextMetadata
 
 	assert.Contains(t, repo.Repo, "ENC[AES256_GCM,")
-
 	assert.Contains(t, repo.Owner, "ENC[AES256_GCM,")
 
-	decryptedRepo, err := reportcrypto.DecryptString(repo.Repo, dek)
+	decryptedRepo, err := reportcrypto.DecryptString(
+		repo.Repo,
+		dek,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, "demo-repository", decryptedRepo)
-	assert.Contains(t, repo.LastCommit.Message, "ENC[AES256_GCM,")
 
-	decryptedMessage, err := reportcrypto.DecryptString(repo.LastCommit.Message, dek)
+	assert.Contains(
+		t,
+		repo.LastCommit.Message,
+		"ENC[AES256_GCM,",
+	)
+
+	decryptedMessage, err := reportcrypto.DecryptString(
+		repo.LastCommit.Message,
+		dek,
+	)
 	require.NoError(t, err)
 
 	assert.Equal(t, "demo commit", decryptedMessage)
@@ -103,7 +129,11 @@ func TestApplyEncrypted_InvalidDEK(t *testing.T) {
 	masterKey, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
-	err = ApplyEncrypted(handler, []byte("bad"), masterKey)
+	err = ApplyEncrypted(
+		handler,
+		[]byte("bad"),
+		masterKey,
+	)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid DEK length")
@@ -117,9 +147,12 @@ func TestApplyEncrypted_InvalidMasterKey(t *testing.T) {
 		ScanData: &cautils.OPASessionObj{},
 	}
 
-	err = ApplyEncrypted(handler, dek, []byte("bad"))
+	err = ApplyEncrypted(
+		handler,
+		dek,
+		[]byte("bad"),
+	)
 
 	require.Error(t, err)
-
 	assert.Contains(t, err.Error(), "invalid master key length")
 }

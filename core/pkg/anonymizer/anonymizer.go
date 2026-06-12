@@ -38,6 +38,10 @@ func applyWithTransformer(
 // ApplyEncrypted anonymizes a scan session while encrypting
 // RepoContextMetadata using the supplied DEK.
 //
+// The DEK is wrapped using the supplied master key (KEK)
+// and stored in EncryptionMetadata for future decryption
+// workflows.
+//
 // Resource identifiers, namespaces, annotations, source paths,
 // and other session data continue to use mapping-based
 // anonymization and remain irreversibly pseudonymized.
@@ -49,14 +53,6 @@ func ApplyEncrypted(
 	masterKey []byte,
 ) error {
 
-	if err := reportcrypto.ValidateDEK(dek); err != nil {
-		return err
-	}
-
-	if err := reportcrypto.ValidateMasterKey(masterKey); err != nil {
-		return err
-	}
-
 	wrappedDEK, err := reportcrypto.WrapDEK(
 		dek,
 		masterKey,
@@ -65,17 +61,19 @@ func ApplyEncrypted(
 		return err
 	}
 
+	encryptionMetadata := &reporthandlingv2.EncryptionMetadata{
+		Version:      "v1",
+		DEKAlgorithm: "AES256_GCM",
+		KEKAlgorithm: "AES256_GCM",
+		EncryptedDEK: wrappedDEK,
+	}
+
 	if resultsHandler != nil &&
 		resultsHandler.ScanData != nil &&
 		resultsHandler.ScanData.Metadata != nil {
 
 		resultsHandler.ScanData.Metadata.EncryptionMetadata =
-			&reporthandlingv2.EncryptionMetadata{
-				Version:      "v1",
-				DEKAlgorithm: "AES256_GCM",
-				KEKAlgorithm: "AES256_GCM",
-				EncryptedDEK: wrappedDEK,
-			}
+			encryptionMetadata
 	}
 
 	if resultsHandler != nil &&
@@ -83,12 +81,7 @@ func ApplyEncrypted(
 		resultsHandler.ScanData.Report != nil {
 
 		resultsHandler.ScanData.Report.Metadata.EncryptionMetadata =
-			&reporthandlingv2.EncryptionMetadata{
-				Version:      "v1",
-				DEKAlgorithm: "AES256_GCM",
-				KEKAlgorithm: "AES256_GCM",
-				EncryptedDEK: wrappedDEK,
-			}
+			encryptionMetadata
 	}
 
 	return applyWithTransformer(
