@@ -585,6 +585,21 @@ func TestResolvePolicyName(t *testing.T) {
 			controlID: "C-9999",
 			wantErr:   "unsupported control ID",
 		},
+		{
+			name:      "C-0199 resolves",
+			controlID: "C-0199",
+			want:      "kubescape-c-0199-deny-net-raw-capability",
+		},
+		{
+			name:      "C-0200 resolves",
+			controlID: "C-0200",
+			want:      "kubescape-c-0200-deny-added-capabilities",
+		},
+		{
+			name:      "C-0201 resolves",
+			controlID: "C-0201",
+			want:      "kubescape-c-0201-deny-capabilities-assigned",
+		},
 	}
 
 	for _, tt := range tests {

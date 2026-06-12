@@ -350,9 +350,13 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 	}
 
 	if len(coverage.NotEvaluatedControls) > 0 {
-		fmt.Fprintf(pp.writer, "\nThe following controls were NOT evaluated (all required resource types failed to pull):\n")
+		fmt.Fprintf(pp.writer, "\nThe following controls were NOT evaluated:\n")
 		for _, c := range coverage.NotEvaluatedControls {
-			fmt.Fprintf(pp.writer, "  • %s (missing: %s)\n", c.ControlID, strings.Join(c.MissingGVRs, ", "))
+			if c.Reason != "" {
+				fmt.Fprintf(pp.writer, "  • %s (%s)\n", c.ControlID, c.Reason)
+			} else {
+				fmt.Fprintf(pp.writer, "  • %s (missing: %s)\n", c.ControlID, strings.Join(c.MissingGVRs, ", "))
+			}
 		}
 	}
 

@@ -99,7 +99,10 @@ func (p *portForward) GetPortForwardLocalhost() string {
 }
 
 func (p *portForward) StopPortForwarder() {
-	p.stopChan <- struct{}{}
+	select {
+	case p.stopChan <- struct{}{}:
+	default:
+	}
 }
 
 func (p *portForward) StartPortForwarder() error {

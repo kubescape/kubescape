@@ -21,7 +21,7 @@ func TestCRDExceptionsGetter_GetExceptions(t *testing.T) {
 	client := fake.NewSimpleDynamicClient(scheme,
 		&unstructured.Unstructured{
 			Object: map[string]any{
-				"apiVersion": "kubescape.io/v1",
+				"apiVersion": "kubescape.io/v1beta1",
 				"kind":       "SecurityException",
 				"metadata": map[string]any{
 					"name":      "se-a",
@@ -38,7 +38,7 @@ func TestCRDExceptionsGetter_GetExceptions(t *testing.T) {
 		},
 		&unstructured.Unstructured{
 			Object: map[string]any{
-				"apiVersion": "kubescape.io/v1",
+				"apiVersion": "kubescape.io/v1beta1",
 				"kind":       "ClusterSecurityException",
 				"metadata": map[string]any{
 					"name": "cse-a",
@@ -94,7 +94,7 @@ func TestCRDExceptionsGetter_GetExceptionsResolvesClusterNamespaceSelector(t *te
 	dynamicClient := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds,
 		&unstructured.Unstructured{
 			Object: map[string]any{
-				"apiVersion": "kubescape.io/v1",
+				"apiVersion": "kubescape.io/v1beta1",
 				"kind":       "ClusterSecurityException",
 				"metadata": map[string]any{
 					"name": "cse-staging",
@@ -123,9 +123,75 @@ func TestCRDExceptionsGetter_GetExceptionsResolvesClusterNamespaceSelector(t *te
 	assert.Equal(t, "ClusterSecurityException", exceptions[0].Attributes["securityExceptionKind"])
 }
 
+func TestCRDExceptionsGetter_PartialApplicationOnConversionError(t *testing.T) {
+	listKinds := map[schema.GroupVersionResource]string{
+		securityExceptionGVR:        "SecurityExceptionList",
+		clusterSecurityExceptionGVR: "ClusterSecurityExceptionList",
+	}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds,
+		&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "kubescape.io/v1beta1",
+			"kind":       "SecurityException",
+			"metadata":   map[string]any{"name": "se-good", "namespace": "team-a", "uid": "uid-good"},
+			"spec": map[string]any{
+				"posture": []any{map[string]any{"controlID": "C-0001", "action": "ignore"}},
+			},
+		}},
+		&unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "kubescape.io/v1beta1",
+			"kind":       "SecurityException",
+			"metadata":   map[string]any{"name": "se-bad", "namespace": "team-a", "uid": "uid-bad"},
+			"spec": map[string]any{
+				// objectSelector is a string instead of an object -> conversion fails.
+				"match":   map[string]any{"objectSelector": "not-a-map"},
+				"posture": []any{map[string]any{"controlID": "C-0002", "action": "ignore"}},
+			},
+		}},
+	)
+
+	getter := &CRDExceptionsGetter{client: client}
+	exceptions, err := getter.GetExceptions("cluster-a")
+	require.NoError(t, err, "a single malformed CRD must not fail the whole getter")
+	require.Len(t, exceptions, 1, "the valid CRD must still be applied when another one fails to convert")
+	assert.Equal(t, "C-0001", exceptions[0].PosturePolicies[0].ControlID)
+}
+
+func TestBuildResourceDesignators_ObjectSelectorWithNamespaceSelector(t *testing.T) {
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	k8sClient := crfake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "staging", Labels: map[string]string{"env": "staging"}}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "staging-2", Labels: map[string]string{"env": "staging"}}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod", Labels: map[string]string{"env": "prod"}}},
+	).Build()
+
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "kubescape.io/v1beta1",
+		"kind":       "ClusterSecurityException",
+		"metadata":   map[string]any{"name": "cse-all"},
+		"spec": map[string]any{
+			"match": map[string]any{
+				"namespaceSelector": map[string]any{"matchLabels": map[string]any{"env": "staging"}},
+				"objectSelector":    map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+				"resources":         []any{map[string]any{"kind": "Deployment", "name": "web"}},
+			},
+			"posture": []any{map[string]any{"controlID": "C-0001", "action": "ignore"}},
+		},
+	}}
+
+	// objectSelector.matchLabels must merge into the namespace x resource cross product,
+	// AND-combined with both the resolved namespaces and the resource scope.
+	got, err := buildResourceDesignators(obj, "ClusterSecurityException", k8sClient)
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []map[string]string{
+		{identifiers.AttributeNamespace: "staging", identifiers.AttributeKind: "Deployment", identifiers.AttributeName: "web", "app": "nginx"},
+		{identifiers.AttributeNamespace: "staging-2", identifiers.AttributeKind: "Deployment", identifiers.AttributeName: "web", "app": "nginx"},
+	}, got)
+}
+
 func TestConvertCRDObjectToPosturePolicies_DefaultScope(t *testing.T) {
 	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "kubescape.io", Version: "v1", Kind: "ClusterSecurityException"})
+	obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "kubescape.io", Version: "v1beta1", Kind: "ClusterSecurityException"})
 	obj.SetName("cse-empty")
 	obj.SetUID("uid-cse")
 	obj.Object["spec"] = map[string]any{
@@ -140,26 +206,207 @@ func TestConvertCRDObjectToPosturePolicies_DefaultScope(t *testing.T) {
 	assert.Equal(t, "*", policies[0].Resources[0].Attributes[identifiers.AttributeKind])
 }
 
-func TestConvertCRDObjectToPosturePolicies_ObjectSelectorIsRejected(t *testing.T) {
-	obj := &unstructured.Unstructured{}
-	obj.SetGroupVersionKind(schema.GroupVersionKind{Group: "kubescape.io", Version: "v1", Kind: "SecurityException"})
-	obj.SetName("se-selector")
-	obj.SetNamespace("team-a")
-	obj.Object["spec"] = map[string]any{
-		"match": map[string]any{
-			"objectSelector": map[string]any{
-				"matchLabels": map[string]any{"app": "nginx"},
-			},
+func TestConvertCRDObjectToPosturePolicies_FrameworkName(t *testing.T) {
+	tests := []struct {
+		name          string
+		postureItem   map[string]any
+		wantFramework string
+	}{
+		{
+			name:          "frameworkName is carried into the posture policy",
+			postureItem:   map[string]any{"controlID": "C-0034", "frameworkName": "NSA", "action": "alert_only"},
+			wantFramework: "NSA",
 		},
-		"posture": []any{
-			map[string]any{"controlID": "C-0100", "action": "ignore"},
+		{
+			name:          "omitted frameworkName scopes the exception framework-wide",
+			postureItem:   map[string]any{"controlID": "C-0034", "action": "alert_only"},
+			wantFramework: "",
 		},
 	}
 
-	policies, err := convertCRDObjectToPosturePolicies(obj, "SecurityException", nil)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "spec.match.objectSelector is not supported")
-	assert.Nil(t, policies)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "kubescape.io/v1beta1",
+				"kind":       "SecurityException",
+				"metadata":   map[string]any{"name": "se-fw", "namespace": "team-a"},
+				"spec":       map[string]any{"posture": []any{tc.postureItem}},
+			}}
+
+			policies, err := convertCRDObjectToPosturePolicies(obj, "SecurityException", nil)
+			require.NoError(t, err)
+			require.Len(t, policies, 1)
+			assert.Equal(t, tc.wantFramework, policies[0].PosturePolicies[0].FrameworkName)
+		})
+	}
+}
+
+func TestBuildResourceDesignators_NamespacedScopeIsNotWidened(t *testing.T) {
+	tests := []struct {
+		name      string
+		resources []map[string]any
+		selector  map[string]any
+		want      []map[string]string
+	}{
+		{
+			name:      "resources narrow the scope without a bare-namespace designator",
+			resources: []map[string]any{{"kind": "Deployment", "name": "web"}},
+			want: []map[string]string{
+				{
+					identifiers.AttributeNamespace: "team-a",
+					identifiers.AttributeKind:      "Deployment",
+					identifiers.AttributeName:      "web",
+				},
+			},
+		},
+		{
+			name: "no narrowing falls back to the whole namespace",
+			want: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+		},
+		{
+			name:      "objectSelector AND resources is a strict intersection",
+			resources: []map[string]any{{"kind": "Deployment", "name": "web"}},
+			selector:  map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			want: []map[string]string{
+				{
+					identifiers.AttributeNamespace: "team-a",
+					identifiers.AttributeKind:      "Deployment",
+					identifiers.AttributeName:      "web",
+					"app":                          "nginx",
+				},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			match := map[string]any{}
+			if tc.selector != nil {
+				match["objectSelector"] = tc.selector
+			}
+			if len(tc.resources) > 0 {
+				resources := make([]any, 0, len(tc.resources))
+				for _, res := range tc.resources {
+					resources = append(resources, res)
+				}
+				match["resources"] = resources
+			}
+			obj := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "kubescape.io/v1beta1",
+				"kind":       "SecurityException",
+				"metadata":   map[string]any{"name": "se-scoped", "namespace": "team-a"},
+				"spec": map[string]any{
+					"match":   match,
+					"posture": []any{map[string]any{"controlID": "C-0034", "action": "ignore"}},
+				},
+			}}
+
+			got, err := buildResourceDesignators(obj, "SecurityException", nil)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tc.want, got)
+		})
+	}
+}
+
+func TestBuildResourceDesignators_ObjectSelector(t *testing.T) {
+	tests := []struct {
+		name      string
+		kind      string
+		namespace string
+		selector  map[string]any
+		resources []map[string]any
+		want      []map[string]string
+	}{
+		{
+			name:      "matchLabels on namespaced SecurityException ANDs labels into the namespace scope",
+			kind:      "SecurityException",
+			namespace: "team-a",
+			selector:  map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			want: []map[string]string{
+				{identifiers.AttributeNamespace: "team-a", "app": "nginx"},
+			},
+		},
+		{
+			name:      "matchLabels AND resources merge into the resource designator",
+			kind:      "ClusterSecurityException",
+			selector:  map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			resources: []map[string]any{{"kind": "Deployment", "name": "web"}},
+			want: []map[string]string{
+				{
+					identifiers.AttributeKind: "Deployment",
+					identifiers.AttributeName: "web",
+					"app":                     "nginx",
+				},
+			},
+		},
+		{
+			name:      "label values are regex-escaped",
+			kind:      "SecurityException",
+			namespace: "team-a",
+			selector:  map[string]any{"matchLabels": map[string]any{"version": "1.25"}},
+			want: []map[string]string{
+				{identifiers.AttributeNamespace: "team-a", "version": `1\.25`},
+			},
+		},
+		{
+			name:      "matchExpressions are best-effort and do not fail or constrain the exception",
+			kind:      "SecurityException",
+			namespace: "team-a",
+			selector: map[string]any{
+				"matchExpressions": []any{
+					map[string]any{"key": "env", "operator": "In", "values": []any{"prod"}},
+				},
+			},
+			want: []map[string]string{{identifiers.AttributeNamespace: "team-a"}},
+		},
+		{
+			name:      "matchLabels apply alongside ignored matchExpressions",
+			kind:      "SecurityException",
+			namespace: "team-a",
+			selector: map[string]any{
+				"matchLabels": map[string]any{"app": "nginx"},
+				"matchExpressions": []any{
+					map[string]any{"key": "env", "operator": "In", "values": []any{"prod"}},
+				},
+			},
+			want: []map[string]string{
+				{identifiers.AttributeNamespace: "team-a", "app": "nginx"},
+			},
+		},
+		{
+			name:     "matchLabels merge into the default cluster-wide scope",
+			kind:     "ClusterSecurityException",
+			selector: map[string]any{"matchLabels": map[string]any{"app": "nginx"}},
+			want: []map[string]string{
+				{identifiers.AttributeKind: "*", "app": "nginx"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			obj := &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "kubescape.io/v1beta1",
+				"kind":       tc.kind,
+				"metadata":   map[string]any{"name": "exception-a", "namespace": tc.namespace},
+				"spec": map[string]any{
+					"match":   map[string]any{"objectSelector": tc.selector},
+					"posture": []any{map[string]any{"controlID": "C-0001", "action": "ignore"}},
+				},
+			}}
+			if len(tc.resources) > 0 {
+				resources := make([]any, 0, len(tc.resources))
+				for _, res := range tc.resources {
+					resources = append(resources, res)
+				}
+				obj.Object["spec"].(map[string]any)["match"].(map[string]any)["resources"] = resources
+			}
+
+			got, err := buildResourceDesignators(obj, tc.kind, nil)
+			require.NoError(t, err)
+			assert.ElementsMatch(t, tc.want, got)
+		})
+	}
 }
 
 func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
@@ -290,7 +537,7 @@ func TestBuildResourceDesignators_NamespaceSelector(t *testing.T) {
 				match["resources"] = resources
 			}
 			obj := &unstructured.Unstructured{Object: map[string]any{
-				"apiVersion": "kubescape.io/v1",
+				"apiVersion": "kubescape.io/v1beta1",
 				"kind":       tc.kind,
 				"metadata": map[string]any{
 					"name":      "exception-a",

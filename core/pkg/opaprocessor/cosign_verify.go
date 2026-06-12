@@ -44,7 +44,9 @@ type VerifyCommand struct {
 
 // Exec runs the verification command
 func verify(ctx context.Context, img string, key string) (bool, error) {
-
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("context canceled before verification: %w", err)
+	}
 	co := &cosign.CheckOpts{}
 	var ociremoteOpts []ociremote.Option
 	attachment := ""
@@ -66,10 +68,16 @@ func verify(ctx context.Context, img string, key string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("resolving attachment type %s for image %s: %w", attachment, img, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("context canceled before Rekor public key retrieval: %w", err)
+	}
 
 	co.RekorPubKeys, err = cosign.GetRekorPubs(ctx)
 	if err != nil {
 		return false, fmt.Errorf("getting Rekor public keys: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, fmt.Errorf("context canceled before signature verification: %w", err)
 	}
 
 	_, _, err = cosign.VerifyImageSignatures(ctx, ref, co)

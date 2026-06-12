@@ -30,6 +30,11 @@ func TestExcludedNamespacesSelectors(t *testing.T) {
 	selectors2 := es.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "namespaces"})
 	assert.Equal(t, 1, len(selectors2))
 	assert.Equal(t, "metadata.name!=default,metadata.name!=ingress", selectors2[0])
+
+	esSpace := NewExcludeSelector("default, ingress")
+	selectorsSpace := esSpace.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
+	assert.Equal(t, 1, len(selectorsSpace))
+	assert.Equal(t, "metadata.namespace!=default,metadata.namespace!=ingress", selectorsSpace[0])
 }
 
 func TestIncludeNamespacesSelectors(t *testing.T) {
@@ -45,6 +50,12 @@ func TestIncludeNamespacesSelectors(t *testing.T) {
 	assert.Equal(t, 2, len(selectors2))
 	assert.Equal(t, "metadata.name==default", selectors2[0])
 	assert.Equal(t, "metadata.name==ingress", selectors2[1])
+
+	isSpace := NewIncludeSelector("default, ingress")
+	selectorsSpace := isSpace.GetNamespacesSelectors(&schema.GroupVersionResource{Resource: "pods"})
+	assert.Equal(t, 2, len(selectorsSpace))
+	assert.Equal(t, "metadata.namespace==default", selectorsSpace[0])
+	assert.Equal(t, "metadata.namespace==ingress", selectorsSpace[1])
 
 	// Cluster-scoped resources must collapse to a single unfiltered query
 	// regardless of how many namespaces were included; otherwise

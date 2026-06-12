@@ -18,6 +18,19 @@ const (
 	suffix    = "]"
 )
 
+// ValidateDEK validates that a DEK is suitable for AES-256-GCM.
+func ValidateDEK(dek []byte) error {
+	if len(dek) != dekSize {
+		return fmt.Errorf(
+			"invalid DEK length: got %d, want %d",
+			len(dek),
+			dekSize,
+		)
+	}
+
+	return nil
+}
+
 // GenerateDEK creates a random 256-bit Data Encryption Key.
 func GenerateDEK() ([]byte, error) {
 	dek := make([]byte, dekSize)
@@ -39,8 +52,8 @@ func formatCiphertext(nonce string, ciphertext string) string {
 //
 //	ENC[AES256_GCM,<base64 nonce>,<base64 ciphertext>]
 func EncryptString(plaintext string, dek []byte) (string, error) {
-	if len(dek) != dekSize {
-		return "", fmt.Errorf("invalid DEK length: got %d, want %d", len(dek), dekSize)
+	if err := ValidateDEK(dek); err != nil {
+		return "", err
 	}
 
 	block, err := aes.NewCipher(dek)
@@ -65,8 +78,8 @@ func EncryptString(plaintext string, dek []byte) (string, error) {
 
 // DecryptString decrypts a ciphertext produced by EncryptString.
 func DecryptString(ciphertext string, dek []byte) (string, error) {
-	if len(dek) != dekSize {
-		return "", fmt.Errorf("invalid DEK length: got %d, want %d", len(dek), dekSize)
+	if err := ValidateDEK(dek); err != nil {
+		return "", err
 	}
 
 	if !strings.HasPrefix(ciphertext, prefix) ||

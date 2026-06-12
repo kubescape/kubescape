@@ -416,6 +416,15 @@ func (k8sHandler *K8sResourceHandler) pullResources(ctx context.Context, queryab
 			apiGroup, apiVersion, resource := k8sinterface.StringToResourceGroup(qr.GroupVersionResourceTriplet)
 			gvr := schema.GroupVersionResource{Group: apiGroup, Version: apiVersion, Resource: resource}
 			result, selectorErrs := k8sHandler.pullSingleResource(ctx, &gvr, nil, qr.FieldSelectors, globalFieldSelectors)
+			if err := ctx.Err(); err != nil {
+				mu.Lock()
+				failedQueries[qr.GroupVersionResourceTriplet] = queryFailure{
+					gvr: qr.GroupVersionResourceTriplet,
+					err: err,
+				}
+				mu.Unlock()
+				return
+			}
 
 			if len(selectorErrs) > 0 {
 				mu.Lock()

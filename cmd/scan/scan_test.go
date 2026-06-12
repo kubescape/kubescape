@@ -379,6 +379,16 @@ func TestGetScanCommand(t *testing.T) {
 	assert.Equal(t, scanCmdExamples, cmd.Example)
 }
 
+func TestGetScanCommand_RunE_FormatFlagInvalid(t *testing.T) {
+	mockKubescape := &mocks.MockIKubescape{}
+	cmd := GetScanCommand(mockKubescape)
+
+	require.NoError(t, cmd.PersistentFlags().Set("format", "xml"))
+
+	err := cmd.RunE(cmd, []string{"."})
+	assert.EqualError(t, err, `invalid format "xml", supported formats: pretty-printer, json, junit, prometheus, pdf, html, sarif`)
+}
+
 func TestGetScanCommand_ScanTimeoutFlagRegistered(t *testing.T) {
 	mockKubescape := &mocks.MockIKubescape{}
 	cmd := GetScanCommand(mockKubescape)
