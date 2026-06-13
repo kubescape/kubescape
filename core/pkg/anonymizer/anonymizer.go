@@ -61,6 +61,13 @@ func ApplyEncrypted(
 		return err
 	}
 
+	if err := applyWithTransformer(
+		resultsHandler,
+		NewEncryptionTransformer(dek),
+	); err != nil {
+		return err
+	}
+
 	encryptionMetadata := &reporthandlingv2.EncryptionMetadata{
 		Version:      "v1",
 		DEKAlgorithm: "AES256_GCM",
@@ -84,8 +91,5 @@ func ApplyEncrypted(
 			encryptionMetadata
 	}
 
-	return applyWithTransformer(
-		resultsHandler,
-		NewEncryptionTransformer(dek),
-	)
+	return nil
 }
