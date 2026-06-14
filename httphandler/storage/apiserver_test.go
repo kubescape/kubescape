@@ -567,6 +567,23 @@ func TestStorePostureReportResults_SkipsOrphanedRoleBinding(t *testing.T) {
 	assert.Equal(t, "pod-test-pod", summaries.Items[0].Name)
 }
 
+func TestStorePostureReportResults_NonRecoverableError(t *testing.T) {
+	store := NewFakeAPIServerStorage("kubescape")
+	ctx := context.Background()
+
+	// Result whose ResourceID has no matching entry in Resources — this is a non-recoverable
+	// build error (findResourceInReport fails) and must not be silently skipped.
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{},
+		Results: []resourcesresults.Result{
+			{ResourceID: "missing-resource-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+	assert.Error(t, err)
+}
+
 func TestMergeMaps(t *testing.T) {
 	tests := []struct {
 		name     string
