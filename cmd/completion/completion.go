@@ -29,11 +29,6 @@ func GetCompletionCmd() *cobra.Command {
 		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 		Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),
 		Run: func(cmd *cobra.Command, args []string) {
-			// Check if args array is not empty
-			if len(args) == 0 {
-				fmt.Println("No arguments provided.")
-				return
-			}
 
 			switch strings.ToLower(args[0]) {
 			case "bash":
@@ -44,8 +39,6 @@ func GetCompletionCmd() *cobra.Command {
 				cmd.Root().GenFishCompletion(os.Stdout, true)
 			case "powershell":
 				cmd.Root().GenPowerShellCompletionWithDesc(os.Stdout)
-			default:
-				fmt.Printf("Invalid argument %s", args[0])
 			}
 		},
 	}
