@@ -67,7 +67,8 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 	for i := range pr.Results {
 		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
-			return err
+			logger.L().Ctx(ctx).Warning("skipping result with incomplete related objects", helpers.Error(err), helpers.String("resourceID", pr.Results[i].ResourceID))
+			continue
 		}
 
 		// Only store full WorkloadConfigurationScan when continuousPostureScan is enabled

@@ -11,12 +11,15 @@ import (
 	"github.com/kubescape/k8s-interface/names"
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/opa-utils/objectsenvelopes"
+	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+	v2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/storage/pkg/apis/softwarecomposition/v1beta1"
 	"github.com/kubescape/storage/pkg/generated/clientset/versioned/fake"
 	"github.com/stretchr/testify/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func NewFakeAPIServerStorage(namespace string) *APIServerStore {
@@ -511,6 +514,57 @@ func Test_RoleBindingResourceTripletToSlug(t *testing.T) {
 			assert.ElementsMatch(t, tt.expectedSlugs, slugs)
 		})
 	}
+}
+
+func TestStorePostureReportResults_SkipsOrphanedRoleBinding(t *testing.T) {
+	store := NewFakeAPIServerStorage("kubescape")
+	ctx := context.Background()
+
+	// RegoResponseVector with only 1 related object (RoleBinding, no Role) — simulates an
+	// orphaned binding whose referenced Role/ClusterRole has been deleted.
+	orphanObj := map[string]interface{}{
+		"kind":      "ServiceAccount",
+		"name":      "my-sa",
+		"namespace": "default",
+		"relatedObjects": []interface{}{
+			map[string]interface{}{
+				"kind":       "RoleBinding",
+				"name":       "orphan-binding",
+				"namespace":  "default",
+				"apiVersion": "rbac.authorization.k8s.io/v1",
+			},
+		},
+	}
+
+	// Normal Pod resource — should be persisted regardless of the orphaned binding above.
+	podObj := map[string]interface{}{
+		"apiVersion": "v1",
+		"kind":       "Pod",
+		"metadata": map[string]interface{}{
+			"name":      "test-pod",
+			"namespace": "default",
+		},
+	}
+
+	pr := &v2.PostureReport{
+		Resources: []reporthandling.Resource{
+			{ResourceID: "orphan-resource-id", Object: orphanObj},
+			{ResourceID: "pod-resource-id", Object: podObj},
+		},
+		Results: []resourcesresults.Result{
+			{ResourceID: "orphan-resource-id"},
+			{ResourceID: "pod-resource-id"},
+		},
+	}
+
+	err := store.StorePostureReportResults(ctx, pr)
+	assert.NoError(t, err)
+
+	// The Pod summary must be stored; the orphaned binding must be skipped, not abort the run.
+	summaries, listErr := store.StorageClient.WorkloadConfigurationScanSummaries("default").List(ctx, metav1.ListOptions{})
+	assert.NoError(t, listErr)
+	assert.Len(t, summaries.Items, 1)
+	assert.Equal(t, "pod-test-pod", summaries.Items[0].Name)
 }
 
 func TestMergeMaps(t *testing.T) {
