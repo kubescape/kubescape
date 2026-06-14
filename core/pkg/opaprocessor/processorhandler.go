@@ -120,6 +120,10 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 
 	var processErrs []error
 	for _, toPin := range policies.Controls {
+		if err := ctx.Err(); err != nil {
+			processErrs = append(processErrs, err)
+			break
+		}
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
 		}
@@ -190,6 +194,10 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 
 	var ruleErrs []error
 	for i := range control.Rules {
+		if err := ctx.Err(); err != nil {
+			ruleErrs = append(ruleErrs, err)
+			break
+		}
 		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
 			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
