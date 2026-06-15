@@ -7,7 +7,7 @@ import (
 // WrapDEK encrypts a DEK using the provided master key
 // and returns a base64-encoded encrypted representation
 // suitable for storing in report metadata.
-func WrapDEK(dek []byte, masterKey []byte,) (string, error) {
+func WrapDEK(dek []byte, masterKey []byte) (string, error) {
 
 	if err := ValidateDEK(dek); err != nil {
 		return "", err
@@ -27,9 +27,10 @@ func WrapDEK(dek []byte, masterKey []byte,) (string, error) {
 
 	return encryptedDEK, nil
 }
+
 // UnwrapDEK decrypts a wrapped DEK using the provided
 // master key and returns the original DEK bytes.
-func UnwrapDEK(wrappedDEK string, masterKey []byte,) ([]byte, error) {
+func UnwrapDEK(wrappedDEK string, masterKey []byte) ([]byte, error) {
 
 	if err := ValidateMasterKey(masterKey); err != nil {
 		return nil, err
