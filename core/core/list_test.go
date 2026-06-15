@@ -29,7 +29,6 @@ func TestNonEmptyListOfPolicies(t *testing.T) {
 	got, _ := io.ReadAll(r)
 	os.Stdout = rescueStdout
 
-	// got := buf.String()
 	want := `[
   "policy1",
   "policy2",
@@ -138,7 +137,7 @@ func TestShortFormatControlRows_ReturnsListOfRowsWithFormattedString(t *testing.
 	assert.Equal(t, want, got)
 }
 
-// The function formats the control rows correctly, replacing newlines in the frameworks column with line breaks.
+// The function formats the control rows correctly, replacing newlines in the frameworks column with spaces.
 func TestShortFormatControlRows_FormatsControlRowsCorrectly(t *testing.T) {
 	controlRows := []table.Row{
 		{"ID1", "Control 1", "Docs 1", "Framework\n1"},
@@ -185,110 +184,197 @@ func TestShortFormatControlRows_HandlesControlRowWithEmptyControlName(t *testing
 	assert.Equal(t, want, got)
 }
 
-// Generates rows for each policy with ID, control, documentation, and framework
+func TestParseControlEntry(t *testing.T) {
+	tests := []struct {
+		name string
+		pipe string
+		want metav1.ControlListEntry
+	}{
+		{
+			name: "full entry with multiple frameworks",
+			pipe: "C-0001|Forbidden Container Registries|NSA, AllControls, MITRE",
+			want: metav1.ControlListEntry{
+				ID:         "C-0001",
+				Name:       "Forbidden Container Registries",
+				Frameworks: []string{"NSA", "AllControls", "MITRE"},
+			},
+		},
+		{
+			name: "entry with single framework",
+			pipe: "C-0001|Name|NSA",
+			want: metav1.ControlListEntry{
+				ID:         "C-0001",
+				Name:       "Name",
+				Frameworks: []string{"NSA"},
+			},
+		},
+		{
+			name: "entry with empty frameworks field",
+			pipe: "C-0001|Name|",
+			want: metav1.ControlListEntry{
+				ID:         "C-0001",
+				Name:       "Name",
+				Frameworks: []string{},
+			},
+		},
+		{
+			name: "entry without frameworks field",
+			pipe: "C-0001|Name",
+			want: metav1.ControlListEntry{
+				ID:         "C-0001",
+				Name:       "Name",
+				Frameworks: []string{},
+			},
+		},
+		{
+			name: "entry with only ID",
+			pipe: "C-0001",
+			want: metav1.ControlListEntry{
+				ID:         "C-0001",
+				Frameworks: []string{},
+			},
+		},
+		{
+			name: "empty string",
+			pipe: "",
+			want: metav1.ControlListEntry{
+				Frameworks: []string{},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseControlEntry(tt.pipe)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+// Generates rows for each entry with ID, name, documentation link, and frameworks.
 func TestGenerateControlRowsWithAllFields(t *testing.T) {
-	policies := []string{
-		"1|Control 1|Framework 1",
-		"2|Control 2|Framework 2",
-		"3|Control 3|Framework 3",
+	entries := []metav1.ControlListEntry{
+		{ID: "1", Name: "Control 1", Frameworks: []string{"NSA", "MITRE"}},
+		{ID: "2", Name: "Control 2", Frameworks: []string{"AllControls"}},
+		{ID: "3", Name: "Control 3", Frameworks: []string{}},
 	}
 
 	want := []table.Row{
-		{"1", "Control 1", "https://hub.armosec.io/docs/1", "Framework\n1"},
-		{"2", "Control 2", "https://hub.armosec.io/docs/2", "Framework\n2"},
-		{"3", "Control 3", "https://hub.armosec.io/docs/3", "Framework\n3"},
+		{"1", "Control 1", "https://hub.armosec.io/docs/1", "NSA\nMITRE"},
+		{"2", "Control 2", "https://hub.armosec.io/docs/2", "AllControls"},
+		{"3", "Control 3", "https://hub.armosec.io/docs/3", ""},
 	}
 
-	got := generateControlRows(policies)
+	got := generateControlRows(entries)
 
 	assert.Equal(t, want, got)
 }
 
-// Handles policies with no '|' characters in the string
-func TestGenerateControlRowsHandlesPoliciesWithEmptyStringOrNoPipesOrOnePipeMissing(t *testing.T) {
-	policies := []string{
-		"",
-		"1",
-		"2|Control 2|Framework 2",
-		"3|Control 3|Framework 3|Extra 3",
-		"4||Framework 4",
-		"|",
-		"5|Control 5||Extra 5",
+// Handles entries with missing or empty fields.
+func TestGenerateControlRowsHandlesMissingFields(t *testing.T) {
+	entries := []metav1.ControlListEntry{
+		{ID: "", Name: "", Frameworks: []string{}},
+		{ID: "1", Name: "", Frameworks: []string{}},
+		{ID: "2", Name: "Control 2", Frameworks: []string{"NSA", "MITRE"}},
 	}
 
-	expectedRows := []table.Row{
+	want := []table.Row{
 		{"", "", "https://hub.armosec.io/docs/", ""},
 		{"1", "", "https://hub.armosec.io/docs/1", ""},
-		{"2", "Control 2", "https://hub.armosec.io/docs/2", "Framework\n2"},
-		{"3", "Control 3", "https://hub.armosec.io/docs/3", "Framework\n3"},
-		{"4", "", "https://hub.armosec.io/docs/4", "Framework\n4"},
-		{"", "", "https://hub.armosec.io/docs/", ""},
-		{"5", "Control 5", "https://hub.armosec.io/docs/5", ""},
+		{"2", "Control 2", "https://hub.armosec.io/docs/2", "NSA\nMITRE"},
 	}
 
-	rows := generateControlRows(policies)
+	got := generateControlRows(entries)
 
-	assert.Equal(t, expectedRows, rows)
+	assert.Equal(t, want, got)
 }
 
-// The function generates a table with the correct headers and rows based on the input policies.
-func TestGenerateTableWithCorrectHeadersAndRows(t *testing.T) {
-	// Arrange
-	ctx := context.Background()
-	policies := []string{
-		"1|Control 1|Framework 1",
-		"2|Control 2|Framework 2",
-		"3|Control 3|Framework 3",
+// jsonControlsFormat emits a JSON array of objects, not pipe-delimited strings.
+func TestJsonControlsFormat(t *testing.T) {
+	entries := []metav1.ControlListEntry{
+		{ID: "C-0001", Name: "Forbidden Container Registries", Frameworks: []string{}},
+		{ID: "C-0002", Name: "Prevent containers from allowing command execution", Frameworks: []string{"NSA", "AllControls", "MITRE"}},
 	}
 
-	// Redirect stdout to a buffer
 	rescueStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	prettyPrintControls(ctx, policies)
+	jsonControlsFormat(entries)
 
 	w.Close()
 	got, _ := io.ReadAll(r)
 	os.Stdout = rescueStdout
 
-	// got := buf.String()
+	// Verify it is valid JSON that unmarshals into typed objects (not strings).
+	var result []metav1.ControlListEntry
+	assert.NoError(t, json.Unmarshal(got, &result))
+	assert.Len(t, result, 2)
+
+	assert.Equal(t, "C-0001", result[0].ID)
+	assert.Equal(t, "Forbidden Container Registries", result[0].Name)
+	assert.Equal(t, []string{}, result[0].Frameworks)
+
+	assert.Equal(t, "C-0002", result[1].ID)
+	assert.Equal(t, []string{"NSA", "AllControls", "MITRE"}, result[1].Frameworks)
+
+	// Verify the raw output contains object keys, not pipe-delimited strings.
+	assert.Contains(t, string(got), `"id"`)
+	assert.Contains(t, string(got), `"name"`)
+	assert.Contains(t, string(got), `"frameworks"`)
+	assert.NotContains(t, string(got), "|")
+}
+
+// The function generates a table with the correct headers and rows based on the input entries.
+func TestGenerateTableWithCorrectHeadersAndRows(t *testing.T) {
+	ctx := context.Background()
+	entries := []metav1.ControlListEntry{
+		{ID: "1", Name: "Control 1", Frameworks: []string{"NSA"}},
+		{ID: "2", Name: "Control 2", Frameworks: []string{"MITRE"}},
+		{ID: "3", Name: "Control 3", Frameworks: []string{"NSA", "MITRE"}},
+	}
+
+	rescueStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	prettyPrintControls(ctx, entries)
+
+	w.Close()
+	got, _ := io.ReadAll(r)
+	os.Stdout = rescueStdout
+
 	want := `╭────────────┬──────────────┬───────────────────────────────┬────────────╮
 │ Control ID │ Control name │ Docs                          │ Frameworks │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
-│          1 │ Control 1    │ https://hub.armosec.io/docs/1 │ Framework  │
-│            │              │                               │ 1          │
+│          1 │ Control 1    │ https://hub.armosec.io/docs/1 │ NSA        │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
-│          2 │ Control 2    │ https://hub.armosec.io/docs/2 │ Framework  │
-│            │              │                               │ 2          │
+│          2 │ Control 2    │ https://hub.armosec.io/docs/2 │ MITRE      │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
-│          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ Framework  │
-│            │              │                               │ 3          │
+│          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ NSA        │
+│            │              │                               │ MITRE      │
 ╰────────────┴──────────────┴───────────────────────────────┴────────────╯
 `
 
 	assert.Equal(t, want, string(got))
 }
 
-func TestGenerateTableWithMalformedPoliciesAndPrettyPrintHeadersAndRows(t *testing.T) {
-	// Arrange
+func TestGenerateTableWithPartialEntriesAndPrettyPrintHeadersAndRows(t *testing.T) {
 	ctx := context.Background()
-	policies := []string{
-		"",
-		"1",
-		"2|Control 2|Framework 2",
-		"3|Control 3|Framework 3|Extra 3",
-		"4||Framework 4",
-		"|",
-		"5|Control 5||Extra 5",
+	entries := []metav1.ControlListEntry{
+		{ID: "", Name: "", Frameworks: []string{}},
+		{ID: "1", Name: "", Frameworks: []string{}},
+		{ID: "2", Name: "Control 2", Frameworks: []string{"NSA"}},
+		{ID: "3", Name: "Control 3", Frameworks: []string{"MITRE"}},
+		{ID: "4", Name: "", Frameworks: []string{"NSA"}},
+		{ID: "", Name: "", Frameworks: []string{}},
+		{ID: "5", Name: "Control 5", Frameworks: []string{}},
 	}
 
-	// Redirect stdout to a buffer
 	rescueStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	prettyPrintControls(ctx, policies)
+	prettyPrintControls(ctx, entries)
 
 	w.Close()
 	got, _ := io.ReadAll(r)
@@ -302,14 +388,11 @@ func TestGenerateTableWithMalformedPoliciesAndPrettyPrintHeadersAndRows(t *testi
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │          1 │              │ https://hub.armosec.io/docs/1 │            │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
-│          2 │ Control 2    │ https://hub.armosec.io/docs/2 │ Framework  │
-│            │              │                               │ 2          │
+│          2 │ Control 2    │ https://hub.armosec.io/docs/2 │ NSA        │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
-│          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ Framework  │
-│            │              │                               │ 3          │
+│          3 │ Control 3    │ https://hub.armosec.io/docs/3 │ MITRE      │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
-│          4 │              │ https://hub.armosec.io/docs/4 │ Framework  │
-│            │              │                               │ 4          │
+│          4 │              │ https://hub.armosec.io/docs/4 │ NSA        │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
 │            │              │ https://hub.armosec.io/docs/  │            │
 ├────────────┼──────────────┼───────────────────────────────┼────────────┤
