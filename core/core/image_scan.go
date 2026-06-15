@@ -67,11 +67,20 @@ func getAttributesFromImage(imgName string) (Attributes, error) {
 		return Attributes{}, err
 	}
 
+	// canonicalImageName is registry/[path/...]/name[:tag]. The registry is always
+	// the first component, but the organization path in between is optional (a
+	// registry image can have no organization) and may span multiple segments, so
+	// don't assume a fixed three-token split. See #2391.
 	tokens := strings.Split(canonicalImageName, "/")
 	registry := tokens[0]
-	organization := tokens[1]
 
-	imageNameAndTag := strings.Split(tokens[2], ":")
+	organization := ""
+	nameAndTag := tokens[len(tokens)-1]
+	if len(tokens) > 2 {
+		organization = strings.Join(tokens[1:len(tokens)-1], "/")
+	}
+
+	imageNameAndTag := strings.Split(nameAndTag, ":")
 	imageName := imageNameAndTag[0]
 
 	// Intialize the image tag with default value
