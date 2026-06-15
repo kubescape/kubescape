@@ -334,7 +334,7 @@ func isPrintSeparatorType(scanType cautils.ScanTypes) bool {
 // failures caused controls to be skipped or partial data was collected.
 // Nothing is printed on a clean scan.
 func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
-	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 {
+	if len(coverage.FailedGVRPulls) == 0 && len(coverage.NotEvaluatedControls) == 0 && len(coverage.PartialGVRPulls) == 0 && len(coverage.PolicyDegradations) == 0 {
 		return
 	}
 
@@ -368,7 +368,20 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 		fmt.Fprintf(pp.writer, "\nControls depending on these resource types were evaluated against incomplete data.\n")
 	}
 
-	fmt.Fprintf(pp.writer, "\nTo fix this, ensure the scanning identity has list/get permissions on the missing resource types.\n")
+	if len(coverage.PolicyDegradations) > 0 {
+		fmt.Fprintf(pp.writer, "\nThe following policy inputs could not be loaded and were served from bundled defaults:\n")
+		for _, d := range coverage.PolicyDegradations {
+			fmt.Fprintf(pp.writer, "  • %s: %s\n", d.Component, d.Reason)
+		}
+		fmt.Fprintf(pp.writer, "\nControls depending on these inputs were evaluated against default configuration, which may not reflect your environment.\n")
+	}
+
+	if len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 {
+		fmt.Fprintf(pp.writer, "\nTo fix this, ensure the scanning identity has list/get permissions on the missing resource types.\n")
+	}
+	if len(coverage.PolicyDegradations) > 0 {
+		fmt.Fprintf(pp.writer, "\nTo fix this, ensure network access to the policy input source, or use --fail-on-degraded-config to fail the scan instead of using bundled defaults.\n")
+	}
 }
 
 func (p *PrettyPrinter) CloseWriter() {
