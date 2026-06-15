@@ -7,6 +7,7 @@ import (
 	"github.com/armosec/armoapi-go/armotypes"
 )
 
+//go:generate curl -sSfL https://github.com/kubescape/regolibrary/releases/latest/download/default-config-inputs.json -o resources/default-config-inputs.json
 //go:embed resources/default-config-inputs.json
 var defaultConfigInputsData []byte
 

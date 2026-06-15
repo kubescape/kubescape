@@ -108,6 +108,7 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 			controlInputs = defaultInputs
 		} else {
 			logger.L().Ctx(ctx).Warning("failed to load bundled default control inputs", helpers.Error(defaultErr))
+			degradations = append(degradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: defaultErr.Error()})
 		}
 	} else {
 		logger.L().StopSuccess("Loaded account configurations")
