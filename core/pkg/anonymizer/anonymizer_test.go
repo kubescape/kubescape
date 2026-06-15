@@ -41,6 +41,9 @@ func TestApplyEncrypted(t *testing.T) {
 	dek, err := reportcrypto.GenerateDEK()
 	require.NoError(t, err)
 
+	masterKey, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
 	handler := &resultshandling.ResultsHandler{
 		ScanData: &cautils.OPASessionObj{
 			Metadata: &reporthandlingv2.Metadata{
@@ -57,25 +60,43 @@ func TestApplyEncrypted(t *testing.T) {
 		},
 	}
 
-	err = ApplyEncrypted(
-		handler,
-		dek,
+	err = ApplyEncrypted(handler, dek, masterKey)
+	require.NoError(t, err)
+
+	require.NotNil(t, handler.ScanData.Metadata.EncryptionMetadata)
+
+	metadata := handler.ScanData.Metadata.EncryptionMetadata
+
+	assert.Equal(t, "v1", metadata.Version)
+	assert.Equal(t, "AES256_GCM", metadata.DEKAlgorithm)
+	assert.Equal(t, "AES256_GCM", metadata.KEKAlgorithm)
+	assert.NotEmpty(t, metadata.EncryptedDEK)
+
+	unwrappedDEK, err := reportcrypto.UnwrapDEK(
+		metadata.EncryptedDEK,
+		masterKey,
 	)
 	require.NoError(t, err)
 
+	assert.Equal(t, dek, unwrappedDEK)
+
+	if handler.ScanData.Report != nil {
+		require.NotNil(
+			t,
+			handler.ScanData.Report.Metadata.EncryptionMetadata,
+		)
+
+		assert.Equal(
+			t,
+			metadata,
+			handler.ScanData.Report.Metadata.EncryptionMetadata,
+		)
+	}
+
 	repo := handler.ScanData.Metadata.ContextMetadata.RepoContextMetadata
 
-	assert.Contains(
-		t,
-		repo.Repo,
-		"ENC[AES256_GCM,",
-	)
-
-	assert.Contains(
-		t,
-		repo.Owner,
-		"ENC[AES256_GCM,",
-	)
+	assert.Contains(t, repo.Repo, "ENC[AES256_GCM,")
+	assert.Contains(t, repo.Owner, "ENC[AES256_GCM,")
 
 	decryptedRepo, err := reportcrypto.DecryptString(
 		repo.Repo,
@@ -83,11 +104,7 @@ func TestApplyEncrypted(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	assert.Equal(
-		t,
-		"demo-repository",
-		decryptedRepo,
-	)
+	assert.Equal(t, "demo-repository", decryptedRepo)
 
 	assert.Contains(
 		t,
@@ -101,11 +118,7 @@ func TestApplyEncrypted(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	assert.Equal(
-		t,
-		"demo commit",
-		decryptedMessage,
-	)
+	assert.Equal(t, "demo commit", decryptedMessage)
 }
 
 func TestApplyEncrypted_InvalidDEK(t *testing.T) {
@@ -113,11 +126,33 @@ func TestApplyEncrypted_InvalidDEK(t *testing.T) {
 		ScanData: &cautils.OPASessionObj{},
 	}
 
-	err := ApplyEncrypted(
+	masterKey, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	err = ApplyEncrypted(
 		handler,
 		[]byte("bad"),
+		masterKey,
 	)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid DEK length")
+}
+
+func TestApplyEncrypted_InvalidMasterKey(t *testing.T) {
+	dek, err := reportcrypto.GenerateDEK()
+	require.NoError(t, err)
+
+	handler := &resultshandling.ResultsHandler{
+		ScanData: &cautils.OPASessionObj{},
+	}
+
+	err = ApplyEncrypted(
+		handler,
+		dek,
+		[]byte("bad"),
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid master key length")
 }
