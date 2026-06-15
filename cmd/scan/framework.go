@@ -143,6 +143,7 @@ func getFrameworkCmd(ks meta.IKubescape, scanInfo *cautils.ScanInfo) *cobra.Comm
 
 			enforceSeverityThresholds(results.GetData().Report.SummaryDetails.GetResourcesSeverityCounters(), scanInfo, terminateOnExceedingSeverity)
 			enforceCoverageThreshold(results.GetData().ScanCoverage, len(results.GetData().Report.SummaryDetails.Controls), scanInfo)
+			enforcePolicyDegradation(results.GetData().ScanCoverage, scanInfo)
 			return nil
 		},
 	}
@@ -208,6 +209,19 @@ func enforceCoverageThreshold(coverage cautils.ScanCoverage, totalControls int, 
 			helpers.String("fail-coverage-below", fmt.Sprintf("%.2f%%", scanInfo.FailCoverageThreshold)),
 		)
 	}
+}
+
+// enforcePolicyDegradation fails the scan if control configurations or
+// exceptions could not be loaded from their configured source and the scan
+// proceeded with bundled defaults instead.
+func enforcePolicyDegradation(coverage cautils.ScanCoverage, scanInfo *cautils.ScanInfo) {
+	if !scanInfo.FailOnDegradedConfig || len(coverage.PolicyDegradations) == 0 {
+		return
+	}
+	for _, d := range coverage.PolicyDegradations {
+		logger.L().Warning("policy input degraded, bundled defaults were used", helpers.String("component", d.Component), helpers.String("reason", d.Reason))
+	}
+	logger.L().Fatal("scan policy inputs were degraded", helpers.String("fail-on-degraded-config", "true"))
 }
 
 // enforceSeverityThresholds ensures that the scan results are below the defined severity threshold

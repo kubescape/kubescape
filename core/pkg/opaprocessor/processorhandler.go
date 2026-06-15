@@ -93,7 +93,7 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// rebuild ScanCoverage so controls that timed out during evaluation
 	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
 	// NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations)
 
 	// edit results
 	opap.updateResults(ctx)

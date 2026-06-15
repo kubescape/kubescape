@@ -18,6 +18,20 @@ type ScanCoverage struct {
 	// partial data, but this field surfaces the gap so operators and CI/CD
 	// pipelines can detect incomplete scans without a false-green result.
 	PartialGVRPulls []PartialGVRPull `json:"partialGVRPulls,omitempty"`
+	// PolicyDegradations records policy inputs (control configurations,
+	// exceptions) that could not be loaded from their configured source and
+	// were served from a fallback so the scan could proceed.
+	PolicyDegradations []PolicyDegradation `json:"policyDegradations,omitempty"`
+}
+
+// PolicyDegradation records a policy input that could not be loaded from its
+// configured source (Kubescape Cloud, ControlInput CRD, regolibrary release,
+// or a local file) and was served from a fallback instead.
+type PolicyDegradation struct {
+	// Component identifies the degraded input, e.g. "controlInputs" or "exceptions".
+	Component string `json:"component"`
+	// Reason is the error returned by the configured source.
+	Reason string `json:"reason"`
 }
 
 // FailedGVRPull records a single GVR whose resources could not be collected.
@@ -63,9 +77,14 @@ type NotEvaluatedControl struct {
 //
 // partialPulls carries per-selector LIST failures for GVRs that were partially
 // collected; they are included as-is in ScanCoverage.PartialGVRPulls.
-func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull) ScanCoverage {
+//
+// policyDegradations carries policy inputs (control configurations,
+// exceptions) that were served from a fallback; they are included as-is in
+// ScanCoverage.PolicyDegradations.
+func BuildScanCoverage(infoMap map[string]apis.StatusInfo, resourceToControlsMap map[string][]string, timedOutControls map[string]string, partialPulls []PartialGVRPull, policyDegradations []PolicyDegradation) ScanCoverage {
 	coverage := ScanCoverage{
-		PartialGVRPulls: partialPulls,
+		PartialGVRPulls:    partialPulls,
+		PolicyDegradations: policyDegradations,
 	}
 
 	notEvaluated := make(map[string]NotEvaluatedControl, len(timedOutControls))

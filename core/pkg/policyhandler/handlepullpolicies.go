@@ -54,19 +54,23 @@ func (policyHandler *PolicyHandler) CollectPolicies(ctx context.Context, policyI
 	policyHandler.getters = &scanInfo.Getters
 
 	// get policies, exceptions and controls inputs
-	policies, exceptions, controlInputs, err := policyHandler.getPolicies(ctx, policyIdentifier)
+	policies, exceptions, controlInputs, degradations, err := policyHandler.getPolicies(ctx, policyIdentifier)
 	if err != nil {
 		return opaSessionObj, err
 	}
 
 	opaSessionObj.Policies = policies
 	opaSessionObj.Exceptions = exceptions
+	if controlInputs == nil {
+		controlInputs = map[string][]string{}
+	}
 	opaSessionObj.RegoInputData.PostureControlInputs = controlInputs
+	opaSessionObj.PolicyDegradations = degradations
 
 	return opaSessionObj, nil
 }
 
-func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, err error) {
+func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdentifier []cautils.PolicyIdentifier) (policies []reporthandling.Framework, exceptions []armotypes.PostureExceptionPolicy, controlInputs map[string][]string, degradations []cautils.PolicyDegradation, err error) {
 	ctx, span := otel.Tracer("").Start(ctx, "policyHandler.getPolicies")
 	defer span.End()
 
@@ -75,10 +79,10 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	// get policies
 	policies, err = policyHandler.getScanPolicies(ctx, policyIdentifier)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	if len(policies) == 0 {
-		return nil, nil, nil, fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(policyIdentifier), ", "))
+		return nil, nil, nil, nil, fmt.Errorf("failed to download policies: '%s'. Make sure the policy exist and you spelled it correctly. For more information, please feel free to contact ARMO team", strings.Join(policyIdentifierToSlice(policyIdentifier), ", "))
 	}
 
 	logger.L().StopSuccess("Loaded policies")
@@ -87,6 +91,8 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	// get exceptions
 	if exceptions, err = policyHandler.getExceptions(); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load exceptions", helpers.Error(err))
+		degradations = append(degradations, cautils.PolicyDegradation{Component: "exceptions", Reason: err.Error()})
+		exceptions = []armotypes.PostureExceptionPolicy{}
 	} else {
 		logger.L().StopSuccess("Loaded exceptions")
 	}
@@ -96,11 +102,18 @@ func (policyHandler *PolicyHandler) getPolicies(ctx context.Context, policyIdent
 	// get account configuration
 	if controlInputs, err = policyHandler.getControlInputs(); err != nil {
 		logger.L().Ctx(ctx).StopError("Failed to load account configurations", helpers.Error(err))
+		degradations = append(degradations, cautils.PolicyDegradation{Component: "controlInputs", Reason: err.Error()})
+
+		if defaultInputs, defaultErr := getter.DefaultControlInputs(); defaultErr == nil {
+			controlInputs = defaultInputs
+		} else {
+			logger.L().Ctx(ctx).Warning("failed to load bundled default control inputs", helpers.Error(defaultErr))
+		}
 	} else {
 		logger.L().StopSuccess("Loaded account configurations")
 	}
 
-	return policies, exceptions, controlInputs, nil
+	return policies, exceptions, controlInputs, degradations, nil
 }
 
 // getScanPolicies - get policies from cache or downloads them. The function returns an error if the policies could not be downloaded.

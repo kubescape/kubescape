@@ -35,7 +35,7 @@ func CollectResources(ctx context.Context, rsrcHandler IResourceHandler, opaSess
 	opaSessionObj.AllResources = allResources
 	opaSessionObj.ExternalResources = externalResources
 	opaSessionObj.ExcludedRules = excludedRulesMap
-	opaSessionObj.ScanCoverage = cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, nil, opaSessionObj.PartialGVRFailures)
+	opaSessionObj.ScanCoverage = cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, nil, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations)
 
 	if getErr != nil {
 		return getErr
