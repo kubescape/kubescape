@@ -47,41 +47,55 @@ func unzipAllResourcesTestDataAndSetVar(zipFilePath, destFilePath string) error 
 	if err != nil {
 		return err
 	}
+	defer archive.Close()
 
 	os.RemoveAll(destFilePath)
 
-	f := archive.File[0]
-	dstFile, err := os.OpenFile(destFilePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
-	if err != nil {
-		return err
+	if len(archive.File) == 0 {
+		return fmt.Errorf("archive contains no files")
 	}
+
+	f := archive.File[0]
 
 	fileInArchive, err := f.Open()
 	if err != nil {
 		return err
 	}
 
-	_, err = io.Copy(dstFile, fileInArchive) //nolint:gosec
+	dstFile, err := os.OpenFile(
+		destFilePath,
+		os.O_WRONLY|os.O_CREATE|os.O_TRUNC,
+		f.Mode(),
+	)
 	if err != nil {
-		dstFile.Close()
 		fileInArchive.Close()
-		archive.Close()
+		return err
+	}
+	defer dstFile.Close()
+	const maxUncompressedTestDataSize = 500 * 1024 * 1024 // 500 MB
+
+	limitedReader := io.LimitReader(fileInArchive, maxUncompressedTestDataSize+1)
+
+	written, err := io.Copy(dstFile, limitedReader)
+	if err != nil {
 		return err
 	}
 
-	dstFile.Close()
+	if written > maxUncompressedTestDataSize {
+		return fmt.Errorf("test archive exceeds maximum allowed size")
+	}
 	fileInArchive.Close()
-	archive.Close()
 
 	file, err := os.Open(destFilePath)
 	if err != nil {
-		panic(err)
+		return err
 	}
+	defer file.Close()
+
 	allResourcesMockData, err = io.ReadAll(file)
 	if err != nil {
-		panic(err)
+		return err
 	}
-	file.Close()
 
 	return nil
 }
