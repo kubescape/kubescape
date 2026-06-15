@@ -2,6 +2,7 @@ package getter
 
 import (
 	_ "embed"
+	encjson "encoding/json"
 
 	"github.com/armosec/armoapi-go/armotypes"
 )
@@ -16,7 +17,7 @@ var defaultConfigInputsData []byte
 // still evaluated against sane defaults instead of an empty configuration.
 func DefaultControlInputs() (map[string][]string, error) {
 	var customerConfig armotypes.CustomerConfig
-	if err := json.Unmarshal(defaultConfigInputsData, &customerConfig); err != nil {
+	if err := encjson.Unmarshal(defaultConfigInputsData, &customerConfig); err != nil {
 		return nil, err
 	}
 	return customerConfig.Settings.PostureControlInputs, nil

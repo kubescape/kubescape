@@ -376,7 +376,12 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 		fmt.Fprintf(pp.writer, "\nControls depending on these inputs were evaluated against default configuration, which may not reflect your environment.\n")
 	}
 
-	fmt.Fprintf(pp.writer, "\nTo fix this, ensure the scanning identity has list/get permissions on the missing resource types.\n")
+	if len(coverage.FailedGVRPulls) > 0 || len(coverage.PartialGVRPulls) > 0 {
+		fmt.Fprintf(pp.writer, "\nTo fix this, ensure the scanning identity has list/get permissions on the missing resource types.\n")
+	}
+	if len(coverage.PolicyDegradations) > 0 {
+		fmt.Fprintf(pp.writer, "\nTo fix this, ensure network access to the policy input source, or use --fail-on-degraded-config to fail the scan instead of using bundled defaults.\n")
+	}
 }
 
 func (p *PrettyPrinter) CloseWriter() {
