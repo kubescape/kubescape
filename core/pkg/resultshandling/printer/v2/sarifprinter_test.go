@@ -228,6 +228,31 @@ func TestAddFix_AddsNewFixToResult(t *testing.T) {
 	assert.Equal(t, expectedFix, result.Fixes[0])
 }
 
+// TestAddRule_SetsSecuritySeverity is the regression test for
+// kubescape/kubescape#2394: SARIF rules omitted properties["security-severity"],
+// so GitHub Code Scanning had no severity to display or filter on. The value must
+// mirror the control's score factor, formatted the same way grype emits it.
+func TestAddRule_SetsSecuritySeverity(t *testing.T) {
+	run := sarif.NewRunWithInformationURI(toolName, toolInfoURI)
+
+	control := &reportsummary.ControlSummary{
+		ControlID:   "C-0001",
+		Name:        "Test control",
+		Description: "a test control",
+		Remediation: "do the thing",
+		ScoreFactor: 8.5,
+	}
+
+	sp := NewSARIFPrinter()
+	sp.addRule(run, control)
+
+	require.Len(t, run.Tool.Driver.Rules, 1)
+	rule := run.Tool.Driver.Rules[0]
+	require.NotNil(t, rule.Properties, "rule properties must be set")
+	assert.Equal(t, "8.5", rule.Properties["security-severity"],
+		"security-severity must mirror the control score factor")
+}
+
 func TestPrintConfigurationScan_MissingControl(t *testing.T) {
 	resourceID := "apps/v1/Deployment/default/my-deployment"
 

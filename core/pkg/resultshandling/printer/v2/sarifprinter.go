@@ -90,7 +90,8 @@ func (sp *SARIFPrinter) SetWriter(ctx context.Context, outputFile string) {
 
 // addRule adds a rule description to the scan run based on the given control summary
 func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IControlSummary) {
-	controlSARIFSeverity := string(scoreFactorToSARIFSeverityLevel(control.GetScoreFactor()))
+	scoreFactor := control.GetScoreFactor()
+	controlSARIFSeverity := string(scoreFactorToSARIFSeverityLevel(scoreFactor))
 
 	configuration := sarif.NewReportingConfiguration().WithLevel(controlSARIFSeverity)
 
@@ -98,7 +99,13 @@ func (sp *SARIFPrinter) addRule(scanRun *sarif.Run, control reportsummary.IContr
 		WithDefaultConfiguration(configuration).
 		WithShortDescription(sarif.NewMultiformatMessageString(control.GetName())).
 		WithFullDescription(sarif.NewMultiformatMessageString(control.GetDescription())).
-		WithHelp(sarif.NewMultiformatMessageString(sp.generateRemediationMessage(control)))
+		WithHelp(sarif.NewMultiformatMessageString(sp.generateRemediationMessage(control))).
+		// security-severity lets GitHub Code Scanning render and filter findings by
+		// severity. It mirrors the CVSS-style score band already used to pick the
+		// SARIF level above, formatted as grype does it. See #2394.
+		WithProperties(sarif.Properties{
+			"security-severity": fmt.Sprintf("%.1f", scoreFactor),
+		})
 }
 
 // addResult adds a result of checking a rule to the scan run based on the given control summary
