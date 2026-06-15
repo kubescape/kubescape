@@ -115,19 +115,31 @@ func listControls(ctx context.Context, listPolicies *metav1.ListPolicies) ([]met
 	return entries, nil
 }
 
-// parseControlEntry converts a pipe-delimited "id|name|fw1, fw2" string from
-// IPolicyGetter.ListControls into a typed ControlListEntry.
+// parseControlEntry converts a pipe-delimited "id|name|fw1, fw2" string into a ControlListEntry.
 func parseControlEntry(pipe string) metav1.ControlListEntry {
-	parts := strings.SplitN(pipe, "|", 3)
 	entry := metav1.ControlListEntry{Frameworks: []string{}}
-	if len(parts) > 0 {
-		entry.ID = parts[0]
+	if pipe == "" {
+		return entry
 	}
-	if len(parts) > 1 {
-		entry.Name = parts[1]
+
+	first := strings.Index(pipe, "|")
+	if first == -1 {
+		entry.ID = pipe
+		return entry
 	}
-	if len(parts) > 2 && parts[2] != "" {
-		for _, fw := range strings.Split(parts[2], ", ") {
+	entry.ID = pipe[:first]
+
+	rest := pipe[first+1:]
+	last := strings.LastIndex(rest, "|")
+	if last == -1 {
+		entry.Name = rest
+		return entry
+	}
+
+	entry.Name = rest[:last]
+	frameworksRaw := rest[last+1:]
+	if frameworksRaw != "" {
+		for _, fw := range strings.Split(frameworksRaw, ",") {
 			if fw = strings.TrimSpace(fw); fw != "" {
 				entry.Frameworks = append(entry.Frameworks, fw)
 			}

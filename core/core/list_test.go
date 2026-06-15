@@ -241,6 +241,15 @@ func TestParseControlEntry(t *testing.T) {
 				Frameworks: []string{},
 			},
 		},
+		{
+			name: "control name containing pipe characters",
+			pipe: "C-0001|Name|with|pipe|NSA, MITRE",
+			want: metav1.ControlListEntry{
+				ID:         "C-0001",
+				Name:       "Name|with|pipe",
+				Frameworks: []string{"NSA", "MITRE"},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
