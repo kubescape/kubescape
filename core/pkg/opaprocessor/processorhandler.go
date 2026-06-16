@@ -495,9 +495,17 @@ func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reportha
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
 		return opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+	case reporthandling.CELLanguage:
+		return opap.runCELOnK8s(ctx, rule, k8sObjects, getRuleData)
 	default:
 		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
+}
+
+// runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects.
+// Stub: the CEL evaluator is added in follow-up PRs (kubescape/kubescape#2001).
+func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string) ([]reporthandling.RuleResponse, error) {
+	return nil, fmt.Errorf("rule: '%s', CEL evaluation not yet implemented", rule.Name)
 }
 
 // runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s

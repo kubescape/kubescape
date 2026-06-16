@@ -642,3 +642,30 @@ func TestMakeRegoDeps_InputIsolation(t *testing.T) {
 
 	assert.False(t, runtimeExists)
 }
+
+func TestRunOPAOnSingleRuleDispatch(t *testing.T) {
+	opap := &OPAProcessor{}
+	getRuleData := func(r *reporthandling.PolicyRule) string { return r.Rule }
+
+	t.Run("CEL language routes to runCELOnK8s stub", func(t *testing.T) {
+		rule := &reporthandling.PolicyRule{
+			PortalBase:   armotypes.PortalBase{Name: "cel-test-rule"},
+			RuleLanguage: reporthandling.CELLanguage,
+		}
+		_, err := opap.runOPAOnSingleRule(context.Background(), rule, nil, getRuleData, resources.RegoDependenciesData{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "CEL evaluation not yet implemented")
+		assert.Contains(t, err.Error(), "cel-test-rule")
+	})
+
+	t.Run("unknown language returns not-supported error", func(t *testing.T) {
+		rule := &reporthandling.PolicyRule{
+			PortalBase:   armotypes.PortalBase{Name: "mystery-rule"},
+			RuleLanguage: reporthandling.RuleLanguages("Mystery"),
+		}
+		_, err := opap.runOPAOnSingleRule(context.Background(), rule, nil, getRuleData, resources.RegoDependenciesData{})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "not supported")
+		assert.Contains(t, err.Error(), "mystery-rule")
+	})
+}
