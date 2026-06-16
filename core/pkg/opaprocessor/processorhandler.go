@@ -139,6 +139,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 			if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 				opap.markControlTimedOut(&control, opap.ControlTimeout)
 				err = nil
+				resourcesAssociatedControl = nil
 			}
 			cancel()
 		} else {
