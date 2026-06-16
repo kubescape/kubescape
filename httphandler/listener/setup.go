@@ -38,12 +38,11 @@ func SetupHTTPListener() error {
 	}
 	server := &http.Server{
 		Addr: fmt.Sprintf(":%s", getPort()), // TODO - support loading port from config/env
-		// Bound slow-client (slowloris-style) resource exhaustion. Scan requests are
-		// handled asynchronously (the handler returns immediately and results are
-		// polled), so these bounds do not cap scan duration. See #2277.
+		// ReadHeaderTimeout defends against slowloris-style attacks without
+		// capping handler duration. ReadTimeout and WriteTimeout are left at 0
+		// because the synchronous scan path (POST /v1/scan?wait=true) blocks
+		// until the scan finishes, which can take minutes. See #2277.
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       60 * time.Second,
-		WriteTimeout:      60 * time.Second,
 		IdleTimeout:       120 * time.Second,
 		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
