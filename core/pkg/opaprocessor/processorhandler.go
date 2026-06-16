@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
@@ -98,10 +99,14 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// edit results
 	opap.updateResults(ctx)
 
+	opap.markTimedOutControlsSkipped()
+
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
+
+	opap.reweightComplianceScores()
 
 	return processErr
 }
@@ -391,6 +396,66 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 		}
 		if opap.InfoMap != nil {
 			opap.InfoMap[id] = statusInfo
+		}
+	}
+}
+
+func (opap *OPAProcessor) markTimedOutControlsSkipped() {
+	if len(opap.TimedOutControls) == 0 {
+		return
+	}
+	status := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusNotEvaluated,
+	}
+	for controlID := range opap.TimedOutControls {
+		if ctrl, ok := opap.Report.SummaryDetails.Controls[controlID]; ok {
+			ctrl.SetStatus(status)
+			opap.Report.SummaryDetails.Controls[controlID] = ctrl
+		}
+		for i := range opap.Report.SummaryDetails.Frameworks {
+			if ctrl, ok := opap.Report.SummaryDetails.Frameworks[i].Controls[controlID]; ok {
+				ctrl.SetStatus(status)
+				opap.Report.SummaryDetails.Frameworks[i].Controls[controlID] = ctrl
+			}
+		}
+	}
+}
+
+func (opap *OPAProcessor) reweightComplianceScores() {
+	if len(opap.TimedOutControls) == 0 {
+		return
+	}
+	var sum float32
+	var count int
+	for ctrlID := range opap.Report.SummaryDetails.Controls {
+		if _, ok := opap.TimedOutControls[ctrlID]; ok {
+			continue
+		}
+		ctrl := opap.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
+		sum += ctrl.GetComplianceScore()
+		count++
+	}
+	if count > 0 {
+		opap.Report.SummaryDetails.ComplianceScore = sum / float32(count)
+	} else {
+		opap.Report.SummaryDetails.ComplianceScore = 0
+	}
+	for i := range opap.Report.SummaryDetails.Frameworks {
+		var fsum float32
+		var fcount int
+		for ctrlID := range opap.Report.SummaryDetails.Frameworks[i].Controls {
+			if _, ok := opap.TimedOutControls[ctrlID]; ok {
+				continue
+			}
+			ctrl := opap.Report.SummaryDetails.Frameworks[i].Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
+			fsum += ctrl.GetComplianceScore()
+			fcount++
+		}
+		if fcount > 0 {
+			opap.Report.SummaryDetails.Frameworks[i].ComplianceScore = fsum / float32(fcount)
+		} else {
+			opap.Report.SummaryDetails.Frameworks[i].ComplianceScore = 0
 		}
 	}
 }
