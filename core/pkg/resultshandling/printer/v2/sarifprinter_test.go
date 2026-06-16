@@ -578,7 +578,8 @@ spec:
 	origWD, err := os.Getwd()
 	require.NoError(t, err)
 	defer func() { _ = os.Chdir(origWD) }()
-	require.NoError(t, os.Chdir("/tmp"))
+	otherWD := t.TempDir()
+	require.NoError(t, os.Chdir(otherWD))
 
 	sp := NewSARIFPrinter()
 	sp.writer = tmp
