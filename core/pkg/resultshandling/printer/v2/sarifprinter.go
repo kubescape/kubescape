@@ -214,10 +214,14 @@ func (sp *SARIFPrinter) printConfigurationScan(ctx context.Context, opaSessionOb
 				continue
 			}
 
-			rsrcAbsPath := path.Join(basePath, filepath)
+			effectiveBase := basePath
+			if effectiveBase == "" && resourceSource.Path != "" {
+				effectiveBase = resourceSource.Path
+			}
+			rsrcAbsPath := path.Join(effectiveBase, filepath)
 			locationResolver, err := locationresolver.NewFixPathLocationResolver(rsrcAbsPath)
 			if err != nil {
-				logger.L().Debug("failed to create location resolver, will use default location", helpers.Error(err))
+				logger.L().Warning("failed to create location resolver, SARIF locations will default to line 1", helpers.Error(err))
 			}
 
 			for _, toPin := range result.AssociatedControls {
@@ -438,6 +442,11 @@ func getBasePathFromMetadata(opaSessionObj cautils.OPASessionObj) string {
 		return opaSessionObj.Metadata.ContextMetadata.RepoContextMetadata.LocalRootPath
 	case v2.Directory:
 		return opaSessionObj.Metadata.ContextMetadata.DirectoryContextMetadata.BasePath
+	case v2.File:
+		if opaSessionObj.Metadata.ContextMetadata.FileContextMetadata != nil {
+			return filepath.Dir(opaSessionObj.Metadata.ContextMetadata.FileContextMetadata.FilePath)
+		}
+		return ""
 	default:
 		return ""
 	}
