@@ -9,6 +9,7 @@ import (
 	"github.com/kubescape/k8s-interface/workloadinterface"
 	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/kubescape/v3/core/mocks"
+	"github.com/kubescape/kubescape/v3/core/pkg/score"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/resources"
@@ -105,10 +106,31 @@ func TestProcess_ControlTimeout(t *testing.T) {
 	require.True(t, ok, "expected timed-out control to be recorded in TimedOutControls")
 	assert.Contains(t, reason, "timed out")
 
+	assert.Empty(t, opap.ResourcesResult, "timed-out control must not contribute resources to ResourcesResult")
+
 	// mirrors the rebuild step performed by ProcessRulesListener after Process returns
 	coverage := cautils.BuildScanCoverage(opaSessionObj.InfoMap, opaSessionObj.ResourceToControlsMap, opap.TimedOutControls, opaSessionObj.PartialGVRFailures, opaSessionObj.PolicyDegradations)
 	require.Len(t, coverage.NotEvaluatedControls, 1)
 	notEvaluated := coverage.NotEvaluatedControls[0]
 	assert.Equal(t, controlID, notEvaluated.ControlID)
 	assert.Contains(t, notEvaluated.Reason, "timed out")
+
+	// Verify timed-out control is Skipped (not Passed) in SummaryDetails and excluded from compliance score.
+	// Simulate the ProcessRulesListener steps that follow Process().
+	framework := reporthandling.Framework{
+		Controls: []reporthandling.Control{policies.Controls[controlID]},
+	}
+	opap.Policies = []reporthandling.Framework{framework}
+	ConvertFrameworksToSummaryDetails(&opaSessionObj.Report.SummaryDetails, opap.Policies, policies)
+	opap.updateResults(context.Background())
+	opap.markTimedOutControlsSkipped()
+
+	ctrl := opaSessionObj.Report.SummaryDetails.Controls[controlID]
+	assert.NotEqual(t, apis.StatusPassed, ctrl.GetStatus().Status(), "timed-out control must not show as Passed in SummaryDetails")
+	assert.Equal(t, apis.StatusSkipped, ctrl.GetStatus().Status(), "timed-out control must be Skipped in SummaryDetails")
+
+	scorewrapper := score.NewScoreWrapper(opaSessionObj)
+	require.NoError(t, scorewrapper.Calculate(score.EPostureReportV2))
+	opap.reweightComplianceScores()
+	assert.Zero(t, opaSessionObj.Report.SummaryDetails.ComplianceScore, "timed-out control must not inflate overall compliance score")
 }
