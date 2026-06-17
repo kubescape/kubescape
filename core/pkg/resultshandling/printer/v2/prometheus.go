@@ -40,10 +40,11 @@ func (pp *PrometheusPrinter) PrintNextSteps() {
 
 func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
 	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
+		outputFile = strings.TrimSpace(outputFile)
+		if outputFile == "" {
 			outputFile = prometheusOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != prometheusOutputExt {
+		if filepath.Ext(outputFile) != prometheusOutputExt {
 			outputFile = outputFile + prometheusOutputExt
 		}
 	}

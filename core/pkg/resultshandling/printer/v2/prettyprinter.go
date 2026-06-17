@@ -197,10 +197,11 @@ func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
 	}
 
 	if outputFile != "" {
-		if strings.TrimSpace(outputFile) == "" {
+		outputFile = strings.TrimSpace(outputFile)
+		if outputFile == "" {
 			outputFile = prettyOutputFile
 		}
-		if filepath.Ext(strings.TrimSpace(outputFile)) != prettyOutputExt {
+		if filepath.Ext(outputFile) != prettyOutputExt {
 			outputFile = outputFile + prettyOutputExt
 		}
 	}

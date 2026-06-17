@@ -146,11 +146,11 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 }
 
 func resolvedOutputPath(format, outputFile string) string {
-	if outputFile == "" {
+	trimmed := strings.TrimSpace(outputFile)
+	if trimmed == "" {
 		return ""
 	}
 	ext := fileExtForFormat(format)
-	trimmed := strings.TrimSpace(outputFile)
 	if ext != "" && filepath.Ext(trimmed) != ext {
 		return trimmed + ext
 	}
