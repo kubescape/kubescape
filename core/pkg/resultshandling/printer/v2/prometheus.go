@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/kubescape/go-logger"
 	"github.com/kubescape/go-logger/helpers"
@@ -12,6 +14,11 @@ import (
 	"github.com/kubescape/kubescape/v3/core/pkg/resultshandling/printer"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
+)
+
+const (
+	prometheusOutputFile = "report"
+	prometheusOutputExt  = ".txt"
 )
 
 var _ printer.IPrinter = &PrometheusPrinter{}
@@ -32,6 +39,14 @@ func (pp *PrometheusPrinter) PrintNextSteps() {
 }
 
 func (pp *PrometheusPrinter) SetWriter(ctx context.Context, outputFile string) {
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = prometheusOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != prometheusOutputExt {
+			outputFile = outputFile + prometheusOutputExt
+		}
+	}
 	pp.writer = printer.GetWriter(ctx, outputFile)
 }
 

@@ -30,20 +30,27 @@ func TestNewPrometheusPrinter(t *testing.T) {
 }
 
 func TestSetWriter(t *testing.T) {
-	// Test case 1: Empty outputFile
 	outputFile := ""
 	promPrinter := &PrometheusPrinter{}
 	promPrinter.SetWriter(context.Background(), outputFile)
 	assert.Equal(t, os.Stdout, promPrinter.writer)
 
-	// Test case 2: Valid outputFile
-	outputFile = filepath.Join(os.TempDir(), "test.log")
+	base := filepath.Join(t.TempDir(), "test-prom")
 	promPrinter = &PrometheusPrinter{}
-	promPrinter.SetWriter(context.Background(), outputFile)
-	f, err := os.Open(outputFile)
+	promPrinter.SetWriter(context.Background(), base)
+	expectedPath := base + prometheusOutputExt
+	f, err := os.Open(expectedPath)
 	assert.NoError(t, err)
 	defer f.Close()
-	assert.NotNil(t, promPrinter.writer)
+	assert.Equal(t, expectedPath, promPrinter.writer.Name())
+
+	withExt := filepath.Join(t.TempDir(), "test-prom"+prometheusOutputExt)
+	promPrinter = &PrometheusPrinter{}
+	promPrinter.SetWriter(context.Background(), withExt)
+	f2, err := os.Open(withExt)
+	assert.NoError(t, err)
+	defer f2.Close()
+	assert.Equal(t, withExt, promPrinter.writer.Name())
 }
 
 func TestScore(t *testing.T) {

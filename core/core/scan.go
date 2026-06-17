@@ -3,6 +3,8 @@ package core
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	mapset "github.com/deckarep/golang-set/v2"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -113,6 +115,7 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	formats := scanInfo.Formats()
 	containPrettyPrinter := false
 	outputPrinters := make([]printer.IPrinter, 0)
+	resolvedPaths := make(map[string]string)
 	for _, format := range formats {
 		usesPrettyPrinter, err := resultshandling.ValidatePrinter(scanInfo.ScanType, scanInfo.GetScanningContext(), format)
 		if err != nil {
@@ -121,6 +124,13 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 
 		if usesPrettyPrinter && containPrettyPrinter {
 			continue
+		}
+
+		if path := resolvedOutputPath(format, scanInfo.Output); path != "" {
+			if existing, collision := resolvedPaths[path]; collision {
+				logger.L().Ctx(ctx).Fatal(fmt.Sprintf("output path collision: formats %q and %q both resolve to %q; specify distinct output paths or use format-specific file extensions", existing, format, path))
+			}
+			resolvedPaths[path] = format
 		}
 
 		printerHandler := resultshandling.NewPrinter(ctx, format, scanInfo, clusterName)
@@ -133,6 +143,37 @@ func GetOutputPrinters(scanInfo *cautils.ScanInfo, ctx context.Context, clusterN
 	}
 
 	return outputPrinters
+}
+
+func resolvedOutputPath(format, outputFile string) string {
+	if outputFile == "" {
+		return ""
+	}
+	ext := fileExtForFormat(format)
+	trimmed := strings.TrimSpace(outputFile)
+	if ext != "" && filepath.Ext(trimmed) != ext {
+		return trimmed + ext
+	}
+	return trimmed
+}
+
+func fileExtForFormat(format string) string {
+	switch format {
+	case printer.JsonFormat:
+		return ".json"
+	case printer.JunitResultFormat:
+		return ".xml"
+	case printer.SARIFFormat:
+		return ".sarif"
+	case printer.HtmlFormat:
+		return ".html"
+	case printer.PdfFormat:
+		return ".pdf"
+	case printer.PrometheusFormat:
+		return ".txt"
+	default:
+		return ".txt"
+	}
 }
 
 func (ks *Kubescape) Scan(scanInfo *cautils.ScanInfo) (*resultshandling.ResultsHandler, error) {

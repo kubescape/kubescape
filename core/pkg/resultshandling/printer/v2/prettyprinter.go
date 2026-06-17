@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -22,6 +23,11 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
+)
+
+const (
+	prettyOutputFile = "report"
+	prettyOutputExt  = ".txt"
 )
 
 var _ printer.IPrinter = &PrettyPrinter{}
@@ -184,17 +190,22 @@ func (pp *PrettyPrinter) printHeader(opaSessionObj *cautils.OPASessionObj) {
 }
 
 func (pp *PrettyPrinter) SetWriter(ctx context.Context, outputFile string) {
-	// PrettyPrinter should accept Stdout at least by its full name (path)
-	// and follow the common behavior of outputting to a default filename
-	// otherwise
 	if outputFile == os.Stdout.Name() {
 		pp.writer = printer.GetWriter(ctx, "")
 		pp.SetMainPrinter()
 		return
 	}
 
-	pp.writer = printer.GetWriter(ctx, outputFile)
+	if outputFile != "" {
+		if strings.TrimSpace(outputFile) == "" {
+			outputFile = prettyOutputFile
+		}
+		if filepath.Ext(strings.TrimSpace(outputFile)) != prettyOutputExt {
+			outputFile = outputFile + prettyOutputExt
+		}
+	}
 
+	pp.writer = printer.GetWriter(ctx, outputFile)
 	pp.SetMainPrinter()
 }
 
