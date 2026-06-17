@@ -347,7 +347,7 @@ func (m *Metrics) setComplianceScores(summaryDetails *reportsummary.SummaryDetai
 }
 
 func (m *Metrics) setCoverageScore(coverage cautils.ScanCoverage) {
-	m.coverage.coverageScore = cautils.Float32ToInt(coverage.CoverageScore)
+	m.coverage.coverageScore = cautils.Float32ToIntFloor(coverage.CoverageScore)
 }
 
 // return -> (passed, skipped, failed)

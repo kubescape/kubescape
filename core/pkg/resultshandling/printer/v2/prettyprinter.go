@@ -342,7 +342,7 @@ func (pp *PrettyPrinter) printScanCoverage(coverage cautils.ScanCoverage) {
 	fmt.Fprintf(pp.writer, "Scan Coverage Warning\n")
 	fmt.Fprintf(pp.writer, "%s\n", getSeparator("─"))
 
-	fmt.Fprintf(pp.writer, "\nScan coverage score: %d%% (%d/%d controls evaluated)\n", cautils.Float32ToInt(coverage.CoverageScore), coverage.EvaluatedControls, coverage.TotalControls)
+	fmt.Fprintf(pp.writer, "\nScan coverage score: %d%% (%d/%d controls evaluated)\n", cautils.Float32ToIntFloor(coverage.CoverageScore), coverage.EvaluatedControls, coverage.TotalControls)
 
 	if len(coverage.FailedGVRPulls) > 0 {
 		fmt.Fprintf(pp.writer, "\nThe following resource types could not be collected:\n")
