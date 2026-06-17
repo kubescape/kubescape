@@ -127,6 +127,39 @@ func TestGetAttributesFromImage(t *testing.T) {
 			},
 			expectedErr: nil,
 		},
+		{
+			// registry image with no organization path (previously panicked)
+			imageName: "myregistry.io/myimage:v1",
+			expectedAttributes: Attributes{
+				Registry:     "myregistry.io",
+				Organization: "",
+				ImageName:    "myimage",
+				ImageTag:     "v1",
+			},
+			expectedErr: nil,
+		},
+		{
+			// registry with a port, no organization, default tag
+			imageName: "localhost:5000/myimage",
+			expectedAttributes: Attributes{
+				Registry:     "localhost:5000",
+				Organization: "",
+				ImageName:    "myimage",
+				ImageTag:     "latest",
+			},
+			expectedErr: nil,
+		},
+		{
+			// multi-segment organization path
+			imageName: "gcr.io/team/sub/myimage:v2",
+			expectedAttributes: Attributes{
+				Registry:     "gcr.io",
+				Organization: "team/sub",
+				ImageName:    "myimage",
+				ImageTag:     "v2",
+			},
+			expectedErr: nil,
+		},
 	}
 
 	for _, tt := range tests {

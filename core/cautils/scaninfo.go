@@ -124,6 +124,7 @@ type ScanInfo struct {
 	ComplianceThreshold   float32                      // Compliance score threshold
 	FailThresholdSeverity string                       // Severity at and above which the command should fail
 	FailCoverageThreshold float32                      // Coverage threshold below which the command fails (0 = disabled)
+	FailOnDegradedConfig  bool                         // Fail the scan if control inputs or exceptions could not be loaded and a fallback was used
 	Submit                bool                         // Submit results to Kubescape Cloud BE
 	ScanID                string                       // Report id of the current scan
 	HostSensorEnabled     BoolPtrFlag                  // Deploy Kubescape K8s host scanner to collect data from certain controls

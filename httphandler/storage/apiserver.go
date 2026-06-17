@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 
 	"github.com/armosec/utils-k8s-go/wlid"
@@ -27,6 +28,9 @@ import (
 )
 
 var storageInstance *APIServerStore
+
+// ErrIncompleteRelatedObjects is returned when a RegoResponseVector lacks the expected Role+RoleBinding pair (e.g. orphaned binding).
+var ErrIncompleteRelatedObjects = stderrors.New("incomplete related objects")
 
 type PostureRepository interface {
 	GetWorkloadConfigurationScanResult(ctx context.Context, name, namespace string) (*v1beta1.WorkloadConfigurationScan, error)
@@ -67,21 +71,22 @@ func (a *APIServerStore) StorePostureReportResults(ctx context.Context, pr *v2.P
 	for i := range pr.Results {
 		workloadScan, err := a.BuildWorkloadConfigurationScan(ctx, pr, &pr.Results[i])
 		if err != nil {
+			if stderrors.Is(err, ErrIncompleteRelatedObjects) {
+				logger.L().Ctx(ctx).Warning("skipping result with incomplete related objects", helpers.Error(err), helpers.String("resourceID", pr.Results[i].ResourceID))
+				continue
+			}
 			return err
 		}
 
-		// Only store full WorkloadConfigurationScan when continuousPostureScan is enabled
 		if a.continuousPostureScan {
 			if err := a.StoreWorkloadConfigurationScanResult(ctx, workloadScan); err != nil {
 				return err
 			}
 		}
 
-		// Always store summaries for headlamp plugin
 		if _, err := a.StoreWorkloadConfigurationScanResultSummary(ctx, workloadScan); err != nil {
 			return err
 		}
-
 	}
 	return nil
 }
@@ -380,7 +385,7 @@ func getRelatedObjects(resource *reporthandling.Resource) []workloadinterface.IM
 
 func getRoleAndRoleBindingFromRelatedObjects(relatedObjects []workloadinterface.IMetadata) (role workloadinterface.IMetadata, roleBinding workloadinterface.IMetadata, err error) {
 	if len(relatedObjects) != 2 {
-		return nil, nil, fmt.Errorf("expected 2 related objects, got %d", len(relatedObjects))
+		return nil, nil, fmt.Errorf("%w: expected 2, got %d", ErrIncompleteRelatedObjects, len(relatedObjects))
 	}
 
 	for i := range relatedObjects {

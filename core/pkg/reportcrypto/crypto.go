@@ -132,3 +132,17 @@ func DecryptString(ciphertext string, dek []byte) (string, error) {
 
 	return string(plaintext), nil
 }
+
+// ValidateMasterKey validates that a master key is suitable
+// for wrapping and unwrapping DEKs.
+func ValidateMasterKey(masterKey []byte) error {
+	if len(masterKey) != dekSize {
+		return fmt.Errorf(
+			"invalid master key length: got %d, want %d",
+			len(masterKey),
+			dekSize,
+		)
+	}
+
+	return nil
+}

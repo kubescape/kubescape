@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/kubescape/backend/pkg/versioncheck"
@@ -37,6 +38,13 @@ func SetupHTTPListener() error {
 	}
 	server := &http.Server{
 		Addr: fmt.Sprintf(":%s", getPort()), // TODO - support loading port from config/env
+		// ReadHeaderTimeout defends against slowloris-style attacks without
+		// capping handler duration. ReadTimeout and WriteTimeout are left at 0
+		// because the synchronous scan path (POST /v1/scan?wait=true) blocks
+		// until the scan finishes, which can take minutes. See #2277.
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1 MiB
 	}
 	if keyPair != nil {
 		server.TLSConfig = &tls.Config{Certificates: []tls.Certificate{*keyPair}}

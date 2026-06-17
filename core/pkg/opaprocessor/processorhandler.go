@@ -19,6 +19,7 @@ import (
 	"github.com/kubescape/opa-utils/objectsenvelopes"
 	"github.com/kubescape/opa-utils/reporthandling"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
+	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
 	reporthandlingv2 "github.com/kubescape/opa-utils/reporthandling/v2"
 	"github.com/kubescape/opa-utils/resources"
@@ -93,15 +94,19 @@ func (opap *OPAProcessor) ProcessRulesListener(ctx context.Context, progressList
 	// rebuild ScanCoverage so controls that timed out during evaluation
 	// (recorded in TimedOutControls by markControlTimedOut) are reflected in
 	// NotEvaluatedControls alongside any collection-phase failures
-	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures)
+	opap.ScanCoverage = cautils.BuildScanCoverage(opap.InfoMap, opap.ResourceToControlsMap, opap.TimedOutControls, opap.PartialGVRFailures, opap.PolicyDegradations)
 
 	// edit results
 	opap.updateResults(ctx)
+
+	opap.markTimedOutControlsSkipped()
 
 	scorewrapper := score.NewScoreWrapper(opap.OPASessionObj)
 	if err := scorewrapper.Calculate(score.EPostureReportV2); err != nil {
 		logger.L().Ctx(ctx).Warning("failed to calculate score", helpers.Error(err))
 	}
+
+	opap.reweightComplianceScores()
 
 	return processErr
 }
@@ -120,6 +125,10 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 
 	var processErrs []error
 	for _, toPin := range policies.Controls {
+		if err := ctx.Err(); err != nil {
+			processErrs = append(processErrs, err)
+			break
+		}
 		if progressListener != nil {
 			progressListener.ProgressJob(1, fmt.Sprintf("Control: %s", toPin.ControlID))
 		}
@@ -135,6 +144,7 @@ func (opap *OPAProcessor) Process(ctx context.Context, policies *cautils.Policie
 			if cctx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 				opap.markControlTimedOut(&control, opap.ControlTimeout)
 				err = nil
+				resourcesAssociatedControl = nil
 			}
 			cancel()
 		} else {
@@ -190,6 +200,10 @@ func (opap *OPAProcessor) processControl(ctx context.Context, control *reporthan
 
 	var ruleErrs []error
 	for i := range control.Rules {
+		if err := ctx.Err(); err != nil {
+			ruleErrs = append(ruleErrs, err)
+			break
+		}
 		resourceAssociatedRule, err := opap.processRule(ctx, &control.Rules[i], control.FixedInput)
 		if err != nil {
 			ruleErrs = append(ruleErrs, fmt.Errorf("rule %q: %w", control.Rules[i].Name, err))
@@ -386,6 +400,66 @@ func (opap *OPAProcessor) markResourcesSkipped(out map[string]*resourcesresults.
 	}
 }
 
+func (opap *OPAProcessor) markTimedOutControlsSkipped() {
+	if len(opap.TimedOutControls) == 0 {
+		return
+	}
+	status := &apis.StatusInfo{
+		InnerStatus: apis.StatusSkipped,
+		SubStatus:   apis.SubStatusNotEvaluated,
+	}
+	for controlID := range opap.TimedOutControls {
+		if ctrl, ok := opap.Report.SummaryDetails.Controls[controlID]; ok {
+			ctrl.SetStatus(status)
+			opap.Report.SummaryDetails.Controls[controlID] = ctrl
+		}
+		for i := range opap.Report.SummaryDetails.Frameworks {
+			if ctrl, ok := opap.Report.SummaryDetails.Frameworks[i].Controls[controlID]; ok {
+				ctrl.SetStatus(status)
+				opap.Report.SummaryDetails.Frameworks[i].Controls[controlID] = ctrl
+			}
+		}
+	}
+}
+
+func (opap *OPAProcessor) reweightComplianceScores() {
+	if len(opap.TimedOutControls) == 0 {
+		return
+	}
+	var sum float32
+	var count int
+	for ctrlID := range opap.Report.SummaryDetails.Controls {
+		if _, ok := opap.TimedOutControls[ctrlID]; ok {
+			continue
+		}
+		ctrl := opap.Report.SummaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
+		sum += ctrl.GetComplianceScore()
+		count++
+	}
+	if count > 0 {
+		opap.Report.SummaryDetails.ComplianceScore = sum / float32(count)
+	} else {
+		opap.Report.SummaryDetails.ComplianceScore = 0
+	}
+	for i := range opap.Report.SummaryDetails.Frameworks {
+		var fsum float32
+		var fcount int
+		for ctrlID := range opap.Report.SummaryDetails.Frameworks[i].Controls {
+			if _, ok := opap.TimedOutControls[ctrlID]; ok {
+				continue
+			}
+			ctrl := opap.Report.SummaryDetails.Frameworks[i].Controls.GetControl(reportsummary.EControlCriteriaID, ctrlID)
+			fsum += ctrl.GetComplianceScore()
+			fcount++
+		}
+		if fcount > 0 {
+			opap.Report.SummaryDetails.Frameworks[i].ComplianceScore = fsum / float32(fcount)
+		} else {
+			opap.Report.SummaryDetails.Frameworks[i].ComplianceScore = 0
+		}
+	}
+}
+
 // markControlTimedOut records in opap.TimedOutControls that a control's
 // evaluation was aborted after exceeding ControlTimeout, so it surfaces as a
 // not-evaluated control instead of silently stalling the scan.
@@ -421,9 +495,17 @@ func (opap *OPAProcessor) runOPAOnSingleRule(ctx context.Context, rule *reportha
 	switch rule.RuleLanguage {
 	case reporthandling.RegoLanguage, reporthandling.RegoLanguage2:
 		return opap.runRegoOnK8s(ctx, rule, k8sObjects, getRuleData, ruleRegoDependenciesData)
+	case reporthandling.CELLanguage:
+		return opap.runCELOnK8s(ctx, rule, k8sObjects, getRuleData)
 	default:
 		return nil, fmt.Errorf("rule: '%s', language '%v' not supported", rule.Name, rule.RuleLanguage)
 	}
+}
+
+// runCELOnK8s evaluates a CEL-based PolicyRule against k8s objects.
+// Stub: the CEL evaluator is added in follow-up PRs (kubescape/kubescape#2001).
+func (opap *OPAProcessor) runCELOnK8s(ctx context.Context, rule *reporthandling.PolicyRule, k8sObjects []map[string]interface{}, getRuleData func(*reporthandling.PolicyRule) string) ([]reporthandling.RuleResponse, error) {
+	return nil, fmt.Errorf("rule: '%s', CEL evaluation not yet implemented", rule.Name)
 }
 
 // runRegoOnK8s compiles an OPA PolicyRule and evaluates its against k8s
