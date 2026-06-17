@@ -10,7 +10,8 @@ import (
 
 // minimal structs for reading the v2 JSON scan output produced by jsonprinter.go
 type scanReport struct {
-	Results []resultEntry `json:"results"`
+	Results        []resultEntry  `json:"results"`
+	SummaryDetails summaryDetails `json:"summaryDetails"`
 }
 
 type resultEntry struct {
@@ -22,11 +23,19 @@ type controlEntry struct {
 	ControlID string     `json:"controlID"`
 	Name      string     `json:"name"`
 	Status    statusInfo `json:"status"`
-	Severity  string     `json:"severity"`
 }
 
 type statusInfo struct {
 	InnerStatus string `json:"status"`
+}
+
+type summaryDetails struct {
+	Controls map[string]controlSummary `json:"controls"`
+}
+
+type controlSummary struct {
+	ScoreFactor float32 `json:"scoreFactor"`
+	Severity    string  `json:"severity"`
 }
 
 // ControlChange represents a single resource+control pair whose status changed (or stayed failed).
@@ -64,6 +73,8 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 
 	baseMap := buildMap(base)
 	headMap := buildMap(head)
+	baseSev := buildSeverityMap(base)
+	headSev := buildSeverityMap(head)
 
 	cs := &ChangeSet{}
 
@@ -76,7 +87,7 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 			ResourceID:  k.resourceID,
 			ControlID:   k.controlID,
 			ControlName: hc.Name,
-			Severity:    hc.Severity,
+			Severity:    headSev[k.controlID],
 			HeadStatus:  hc.Status.InnerStatus,
 		}
 		if bc, ok := baseMap[k]; ok {
@@ -104,7 +115,7 @@ func Compute(basePath, headPath string) (*ChangeSet, error) {
 				ResourceID:  k.resourceID,
 				ControlID:   k.controlID,
 				ControlName: bc.Name,
-				Severity:    bc.Severity,
+				Severity:    baseSev[k.controlID],
 				BaseStatus:  "failed",
 				HeadStatus:  headStatus,
 			})
@@ -141,6 +152,33 @@ func buildMap(r *scanReport) map[key]controlEntry {
 		}
 	}
 	return m
+}
+
+func buildSeverityMap(r *scanReport) map[string]string {
+	m := make(map[string]string, len(r.SummaryDetails.Controls))
+	for id, cs := range r.SummaryDetails.Controls {
+		sev := cs.Severity
+		if sev == "" {
+			sev = scoreToSeverity(cs.ScoreFactor)
+		}
+		m[id] = sev
+	}
+	return m
+}
+
+func scoreToSeverity(f float32) string {
+	switch {
+	case f >= 9:
+		return "Critical"
+	case f >= 7:
+		return "High"
+	case f >= 4:
+		return "Medium"
+	case f >= 1:
+		return "Low"
+	default:
+		return ""
+	}
 }
 
 // severityRank maps severity strings to comparable ints (higher = more severe).
