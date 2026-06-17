@@ -51,19 +51,21 @@ The `##vso[task.prependpath]` logging command adds the Kubescape binary to `PATH
 
 ### Step 3 — Scan Kubernetes Manifests
 
-Add a step to scan all Kubernetes manifests in the repository:
+Add a step to scan all Kubernetes manifests in the repository against all frameworks:
 
 ```yaml
-- script: kubescape scan . --compliance-threshold 80
+- script: kubescape scan framework all . --compliance-threshold 80
   displayName: Scan Kubernetes manifests
 ```
 
 Kubescape exits with code `1` if the compliance score is below the threshold, marking the Azure Pipelines job as failed.
 
+> **Note:** `--compliance-threshold` only applies to `scan framework`, `scan control`, and `--view resource|control`. Using `kubescape scan .` without a framework does not enforce the compliance threshold.
+
 To scan a specific directory instead of the entire repository, pass the path explicitly:
 
 ```bash
-kubescape scan ./manifests/ --compliance-threshold 80
+kubescape scan framework all ./manifests/ --compliance-threshold 80
 ```
 
 ### Step 4 — Scan with a Specific Framework
@@ -75,7 +77,7 @@ To scan against a specific security framework such as NSA, MITRE, or CIS:
   displayName: Scan with NSA framework
 ```
 
-Available frameworks: `nsa`, `mitre`, `cis-v1.23-t1.0.1`. Run `kubescape list frameworks` to see all options.
+Available built-in frameworks: `allcontrols`, `nsa`, `mitre`. Run `kubescape list frameworks` to see all available frameworks including downloadable ones.
 
 ### Step 5 — Scan a Container Image
 
@@ -94,7 +96,7 @@ To store scan results as a downloadable Azure Pipelines artifact for later revie
 
 ```yaml
 - script: |
-    kubescape scan . --format json --output $(Build.ArtifactStagingDirectory)/results.json || true
+    kubescape scan framework all . --format json --output $(Build.ArtifactStagingDirectory)/results.json || true
   displayName: Save scan results
 
 - task: PublishBuildArtifacts@1
@@ -107,7 +109,7 @@ To store scan results as a downloadable Azure Pipelines artifact for later revie
 The `|| true` prevents the step from failing before the artifact is published. Add a separate threshold enforcement step after publishing results:
 
 ```yaml
-- script: kubescape scan . --compliance-threshold 80
+- script: kubescape scan framework all . --compliance-threshold 80
   displayName: Enforce compliance threshold
 ```
 
@@ -129,7 +131,7 @@ steps:
     displayName: Install Kubescape
 
   - script: |
-      kubescape scan . --format json --output $(Build.ArtifactStagingDirectory)/results.json || true
+      kubescape scan framework all . --format json --output $(Build.ArtifactStagingDirectory)/results.json || true
     displayName: Save scan results
 
   - task: PublishBuildArtifacts@1
@@ -138,7 +140,7 @@ steps:
       artifactName: kubescape-results
     displayName: Publish scan results
 
-  - script: kubescape scan . --compliance-threshold 80
+  - script: kubescape scan framework all . --compliance-threshold 80
     displayName: Enforce compliance threshold
 ```
 
@@ -149,9 +151,9 @@ Kubescape behaviour is controlled via CLI flags passed to the `kubescape scan` c
 | Flag | Default | Description |
 |---|---|---|
 | `--compliance-threshold` | `0` | Minimum compliance score (0–100). The pipeline fails if the score is below this value. |
-| `--format` | `pretty-printer` | Output format for manifest scans. Accepted values: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`. Image scans support `pretty-printer`, `json`, and `sarif` only (no `junit`). |
+| `--format` | `pretty-printer` | Output format for manifest/framework scans. Accepted values: `pretty-printer`, `json`, `junit`, `sarif`, `html`, `pdf`, `prometheus`. Image scans support `pretty-printer`, `json`, and `sarif` only (no `junit`). |
 | `--output` | stdout | Path to write the scan results file. |
-| `--severity-threshold` | (unset) | Fail the pipeline if any vulnerability at or above this severity is found. Accepted values: `low`, `medium`, `high`, `critical`. |
+| `--severity-threshold` | (unset) | Fail the pipeline if any control failure at or above this severity is found. Accepted values: `low`, `medium`, `high`, `critical`. |
 | `--exceptions` | — | Path to an exceptions file to suppress known findings. |
 
 ### Scanning Multiple Frameworks
@@ -172,7 +174,7 @@ Azure DevOps supports SARIF output for static analysis results. To publish SARIF
 
 ```yaml
 - script: |
-    kubescape scan . --format sarif --output $(Build.ArtifactStagingDirectory)/results.sarif || true
+    kubescape scan framework all . --format sarif --output $(Build.ArtifactStagingDirectory)/results.sarif || true
   displayName: Save SARIF results
 
 - task: PublishBuildArtifacts@1
