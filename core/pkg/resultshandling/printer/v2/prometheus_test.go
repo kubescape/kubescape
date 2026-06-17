@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kubescape/k8s-interface/workloadinterface"
+	"github.com/kubescape/kubescape/v3/core/cautils"
 	"github.com/kubescape/opa-utils/reporthandling/apis"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/reportsummary"
 	"github.com/kubescape/opa-utils/reporthandling/results/v1/resourcesresults"
@@ -138,6 +139,7 @@ func TestResourceMetricsEmitted(t *testing.T) {
 		map[string]workloadinterface.IMetadata{resourceID: wl},
 		map[string]resourcesresults.Result{resourceID: result},
 		&reportsummary.SummaryDetails{},
+		cautils.ScanCoverage{},
 	)
 	output := metrics.String()
 
@@ -145,4 +147,35 @@ func TestResourceMetricsEmitted(t *testing.T) {
 		"missing kubescape_resource_count_controls_failed — setResourcesCounters may be commented out")
 	assert.Contains(t, output, "kubescape_resource_count_controls_skipped",
 		"missing kubescape_resource_count_controls_skipped — setResourcesCounters may be commented out")
+}
+
+func TestCoverageScoreMetricEmitted(t *testing.T) {
+	coverage := cautils.ScanCoverage{}
+	coverage.ComputeCoverageScore(10)
+	require.Equal(t, float32(100), coverage.CoverageScore)
+
+	pp := NewPrometheusPrinter(false)
+	metrics := pp.generatePrometheusFormat(
+		map[string]workloadinterface.IMetadata{},
+		map[string]resourcesresults.Result{},
+		&reportsummary.SummaryDetails{},
+		coverage,
+	)
+	output := metrics.String()
+
+	assert.Contains(t, output, "# TYPE kubescape_cluster_coverage_score gauge")
+	assert.Contains(t, output, "kubescape_cluster_coverage_score{} 100")
+
+	// a degraded scan must emit the discounted score
+	degraded := cautils.ScanCoverage{
+		NotEvaluatedControls: []cautils.NotEvaluatedControl{{ControlID: "C-0001"}},
+	}
+	degraded.ComputeCoverageScore(10)
+	metrics = pp.generatePrometheusFormat(
+		map[string]workloadinterface.IMetadata{},
+		map[string]resourcesresults.Result{},
+		&reportsummary.SummaryDetails{},
+		degraded,
+	)
+	assert.Contains(t, metrics.String(), "kubescape_cluster_coverage_score{} 90")
 }

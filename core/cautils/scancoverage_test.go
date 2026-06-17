@@ -160,6 +160,77 @@ func TestBuildScanCoverage_FailedGVRPullIsNotPhantomNotEvaluatedControl(t *testi
 	assert.Empty(t, coverage.NotEvaluatedControls)
 }
 
+func TestComputeCoverageScore_FullCoverage(t *testing.T) {
+	c := ScanCoverage{}
+	c.ComputeCoverageScore(20)
+	assert.Equal(t, float32(100), c.CoverageScore)
+	assert.Equal(t, 20, c.EvaluatedControls)
+	assert.Equal(t, 20, c.TotalControls)
+	assert.False(t, c.Degraded)
+}
+
+func TestComputeCoverageScore_NotEvaluatedControlsReduceScore(t *testing.T) {
+	c := ScanCoverage{
+		NotEvaluatedControls: []NotEvaluatedControl{
+			{ControlID: "C-0001"},
+			{ControlID: "C-0002"},
+		},
+	}
+	c.ComputeCoverageScore(10)
+	assert.Equal(t, float32(80), c.CoverageScore)
+	assert.Equal(t, 8, c.EvaluatedControls)
+	assert.True(t, c.Degraded)
+}
+
+func TestComputeCoverageScore_PartialPullDiscount(t *testing.T) {
+	c := ScanCoverage{
+		PartialGVRPulls: []PartialGVRPull{
+			{GVR: "/v1/pods", Selector: "metadata.namespace==prod"},
+			{GVR: "core/v1/secrets", Selector: "metadata.name==s"},
+		},
+	}
+	c.ComputeCoverageScore(10)
+	// full control coverage minus 2 partial pulls * 2pp
+	assert.Equal(t, float32(96), c.CoverageScore)
+	assert.True(t, c.Degraded)
+}
+
+func TestComputeCoverageScore_PolicyDegradationDiscount(t *testing.T) {
+	c := ScanCoverage{
+		PolicyDegradations: []PolicyDegradation{
+			{Component: "controlInputs", Reason: "network error"},
+		},
+	}
+	c.ComputeCoverageScore(10)
+	// full control coverage minus 1 degradation * 5pp
+	assert.Equal(t, float32(95), c.CoverageScore)
+	assert.True(t, c.Degraded)
+}
+
+func TestComputeCoverageScore_CombinedDiscountsClampedToZero(t *testing.T) {
+	c := ScanCoverage{
+		NotEvaluatedControls: []NotEvaluatedControl{{ControlID: "C-0001"}},
+		PartialGVRPulls: []PartialGVRPull{
+			{GVR: "/v1/pods", Selector: "a"},
+		},
+		PolicyDegradations: []PolicyDegradation{
+			{Component: "exceptions", Reason: "forbidden"},
+		},
+	}
+	c.ComputeCoverageScore(2)
+	// 1/2 evaluated = 50, minus 2pp (partial) minus 5pp (degradation) = 43
+	assert.Equal(t, float32(43), c.CoverageScore)
+	assert.True(t, c.Degraded)
+}
+
+func TestComputeCoverageScore_ZeroControls(t *testing.T) {
+	c := ScanCoverage{}
+	c.ComputeCoverageScore(0)
+	assert.Equal(t, float32(100), c.CoverageScore)
+	assert.Equal(t, 0, c.EvaluatedControls)
+	assert.False(t, c.Degraded)
+}
+
 func TestBuildScanCoverage_PartialGVRPullsPassedThrough(t *testing.T) {
 	// Partial failures (GVR has some data, specific selector failed) must flow
 	// into ScanCoverage.PartialGVRPulls so consumers can detect incomplete scans
