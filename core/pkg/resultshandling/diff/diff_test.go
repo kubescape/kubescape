@@ -134,7 +134,7 @@ func TestCompute_SeverityFromSummaryDetails(t *testing.T) {
 		{"high", 7.0, "High"},
 		{"medium", 5.0, "Medium"},
 		{"low", 2.0, "Low"},
-		{"unknown_zero", 0, ""},
+		{"unknown_zero", 0, "Unknown"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -155,9 +155,9 @@ func TestCompute_SeverityFromSummaryDetails(t *testing.T) {
 	}
 }
 
-func TestCompute_SeverityStringFieldTakesPrecedence(t *testing.T) {
+func TestCompute_SeverityStringFromCurrentReport(t *testing.T) {
 	sum := summaryDetails{Controls: map[string]controlSummary{
-		"C-001": {ScoreFactor: 9.5, Severity: "High"},
+		"C-001": {ScoreFactor: 9.5, Severity: "Critical"},
 	}}
 	head := scanReport{
 		Results:        []resultEntry{makeResult("res1", makeControl("C-001", "Control 1", "failed"))},
@@ -168,7 +168,7 @@ func TestCompute_SeverityStringFieldTakesPrecedence(t *testing.T) {
 	cs, err := Compute(writeTempReport(t, base), writeTempReport(t, head))
 	require.NoError(t, err)
 	require.Len(t, cs.New, 1)
-	assert.Equal(t, "High", cs.New[0].Severity)
+	assert.Equal(t, "Critical", cs.New[0].Severity)
 }
 
 func TestFilterBySeverity_BelowThresholdReturnsEmpty(t *testing.T) {

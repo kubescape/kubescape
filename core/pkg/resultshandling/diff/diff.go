@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/kubescape/opa-utils/reporthandling/apis"
 )
 
 // minimal structs for reading the v2 JSON scan output produced by jsonprinter.go
@@ -159,26 +161,11 @@ func buildSeverityMap(r *scanReport) map[string]string {
 	for id, cs := range r.SummaryDetails.Controls {
 		sev := cs.Severity
 		if sev == "" {
-			sev = scoreToSeverity(cs.ScoreFactor)
+			sev = apis.ControlSeverityToString(cs.ScoreFactor)
 		}
 		m[id] = sev
 	}
 	return m
-}
-
-func scoreToSeverity(f float32) string {
-	switch {
-	case f >= 9:
-		return "Critical"
-	case f >= 7:
-		return "High"
-	case f >= 4:
-		return "Medium"
-	case f >= 1:
-		return "Low"
-	default:
-		return ""
-	}
 }
 
 // severityRank maps severity strings to comparable ints (higher = more severe).
