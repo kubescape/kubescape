@@ -353,7 +353,7 @@ func TestToJson(t *testing.T) {
 	assert.NotEmpty(t, data)
 
 	// verify it is valid JSON
-	var out map[string]interface{}
+	var out map[string]any
 	assert.NoError(t, json.Unmarshal(data, &out))
 }
 

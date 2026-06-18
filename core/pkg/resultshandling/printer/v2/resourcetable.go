@@ -140,7 +140,7 @@ func (a Matrix) Len() int      { return len(a) }
 func (a Matrix) Swap(i, j int) { a[i], a[j] = a[j], a[i] }
 func (a Matrix) Less(i, j int) bool {
 	l := len(a[i])
-	for k := 0; k < l; k++ {
+	for k := range l {
 		if a[i][k] < a[j][k] {
 			return true
 		} else if a[i][k] > a[j][k] {

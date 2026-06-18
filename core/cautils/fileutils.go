@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -58,7 +59,7 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 	}
 
 	// Parse user-supplied value overrides once; reuse for every chart we render.
-	var userValues map[string]interface{}
+	var userValues map[string]any
 	if !valueOpts.IsEmpty() {
 		var err error
 		userValues, err = valueOpts.MergeValues()
@@ -100,14 +101,12 @@ func LoadResourcesFromHelmCharts(ctx context.Context, basePath string, valueOpts
 // mergeMaps performs a deep merge of override into a copy of base, with override winning on conflicts.
 // This mirrors helm.sh/helm/v3 internal `chartutil.CoalesceTables` semantics for values overlay
 // and is used to layer user --set/-f values over a chart's defaults before rendering.
-func mergeMaps(base, override map[string]interface{}) map[string]interface{} {
-	out := make(map[string]interface{}, len(base))
-	for k, v := range base {
-		out[k] = v
-	}
+func mergeMaps(base, override map[string]any) map[string]any {
+	out := make(map[string]any, len(base))
+	maps.Copy(out, base)
 	for k, v := range override {
-		if vMap, ok := v.(map[string]interface{}); ok {
-			if baseMap, ok := out[k].(map[string]interface{}); ok {
+		if vMap, ok := v.(map[string]any); ok {
+			if baseMap, ok := out[k].(map[string]any); ok {
 				out[k] = mergeMaps(baseMap, vMap)
 				continue
 			}
@@ -146,9 +145,7 @@ func LoadResourcesFromKustomizeDirectory(ctx context.Context, basePath string) (
 		logger.L().Ctx(ctx).Warning(fmt.Sprintf("Rendering yaml from Kustomize failed: %v", errs))
 	}
 
-	for k, v := range wls {
-		sourceToWorkloads[k] = v
-	}
+	maps.Copy(sourceToWorkloads, wls)
 	return sourceToWorkloads, kustomizeDirectoryName
 }
 
@@ -281,7 +278,7 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, _ er
 	}()
 
 	for i, doc := range splitYAMLDocuments(yamlFile) {
-		var t interface{}
+		var t any
 		if err := yaml.Unmarshal(doc, &t); err != nil {
 			logger.L().Warning(fmt.Sprintf("skipping malformed YAML document %d: %v", i+1, err))
 			continue
@@ -290,7 +287,7 @@ func readYamlFile(yamlFile []byte) (yamlObjs []workloadinterface.IMetadata, _ er
 		if j == nil {
 			continue
 		}
-		if obj, ok := j.(map[string]interface{}); ok {
+		if obj, ok := j.(map[string]any); ok {
 			if o := objectsenvelopes.NewObject(obj); o != nil {
 				if o.GetObjectType() == workloadinterface.TypeListWorkloads {
 					if list := workloadinterface.NewListWorkloadsObj(o.GetObject()); list != nil {
@@ -344,7 +341,7 @@ func isYAMLDocumentSeparator(line []byte) bool {
 
 func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, error) {
 	workloads := []workloadinterface.IMetadata{}
-	var jsonObj interface{}
+	var jsonObj any
 	if err := json.Unmarshal(jsonFile, &jsonObj); err != nil {
 		return workloads, err
 	}
@@ -353,30 +350,30 @@ func readJsonFile(jsonFile []byte) ([]workloadinterface.IMetadata, error) {
 
 	return workloads, nil
 }
-func convertJsonToWorkload(jsonObj interface{}, workloads *[]workloadinterface.IMetadata) {
+func convertJsonToWorkload(jsonObj any, workloads *[]workloadinterface.IMetadata) {
 
 	switch x := jsonObj.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		if o := objectsenvelopes.NewObject(x); o != nil {
 			(*workloads) = append(*workloads, o)
 		}
-	case []interface{}:
+	case []any:
 		for i := range x {
 			convertJsonToWorkload(x[i], workloads)
 		}
 	}
 }
-func convertYamlToJson(i interface{}) interface{} {
+func convertYamlToJson(i any) any {
 	switch x := i.(type) {
-	case map[interface{}]interface{}:
-		m2 := map[string]interface{}{}
+	case map[any]any:
+		m2 := map[string]any{}
 		for k, v := range x {
 			if s, ok := k.(string); ok {
 				m2[s] = convertYamlToJson(v)
 			}
 		}
 		return m2
-	case []interface{}:
+	case []any:
 		for i, v := range x {
 			x[i] = convertYamlToJson(v)
 		}

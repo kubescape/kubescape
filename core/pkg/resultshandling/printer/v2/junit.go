@@ -235,7 +235,7 @@ func testsCases(results *cautils.OPASessionObj, controls reportsummary.IControls
 		testCase.Classname = classname
 
 		if control.GetStatus().IsFailed() {
-			resources := map[string]interface{}{}
+			resources := map[string]any{}
 			for rId, status := range control.ListResourcesIDs(nil).All() {
 				if status != apis.StatusFailed {
 					continue

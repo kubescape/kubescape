@@ -202,8 +202,8 @@ func (pp *PrettyPrinter) Score(_ float32) {
 }
 
 func (pp *PrettyPrinter) printResults(controls *reportsummary.ControlSummaries, allResources map[string]workloadinterface.IMetadata, sortedControlIDs [][]string) {
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
+	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
+		for _, c := range sortedControlID {
 			controlSummary := controls.GetControl(reportsummary.EControlCriteriaID, c) //  summaryDetails.Controls ListControls().All() Controls.GetControl(ca)
 			pp.printTitle(controlSummary)
 			pp.printResources(controlSummary, allResources)
@@ -314,11 +314,11 @@ func generateRelatedObjectsStr(workload WorkloadSummary) string {
 }
 
 func getSeparator(sep string) string {
-	s := ""
-	for i := 0; i < 80; i++ {
-		s += sep
+	var s strings.Builder
+	for range 80 {
+		s.WriteString(sep)
 	}
-	return s
+	return s.String()
 }
 
 func isPrintSeparatorType(scanType cautils.ScanTypes) bool {

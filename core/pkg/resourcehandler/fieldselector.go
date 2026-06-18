@@ -57,7 +57,7 @@ func (is *IncludeSelector) GetClusterScope(resource *schema.GroupVersionResource
 
 func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	fieldSelectors := ""
-	for _, n := range strings.Split(es.namespace, FieldSelectorsSeparator) {
+	for n := range strings.SplitSeq(es.namespace, FieldSelectorsSeparator) {
 		n = strings.TrimSpace(n)
 		if n != "" {
 			fieldSelectors = combineFieldSelectors(fieldSelectors, getNamespacesSelector(resource.Resource, n, FieldSelectorsNotEqualsOperator))
@@ -69,7 +69,7 @@ func (es *ExcludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionR
 
 func (is *IncludeSelector) GetNamespacesSelectors(resource *schema.GroupVersionResource) []string {
 	fieldSelectors := []string{}
-	for _, n := range strings.Split(is.namespace, FieldSelectorsSeparator) {
+	for n := range strings.SplitSeq(is.namespace, FieldSelectorsSeparator) {
 		n = strings.TrimSpace(n)
 		if n == "" {
 			continue

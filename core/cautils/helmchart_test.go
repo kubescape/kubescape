@@ -19,7 +19,7 @@ type HelmChartTestSuite struct {
 	suite.Suite
 	helmChartPath         string
 	expectedFiles         []string
-	expectedDefaultValues map[string]interface{}
+	expectedDefaultValues map[string]any
 }
 
 func TestHelmChartTestSuite(t *testing.T) {
@@ -40,10 +40,10 @@ func (s *HelmChartTestSuite) SetupSuite() {
 		filepath.Join(s.helmChartPath, "templates", "cronjob.yaml"),
 	}
 
-	var obj interface{}
+	var obj any
 	file, _ := os.ReadFile(filepath.Join("testdata", "helm_expected_default_values.json"))
 	_ = json.Unmarshal([]byte(file), &obj)
-	s.expectedDefaultValues = obj.(map[string]interface{})
+	s.expectedDefaultValues = obj.(map[string]any)
 }
 
 func (s *HelmChartTestSuite) TestInvalidHelmDirectory() {
@@ -80,11 +80,11 @@ func (s *HelmChartTestSuite) TestGetWorkloadsWithOverride() {
 	values := chart.GetDefaultValues()
 
 	// Default pullPolicy value = Always
-	pullPolicyValue := values["image"].(map[string]interface{})["pullPolicy"].(string)
+	pullPolicyValue := values["image"].(map[string]any)["pullPolicy"].(string)
 	s.Equal(pullPolicyValue, "Always")
 
 	// Override default value
-	values["image"].(map[string]interface{})["pullPolicy"] = "Never"
+	values["image"].(map[string]any)["pullPolicy"] = "Never"
 
 	fileToWorkloads, errs := chart.GetWorkloads(values)
 	s.Len(errs, 0)
@@ -153,7 +153,7 @@ func TestHelmValueOptions_MergeValues(t *testing.T) {
 	merged, err := opts.MergeValues()
 	assert.NoError(t, err)
 
-	image, ok := merged["image"].(map[string]interface{})
+	image, ok := merged["image"].(map[string]any)
 	assert.True(t, ok, "expected image to be a nested map")
 	assert.Equal(t, "v1.2.3", image["tag"])
 	assert.Equal(t, "myrepo/app", image["repository"])
@@ -221,25 +221,25 @@ func TestLoadResourcesFromHelmCharts_AttachesProvenance(t *testing.T) {
 }
 
 func TestMergeMaps_DeepMerge(t *testing.T) {
-	base := map[string]interface{}{
-		"image": map[string]interface{}{"repository": "base-repo", "tag": "default"},
+	base := map[string]any{
+		"image": map[string]any{"repository": "base-repo", "tag": "default"},
 		"keep":  "untouched",
 	}
-	override := map[string]interface{}{
-		"image": map[string]interface{}{"tag": "overridden"},
+	override := map[string]any{
+		"image": map[string]any{"tag": "overridden"},
 		"new":   "added",
 	}
 
 	out := mergeMaps(base, override)
 
-	img := out["image"].(map[string]interface{})
+	img := out["image"].(map[string]any)
 	assert.Equal(t, "base-repo", img["repository"], "non-overridden nested key should survive")
 	assert.Equal(t, "overridden", img["tag"], "override should win on conflict")
 	assert.Equal(t, "untouched", out["keep"])
 	assert.Equal(t, "added", out["new"])
 
 	// base should not be mutated by mergeMaps
-	assert.Equal(t, "default", base["image"].(map[string]interface{})["tag"])
+	assert.Equal(t, "default", base["image"].(map[string]any)["tag"])
 }
 
 func (s *HelmChartTestSuite) TestIsHelmDirectory() {

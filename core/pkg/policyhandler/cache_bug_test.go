@@ -27,7 +27,7 @@ func TestTimedCacheInvalidateAfterStopNoPanic(t *testing.T) {
 func TestTimedCacheRaceInvalidateAndStopNoPanic(t *testing.T) {
 	var panicCount atomic.Int64
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		cache := NewTimedCache[string](1 * time.Hour)
 		cache.Set("test")
 

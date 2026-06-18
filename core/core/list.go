@@ -122,14 +122,14 @@ func parseControlEntry(pipe string) metav1.ControlListEntry {
 		return entry
 	}
 
-	first := strings.Index(pipe, "|")
-	if first == -1 {
+	before, after, ok := strings.Cut(pipe, "|")
+	if !ok {
 		entry.ID = pipe
 		return entry
 	}
-	entry.ID = pipe[:first]
+	entry.ID = before
 
-	rest := pipe[first+1:]
+	rest := after
 	last := strings.LastIndex(rest, "|")
 	if last == -1 {
 		entry.Name = rest
@@ -139,7 +139,7 @@ func parseControlEntry(pipe string) metav1.ControlListEntry {
 	entry.Name = rest[:last]
 	frameworksRaw := rest[last+1:]
 	if frameworksRaw != "" {
-		for _, fw := range strings.Split(frameworksRaw, ",") {
+		for fw := range strings.SplitSeq(frameworksRaw, ",") {
 			if fw = strings.TrimSpace(fw); fw != "" {
 				entry.Frameworks = append(entry.Frameworks, fw)
 			}

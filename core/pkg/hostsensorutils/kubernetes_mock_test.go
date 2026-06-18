@@ -338,9 +338,7 @@ func newWatchMock(opts ...K8sMockOption) *watchMock {
 		k8sMockOptions: k8sMockWithOptions(opts),
 	}
 
-	w.wg.Add(1)
-	go func() {
-		defer w.wg.Done()
+	w.wg.Go(func() {
 
 		for _, toPin := range w.mockPods {
 			pod := toPin
@@ -358,7 +356,7 @@ func newWatchMock(opts ...K8sMockOption) *watchMock {
 				Object: &pod,
 			}
 		}
-	}()
+	})
 
 	return w
 }

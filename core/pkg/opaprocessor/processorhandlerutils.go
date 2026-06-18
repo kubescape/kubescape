@@ -307,7 +307,7 @@ func removeConfigMapData(workload workloadinterface.IWorkload) {
 func overrideSensitiveData(workload workloadinterface.IWorkload) {
 	dataInterface, ok := workloadinterface.InspectMap(workload.GetObject(), "data")
 	if ok {
-		data, ok := dataInterface.(map[string]interface{})
+		data, ok := dataInterface.(map[string]any)
 		if ok {
 			for key := range data {
 				workloadinterface.SetInMap(workload.GetObject(), []string{"data"}, key, "XXXXXX")

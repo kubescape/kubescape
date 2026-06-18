@@ -255,8 +255,8 @@ func (c *ClusterConfig) GetContextName() string {
 	return c.configObj.ClusterName
 }
 
-func (c *ClusterConfig) ToMapString() map[string]interface{} {
-	m := map[string]interface{}{}
+func (c *ClusterConfig) ToMapString() map[string]any {
+	m := map[string]any{}
 	if bc, err := json.Marshal(c.configObj); err == nil {
 		if err := json.Unmarshal(bc, &m); err != nil {
 			logger.L().Error("failed to unmarshal config", helpers.Error(err))

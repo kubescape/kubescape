@@ -3,6 +3,7 @@ package configurationprinter
 import (
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -80,8 +81,8 @@ func (fp *FrameworkPrinter) PrintSummaryTable(writer io.Writer, summaryDetails *
 	var dataRows []table.Row
 
 	infoToPrintInfo := utils.MapInfoToPrintInfo(summaryDetails.Controls)
-	for i := len(sortedControlIDs) - 1; i >= 0; i-- {
-		for _, c := range sortedControlIDs[i] {
+	for _, sortedControlID := range slices.Backward(sortedControlIDs) {
+		for _, c := range sortedControlID {
 			row := GenerateRow(summaryDetails.Controls.GetControl(reportsummary.EControlCriteriaID, c), infoToPrintInfo, printAll)
 			if len(row) > 0 {
 				dataRows = append(dataRows, row)

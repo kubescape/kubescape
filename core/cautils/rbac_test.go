@@ -49,7 +49,7 @@ func TestRBACObjectsSetResourcesReport(t *testing.T) {
 func TestConvertToMap(t *testing.T) {
 	tests := []struct {
 		name          string
-		obj           interface{}
+		obj           any
 		expectedName  string
 		expectedError string
 	}{
@@ -108,7 +108,7 @@ func TestConvertToMap(t *testing.T) {
 			}
 
 			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedName, got["metadata"].(map[string]interface{})["name"])
+			assert.Equal(t, tt.expectedName, got["metadata"].(map[string]any)["name"])
 			assert.Contains(t, got, "rules")
 		})
 	}

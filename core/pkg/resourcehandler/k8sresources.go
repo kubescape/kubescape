@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
@@ -159,9 +160,7 @@ func (k8sHandler *K8sResourceHandler) GetResources(ctx context.Context, sessionO
 				// using hostSensor mock
 				cautils.SetInfoMapForResources("failed to init host scanner", hostResources, sessionObj.InfoMap)
 			} else {
-				for k, v := range infoMap {
-					sessionObj.InfoMap[k] = v
-				}
+				maps.Copy(sessionObj.InfoMap, infoMap)
 			}
 			cautils.StopSpinner()
 			logger.L().Success("Requested Host scanner data")
@@ -558,7 +557,7 @@ func (k8sHandler *K8sResourceHandler) pullSingleResource(ctx context.Context, re
 
 	return resourceList, selectorErrs
 }
-func ConvertMapListToMeta(resourceMap []map[string]interface{}) []workloadinterface.IMetadata {
+func ConvertMapListToMeta(resourceMap []map[string]any) []workloadinterface.IMetadata {
 	var workloads []workloadinterface.IMetadata
 	for i := range resourceMap {
 		r := resourceMap[i]
@@ -605,9 +604,7 @@ func (k8sHandler *K8sResourceHandler) collectRbacResources(allResources map[stri
 	if err != nil {
 		return err
 	}
-	for k, v := range allRbacResources {
-		allResources[k] = v
-	}
+	maps.Copy(allResources, allRbacResources)
 
 	logger.L().StopSuccess("Collected RBAC resources")
 

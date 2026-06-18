@@ -34,7 +34,7 @@ func Test_GetRequestPayload(t *testing.T) {
 				Commands: []apis.Command{
 					{
 						CommandName: apis.TypeRunKubescape,
-						Args: map[string]interface{}{
+						Args: map[string]any{
 							KubescapeScanV1: utilsmetav1.PostScanRequest{
 								ExcludedNamespaces: []string{"1111"},
 								IncludeNamespaces:  []string{"2222"},

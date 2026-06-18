@@ -41,7 +41,7 @@ type Vulnerability struct {
 	Link               string                `json:"link"`
 	Description        string                `json:"description"`
 	Severity           string                `json:"severity"`
-	Metadata           interface{}           `json:"metadata"`
+	Metadata           any                   `json:"metadata"`
 	Fixes              VulFixes              `json:"fixedIn"`
 	Relevancy          string                `json:"relevant"` // use the related enum
 	UrgentCount        int                   `json:"urgent"`
